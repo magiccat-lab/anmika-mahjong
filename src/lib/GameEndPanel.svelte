@@ -18,7 +18,7 @@
   {/if}
   <table class="ranking">
     <thead>
-      <tr><th>順位</th><th>player</th><th>点数</th><th>チップ収支</th><th>順位チップ</th><th>N万点トップ賞</th><th>トントンブー</th><th>合計</th></tr>
+      <tr><th>順位</th><th>player</th><th>点数</th><th>チップ収支</th><th>順位チップ</th><th>N万点トップ賞</th><th>トビ賞</th><th>トントンブー</th><th>合計</th></tr>
     </thead>
     <tbody>
       {#each (finalScore ?? ranking.map(r => ({ ...r, chipBase: chipLedger?.[r.player] ?? 0, uma: 0, topNBonus: 0, tobiBonus: 0, tontonbuBonus: 0, chip: chipLedger?.[r.player] ?? 0, total: chipLedger?.[r.player] ?? 0 }))) as r}
@@ -29,6 +29,7 @@
           <td class="ledger">{(r.chipBase ?? 0) > 0 ? '+' : ''}{r.chipBase ?? 0}</td>
           <td class="uma">{r.uma > 0 ? '+' : ''}{r.uma}</td>
           <td class="topn">{(r.topNBonus ?? 0) > 0 ? '+' : ''}{r.topNBonus ?? 0}</td>
+          <td class="tobi">{(r.tobiBonus ?? 0) > 0 ? '+' : ''}{r.tobiBonus ?? 0}</td>
           <td class="tonton">{(r.tontonbuBonus ?? 0) > 0 ? '+' : ''}{r.tontonbuBonus ?? 0}</td>
           <td class="final"><strong>{r.total > 0 ? '+' : ''}{r.total}</strong></td>
         </tr>

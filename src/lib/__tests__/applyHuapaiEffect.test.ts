@@ -73,6 +73,48 @@ describe('Game3 applyHuapaiEffect', () => {
     expect(result.fanshu).toBe(1); // 変化なし [applyChipsOnHule 側で base ×4]
   });
 
+  // [2026-05-23 audit [10] regression] アンミカ rules: 夏夏単独は 2 ランクアップ、 ×4 ではない
+  it('夏夏 [natsu=2、 金北なし] は 2 ランクアップ [打点 ×4 ではない]', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = 0 as PlayerId;
+    g.huapai[player] = ['f2', 'f2'];
+    g.kinpeiTarget[player] = null;
+    g.goldHand[player] = { p: 0, s: 0, z: 0 };
+    const result = { fanshu: 1, fu: 30, hupai: [] } as any;
+    g.applyHuapaiEffect(result, player);
+    // 1翻 [Lv1] → 2 ランクアップ → Lv3 = 3翻相当
+    expect(result.fanshu).toBe(3);
+    expect(result.hupai.some((h: any) => h.name.includes('夏夏'))).toBe(true);
+  });
+
+  // [2026-05-23 audit [10] regression] 夏単体 1 ランクアップ
+  it('夏 [natsu=1、 金北なし] は 1 ランクアップ', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = 0 as PlayerId;
+    g.huapai[player] = ['f2'];
+    g.kinpeiTarget[player] = null;
+    g.goldHand[player] = { p: 0, s: 0, z: 0 };
+    const result = { fanshu: 1, fu: 30, hupai: [] } as any;
+    g.applyHuapaiEffect(result, player);
+    expect(result.fanshu).toBe(2);
+    expect(result.hupai.some((h: any) => h.name.includes('夏'))).toBe(true);
+  });
+
+  // [2026-05-23 audit [10] regression] 夏金北 [夏 1 + 金北] = 2 ランクアップ
+  it('夏金北 [natsu=1 + kinpeiTarget=natsu] は 2 ランクアップ', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = 0 as PlayerId;
+    g.huapai[player] = ['f2'];
+    g.kinpeiTarget[player] = 'natsu';
+    g.goldHand[player] = { p: 0, s: 0, z: 1 };
+    const result = { fanshu: 1, fu: 30, hupai: [] } as any;
+    g.applyHuapaiEffect(result, player);
+    expect(result.fanshu).toBe(3);
+  });
+
   it('リーチ中なら fubaopai の華も hua candidate に含む', () => {
     const g = new Game3();
     g.qipai();
