@@ -707,7 +707,12 @@ class RoomHub:
         # 入らず、 R14 P0 #3 fix が実質機能してなかった。
         # whitelist は client `case 'X'` 名 [pon/damingang/nukiBei/tsumokiri/drawNext/agariyame] に揃え、
         # broadcast で payload['action']['type'] を見て判定。
-        self._action_log_max = 5000
+        # [Phase B4 audit HIGH] 旧 5000 件 cap を撤廃 [長尺対戦の reconnect 復元不完全 fix]。
+        # action は最大でも 1 局あたり数百件、 半荘 8 局でも数千件で 上限が 役立つことは稀、
+        # かつ trim されると reconnect 時に消えた action が復元できず game state が壊れる。
+        # 完全 checkpoint 化 [seq + snapshot fallback] は別 task。
+        # 0 / None は 無制限を意味する。
+        self._action_log_max: int | None = None
         self._replayable_action_types = {
             "discard",
             "lizhi",
@@ -851,10 +856,9 @@ class RoomHub:
             if inner_type in self._replayable_action_types:
                 log = self._action_log.setdefault(room_id, [])
                 log.append(payload)
-                if len(log) > self._action_log_max:
-                    # R16 P1 #7 fix: trim 時 marker を append しない [上限実質 5001 化を防ぐ]、
-                    # 警告 log のみ。 完全 checkpoint 化 [trim 時 game state snapshot] は別 task、
-                    # 現状は 「長尺対戦で 5000 超えたら 復元不完全」 を 容認 [稀]
+                # [Phase B4 audit HIGH] 旧 5000 件 trim は廃止。 trim すると 5000 件超セッションで
+                # reconnect 復元不完全 → 完全な action log を保持して再接続時に全部送る。
+                if self._action_log_max is not None and len(log) > self._action_log_max:
                     drop_n = len(log) - self._action_log_max
                     log[:drop_n] = []
                     log_obj = logging.getLogger("anmika_server")
