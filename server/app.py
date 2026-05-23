@@ -329,8 +329,10 @@ def _gen_room_id() -> str:
 
 
 @app.get("/api/rooms")
-async def list_rooms():
-    """open 状態の部屋一覧"""
+async def list_rooms(request: Request):
+    """open 状態の部屋一覧 [認証必須]"""
+    if not current_user(request):
+        raise HTTPException(status_code=401, detail="login required")
     with db_conn() as c:
         rows = c.execute(
             """SELECT r.room_id, r.host_user_id, r.status, r.created_at,
@@ -412,7 +414,10 @@ async def create_room(request: Request):
 
 
 @app.get("/api/rooms/{room_id}")
-async def get_room(room_id: str):
+async def get_room(room_id: str, request: Request):
+    """部屋詳細 [認証必須]"""
+    if not current_user(request):
+        raise HTTPException(status_code=401, detail="login required")
     with db_conn() as c:
         room = c.execute("SELECT * FROM rooms WHERE room_id=?", (room_id,)).fetchone()
         if not room:
