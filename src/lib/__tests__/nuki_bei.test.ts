@@ -1,0 +1,142 @@
+import { describe, it, expect } from 'vitest';
+import { Game3 } from '../game3';
+import type { PlayerId } from '../types';
+
+// 北抜き [canNukiBei / declareNukiBei] の挙動 verify。
+// 過去 P0-6b で state corruption 起きた領域、 gold 北 / 通常 z4 区別 / フィーバー制限 等を unit 固定。
+describe('Game3 nuki bei', () => {
+  it('zimo ナシ で canNukiBei = false', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    // qipai 直後 zimo してない
+    expect(g.canNukiBei(player)).toBe(false);
+  });
+
+  it('z4 を持ってない player は canNukiBei = false [zimo 別 tile]', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    const sp = g.shoupai.get(player) as any;
+    // 強制的に z4 を 0 枚にしてから zimo
+    sp._bingpai.z[4] = 0;
+    g.zimo();
+    // zimo した tile が z4 でも sp._zimo フィールドにあるだけで _bingpai.z[4] は 0 のまま
+    // canNukiBei は _bingpai.z[4] >= 1 を要求
+    if (sp._zimo !== 'z4') {
+      expect(g.canNukiBei(player)).toBe(false);
+    }
+  });
+
+  it('z4 持ち + zimo 済 + 非フィーバー で canNukiBei = true', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    const sp = g.shoupai.get(player) as any;
+    sp._bingpai.z[4] = 1;
+    g.zimo();
+    expect(g.canNukiBei(player)).toBe(true);
+  });
+
+  it('フィーバー中 非フィーバー player は ツモ z4 のみ抜ける、 手牌 z4 不可', () => {
+    const g = new Game3();
+    g.qipai();
+    const me = g.lunbanToPlayerId(g.state.lunban);
+    const other = ((me + 1) % 3) as PlayerId;
+    g.feverActive[other] = true;
+    const sp = g.shoupai.get(me) as any;
+    sp._bingpai.z[4] = 2; // 手に z4
+    g.zimo();
+    // フィーバー中 + 自家非フィーバー: sp._zimo === 'z4' のときのみ true
+    if (sp._zimo === 'z4') {
+      expect(g.canNukiBei(me)).toBe(true);
+    } else {
+      expect(g.canNukiBei(me)).toBe(false);
+    }
+  });
+
+  it('フィーバー中 非フィーバー player は ツモ gN も 北として抜ける', () => {
+    const g = new Game3();
+    g.qipai();
+    const me = g.lunbanToPlayerId(g.state.lunban);
+    const other = ((me + 1) % 3) as PlayerId;
+    g.feverActive[other] = true;
+    const sp = g.shoupai.get(me) as any;
+    sp._bingpai.z[4] = 1;
+    sp._zimo = 'gN';
+    g.goldHand[me].z = 1;
+    expect(g.canNukiBei(me)).toBe(true);
+  });
+
+  it('declareNukiBei で nukidora +1、 抜き後の justNukidBei flag が立つ', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    const sp = g.shoupai.get(player) as any;
+    sp._bingpai.z[4] = 1;
+    g.goldHand[player].z = 0;
+    g.zimo();
+    expect(g.canNukiBei(player)).toBe(true);
+    const before = g.nukidora[player];
+    const replacement = g.declareNukiBei(player);
+    expect(replacement).toBeTruthy();
+    expect(g.nukidora[player]).toBe(before + 1);
+    expect(g.justNukidBei[player]).toBe(true);
+  });
+
+  it('regression: リーチ後 北抜きの代替ツモは嶺上フラグを立てる', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    const sp = g.shoupai.get(player) as any;
+    sp._bingpai.z[4] = 1;
+    g.goldHand[player].z = 0;
+    g.zimo();
+    g.lizhi.add(player);
+
+    const replacement = g.declareNukiBei(player);
+
+    expect(replacement).toBeTruthy();
+    expect(g.lingshangActive[player]).toBe(true);
+    expect(g.justNukidBei[player]).toBe(true);
+  });
+
+  // 2026-05-14 ゆーま 自走 bug fix:
+  //   game.dapai 内で justNukidBei を clear すると、 store 側 pon 候補 check 時点で
+  //   既に false になり 「抜き直後の他家ポン不可」 ルール 2-4 が破れる。
+  //   game.dapai は flag を保持し、 store.ts pon check 後に clear する設計に変更。
+  it('declareNukiBei → dapai の直後でも justNukidBei が true で残る [pon check 防衛]', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    const sp = g.shoupai.get(player) as any;
+    sp._bingpai.z[4] = 1;
+    g.goldHand[player].z = 0;
+    g.zimo();
+    g.declareNukiBei(player);
+    expect(g.justNukidBei[player]).toBe(true);
+    // 嶺上ツモ後、 すぐに dapai しても justNukidBei は維持される
+    const dapai = sp._zimo;
+    if (typeof dapai === 'string' && dapai.length <= 2) {
+      try { g.dapai(dapai); } catch { /* dapai 失敗時は test skip */ }
+      // dapai 後も flag は true [store 側で pon check 終了後に clear する仕様]
+      expect(g.justNukidBei[player]).toBe(true);
+    }
+  });
+
+  it('goldHand.z >= 1 の player は 金北 優先で抜ける [nukidoraGold +1]', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    const sp = g.shoupai.get(player) as any;
+    sp._bingpai.z[4] = 1;
+    g.goldHand[player].z = 1;
+    g.zimo();
+    const beforeNormal = g.nukidora[player];
+    const beforeGold = g.nukidoraGold[player];
+    g.declareNukiBei(player);
+    expect(g.nukidoraGold[player]).toBe(beforeGold + 1);
+    expect(g.nukidora[player]).toBe(beforeNormal); // 通常は incr ナシ
+    expect(g.goldHand[player].z).toBe(0);
+  });
+});

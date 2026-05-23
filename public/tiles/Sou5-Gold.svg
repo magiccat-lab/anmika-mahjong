@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:cc="http://creativecommons.org/ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:osb="http://www.openswatchbook.org/uri/2009/osb" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" xmlns:svg="http://www.w3.org/2000/svg" viewBox="0 0 300 400">
+  <!-- Generator: Adobe Illustrator 30.4.0, SVG Export Plug-In . SVG Version: 2.1.4 Build 226)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #fff;
+      }
+
+      .st1 {
+        stroke-linejoin: round;
+        stroke-width: 10px;
+      }
+
+      .st1, .st2, .st3 {
+        stroke-linecap: round;
+      }
+
+      .st1, .st4, .st3 {
+        fill: #d0a900;
+      }
+
+      .st1, .st3 {
+        stroke: #fff;
+      }
+
+      .st2 {
+        fill: #d71e1e;
+        stroke: #d0a900;
+        stroke-width: 52.75px;
+      }
+
+      .st2, .st3 {
+        stroke-miterlimit: 3.84;
+      }
+
+      .st3 {
+        stroke-width: 12px;
+      }
+    </style>
+  </defs>
+  <g id="svg2" inkscape:version="0.91 r13725" sodipodi:docname="Sou5-Dora.svg">
+    <path id="path4344" class="st2" d="M48.29,159.79V30.62" inkscape:connector-curvature="0"/>
+    <path id="path4445" class="st2" d="M251.13,159.79V30.62" inkscape:connector-curvature="0"/>
+    <path id="path4471" class="st2" d="M251.13,368.22v-129.17" inkscape:connector-curvature="0"/>
+    <path id="path4497" class="st2" d="M48.29,368.22v-129.17" inkscape:connector-curvature="0"/>
+    <path id="path4523" class="st2" d="M147.61,263.63v-129.17" inkscape:connector-curvature="0"/>
+    <g id="_x3C_defs">
+      <inkscape:path-effect id="path-effect7963" copytype="repeated_stretched" effect="skeletal" fuse_tolerance="0" is_visible="true" normal_offset="0" pattern="m -90.825902,-314.06958 23.03016,41.38503 13.798268,-41.38503 z" pattern-nodetypes="cccc" prop_scale="1" prop_units="false" scale_y_rel="false" spacing="0" tang_offset="0" vertical_pattern="false"/>
+      <inkscape:path-effect id="path-effect7830" copytype="repeated_stretched" effect="skeletal" fuse_tolerance="0" is_visible="true" normal_offset="0" pattern="M -12.828427,33.715729 -17,-11 l 9.0000001,0 z" pattern-nodetypes="cccc" prop_scale="-1" prop_units="false" scale_y_rel="false" spacing="5.1" tang_offset="0" vertical_pattern="false"/>
+    </g>
+    <sodipodi:namedview id="base" bordercolor="#666666" borderopacity="1" inkscape:current-layer="layer1" inkscape:cx="178.67439" inkscape:cy="235.18486" inkscape:document-units="px" inkscape:guide-bbox="true" inkscape:pageopacity="0" inkscape:pageshadow="2" inkscape:window-height="1017" inkscape:window-maximized="1" inkscape:window-width="1920" inkscape:window-x="1912" inkscape:window-y="-8" inkscape:zoom="1.0109639" pagecolor="#aeffff" showgrid="true" showguides="true" units="px">
+      <inkscape:grid id="grid4774" color="#3f3fff" dotted="false" empcolor="#3f3fff" empopacity="0.07843137" enabled="false" opacity="0.03921569" type="xygrid" visible="true"/>
+      <sodipodi:guide id="guide8231" inkscape:color="rgb(0,0,255)" inkscape:label="" orientation="0,1" position="150,200"/>
+      <sodipodi:guide id="guide8233" inkscape:color="rgb(0,0,255)" inkscape:label="" orientation="1,0" position="150.35156,334.82897"/>
+    </sodipodi:namedview>
+    <ellipse id="ellipse4337" class="st4" cx="34.36" cy="27.05" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4340" class="st4" cx="62.14" cy="27.05" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4342" class="st4" cx="33.19" cy="170.33" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4346" class="st4" cx="63.69" cy="170.33" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4348" class="st4" cx="59.24" cy="92.67" rx="31.45" ry="24.33"/>
+    <ellipse id="ellipse4350" class="st4" cx="37.49" cy="92.67" rx="31.45" ry="24.33"/>
+    <path id="path4358" class="st1" d="M39.32,105.12c4.06-6.18,14.92-5.91,18.34,0" inkscape:connector-curvature="0" sodipodi:nodetypes="cc"/>
+    <path id="path4360" class="st1" d="M39.32,87.58c4.06-6.18,14.92-5.91,18.34,0" inkscape:connector-curvature="0" sodipodi:nodetypes="cc"/>
+    <ellipse id="ellipse4439" class="st4" cx="237.19" cy="27.05" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4441" class="st4" cx="264.98" cy="27.05" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4443" class="st4" cx="236.03" cy="170.33" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4447" class="st4" cx="266.53" cy="170.33" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4449" class="st4" cx="262.07" cy="92.67" rx="31.45" ry="24.33"/>
+    <ellipse id="ellipse4451" class="st4" cx="240.33" cy="92.67" rx="31.45" ry="24.33"/>
+    <path id="path4459" class="st1" d="M242.16,105.12c4.06-6.18,14.92-5.91,18.34,0" inkscape:connector-curvature="0" sodipodi:nodetypes="cc"/>
+    <path id="path4461" class="st1" d="M242.16,87.58c4.06-6.18,14.92-5.91,18.34,0" inkscape:connector-curvature="0" sodipodi:nodetypes="cc"/>
+    <ellipse id="ellipse4465" class="st4" cx="237.19" cy="235.49" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4467" class="st4" cx="264.98" cy="235.49" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4469" class="st4" cx="236.03" cy="378.76" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4473" class="st4" cx="266.53" cy="378.76" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4475" class="st4" cx="262.07" cy="301.1" rx="31.45" ry="24.33"/>
+    <ellipse id="ellipse4477" class="st4" cx="240.33" cy="301.1" rx="31.45" ry="24.33"/>
+    <path id="path4485" class="st1" d="M242.16,313.55c4.06-6.18,14.92-5.91,18.34,0" inkscape:connector-curvature="0" sodipodi:nodetypes="cc"/>
+    <path id="path4487" class="st1" d="M242.16,296.01c4.06-6.18,14.92-5.91,18.34,0" inkscape:connector-curvature="0" sodipodi:nodetypes="cc"/>
+    <ellipse id="ellipse4491" class="st4" cx="34.36" cy="235.49" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4493" class="st4" cx="62.14" cy="235.49" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4495" class="st4" cx="33.19" cy="378.76" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4499" class="st4" cx="63.69" cy="378.76" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4501" class="st4" cx="59.24" cy="301.1" rx="31.45" ry="24.33"/>
+    <ellipse id="ellipse4503" class="st4" cx="37.49" cy="301.1" rx="31.45" ry="24.33"/>
+    <path id="path4511" class="st1" d="M39.32,313.55c4.06-6.18,14.92-5.91,18.34,0" inkscape:connector-curvature="0" sodipodi:nodetypes="cc"/>
+    <path id="path4513" class="st1" d="M39.32,296.01c4.06-6.18,14.92-5.91,18.34,0" inkscape:connector-curvature="0" sodipodi:nodetypes="cc"/>
+    <ellipse id="ellipse4517" class="st4" cx="133.68" cy="130.9" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4519" class="st4" cx="161.46" cy="130.9" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4521" class="st4" cx="132.51" cy="274.17" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4525" class="st4" cx="163.01" cy="274.17" rx="23.67" ry="18.32"/>
+    <ellipse id="ellipse4527" class="st4" cx="158.56" cy="196.51" rx="31.45" ry="24.33"/>
+    <ellipse id="ellipse4529" class="st4" cx="136.81" cy="196.51" rx="31.45" ry="24.33"/>
+    <path id="path4537" class="st1" d="M138.64,208.96c4.06-6.18,14.92-5.91,18.34,0" inkscape:connector-curvature="0" sodipodi:nodetypes="cc"/>
+    <path id="path4539" class="st1" d="M138.64,191.42c4.06-6.18,14.92-5.91,18.34,0" inkscape:connector-curvature="0" sodipodi:nodetypes="cc"/>
+    <circle id="path4178" class="st4" cx="148.38" cy="346.12" r="19.78"/>
+    <path id="path4455" class="st3" d="M251.13,120.22v44.82" inkscape:connector-curvature="0"/>
+    <path id="path4352" class="st3" d="M48.29,32.14v36.3" inkscape:connector-curvature="0"/>
+    <path id="path4354" class="st3" d="M48.29,120.22v44.82" inkscape:connector-curvature="0"/>
+    <path id="path4453" class="st3" d="M251.13,32.14v36.3" inkscape:connector-curvature="0"/>
+    <path id="path4479" class="st3" d="M251.13,240.57v36.3" inkscape:connector-curvature="0"/>
+    <path id="path4481" class="st3" d="M251.13,328.66v44.82" inkscape:connector-curvature="0"/>
+    <path id="path4505" class="st3" d="M48.29,240.57v36.3" inkscape:connector-curvature="0"/>
+    <path id="path4507" class="st3" d="M48.29,328.66v44.82" inkscape:connector-curvature="0"/>
+    <path id="path4531" class="st3" d="M147.61,135.98v36.3" inkscape:connector-curvature="0"/>
+    <path id="path4533" class="st3" d="M147.61,224.06v44.82" inkscape:connector-curvature="0"/>
+    <ellipse id="ellipse4356" class="st0" cx="48.29" cy="30.03" rx="8.62" ry="8.34"/>
+    <ellipse id="ellipse4457" class="st0" cx="251.13" cy="30.03" rx="8.62" ry="8.34"/>
+    <ellipse id="ellipse4483" class="st0" cx="251.13" cy="238.47" rx="8.62" ry="8.34"/>
+    <ellipse id="ellipse4509" class="st0" cx="48.29" cy="238.47" rx="8.62" ry="8.34"/>
+    <ellipse id="ellipse4535" class="st0" cx="147.61" cy="133.88" rx="8.62" ry="8.34"/>
+  </g>
+</svg>

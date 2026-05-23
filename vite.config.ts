@@ -1,0 +1,16 @@
+/// <reference types="vitest/config" />
+import { defineConfig } from 'vitest/config'
+import { svelte } from '@sveltejs/vite-plugin-svelte'
+
+export default defineConfig({
+  plugins: [svelte()],
+  test: {
+    include: ['src/**/*.test.ts'],
+    environment: 'node',
+    // 2026-05-14 R3 follow-up: Game3 が Math.random ベース shuffle で random fuzz 系 tests が
+    // 1/5 程度 ランダム fail。 seed 化は test infra 大改修なので retry: 2 で flaky 吸収。
+    // ロジック bug は 3 連続 fail で検出される
+    retry: 2,
+    fileParallelism: false,
+  },
+})

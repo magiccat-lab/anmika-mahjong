@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:cc="http://creativecommons.org/ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:osb="http://www.openswatchbook.org/uri/2009/osb" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" xmlns:svg="http://www.w3.org/2000/svg" viewBox="0 0 300 400">
+  <!-- Generator: Adobe Illustrator 30.4.0, SVG Export Plug-In . SVG Version: 2.1.4 Build 226)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #fff;
+      }
+
+      .st1 {
+        fill: #d0a900;
+      }
+
+      .st2 {
+        fill: none;
+        stroke: #fff;
+        stroke-dasharray: 13.5 13.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 6.75px;
+      }
+    </style>
+  </defs>
+  <g id="svg2" inkscape:version="0.91 r13725" sodipodi:docname="Pin5-Dora.svg">
+    <g id="_x3C_defs">
+      <inkscape:path-effect id="path-effect7963" copytype="repeated_stretched" effect="skeletal" fuse_tolerance="0" is_visible="true" normal_offset="0" pattern="m -90.825902,-314.06958 23.03016,41.38503 21.477976,-41.38503 z" pattern-nodetypes="cccc" prop_scale="1" prop_units="false" scale_y_rel="false" spacing="0" tang_offset="0" vertical_pattern="false"/>
+      <inkscape:path-effect id="path-effect7830" copytype="repeated_stretched" effect="skeletal" fuse_tolerance="0" is_visible="true" normal_offset="0" pattern="M -12.828427,33.715729 -17,-11 l 9.0000001,0 z" pattern-nodetypes="cccc" prop_scale="-1" prop_units="false" scale_y_rel="false" spacing="5.1" tang_offset="0" vertical_pattern="false"/>
+    </g>
+    <sodipodi:namedview id="base" bordercolor="#666666" borderopacity="1" inkscape:current-layer="layer1" inkscape:cx="-162.1301" inkscape:cy="301.89564" inkscape:document-units="px" inkscape:guide-bbox="true" inkscape:pageopacity="0" inkscape:pageshadow="2" inkscape:window-height="1017" inkscape:window-maximized="1" inkscape:window-width="1920" inkscape:window-x="1912" inkscape:window-y="-8" inkscape:zoom="0.71485945" pagecolor="#aeffff" showgrid="true" showguides="true" units="px">
+      <inkscape:grid id="grid4774" color="#3f3fff" dotted="false" empcolor="#3f3fff" empopacity="0.07843137" enabled="false" opacity="0.03921569" type="xygrid" visible="true"/>
+      <sodipodi:guide id="guide8231" inkscape:color="rgb(0,0,255)" inkscape:label="" orientation="0,1" position="150,200"/>
+      <sodipodi:guide id="guide8233" inkscape:color="rgb(0,0,255)" inkscape:label="" orientation="1,0" position="150,200"/>
+    </sodipodi:namedview>
+    <circle id="circle7730" class="st1" cx="77.67" cy="89.86" r="61.12"/>
+    <circle id="circle7732" class="st0" cx="77.67" cy="89.86" r="46.09"/>
+    <circle id="circle7734" class="st1" cx="77.67" cy="89.86" r="39.69"/>
+    <path id="path7736" class="st2" d="M99.22,89.71c-.08-11.74-9.55-21.26-21.29-21.4-11.74-.14-21.43,9.15-21.79,20.88-.36,11.74,8.74,21.6,20.47,22.18s21.76-8.34,22.56-20.05" sodipodi:cx="-209.3149" sodipodi:cy="-484.05789" sodipodi:end="6.2079791" sodipodi:open="true" sodipodi:rx="21.068708" sodipodi:ry="21.06871" sodipodi:start="0" sodipodi:type="arc"/>
+    <circle id="circle7738" class="st0" cx="77.67" cy="89.86" r="8.03"/>
+    <circle id="circle7740" class="st1" cx="77.67" cy="89.86" r="3.67"/>
+    <circle id="circle7786" class="st1" cx="221.78" cy="89.86" r="61.12"/>
+    <circle id="circle7788" class="st0" cx="221.78" cy="89.86" r="46.09"/>
+    <circle id="circle7790" class="st1" cx="221.78" cy="89.86" r="39.69"/>
+    <path id="path7792" class="st2" d="M243.33,89.71c-.08-11.74-9.55-21.26-21.29-21.4-11.74-.14-21.43,9.15-21.79,20.88-.36,11.74,8.74,21.6,20.47,22.18s21.76-8.34,22.56-20.05" sodipodi:cx="-209.3149" sodipodi:cy="-484.05789" sodipodi:end="6.2079791" sodipodi:open="true" sodipodi:rx="21.068708" sodipodi:ry="21.06871" sodipodi:start="0" sodipodi:type="arc"/>
+    <circle id="circle7794" class="st0" cx="221.78" cy="89.86" r="8.03"/>
+    <circle id="circle7796" class="st1" cx="221.78" cy="89.86" r="3.67"/>
+    <circle id="circle7800" class="st1" cx="77.67" cy="309.79" r="61.12"/>
+    <circle id="circle7802" class="st0" cx="77.67" cy="309.79" r="46.09"/>
+    <circle id="circle7804" class="st1" cx="77.67" cy="309.79" r="39.69"/>
+    <path id="path7806" class="st2" d="M99.22,309.64c-.08-11.74-9.55-21.26-21.29-21.4-11.74-.14-21.43,9.15-21.79,20.88-.36,11.74,8.74,21.6,20.47,22.18,11.73.58,21.76-8.34,22.56-20.05" sodipodi:cx="-209.3149" sodipodi:cy="-484.05789" sodipodi:end="6.2079791" sodipodi:open="true" sodipodi:rx="21.068708" sodipodi:ry="21.06871" sodipodi:start="0" sodipodi:type="arc"/>
+    <circle id="circle7808" class="st0" cx="77.67" cy="309.79" r="8.03"/>
+    <circle id="circle7810" class="st1" cx="77.67" cy="309.79" r="3.67"/>
+    <circle id="circle7814" class="st1" cx="221.78" cy="309.79" r="61.12"/>
+    <circle id="circle7816" class="st0" cx="221.78" cy="309.79" r="46.09"/>
+    <circle id="circle7818" class="st1" cx="221.78" cy="309.79" r="39.69"/>
+    <path id="path7820" class="st2" d="M243.33,309.64c-.08-11.74-9.55-21.26-21.29-21.4-11.74-.14-21.43,9.15-21.79,20.88-.36,11.74,8.74,21.6,20.47,22.18s21.76-8.34,22.56-20.05" sodipodi:cx="-209.3149" sodipodi:cy="-484.05789" sodipodi:end="6.2079791" sodipodi:open="true" sodipodi:rx="21.068708" sodipodi:ry="21.06871" sodipodi:start="0" sodipodi:type="arc"/>
+    <circle id="circle7822" class="st0" cx="221.78" cy="309.79" r="8.03"/>
+    <circle id="circle7824" class="st1" cx="221.78" cy="309.79" r="3.67"/>
+    <circle id="circle7828" class="st1" cx="149.98" cy="200.68" r="61.12"/>
+    <circle id="circle7830" class="st0" cx="149.98" cy="200.68" r="46.09"/>
+    <circle id="circle7832" class="st1" cx="149.98" cy="200.68" r="39.69"/>
+    <path id="path7834" class="st2" d="M171.53,200.53c-.08-11.74-9.55-21.26-21.29-21.4-11.74-.14-21.43,9.15-21.79,20.88-.36,11.74,8.74,21.6,20.47,22.18,11.73.58,21.76-8.34,22.56-20.05" sodipodi:cx="-209.3149" sodipodi:cy="-484.05789" sodipodi:end="6.2079791" sodipodi:open="true" sodipodi:rx="21.068708" sodipodi:ry="21.06871" sodipodi:start="0" sodipodi:type="arc"/>
+    <circle id="circle7836" class="st0" cx="149.98" cy="200.68" r="8.03"/>
+    <circle id="circle7838" class="st1" cx="149.98" cy="200.68" r="3.67"/>
+    <circle id="path4178" class="st1" cx="46.16" cy="200" r="19.78" transform="translate(-5.85 1.44) rotate(-1.68)"/>
+  </g>
+</svg>
