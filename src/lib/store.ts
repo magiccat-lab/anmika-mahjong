@@ -1055,9 +1055,10 @@ function createGameStore() {
             if (myOnlineSeat !== owner) { dlog('[gate-block]', { type: 'rollSaiKoroDice', my: myOnlineSeat, w: owner }); return; }
           }
         }
-        const d1 = override ? override[0] : Math.floor(Math.random() * 6) + 1;
-        const d2 = override ? override[1] : Math.floor(Math.random() * 6) + 1;
-        sendOnlineAction({ type: 'rollSaiKoroDice', override: [d1, d2] });
+        // [Phase B3 audit HIGH] online サイコロは server 側で crypto.randomInt 生成、
+        // client が override を作って渡しても server がそのまま上書きする。 ここでは
+        // placeholder の override を送るだけ [server 側 validation 経路を変えないため]。
+        sendOnlineAction({ type: 'rollSaiKoroDice', override: [1, 1] });
         return;
       }
       update((s) => {

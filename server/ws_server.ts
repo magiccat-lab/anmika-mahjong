@@ -17,6 +17,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
+import { randomInt as cryptoRandomInt } from 'node:crypto';
 
 const PORT = parseInt(process.env.ANMIKA_WS_PORT ?? '8791');
 const API_BASE = process.env.ANMIKA_API_BASE ?? 'http://127.0.0.1:8790';
@@ -219,9 +220,19 @@ wss.on('connection', async (ws, req) => {
       }
       fireStart(room, msg.preShuffledPool, msg.qijia ?? 0);
     } else if (msg.type === 'action') {
-      const relay = { type: 'action', from_seat: seat, from_user_id: uid, action: msg.action };
+      // [Phase B3 audit HIGH] サイコロは server で乱数生成し client override を信頼しない。
+      // client が `rollSaiKoroDice` を送ってきたら、 server side で crypto.randomInt(1,7) × 2 を
+      // 生成し action.override を上書きしてから broadcast する [既存 client validation 経路も
+      // 通せるよう、 action 構造はそのまま維持]。
+      const action = msg.action ?? {};
+      if (action && action.type === 'rollSaiKoroDice') {
+        const d1 = cryptoRandomInt(1, 7);
+        const d2 = cryptoRandomInt(1, 7);
+        action.override = [d1, d2];
+      }
+      const relay = { type: 'action', from_seat: seat, from_user_id: uid, action };
       // eslint-disable-next-line no-console
-      console.log(`[anmika-ws] action room=${room.room_id} from_seat=${seat} action=${JSON.stringify(msg.action).slice(0,100)}`);
+      console.log(`[anmika-ws] action room=${room.room_id} from_seat=${seat} action=${JSON.stringify(action).slice(0,100)}`);
       broadcastToAll(room, relay);
     }
   });
