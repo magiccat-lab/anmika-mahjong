@@ -16,9 +16,51 @@
 //     {type:'action', from_seat: number, action: {...}}  // 送信元 seat 付き
 
 import { WebSocketServer, WebSocket } from 'ws';
+import jwt from 'jsonwebtoken';
 
 const PORT = parseInt(process.env.ANMIKA_WS_PORT ?? '8791');
 const API_BASE = process.env.ANMIKA_API_BASE ?? 'http://127.0.0.1:8790';
+
+// WS token 検証用 secret [Phase B1、 codex audit HIGH 1]。
+// Python 側 server/app.py の WS_SECRET と同値、 default は ANMIKA_SESSION_SECRET。
+// 未設定なら deny only mode で全 WS 接続を 4401 reject する [本番安全側]。
+const WS_SECRET =
+  process.env.ANMIKA_WS_SECRET ||
+  process.env.ANMIKA_SESSION_SECRET ||
+  '';
+
+interface WsTokenPayload {
+  uid: string;
+  username?: string;
+  seat: number;
+  room_id: string;
+  is_host: boolean;
+  iat?: number;
+  exp?: number;
+}
+
+function verifyWsToken(token: string): WsTokenPayload | null {
+  if (!WS_SECRET) return null;
+  try {
+    const decoded = jwt.verify(token, WS_SECRET, { algorithms: ['HS256'] });
+    if (typeof decoded !== 'object' || decoded === null) return null;
+    const p = decoded as Record<string, unknown>;
+    if (typeof p.uid !== 'string' || typeof p.room_id !== 'string' || typeof p.seat !== 'number') {
+      return null;
+    }
+    return {
+      uid: p.uid,
+      username: typeof p.username === 'string' ? p.username : undefined,
+      seat: p.seat,
+      room_id: p.room_id,
+      is_host: Boolean(p.is_host),
+      iat: typeof p.iat === 'number' ? p.iat : undefined,
+      exp: typeof p.exp === 'number' ? p.exp : undefined,
+    };
+  } catch (e) {
+    return null;
+  }
+}
 
 interface Member {
   user_id: string;
@@ -111,12 +153,31 @@ wss.on('connection', async (ws, req) => {
   const match = url.pathname.match(/^\/ws\/room\/([A-Z0-9]+)$/);
   if (!match) { ws.close(4404, 'invalid path'); return; }
   const room_id = match[1];
-  const uid = url.searchParams.get('uid') ?? '';
-  const name = url.searchParams.get('name') ?? 'anon';
-  const host = url.searchParams.get('host') ?? uid;
-  const seat = parseInt(url.searchParams.get('seat') ?? '0');
-  if (!uid) { ws.close(4401, 'no uid'); return; }
-  const room = getOrCreateRoom(room_id, host);
+
+  // [Phase B1] JWT token 検証 — uid / seat / host / room_id を 全部 token 由来で決める。
+  // クエリパラメータ uid/host/seat は無視 [client 偽装防止]。
+  const token = url.searchParams.get('token') ?? '';
+  const payload = token ? verifyWsToken(token) : null;
+  if (!payload) {
+    ws.close(4401, 'invalid or missing ws token');
+    return;
+  }
+  if (payload.room_id !== room_id) {
+    ws.close(4403, 'token room_id mismatch');
+    return;
+  }
+  const uid = payload.uid;
+  const name = payload.username ?? url.searchParams.get('name') ?? 'anon';
+  const seat = payload.seat;
+  // host_user_id は room の最初の member [is_host=true] が決定する、 後続 join は無視。
+  // クライアントクエリ ?host= は信頼しない。
+  const initialHost = payload.is_host ? uid : '';
+
+  const room = getOrCreateRoom(room_id, initialHost);
+  // host_user_id 未確定で is_host=true の token が来たら設定する [先に non-host が join した場合の保険]
+  if (!room.host_user_id && payload.is_host) {
+    room.host_user_id = uid;
+  }
   const member: Member = {
     user_id: uid, username: name, seat, ws, is_cpu: uid.startsWith('CPU_'),
   };

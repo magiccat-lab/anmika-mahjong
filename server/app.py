@@ -19,6 +19,9 @@ import logging
 import os
 import secrets as _secrets
 import sqlite3
+import time as _time
+
+import jwt as _jwt
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -45,6 +48,10 @@ if not SESSION_SECRET:
 PUBLIC_BASE_URL = os.environ.get("ANMIKA_PUBLIC_BASE_URL", "https://anmika.magiccatlab.com").rstrip(
     "/"
 )
+# WS token 用 secret [Phase B1、 codex audit HIGH]。
+# Node 側 ws_server.ts と共有して JWT verify する。 default は SESSION_SECRET と同値。
+WS_SECRET = os.environ.get("ANMIKA_WS_SECRET") or SESSION_SECRET
+WS_TOKEN_TTL_SEC = int(os.environ.get("ANMIKA_WS_TOKEN_TTL_SEC", "60"))
 DISCORD_REDIRECT_URI = f"{PUBLIC_BASE_URL}/auth/discord/callback"
 
 DB_PATH = Path(
@@ -326,6 +333,56 @@ def _gen_room_id() -> str:
 
     chars = string.ascii_uppercase + string.digits
     return "".join(_secrets.choice(chars) for _ in range(4))
+
+
+@app.post("/api/ws-token")
+async def issue_ws_token(request: Request):
+    """WS 接続用 短期 JWT を発行 [Phase B1、 codex audit HIGH 1]。
+
+    既存 session cookie で認証 → DB で room member 確認 → 60s 有効 JWT を返す。
+    Node 側 ws_server.ts が ANMIKA_WS_SECRET で verify、 uid / seat / is_host を
+    payload から取得する [client 任意上書き 不可]。
+    """
+    u = current_user(request)
+    if not u:
+        raise HTTPException(status_code=401, detail="login required")
+    body: dict[str, Any] = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    room_id = ""
+    if isinstance(body, dict):
+        room_id = str(body.get("room_id", "")).strip().upper()
+    if not room_id:
+        raise HTTPException(status_code=400, detail="room_id required")
+    with db_conn() as c:
+        room = c.execute(
+            "SELECT host_user_id, status FROM rooms WHERE room_id=?",
+            (room_id,),
+        ).fetchone()
+        if not room:
+            raise HTTPException(status_code=404, detail="room not found")
+        if room["status"] not in ("open", "playing"):
+            raise HTTPException(status_code=410, detail="room closed")
+        member = c.execute(
+            "SELECT seat FROM room_members WHERE room_id=? AND user_id=?",
+            (room_id, u["user_id"]),
+        ).fetchone()
+        if not member:
+            raise HTTPException(status_code=403, detail="not a room member")
+    now = int(_time.time())
+    payload = {
+        "uid": u["user_id"],
+        "username": u["username"],
+        "seat": int(member["seat"]),
+        "room_id": room_id,
+        "is_host": room["host_user_id"] == u["user_id"],
+        "iat": now,
+        "exp": now + WS_TOKEN_TTL_SEC,
+    }
+    token = _jwt.encode(payload, WS_SECRET, algorithm="HS256")
+    return {"token": token, "expires_in": WS_TOKEN_TTL_SEC}
 
 
 @app.get("/api/rooms")

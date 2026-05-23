@@ -1021,10 +1021,31 @@
     }
     return pool;
   }
-  function connectOnlineWs() {
+  async function connectOnlineWs() {
     if (!currentRoomId || !onlineMe || !onlineRoomMeta) return;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${location.host}/ws/room/${currentRoomId}?uid=${onlineMe.user_id}&name=${encodeURIComponent(onlineMe.username)}&seat=${onlineRoomMeta.mySeat}&host=${onlineRoomMeta.hostUserId}`;
+    // [Phase B1] WS auth: server から短期 JWT を取得して handshake に渡す。
+    // クエリの uid/seat/host は server 側で無視されるので token のみ送る。
+    let token = '';
+    try {
+      const r = await fetch('/api/ws-token', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room_id: currentRoomId }),
+      });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        console.error(`[anmika] ws-token ${r.status}: ${detail}`);
+        return;
+      }
+      const data = (await r.json()) as { token: string };
+      token = data.token;
+    } catch (e) {
+      console.error('[anmika] ws-token fetch failed', e);
+      return;
+    }
+    const url = `${protocol}//${location.host}/ws/room/${currentRoomId}?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(url);
     onlineWs = ws;
     ws.onopen = () => {

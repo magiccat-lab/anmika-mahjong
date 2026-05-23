@@ -25,21 +25,41 @@
     logs = [...logs, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-30);
   }
 
-  function buildUrl(): string {
-    const base = WS_BASE || (location.protocol === 'https:' ? `wss://${location.host}` : `ws://${location.host}`);
-    const params = new URLSearchParams({
-      uid: me.user_id,
-      name: me.username,
-      seat: String(mySeat),
-      host: hostUserId,
+  async function fetchWsToken(): Promise<string> {
+    // [Phase B1] server から短期 JWT を取得して WS handshake に渡す。
+    // uid / seat / is_host は server が DB から決定するので client は room_id を渡すだけ。
+    const r = await fetch('/api/ws-token', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_id: roomId }),
     });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      throw new Error(`ws-token ${r.status}: ${detail}`);
+    }
+    const data = (await r.json()) as { token: string };
+    return data.token;
+  }
+
+  async function buildUrl(): Promise<string> {
+    const base = WS_BASE || (location.protocol === 'https:' ? `wss://${location.host}` : `ws://${location.host}`);
+    const token = await fetchWsToken();
+    const params = new URLSearchParams({ token });
     return `${base}/ws/room/${roomId}?${params.toString()}`;
   }
 
-  function connect() {
+  async function connect() {
     if (ws) return;
-    const url = buildUrl();
-    log(`connecting ${url}`);
+    let url: string;
+    try {
+      url = await buildUrl();
+    } catch (e: any) {
+      error = `ws-token failed: ${e?.message ?? e}`;
+      log(error);
+      return;
+    }
+    log(`connecting ${url.replace(/token=[^&]+/, 'token=***')}`);
     ws = new WebSocket(url);
     ws.addEventListener('open', () => { connected = true; log('connected'); });
     ws.addEventListener('close', (e) => { connected = false; log(`closed code=${e.code}`); ws = null; });
