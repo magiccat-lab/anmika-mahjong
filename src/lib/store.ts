@@ -2524,11 +2524,11 @@ export function autoLizhiInline(s: StoreState, safetyMax = 12): StoreState {
   return s;
 }
 
-/** 流局時のテンパイ料計算 [アンミカ三麻、 罰符総額 3000]
- * + 流し役満 check [河 全ヤオ + 副露されてない + 立直してない]
- * フィーバー player が一度でもアガリ取ってたら罰符ナシ
+/** 流局結果 [アンミカ三麻、 ノーテン罰符なし、 2026-05-23 audit]
+ * - 流し役満 check [河 全ヤオ + 副露されてない + 立直してない] のみ点数移動あり
+ * - 通常流局はテンパイ/ノーテンに関わらず点数移動なし
  */
-/** 流局成立時の helper: snapshot 保存 + 罰符 / 流し役満 apply + pendingPingju 設定
+/** 流局成立時の helper: snapshot 保存 + 流し役満 apply + pendingPingju 設定
  *  [リョー指示 2026-05-12: agari panel 内で 点数移動表示できるよう apply を 前倒し] */
 export function applyPingjuTransition(s: StoreState, msgPrefix: string = ''): StoreState {
   saveHuleSnapshot(s.game);
@@ -2608,20 +2608,16 @@ function computePingjuMessage(g: Game3): string {
       return `🌊 流し役満 [player ${p}]、 役満ツモ + chip +5 オール`;
     }
   }
-  if (feverWonAny) return '流局 [フィーバーアガリ済、 ノーテン罰符ナシ]';
+  if (feverWonAny) return '流局 [フィーバーアガリ済]';
+  // アンミカルール [2026-05-23 audit、 codex CRITICAL [5]]: ノーテン流局は存在しないため
+  // テンパイ/ノーテンによる点数移動はなし。 表示用に判定だけ残す。
   const tenpai: number[] = [];
   for (const p of [0, 1, 2] as const) {
     if (g.xiangting(p) === 0) tenpai.push(p);
   }
-  const noten = ([0, 1, 2] as const).filter((p) => !tenpai.includes(p));
-  if (tenpai.length === 0 || tenpai.length === 3) return '流局 [全員ノーテン or 全員テンパイ、 点数移動なし]';
-  // アンミカ罰符総額 4000: 1人テンパイ +4000/2人ノーテン -2000、2人テンパイ +2000/1人ノーテン -4000
-  const totalPenalty = 4000;
-  const eachReceive = Math.floor(totalPenalty / tenpai.length / 100) * 100;
-  const eachPay = Math.floor(totalPenalty / noten.length / 100) * 100;
-  for (const p of tenpai) g.state.defen[p as 0 | 1 | 2] += eachReceive;
-  for (const p of noten) g.state.defen[p as 0 | 1 | 2] -= eachPay;
-  return `流局 [テンパイ p${tenpai.join(',')} 各 +${eachReceive} / ノーテン p${noten.join(',')} 各 -${eachPay}]`;
+  if (tenpai.length === 3) return '流局 [全員テンパイ、 点数移動なし]';
+  if (tenpai.length === 0) return '流局 [全員ノーテン、 点数移動なし]';
+  return `流局 [テンパイ p${tenpai.join(',')}、 点数移動なし]`;
 }
 
 export const game = createGameStore();

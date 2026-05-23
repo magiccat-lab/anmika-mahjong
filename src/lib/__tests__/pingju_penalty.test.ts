@@ -3,8 +3,10 @@ import { game, applyPingjuTransition } from '../store';
 import { buildShoupai } from '../game3';
 import { get } from 'svelte/store';
 
-describe('流局ノーテン罰符', () => {
-  it('1人テンパイなら +4000、2人ノーテンは各 -2000', () => {
+// アンミカルール 2026-05-23 audit: ノーテン流局なし。
+// 流局時はテンパイ/ノーテンに関わらず点数移動なし [罰符 0]。
+describe('流局 点数移動なし [ノーテン罰符 廃止]', () => {
+  it('1人テンパイ 2人ノーテン でも全員 35000 のまま', () => {
     game.reset();
     const s: any = get(game);
     s.game.shoupai.set(0, buildShoupai(['p1','p1','p1','p2','p2','p2','p3','p3','p3','s7','s7','s7','s8']));
@@ -16,12 +18,13 @@ describe('流局ノーテン罰符', () => {
 
     applyPingjuTransition(s, '');
 
-    expect(s.game.state.defen[0]).toBe(39000);
-    expect(s.game.state.defen[1]).toBe(33000);
-    expect(s.game.state.defen[2]).toBe(33000);
+    expect(s.game.state.defen[0]).toBe(35000);
+    expect(s.game.state.defen[1]).toBe(35000);
+    expect(s.game.state.defen[2]).toBe(35000);
+    expect(s.message).toContain('点数移動なし');
   });
 
-  it('2人テンパイなら各 +2000、1人ノーテンは -4000', () => {
+  it('2人テンパイ 1人ノーテン でも全員 35000 のまま', () => {
     game.reset();
     const s: any = get(game);
     const tenpai = ['p1','p1','p1','p2','p2','p2','p3','p3','p3','s7','s7','s7','s8'];
@@ -34,8 +37,9 @@ describe('流局ノーテン罰符', () => {
 
     applyPingjuTransition(s, '');
 
-    expect(s.game.state.defen[0]).toBe(37000);
-    expect(s.game.state.defen[1]).toBe(37000);
-    expect(s.game.state.defen[2]).toBe(31000);
+    expect(s.game.state.defen[0]).toBe(35000);
+    expect(s.game.state.defen[1]).toBe(35000);
+    expect(s.game.state.defen[2]).toBe(35000);
+    expect(s.message).toContain('点数移動なし');
   });
 });
