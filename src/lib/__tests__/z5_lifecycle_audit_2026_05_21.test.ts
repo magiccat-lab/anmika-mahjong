@@ -14,6 +14,9 @@ describe('z5 lifecycle audit 2026-05-21', () => {
     g.yifaActive[winner] = true;
     g.chipLedger = { 0: 0, 1: 0, 2: 0 };
     g.chipBreakdown = [];
+    g.huapai = { 0: [], 1: [], 2: [] };
+    g.nukidora = { 0: 0, 1: 0, 2: 0 };
+    g.nukidoraGold = { 0: 0, 1: 0, 2: 0 };
 
     const result: any = { fanshu: 1, fu: 30, hupai: [] };
     g.applyHule(result, winner, null);

@@ -8,7 +8,7 @@ import type { PlayerId } from '../types';
 //   自家以外の操作で button 出ない事
 
 describe('複数 player button gate [store action]', () => {
-  beforeEach(() => game.reset());
+  beforeEach(() => game.reset({ cpuSeats: [] }));
 
   it('discard 後 ronCandidates が human のみ filter される [全 CPU なら 空]', () => {
     const s = get(game);

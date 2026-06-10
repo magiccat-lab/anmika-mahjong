@@ -1110,6 +1110,11 @@ async def room_ws(ws: WebSocket, room_id: str):
                     cpu_seat = act.get("cpuSeat")
                     if not isinstance(cpu_seat, int) or cpu_seat not in cpu_seats:
                         continue
+                # R22 HIGH: online サイコロ出目は server authority。
+                # client の override は信用せず、broadcast 直前に cryptographic random で上書きする。
+                if act_type == "rollSaiKoroDice":
+                    act["override"] = [_secrets.randbelow(6) + 1, _secrets.randbelow(6) + 1]
+                    msg["action"] = act
                 # R4 P0 #4 / 方針統一: nextRound は host or winner。 server は host のみ厳格 check
                 # client UI 側で winner にも button 出すなら、 winner 経路は別 action 名 [nextRoundFromWinner]
                 # で server 検証 path 分けるべきだが、 身内戦 scope なので 「host or 任意 member」 まで緩める

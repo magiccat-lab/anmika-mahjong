@@ -52,6 +52,7 @@
   }
   onDestroy(() => {
     if (cutinTimer !== null) clearTimeout(cutinTimer);
+    if (autoTsumoKiriTimer !== null) clearTimeout(autoTsumoKiriTimer);
   });
 
   const PLAYERS = [0, 1, 2] as const satisfies readonly PlayerId[];
@@ -103,12 +104,18 @@
   $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) console.log('[seat-debug] selfPlayer=', selfPlayer, 'srv0=', srv0, 'srv1=', srv1, 'srv2=', srv2, 'rotateOffset=', rotateOffset, 'revealCheck(srv0)=', selfPlayer === srv0); }
   $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) console.log('[disabled-debug] currentPlayer=', currentPlayer, 'lunban=', state.lunban, 'srv0=', srv0, 'isCurrent(self)=', currentPlayer === srv0, 'needsZimo=', needsZimo, '_zimo(cur)=', $game.game.shoupai.get(currentPlayer)?._zimo, '_zimo(srv0)=', $game.game.shoupai.get(srv0)?._zimo, 'awaitRon=', $game.awaitingRonDecision, 'awaitFulou=', $game.awaitingFulou); }
 
+  // 白ぽっち演出中は CPU / 自動ツモ切りを止めるので、driver より先に宣言しておく。
+  type PochiRevealState = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean };
+  let pochiReveal: PochiRevealState | null = null;
+  let lastSeenZimoEventCount = 0;
+  let lastSeenGameRef: any = null;
+
   // host が CPU 番のみ駆動 [連発防止: 同じ局・同じ lunban に対し 1 回だけ fire]
   let lastCpuDriverKey = '';
   $: if (onlineGameStarted && onlineRoomMeta?.isHost) {
     const cur = $game.game.lunbanToPlayerId($game.game.state.lunban);
     const curMember = onlineMembers.find((m) => m.seat === cur);
-    const ready = !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei;
+    const ready = pochiReveal === null && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei;
     // R4 P1 #19 fix: 副露後 _zimo が mianzi 固定文字列で同一 key のまま再発火しない bug。
     // events.length + 河 count + shoupai string ハッシュ を key に混ぜて 状態変化を捕捉。
     // ready 条件にも !$game.lizhiPending を追加
@@ -121,8 +128,13 @@
       // R6 P2 #13: production では log 出さない
       if ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver)) console.log('[host-cpu-driver] fire seat=', cur, 'name=', curMember.username, 'key=', key);
       setTimeout(() => {
-        const curNow = $game.game.lunbanToPlayerId($game.game.state.lunban);
-        if (curNow === cur) game.cpuStep();
+        const snap = get(game);
+        const curNow = snap.game.lunbanToPlayerId(snap.game.state.lunban);
+        const stillReady = pochiReveal === null
+          && !snap.roundEnded && !snap.awaitingRonDecision && !snap.awaitingFulou
+          && !snap.pendingFeverContinue && !snap.pendingFuyu && !snap.pendingKinpei;
+        if (curNow === cur && stillReady) game.cpuStep();
+        else lastCpuDriverKey = '';
       }, 1500);  // リョー指示 2026-05-14: 5000 → 1500ms に短縮
     }
   }
@@ -144,9 +156,6 @@
 
   // 白ぽっち ツモ演出 [リョー指示 2026-05-13]
   // shan.lastZimoPochi が non-null になった瞬間を latch、 modal 表示用
-  let pochiReveal: { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean } | null = null;
-  let lastSeenZimoEventCount = 0;
-  let lastSeenGameRef: any = null;
   $: {
     // game instance 切替 [resetDebug / reset] 検出で latch reset
     if ($game.game !== lastSeenGameRef) {
@@ -162,14 +171,14 @@
       if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] check', { lastZ, lastPochi, pochiReveal, lizhi: lastZ ? $game.game.lizhi.has(lastZ.player) : null });
       // [2026-05-21 fix] lastZ.pai は raw colored (z5b/r/g/y) の場合もあるので startsWith 比較
       if (lastZ && typeof lastZ.pai === 'string' && lastZ.pai.startsWith('z5') && lastPochi && pochiReveal === null) {
-        const isLizhi = $game.game.lizhi.has(lastZ.player);
-        if (isLizhi) {
+        const shouldDisplayReveal = !onlineGameStarted || lastZ.player === selfPlayer;
+        if (shouldDisplayReveal) {
           // eslint-disable-next-line no-console
           if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] LATCH', { player: lastZ.player, color: lastPochi });
           pochiReveal = { player: lastZ.player, color: lastPochi, isCpu: $game.cpu[lastZ.player] === true };
         } else {
           // eslint-disable-next-line no-console
-          if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] skip (not lizhi)');
+          if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] skip (not local reveal)');
         }
       }
       lastSeenZimoEventCount = zimoEvents.length;
@@ -1437,15 +1446,21 @@
   let lastCpuStepKey: string | null = null;
   $: {
     const cur = $game.game.lunbanToPlayerId($game.game.state.lunban);
-    const key = `${state.jushu}-${state.lunban}`;
+    const key = `${state.jushu}-${state.lunban}-${$game.game.events.length}-${($game as any)._cpuStepStalled ?? 0}`;
     const canStep = !onlineGameStarted && viewMode === 'single' && !$game.roundEnded
       && !$game.awaitingRonDecision && !$game.awaitingFulou
       && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
-      && cur !== 0 && $game.cpu[cur];
+      && pochiReveal === null
+      && cur !== selfPlayer && $game.cpu[cur];
     if (canStep && lastCpuStepKey !== key) {
       lastCpuStepKey = key;
-      setTimeout(() => game.cpuStep(), cpuDelayMs);
-    } else if (!canStep && (cur === 0 || $game.roundEnded)) {
+      setTimeout(() => {
+        const snap = get(game);
+        const curNow = snap.game.lunbanToPlayerId(snap.game.state.lunban);
+        if (pochiReveal === null && curNow === cur) game.cpuStep();
+        else lastCpuStepKey = null;
+      }, cpuDelayMs);
+    } else if (!canStep && (cur === selfPlayer || $game.roundEnded)) {
       lastCpuStepKey = null;
     }
   }
@@ -1457,6 +1472,7 @@
   $: if (viewMode === 'single' && !onlineGameStarted && $game.roundEnded && $game.lastWinner !== null
         && $game.cpu[$game.lastWinner as PlayerId] && !state.finished
         && !$game.pendingKinpei && !$game.pendingFuyu && !$game.pendingSaiKoro
+        && pochiReveal === null
         && !$game.lastDapai  // ron 時は lastDapai が残ってる、 tsumo のみ
         && !cpuAutoAdvanceFired) {
     cpuAutoAdvanceFired = true;
@@ -1472,26 +1488,31 @@
   // 自動ツモ切り [自家 番 + zimo あり + 局進行中]
   // 2026-05-14 codex review #3 fix: !onlineGameStarted 明示 + currentPlayer === selfPlayer
   // [hardcoded 0 を 廃止、 online は dora row checkbox 非表示で更に二重防御]
-  $: if (viewMode === 'single' && !onlineGameStarted && autoTsumoKiri && !$game.roundEnded
-        && !$game.awaitingRonDecision && !$game.awaitingFulou
-        && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
-        && !$game.lizhiPending
-        && $game.game.lunbanToPlayerId($game.game.state.lunban) === selfPlayer
-        && $game.lastZimo
-        && !canTsumo) {
-    setTimeout(() => game.tsumokiri(), 600);
-  }
-  // [2026-05-21] リーチ済 player は autoTsumoKiri checkbox に関わらず 自動ツモ切り強制
-  // (リーチ後の打牌制限ルール、 ツモ可なら停止して ツモボタン待ち)
-  $: if (viewMode === 'single' && !onlineGameStarted && !$game.roundEnded
-        && !$game.awaitingRonDecision && !$game.awaitingFulou
-        && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
-        && !$game.lizhiPending
-        && $game.game.lunbanToPlayerId($game.game.state.lunban) === selfPlayer
-        && $game.game.lizhi.has(selfPlayer)
-        && $game.lastZimo
-        && !canTsumo) {
-    setTimeout(() => game.tsumokiri(), 600);
+  let autoTsumoKiriTimer: ReturnType<typeof setTimeout> | null = null;
+  $: {
+    const baseAutoTsumoKiri = viewMode === 'single' && !onlineGameStarted && !$game.roundEnded
+      && !$game.awaitingRonDecision && !$game.awaitingFulou
+      && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
+      && !$game.lizhiPending
+      && pochiReveal === null
+      && $game.game.lunbanToPlayerId($game.game.state.lunban) === selfPlayer
+      && !!$game.lastZimo
+      && !canTsumo;
+    const shouldAutoTsumoKiri = baseAutoTsumoKiri
+      && (autoTsumoKiri || $game.game.lizhi.has(selfPlayer as PlayerId));
+    if (shouldAutoTsumoKiri && autoTsumoKiriTimer === null) {
+      const target = selfPlayer as PlayerId;
+      const zimo = $game.lastZimo;
+      autoTsumoKiriTimer = setTimeout(() => {
+        autoTsumoKiriTimer = null;
+        const snap = get(game);
+        const cur = snap.game.lunbanToPlayerId(snap.game.state.lunban);
+        if (pochiReveal === null && cur === target && snap.lastZimo === zimo) game.tsumokiri(target);
+      }, 600);
+    } else if (!shouldAutoTsumoKiri && autoTsumoKiriTimer !== null) {
+      clearTimeout(autoTsumoKiriTimer);
+      autoTsumoKiriTimer = null;
+    }
   }
 </script>
 

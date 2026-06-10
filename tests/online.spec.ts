@@ -285,7 +285,7 @@ test.describe('online 対戦 e2e', () => {
 
       // --- 追加: REAL WS-sync flow [selectCombo + rollSaiKoroDice action] ---
       // A 側で selectSaiKoroCombo + rollSaiKoroDice を store 経由で呼ぶ。 WS で B に届いて
-      // 両 client の pendingSaiKoro.rolls に同じ override 出目が積まれるはず
+      // 両 client の pendingSaiKoro.rolls に server 生成の同じ出目が積まれるはず
       await A.page.evaluate(() => {
         const s = (window as any).__gameStore;
         // chances[0] = 三連刻 [小=3, 大=5]、 selectSaiKoroCombo は (small, large)
@@ -294,7 +294,7 @@ test.describe('online 対戦 e2e', () => {
       await Promise.all([A.page.waitForTimeout(800), B.page.waitForTimeout(800)]);
       await A.page.evaluate(() => {
         const s = (window as any).__gameStore;
-        s.rollSaiKoroDice([2, 4]);  // override で hit=false 出目を強制
+        s.rollSaiKoroDice([2, 4]);  // client override は server 側で上書きされる
       });
       await Promise.all([A.page.waitForTimeout(1500), B.page.waitForTimeout(1500)]);
 
@@ -319,8 +319,15 @@ test.describe('online 対戦 e2e', () => {
       expect(stateB!.length, 'B rolls 件数 = 2 [WS sync 成立]').toBeGreaterThanOrEqual(2);
       const lastA = stateA![stateA!.length - 1];
       const lastB = stateB![stateB!.length - 1];
-      expect(lastA.dice, '直近 roll [A]').toEqual([2, 4]);
-      expect(lastB.dice, '直近 roll [B、 WS sync で同値]').toEqual([2, 4]);
+      expect(lastA.dice, '直近 roll [A] 1-6').toEqual(expect.arrayContaining([
+        expect.any(Number),
+        expect.any(Number),
+      ]));
+      expect(lastA.dice[0]).toBeGreaterThanOrEqual(1);
+      expect(lastA.dice[0]).toBeLessThanOrEqual(6);
+      expect(lastA.dice[1]).toBeGreaterThanOrEqual(1);
+      expect(lastA.dice[1]).toBeLessThanOrEqual(6);
+      expect(lastB.dice, '直近 roll [B、 WS sync で同値]').toEqual(lastA.dice);
     } finally {
       await A.ctx.close();
       await B.ctx.close();

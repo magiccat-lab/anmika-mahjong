@@ -67,7 +67,7 @@ function restorePendingAfterDapai(ng: Game3, restoredLastZimo: string | null): P
 }
 
 /** 牌譜 v2 → StoreState を構築。 invalid なら null 返し、 store 側は message 設定のみ */
-export function buildStateFromPaifu(paifu: any): StoreState | null {
+export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false }): StoreState | null {
   if (paifu.type !== 'anmika-mahjong-paifu' || (paifu.version ?? 1) < 2) return null;
   const ng = new Game3();
   const shan = ng.shan as any;
@@ -194,7 +194,7 @@ export function buildStateFromPaifu(paifu: any): StoreState | null {
     kanCandidates: restoredPending.kanCandidates,
     roundEnded: false,
     message: restoredPending.message ?? `📂 牌譜 v${paifu.version} 復元完了 [timestamp: ${paifu.timestamp}]`,
-    cpu: { 0: false, 1: false, 2: false },
+    cpu: { 0: !!preservedCpu[0], 1: !!preservedCpu[1], 2: !!preservedCpu[2] },
     lizhiPending: null,
     pendingKinpei: null,
     pendingFuyu: null,

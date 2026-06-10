@@ -9,6 +9,7 @@ export type PreHuleSnapshot = {
   chipLedger: Record<PlayerId, number>;
   akiUsedCount: Record<PlayerId, number>;
   feverActive: Record<PlayerId, boolean>;
+  shanSnapshot: any | null;
   baopaiLen: number;
   fubaopaiLen: number;
   lizhibang: number;
@@ -33,6 +34,7 @@ export function saveSnapshot(refs: SnapshotRefs): PreHuleSnapshot {
     chipLedger: { ...refs.chipLedger },
     akiUsedCount: { ...refs.akiUsedCount },
     feverActive: { ...refs.feverActive },
+    shanSnapshot: typeof refs.shan?.snapshot === 'function' ? refs.shan.snapshot() : null,
     baopaiLen: refs.shan.baopai.length,
     fubaopaiLen: (refs.shan.fubaopai ?? []).length,
     lizhibang: refs.state?.lizhibang ?? 0,
@@ -50,13 +52,17 @@ export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null
   Object.assign(refs.chipLedger, snap.chipLedger);
   Object.assign(refs.akiUsedCount, snap.akiUsedCount);
   Object.assign(refs.feverActive, snap.feverActive);
-  while (refs.shan.baopai.length > snap.baopaiLen) {
-    const popped = refs.shan._baopai.pop();
-    refs.shan._pai.push(popped);
-  }
-  while ((refs.shan.fubaopai ?? []).length > snap.fubaopaiLen) {
-    const popped = (refs.shan._fubaopai ?? []).pop();
-    if (popped) refs.shan._pai.push(popped);
+  if (snap.shanSnapshot && typeof refs.shan?.restore === 'function') {
+    refs.shan.restore(snap.shanSnapshot);
+  } else {
+    while ((refs.shan.fubaopai ?? []).length > snap.fubaopaiLen) {
+      const popped = (refs.shan._fubaopai ?? []).pop();
+      if (popped) refs.shan._pai.push(popped);
+    }
+    while (refs.shan.baopai.length > snap.baopaiLen) {
+      const popped = refs.shan._baopai.pop();
+      if (popped) refs.shan._pai.push(popped);
+    }
   }
   // 2026-05-14 codex review fix: lizhibang / qianggangPending / events / chipBreakdown も復元
   if (refs.state) refs.state.lizhibang = snap.lizhibang;

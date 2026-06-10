@@ -1709,7 +1709,7 @@ function createGameStore() {
     /** 牌譜 JSON v2 から完全復元 [paifuIo.ts に委譲] */
     loadFromPaifu(paifu: any) {
       update((s) => {
-        const next = buildStateFromPaifu(paifu);
+        const next = buildStateFromPaifu(paifu, s.cpu);
         if (!next) {
           s.message = '牌譜 v2 形式じゃないので完全復元できない';
           return { ...s };
@@ -1867,12 +1867,13 @@ function createGameStore() {
       });
     },
     /** ツモ切り */
-    tsumokiri() {
+    tsumokiri(expectedPlayer?: PlayerId) {
       if (!checkOnlineGate({ type: 'tsumokiri' }, 'currentPlayer')) return;
       if (sendOnlineAction({ type: 'tsumokiri' })) return;
       update((s) => {
         if (!s.lastZimo) return { ...s };
         const player = s.game.lunbanToPlayerId(s.game.state.lunban);
+        if (expectedPlayer !== undefined && player !== expectedPlayer) return { ...s };
         // [2026-05-21] リーチ済 player の ツモアガリ可なら 自動 tsumokiri 停止 (ツモボタン待ち)
         if (s.game.lizhi.has(player) && s.game.canTsumo(player)) {
           s.message = `player ${player} はツモ和了可能 [自動ツモ切り停止]`;
@@ -2065,6 +2066,12 @@ function createGameStore() {
     reset(opts: { preserveChip?: boolean; preShuffledPool?: string[]; qijia?: 0|1|2; cpuSeats?: number[] } = {}) {
       // 旧 game の chip ledger を保持する option [リョー指示 2026-05-12 次の試合へ default 持越し]
       let preservedChip: Record<0|1|2, number> | null = null;
+      const currentState = get(store) as StoreState;
+      const preservedCpu: Record<0|1|2, boolean> = {
+        0: !!currentState.cpu?.[0],
+        1: !!currentState.cpu?.[1],
+        2: !!currentState.cpu?.[2],
+      };
       if (opts.preserveChip) {
         update((s) => {
           preservedChip = { 0: s.game.chipLedger[0], 1: s.game.chipLedger[1], 2: s.game.chipLedger[2] };
@@ -2084,7 +2091,7 @@ function createGameStore() {
       }
       // R12 P0 #2 fix: cpuSeats 渡されたら CPU 席 を保持、 でないと online CPU 入り部屋で
       // 次半荘 から CPU 駆動が消える bug
-      const cpuMap: Record<0|1|2, boolean> = { 0: false, 1: false, 2: false };
+      const cpuMap: Record<0|1|2, boolean> = opts.cpuSeats ? { 0: false, 1: false, 2: false } : { ...preservedCpu };
       if (opts.cpuSeats) {
         for (const s of opts.cpuSeats) {
           if (s === 0 || s === 1 || s === 2) cpuMap[s] = true;
@@ -2202,11 +2209,12 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
   // 既に局終了してる場合は no-op [連打防止]
   if (s.roundEnded) return { ...s };
   const player = s.game.lunbanToPlayerId(s.game.state.lunban);
-  // 北 [z4] は河に切れない → 北抜きに変換 [アンミカ独自、 リョー指示 2026-05-11]
-  if (pai === 'z4' && s.game.canNukiBei(player as any)) {
-    const replacement = s.game.declareNukiBei(player as any);
+  // 北 [z4/gN] は河に切れない → 北抜きに変換 [アンミカ独自、 リョー指示 2026-05-11]
+  if (toCorePai(pai) === 'z4' && s.game.canNukiBei(player as any)) {
+    const nukiMeta = { gold: meta?.gold === true || pai === 'gN' || (s.game.shan.lastZimoGold && toCorePai(s.lastZimo ?? '') === 'z4') };
+    const replacement = s.game.declareNukiBei(player as any, nukiMeta);
     s.lastZimo = replacement ?? null;
-    s.message = `[ツモ切り] 北 [z4] → 北抜き`;
+    s.message = `[ツモ切り] 北 [${pai}] → 北抜き`;
     if (replacement == null) {
       // 2026-05-14 codex review P2 fix: 北抜きでの 王牌枯渇 流局も applyPingjuTransition
       s = applyPingjuTransition(s, `🌀 流局 [北抜きで王牌枯渇]:`);
