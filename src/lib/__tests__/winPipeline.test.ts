@@ -1,11 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { Game3 } from '../game3';
-import { blockingWinPipelineReason, getWinPipelineState, settleAfterWin } from '../store/winPipeline';
+import {
+  advanceSaiKoroStage,
+  appendSaiKoroChances,
+  blockingWinPipelineReason,
+  enterFulouStage,
+  enterRonDecisionStage,
+  getWinPipelineState,
+  settleAfterWin,
+} from '../store/winPipeline';
 
 function baseState() {
   return {
     game: new Game3(),
     awaitingRonDecision: false,
+    awaitingFulou: false,
+    ronPassedPlayers: [],
+    ronDeclaredPlayers: [],
+    ronResults: [],
+    ponCandidates: [],
+    kanCandidates: [],
     pendingQianggang: null,
     pendingFuyu: null,
     pendingKinpei: null,
@@ -48,5 +62,42 @@ describe('winPipeline state machine helper', () => {
 
     settleAfterWin(s, { winner: 0, isRon: true });
     expect(s.game.feverWinCount[0]).toBe(1);
+  });
+
+  it('moves reaction windows through explicit stages', () => {
+    const s: any = baseState();
+    enterRonDecisionStage(s, {
+      ponCandidates: [{ player: 1, mianzi: ['z555+'] }],
+      kanCandidates: [],
+    });
+    expect(getWinPipelineState(s)).toEqual({ stage: 'ron-decision', owner: null });
+    expect(s.ronPassedPlayers).toEqual([]);
+    expect(s.ponCandidates).toHaveLength(1);
+
+    enterFulouStage(s, { ponCandidates: s.ponCandidates, kanCandidates: [] });
+    expect(getWinPipelineState(s)).toEqual({ stage: 'fulou', owner: null });
+    expect(s.awaitingRonDecision).toBe(false);
+    expect(s.awaitingFulou).toBe(true);
+  });
+
+  it('queues and advances saikoro chances without carrying roll state', () => {
+    const s: any = baseState();
+    appendSaiKoroChances(s, 0, [
+      { name: 'one', baseChip: 1, shuvariApplicable: false, count: 1, plusMinus: '+', winner: 0 },
+      { name: 'two', baseChip: 2, shuvariApplicable: false, count: 1, plusMinus: '+', winner: 1 },
+    ]);
+    s.pendingSaiKoro.selectedCombo = [1, 2];
+    s.pendingSaiKoro.rolls.push({ dice: [1, 2], hit: true, zoro: false });
+    s.pendingSaiKoro.finalized = true;
+
+    advanceSaiKoroStage(s);
+    expect(s.pendingSaiKoro.currentIdx).toBe(1);
+    expect(s.pendingSaiKoro.selectedCombo).toBeNull();
+    expect(s.pendingSaiKoro.rolls).toEqual([]);
+    expect(getWinPipelineState(s)).toEqual({ stage: 'saikoro', owner: 1 });
+
+    s.pendingSaiKoro.finalized = true;
+    advanceSaiKoroStage(s);
+    expect(s.pendingSaiKoro).toBeNull();
   });
 });

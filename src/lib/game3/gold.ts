@@ -21,6 +21,10 @@ export function goldSuitFromPhysicalPai(pai: string): GoldSuit | null {
   return null;
 }
 
+export function isGoldPhysicalPai(pai: string): boolean {
+  return goldSuitFromPhysicalPai(pai) !== null;
+}
+
 export function goldSuitFromCorePai(corePai: string): GoldSuit | null {
   if (corePai === 'p0') return 'p';
   if (corePai === 's0') return 's';
@@ -55,6 +59,11 @@ export function hasGoldKita(ctx: {
   nukidoraGold?: Record<PlayerId, number>;
 }, player: PlayerId): boolean {
   return (ctx.goldHand[player]?.z ?? 0) > 0 || ((ctx.nukidoraGold?.[player] ?? 0) > 0);
+}
+
+export function shouldPreserveGoldPai(corePai: string, hand: GoldHand): boolean {
+  const suit = goldSuitFromCorePai(corePai);
+  return suit !== null && hand[suit] > 0;
 }
 
 export function resolveGoldDiscardFlag(opts: {

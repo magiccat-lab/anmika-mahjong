@@ -4,6 +4,7 @@ import { writable, get } from 'svelte/store';
 import { Game3, buildShoupai, isGoldPai, pochiColorFromPai } from './game3';
 import type { PlayerId } from './types';
 import { dlog, toCorePai } from './helpers';
+import { resolveNukiBeiMeta } from './game3/bei';
 import { buildStateFromPaifu } from './store/paifuIo';
 import { buildDebugState } from './store/debug';
 import { cpuStepImpl, autoAdvanceImpl } from './store/cpuActions';
@@ -11,16 +12,30 @@ import { generateTilePool, defaultSanmaRule } from './shan3';
 import { declareKanImpl, ponImpl, damingangImpl } from './store/fulouActions';
 import { hasGoldKita } from './game3/gold';
 import {
+  advanceSaiKoroStage,
+  appendSaiKoroChances,
   blockingWinPipelineReason,
   clearFeverContinueStage,
   clearFuyuStage,
   clearKinpeiStage,
+  clearQianggangStage,
+  clearReactionStage,
+  continueRonDecisionStage,
+  enterFulouStage,
   enterFuyuStage,
   enterKinpeiStage,
+  enterQianggangStage,
+  enterRonDecisionStage,
+  finishRonDecisionStage,
+  replaceReactionCandidates,
+  replaceSaiKoroChances,
   settleAfterWin,
   type PendingFeverContinue,
   type PendingFuyu,
   type PendingKinpei,
+  type PendingQianggang,
+  type PendingSaiKoro,
+  type ReactionCandidate,
 } from './store/winPipeline';
 
 /** 12 種スタンプ ID [テキスト frame で先行、 後追いで画像差替予定]
@@ -64,8 +79,8 @@ export interface StoreState {
   ronDeclaredPlayers: number[];
   ronResults: Array<{ player: number; result: any }>;
   awaitingFulou: boolean;        // 副露 [pon / 大明槓] 判定待ち
-  ponCandidates: Array<{ player: number; mianzi: string[] }>;
-  kanCandidates: Array<{ player: number; mianzi: string[] }>; // 大明槓候補
+  ponCandidates: ReactionCandidate[];
+  kanCandidates: ReactionCandidate[]; // 大明槓候補
   roundEnded: boolean;           // 局終了 [次局ボタン表示用]
   message: string | null;        // 状況メッセージ [和了表示等]
   cpu: { 0: boolean; 1: boolean; 2: boolean };  // 各 player が CPU か
@@ -81,23 +96,11 @@ export interface StoreState {
   pendingFeverContinue: PendingFeverContinue | null; // フィーバー中 アガリ後の 「続行」 ボタン待ち
   pendingPingju: boolean; // 流局成立、 「次局へ」 で 判定フェーズ [流し役満 / tenpai 罰符] を apply 待ち [リョー指示 2026-05-11]
   // R9 P1 #7 fix: 加槓 後の 槍槓 ron window 中の deferred state、 全員 pass で declareKan 実行
-  pendingQianggang: { player: number; mianzi: string; kakanPai: string } | null;
+  pendingQianggang: PendingQianggang | null;
   /** サイコロチャンス [出目当て] modal 表示中 [MVP、 アガリ時の saiKoroChances を順に処理]
    *  chances: result.saiKoroChances [push 順]、 currentIdx: 現在処理中 index、
    *  selectedCombo: 宣言した出目 [小さい方 / 大きい方]、 rolls: 4 回ぶんの結果 */
-  pendingSaiKoro: {
-    /** 主 winner [互換用、 個別 chance owner は chances[i].winner を見る] */
-    winner: number;
-    // R4 P1 #8 fix: chance ごとに owner を持つ、 ダブロン後勝者の祝儀が先勝者に入る bug 解消
-    chances: Array<{ name: string; baseChip: number; shuvariApplicable: boolean; count: number; plusMinus: '+' | '-'; winner?: number; mode?: 'tsumo' | 'ron' }>;
-    currentIdx: number;
-    selectedCombo: [number, number] | null;
-    rolls: Array<{ dice: [number, number]; hit: boolean; zoro: boolean }>;
-    /** 4 振り完了 + chip 加算済、 user の「次へ」 click 待ち */
-    finalized: boolean;
-    /** finalize 結果の summary [UI 表示用] */
-    summary: { hits: number; chipN: number; zoroBonusTotal: number } | null;
-  } | null;
+  pendingSaiKoro: PendingSaiKoro | null;
   /** スタンプ popup [seat ごと最新 1 つ、 ts で fade 判定]
    *  game state 副作用なし、 reload で復元しない [_action_log にも入らない] */
   stamps: Record<PlayerId, { id: StampId; ts: number } | null>;
@@ -759,16 +762,15 @@ function createGameStore() {
             const otherWinners = allRonResults.filter(r => r.player !== player).map(r => r.player);
             enterKinpeiStage(s, { winner: player, isRon: true, ronfrom: s.lastDapai!.player, otherWinners, humanOthers, cutinQueued: true });
           }
-          s.awaitingRonDecision = true;
+          continueRonDecisionStage(s);
           s.message += ` [他 human 候補 p${humanOthers.join('/')} 判断待ち]`;
           return { ...s };
         }
         s.game.snapshotLocked = false;
-        s.awaitingRonDecision = false;
+        finishRonDecisionStage(s);
         // R9 P1 #7: 槍槓 ron 成立時は pendingQianggang clear、 後段の declareKanImpl は走らない
         if (s.pendingQianggang) {
-          s.pendingQianggang = null;
-          s.game.qianggangPending = false;
+          clearQianggangStage(s);
         }
         // 金北持ち + 自家 → アガリ計算後 modal で変更可能 [リョー指示]
         // ただし フィーバー + 払い [reverse pochi] state なら 自動確定で modal スキップ
@@ -868,11 +870,11 @@ function createGameStore() {
         s.lastHuleResult = (s.ronResults.length > 0 ? s.ronResults[s.ronResults.length - 1].result : ronResults[ronResults.length - 1].result);
         s.lastWinner = s.ronResults.length > 1 ? winnerByOya(s.game, s.ronResults) : winner;
         if (fuyuHumans.length > 0) {
-          s.awaitingRonDecision = true;
+          continueRonDecisionStage(s);
           s.message += ` [他 human 候補 p${fuyuHumans.join('/')} 判断待ち]`;
           return { ...s };
         }
-        s.awaitingRonDecision = false;
+        finishRonDecisionStage(s);
         // 2026-05-14 codex review P1 fix: 冬選択経由のアガリでもサイコロチャンス trigger を check
         // R3 P1 #8: 全 winner ぶん triggerSaiKoroIfAny を 順に呼ぶ [後述 queue 化に依存]
         for (const rr of ronResults) {
@@ -976,15 +978,7 @@ function createGameStore() {
         if (s.pendingSaiKoro) {
           const winners = new Set(allResults.map(r => r.player));
           const remaining = s.pendingSaiKoro.chances.filter((c: any) => !winners.has(c.winner));
-          if (remaining.length === 0) {
-            s.pendingSaiKoro = null;
-          } else {
-            s.pendingSaiKoro = {
-              ...s.pendingSaiKoro,
-              chances: remaining,
-              currentIdx: Math.min(s.pendingSaiKoro.currentIdx, remaining.length - 1),
-            };
-          }
+          replaceSaiKoroChances(s, remaining);
         }
         for (const rr of allResults) {
           if (!cutinQueued) s = enqueueCutinState(s, isRon ? 'ron' : 'tsumo', rr.player as PlayerId);
@@ -996,11 +990,12 @@ function createGameStore() {
           !(s.ronPassedPlayers ?? []).includes(p) && !(s.ronDeclaredPlayers ?? []).includes(p)
         );
         if (kinpeiRemainingHumans.length > 0) {
-          s.awaitingRonDecision = true;
+          continueRonDecisionStage(s);
           s.message += ` [他 human 候補 p${kinpeiRemainingHumans.join('/')} 判断待ち]`;
           return { ...s };
         }
         s.game.snapshotLocked = false;
+        finishRonDecisionStage(s);
         // fever 継続: 次家へ advance、 selectKinpei が ron/tsumo を兼ねるので両 path 対応
         settleAfterWin(s, { winner: winner as PlayerId, isRon });
         return { ...s };
@@ -1155,23 +1150,8 @@ function createGameStore() {
       if (sendOnlineAction({ type: 'advanceSaiKoro' })) return;
       update((s) => {
         if (!s.pendingSaiKoro || !s.pendingSaiKoro.finalized) return { ...s };
-        const ps = s.pendingSaiKoro;
-        const nextIdx = ps.currentIdx + 1;
-        if (nextIdx >= ps.chances.length) {
-          s.pendingSaiKoro = null;
-        } else {
-          // R6 P2 #10 fix: { ...ps } で ad-hoc _zoroBonusAcc が次 chance に持ち越されて
-          // summary 計算で前 chance の ゾロ bonus が混ざる bug 解消。 明示的に reset
-          s.pendingSaiKoro = {
-            winner: ps.winner,
-            chances: ps.chances,
-            currentIdx: nextIdx,
-            selectedCombo: null,
-            rolls: [],
-            finalized: false,
-            summary: null,
-          };
-        }
+        // R6 P2 #10 fix: ad-hoc _zoroBonusAcc を次 chance に持ち越さない。
+        advanceSaiKoroStage(s);
         return { ...s };
       });
     },
@@ -1223,7 +1203,7 @@ function createGameStore() {
         s.lastHuleResult = null;
         if (!hasPendingReaction) {
           s.lastDapai = null;
-          s.awaitingRonDecision = false;
+          finishRonDecisionStage(s);
         }
         // フィーバー継続で次 hule の snapshot を fresh に [2026-05-12 リョー指示: 点数移動 が累積になる bug fix]
         saveHuleSnapshot(s.game);
@@ -1269,23 +1249,17 @@ function createGameStore() {
           // ponCandidates / kanCandidates を消さない
           const hasFulouCand = (s.ponCandidates?.length ?? 0) > 0 || (s.kanCandidates?.length ?? 0) > 0;
           if (wasAwaitingRon && hasFulouCand) {
-            s.awaitingRonDecision = false;
-            s.awaitingFulou = true;
+            enterFulouStage(s, { ponCandidates: s.ponCandidates, kanCandidates: s.kanCandidates });
             s.message = `ロン全 pass、 副露可能`;
             return { ...s };
           }
-          s.awaitingRonDecision = false;
-          s.awaitingFulou = false;
-          s.ponCandidates = [];
-          s.kanCandidates = [];
+          clearReactionStage(s, { clearRonTracking: false });
           if (wasAwaitingRon && s.message?.startsWith('ロン可能')) s.message = null;
           if (s.message?.startsWith('副露可能')) s.message = null;
           // R11 codex P0 #1 fix: legacy-all pass でも pendingQianggang の finalize を先に処理、
           // 槍槓不成立 [全員 見送り] で 後段 declareKanImpl 実行する
           if (s.pendingQianggang) {
-            const pq = s.pendingQianggang;
-            s.pendingQianggang = null;
-            s.game.qianggangPending = false;
+            const pq = clearQianggangStage(s)!;
             s.lastDapai = null;
             s.ronPassedPlayers = [];
             s.ronDeclaredPlayers = [];
@@ -1325,8 +1299,7 @@ function createGameStore() {
         // 候補リストから effectivePlayer を除外、 残候補 なくなったら 次の state へ進む
         const newPonCands = (s.ponCandidates ?? []).filter((c: any) => c.player !== effectivePlayer);
         const newKanCands = (s.kanCandidates ?? []).filter((c: any) => c.player !== effectivePlayer);
-        s.ponCandidates = newPonCands;
-        s.kanCandidates = newKanCands;
+        replaceReactionCandidates(s, { ponCandidates: newPonCands, kanCandidates: newKanCands });
         // ロン候補は state には store されてないが、 awaitingRonDecision を 全 candidate 見送り time に true→false
         // 簡略: 全 ronCandidates [from canRon] のうち effectivePlayer 除外で 残ありなら 待機継続
         // R3 P0 #2 fix: pass 済 player を ronPassedPlayers に追加、 再計算で復活しない
@@ -1368,7 +1341,7 @@ function createGameStore() {
               s.message = allRonResults.length > 1
                 ? `🎉🎉 ダブロン! ${formatRonResults(allRonResults)}`
                 : `🎉 CPU ロン: ${ronResults.map(r => `p${r.player}`).join('/')}`;
-              s.awaitingRonDecision = false;
+              finishRonDecisionStage(s);
               // R18 #4 fix: pass 後 CPU ロンで fever 継続抜けてた、 winner が fever 中なら
               // pendingFeverContinue にして 通常 ロンと揃える
               const winnerSeat = s.lastWinner as PlayerId;
@@ -1398,20 +1371,16 @@ function createGameStore() {
         // 場合 awaitingFulou に遷移、 鳴き機会を失わない。 旧 code は ron 経路で 直接 zimo に
         // 進んでて 鳴き候補消失 bug
         if (s.awaitingRonDecision && !s.awaitingFulou && (newPonCands.length > 0 || newKanCands.length > 0)) {
-          s.awaitingRonDecision = false;
-          s.awaitingFulou = true;
+          enterFulouStage(s, { ponCandidates: newPonCands, kanCandidates: newKanCands });
           s.message = `ロン全 pass、 副露可能: p${[...newPonCands.map((c:any)=>c.player), ...newKanCands.map((c:any)=>c.player)].join('/')}`;
           return { ...s };
         }
         // 全 候補 消費 → 次の手番へ進む
         const wasAwaitingRon = s.awaitingRonDecision;
-        s.awaitingRonDecision = false;
-        s.awaitingFulou = false;
+        clearReactionStage(s, { clearCandidates: false, clearRonTracking: false });
         // R9 P1 #7 fix: 加槓 槍槓 window で全員 pass なら 後段の declareKanImpl 実行
         if (s.pendingQianggang) {
-          const pq = s.pendingQianggang;
-          s.pendingQianggang = null;
-          s.game.qianggangPending = false;
+          const pq = clearQianggangStage(s)!;
           s.lastDapai = null;
           s.ronPassedPlayers = [];
           s.ronDeclaredPlayers = [];
@@ -1606,12 +1575,9 @@ function createGameStore() {
             // 全 CPU 役なしで ron 失敗 → 加槓 通常進行
           }
           if (humanRonCands.length > 0) {
-            s.pendingQianggang = { player, mianzi, kakanPai };
+            enterQianggangStage(s, { player, mianzi, kakanPai });
             s.lastDapai = { player, pai: kakanPai };
-            s.awaitingRonDecision = true;
-            s.ronPassedPlayers = [];
-            s.ronDeclaredPlayers = [];
-            s.ronResults = [];
+            enterRonDecisionStage(s);
             s.message = `🎯 加槓 [${mianzi}] → 槍槓 ron 候補 p${humanRonCands.join('/')} の判断待ち`;
             return { ...s };
           }
@@ -1752,13 +1718,7 @@ function createGameStore() {
         s.lastDapai = null;
         s.lastWinner = null;
         s.lastHuleResult = null;
-        s.awaitingRonDecision = false;
-        s.ronPassedPlayers = [];
-        s.ronDeclaredPlayers = [];
-        s.ronResults = [];
-        s.awaitingFulou = false;
-        s.ponCandidates = [];
-        s.kanCandidates = [];
+        clearReactionStage(s);
         s.roundEnded = false;
         s.message = null;
         s.lizhiPending = null;
@@ -2125,24 +2085,7 @@ export function triggerSaiKoroIfAny(s: StoreState, result: any, winner: number):
     mode: c.mode ?? (result?._isRon ? 'ron' : 'tsumo'),
     winner,
   }));
-  // R10 P0 #2 fix: 既存 pendingSaiKoro があれば 同 winner でも append、 上書きしない。
-  // 旧 code は同 winner で上書きしてて、 continueFever で次局進行時に 前回 chances が消失
-  if (s.pendingSaiKoro) {
-    s.pendingSaiKoro = {
-      ...s.pendingSaiKoro,
-      chances: [...s.pendingSaiKoro.chances, ...mappedChances],
-    };
-    return s;
-  }
-  s.pendingSaiKoro = {
-    winner,
-    chances: mappedChances,
-    currentIdx: 0,
-    selectedCombo: null,
-    rolls: [],
-    finalized: false,
-    summary: null,
-  };
+  appendSaiKoroChances(s, winner, mappedChances);
   return s;
 }
 
@@ -2152,7 +2095,12 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
   const player = s.game.lunbanToPlayerId(s.game.state.lunban);
   // 北 [z4/gN] は河に切れない → 北抜きに変換 [アンミカ独自、 リョー指示 2026-05-11]
   if (toCorePai(pai) === 'z4' && s.game.canNukiBei(player as any)) {
-    const nukiMeta = { gold: meta?.gold === true || pai === 'gN' || (s.game.shan.lastZimoGold && toCorePai(s.lastZimo ?? '') === 'z4') };
+    const nukiMeta = resolveNukiBeiMeta({
+      requestedPai: pai,
+      metaGold: meta?.gold,
+      lastZimo: s.lastZimo,
+      lastZimoGold: s.game.shan.lastZimoGold,
+    });
     const replacement = s.game.declareNukiBei(player as any, nukiMeta);
     s.lastZimo = replacement ?? null;
     s.message = `[ツモ切り] 北 [${pai}] → 北抜き`;
@@ -2223,7 +2171,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
         ? `🎉🎉 ダブロン! ${ronResults.map(r => `p${r.player}: ${formatHuleResult(r.result)}`).join(' / ')}`
         : `🎉 [CPU] player ${ronResults[0].player} ロン和了！ ${formatHuleResult(ronResults[0].result)}`;
       s.lastHuleResult = winnerResult;
-      s.awaitingRonDecision = false;
+      finishRonDecisionStage(s);
       // 2026-05-14 codex review P1 fix: CPU ロン経路でも 特殊効果の state 遷移を 人間 ron と
       // 揃える。 triggerSaiKoroIfAny / feverWinCount inc / pendingFeverContinue / roundEnded 制御
       // Round 2 codex fix P2 #11: 全 winner の saiKoroChances を queue 化、 ダブロン 両方処理
@@ -2294,8 +2242,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
       if (shouldPon) {
         s.game.declarePon(cand.player as any, cand.mianzi[0], player as any);
         s.lastZimo = null;
-        s.awaitingFulou = false;
-        s.ponCandidates = [];
+        clearReactionStage(s);
         s.message = `[CPU] player ${cand.player} ポン [${cand.mianzi[0]}]`;
         return { ...s };
       }
@@ -2323,9 +2270,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
           continue;  // 次 候補 / pass loop へ
         }
         s.lastZimo = replacement;
-        s.awaitingFulou = false;
-        s.kanCandidates = [];
-        s.ponCandidates = [];
+        clearReactionStage(s);
         s.message = `[CPU] player ${cand.player} 大明槓 [${cand.mianzi[0]}]、 嶺上 ${replacement}`;
         return { ...s };
       }
@@ -2334,9 +2279,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     const humanPonCands = ponCands.filter((c) => !s.cpu[c.player as 0 | 1 | 2]);
     const humanKanCands = kanCands.filter((c) => !s.cpu[c.player as 0 | 1 | 2]);
     if (humanPonCands.length > 0 || humanKanCands.length > 0) {
-      s.awaitingFulou = true;
-      s.ponCandidates = humanPonCands;
-      s.kanCandidates = humanKanCands;
+      enterFulouStage(s, { ponCandidates: humanPonCands, kanCandidates: humanKanCands });
       const ppl = [
         ...humanPonCands.map((c) => `pon p${c.player}`),
         ...humanKanCands.map((c) => `kan p${c.player}`),
@@ -2406,14 +2349,12 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     return { ...s };
   }
   // 人間 ron 候補が残っている [CPU は ronCandidates にいた場合上で auto-ron 済]
-  s.awaitingRonDecision = true;
-  s.ronPassedPlayers = [];  // R3 P0 #2: 新規 ロン局面で reset、 deadlock 防止
-  s.ronDeclaredPlayers = [];  // R3 follow-up #29: 新規 ロン局面で reset
-  s.ronResults = [];
   // R13 P0 #5 fix: ロン全員 pass 後 副露候補 消失 bug fix。 ponCands / kanCands を
   // state に保存 [human 候補のみ]、 pass() 経由で全員 ron pass 後 awaitingFulou に遷移
-  s.ponCandidates = ponCands.filter((c) => !s.cpu[c.player as 0|1|2]);
-  s.kanCandidates = kanCands.filter((c) => !s.cpu[c.player as 0|1|2]);
+  enterRonDecisionStage(s, {
+    ponCandidates: ponCands.filter((c) => !s.cpu[c.player as 0|1|2]),
+    kanCandidates: kanCands.filter((c) => !s.cpu[c.player as 0|1|2]),
+  });
   s.message = `ロン可能: player ${ronCandidates.join(',')}`;
   return { ...s };
 }

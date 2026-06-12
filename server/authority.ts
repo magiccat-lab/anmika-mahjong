@@ -1,5 +1,6 @@
 import { Game3 } from '../src/lib/game3';
 import { toCorePai } from '../src/lib/helpers';
+import { resolveNukiBeiMeta } from '../src/lib/game3/bei';
 import type { Pai, PlayerId } from '../src/lib/types';
 
 export type AuthorityMember = {
@@ -166,9 +167,12 @@ export class RoomAuthority {
 
     const pai = paiValue as Pai;
     if (toCorePai(pai) === 'z4' && this.game.canNukiBei(actor)) {
-      const replacement = this.game.declareNukiBei(actor, {
-        gold: meta?.gold === true || pai === 'gN' || (this.game.shan.lastZimoGold && toCorePai(this.lastZimo ?? '') === 'z4'),
-      });
+      const replacement = this.game.declareNukiBei(actor, resolveNukiBeiMeta({
+        requestedPai: pai,
+        metaGold: meta?.gold,
+        lastZimo: this.lastZimo,
+        lastZimoGold: this.game.shan.lastZimoGold,
+      }));
       this.lastZimo = replacement;
       if (replacement === null) this.roundEnded = true;
       return null;

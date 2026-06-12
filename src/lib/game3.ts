@@ -36,7 +36,7 @@ import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotH
 import { applyFuyuChip as applyFuyuChipHelper, applyChipsOnHule as applyChipsOnHuleHelper, type HuleChipCtx } from './game3/huleChip';
 import { computeTileInventory, diffInventory, expectedInventory } from './game3/inventory';
 import { canNukiBeiFromState, consumeNukiBei } from './game3/bei';
-import { emptyGoldHand, hasGoldKita, resolveGoldDiscardFlag, resolveGoldPaiForDiscard, trackGoldDraw, type GoldHand } from './game3/gold';
+import { emptyGoldHand, hasGoldKita, isGoldPhysicalPai, resolveGoldDiscardFlag, resolveGoldPaiForDiscard, shouldPreserveGoldPai, trackGoldDraw, type GoldHand } from './game3/gold';
 import {
   emptyPochiHand,
   isReversePochiColor,
@@ -777,7 +777,7 @@ export class Game3 {
       player,
       pai,
       pochi: corePai === 'z5' ? (this.shan.lastZimoPochi ?? null) : null,
-      gold: this.shan.lastZimoGold && (pai === 'gp' || pai === 'gs' || pai === 'gN'),
+      gold: this.shan.lastZimoGold && isGoldPhysicalPai(pai),
     };
     this.events.push({ type: 'zimo', player, pai });
     dlog('[zimo]', { player, pai, rawPai, pochi: rawColor, gold: this.shan.lastZimoGold, drawnHua: [...this.shan.lastDrawnHuapai], huapaiAfter: [...this.huapai[player]] });
@@ -797,7 +797,7 @@ export class Game3 {
       player,
       pai,
       pochi: corePai === 'z5' ? (this.shan.lastZimoPochi ?? null) : null,
-      gold: this.shan.lastZimoGold && (pai === 'gp' || pai === 'gs' || pai === 'gN'),
+      gold: this.shan.lastZimoGold && isGoldPhysicalPai(pai),
     };
     this.events.push({ type: 'zimo', player, pai });
   }
@@ -1158,9 +1158,7 @@ export class Game3 {
         else prio -= 1;
       }
       // 金牌 [gp / gs / gN] 残し [リョー指示 2026-05-14]
-      if (basePai === 'p0' && (this.goldHand[player]?.p ?? 0) > 0) prio -= 3;
-      else if (basePai === 's0' && (this.goldHand[player]?.s ?? 0) > 0) prio -= 3;
-      else if (basePai === 'z4' && (this.goldHand[player]?.z ?? 0) > 0) prio -= 3;
+      if (shouldPreserveGoldPai(basePai, this.goldHand[player])) prio -= 3;
       // 赤 5 [非金] は chip 2 倍、 軽く残す
       if ((basePai === 'p0' || basePai === 's0') && prio > -3) prio -= 1;
       // リーチ家への 安牌評価 [現物 +10 > スジ +4 > カベ +2 > 危険 -5]

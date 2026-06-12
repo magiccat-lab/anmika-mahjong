@@ -46,3 +46,16 @@ export function consumeNukiBei(opts: {
   opts.nukidora.value += 1;
   return 'normal';
 }
+
+export function resolveNukiBeiMeta(opts: {
+  requestedPai: string;
+  metaGold?: boolean;
+  lastZimo: string | null | undefined;
+  lastZimoGold: boolean;
+}): { gold: boolean } {
+  return {
+    gold: opts.metaGold === true
+      || opts.requestedPai === 'gN'
+      || (opts.lastZimoGold && toCorePai(opts.lastZimo ?? '') === 'z4'),
+  };
+}

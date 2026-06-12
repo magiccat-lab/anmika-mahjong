@@ -5,6 +5,7 @@
 import type { StoreState } from '../store';
 import { applyPingjuTransition } from '../store';
 import { dlog } from '../helpers';
+import { clearReactionStage } from './winPipeline';
 
 /** 暗槓 / 加槓 [現家、 ツモ後]
  *  2026-05-14 codex review P2 fix: replacement null 時の 王牌枯渇 流局を applyPingjuTransition で
@@ -45,10 +46,7 @@ export function ponImpl(initial: StoreState, player: number, mianzi: string): St
     s.message = `player ${player} ポン不可 [mianzi=${mianzi}]、 候補待ち継続`;
     return { ...s };
   }
-  s.awaitingRonDecision = false;
-  s.awaitingFulou = false;
-  s.ponCandidates = [];
-  s.kanCandidates = [];
+  clearReactionStage(s);
   s.lastZimo = null;
   s.message = `player ${player} ポン → 打牌してください`;
   return { ...s };
@@ -65,20 +63,14 @@ export function damingangImpl(initial: StoreState, player: number, mianzi: strin
     const shanRem = (s.game.shan as any)?.paishu ?? 0;
     if (shanRem === 0) {
       // 山枯渇 [本当に流局]
-      s.awaitingRonDecision = false;
-      s.awaitingFulou = false;
-      s.ponCandidates = [];
-      s.kanCandidates = [];
+      clearReactionStage(s);
       return applyPingjuTransition({ ...s }, `🌀 流局 [大明槓後 王牌枯渇]:`);
     }
     // 不正 mianzi / rollback 済み: 候補待ち継続
     s.message = `player ${player} 大明槓不可 [mianzi=${mianzi}]、 候補待ち継続`;
     return { ...s };
   }
-  s.awaitingRonDecision = false;
-  s.awaitingFulou = false;
-  s.ponCandidates = [];
-  s.kanCandidates = [];
+  clearReactionStage(s);
   s.lastZimo = replacement;
   s.message = `player ${player} 大明槓 [${mianzi}]、 嶺上 ${replacement}`;
   return { ...s };

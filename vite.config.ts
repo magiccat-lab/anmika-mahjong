@@ -1,8 +1,12 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from 'vitest/config'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
+import { fileURLToPath } from 'node:url'
+
+const projectRoot = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
+  root: projectRoot,
   plugins: [svelte()],
   test: {
     include: ['src/**/*.test.ts'],
