@@ -1,8 +1,9 @@
 ﻿
-// anmika-mahjong WS relay server [リョー指示 2026-05-13 「single の UI そのまま、 CPU 打牌を他人の打牌に置き換えるだけ」]
+// anmika-mahjong WS server [client UI 互換 + server authoritative core validation]
 //
-// 役割: 部屋に接続した client 間で message を中継するだけ。 game logic は client 持ち。
-// host が preShuffledPool [生成済 山 array] を broadcast → 全 client が同じ配牌で qipai → 同一 game state。
+// 役割: 部屋に接続した client 間で message を中継しつつ、 server 側にも Game3 正本を持ち、
+// 打牌 / 鳴き / 和了 / リーチ / 北抜き / 次局の妥当性を検証してから broadcast する。
+// 山 / サイコロは server 生成で client override を信頼しない。
 //
 // 起動: tsx server/ws_server.ts (port 8791)
 //
@@ -19,6 +20,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
 import { randomInt as cryptoRandomInt } from 'node:crypto';
 import { defaultSanmaRule, generateTilePool } from '../src/lib/shan3';
+import { createRoomAuthority, type RoomAuthority } from './authority';
 
 const PORT = parseInt(process.env.ANMIKA_WS_PORT ?? '8791');
 const API_BASE = process.env.ANMIKA_API_BASE ?? 'http://127.0.0.1:8790';
@@ -81,6 +83,7 @@ interface Room {
   members: Map<string, Member>;
   host_user_id: string;
   started: boolean;
+  authority: RoomAuthority | null;
   // host から start 受信時 size<3 で reject された場合、 ここに保留して 3 人揃った瞬間に発火
   // [race fix 2026-05-13: A 先 connect → host start ws.onopen 即送信 → size=2 で破棄 → B 後 connect で永遠に start こない 問題]
   pendingStart: { preShuffledPool: string[]; qijia: number } | null;
@@ -118,7 +121,7 @@ function serverShuffledPool(): string[] {
 function getOrCreateRoom(room_id: string, host_user_id: string): Room {
   let r = rooms.get(room_id);
   if (!r) {
-    r = { room_id, members: new Map(), host_user_id, started: false, pendingStart: null };
+    r = { room_id, members: new Map(), host_user_id, started: false, authority: null, pendingStart: null };
     rooms.set(room_id, r);
   }
   return r;
@@ -139,6 +142,7 @@ function broadcastMembers(room: Room): void {
 function fireStart(room: Room, preShuffledPool: string[], qijia: number): void {
   room.started = true;
   room.pendingStart = null;
+  room.authority = createRoomAuthority({ preShuffledPool, qijia });
   // eslint-disable-next-line no-console
   console.log(`[anmika-ws] room=${room.room_id} game started, pool len=${preShuffledPool?.length}`);
   const startMsg = {
@@ -168,36 +172,43 @@ function broadcastToAll(room: Room, payload: any, exceptUid?: string): void {
 
 const PLAYER_FIELD_ACTIONS = new Set(['ron', 'pass', 'pon', 'damingang']);
 
-function validateActionEnvelope(room: Room, uid: string, seat: number, action: any): string | null {
-  if (!action || typeof action !== 'object') return 'missing action object';
-  if (typeof action.type !== 'string') return 'missing action.type';
-
+function resolveActorSeat(room: Room, uid: string, seat: number, action: any): { actorSeat: number; reason: string | null } {
   let actorSeat = seat;
-  if (action.cpuRelay === true) {
-    if (uid !== room.host_user_id) return 'cpuRelay requires host';
-    if (typeof action.cpuSeat !== 'number') return 'cpuRelay requires cpuSeat';
+  if (action?.cpuRelay === true) {
+    if (uid !== room.host_user_id) return { actorSeat, reason: 'cpuRelay requires host' };
+    if (typeof action.cpuSeat !== 'number') return { actorSeat, reason: 'cpuRelay requires cpuSeat' };
     const cpu = Array.from(room.members.values()).find((m) => m.seat === action.cpuSeat && m.is_cpu);
-    if (!cpu) return `cpuRelay seat ${action.cpuSeat} is not a CPU member`;
+    if (!cpu) return { actorSeat, reason: `cpuRelay seat ${action.cpuSeat} is not a CPU member` };
     actorSeat = action.cpuSeat;
   }
+  return { actorSeat, reason: null };
+}
+
+function validateActionEnvelope(room: Room, uid: string, seat: number, action: any): { actorSeat: number; reason: string | null } {
+  if (!action || typeof action !== 'object') return { actorSeat: seat, reason: 'missing action object' };
+  if (typeof action.type !== 'string') return { actorSeat: seat, reason: 'missing action.type' };
+
+  const actor = resolveActorSeat(room, uid, seat, action);
+  if (actor.reason) return actor;
+  const actorSeat = actor.actorSeat;
 
   if (PLAYER_FIELD_ACTIONS.has(action.type)) {
     const target = action.player ?? actorSeat;
-    if (target !== actorSeat) return `${action.type}: player ${target} != actor seat ${actorSeat}`;
+    if (target !== actorSeat) return { actorSeat, reason: `${action.type}: player ${target} != actor seat ${actorSeat}` };
   }
 
   if (action.type === 'nextMatch' && uid !== room.host_user_id) {
-    return 'nextMatch requires host';
+    return { actorSeat, reason: 'nextMatch requires host' };
   }
   if (action.type === 'nextRound' && action.from_role === 'host' && uid !== room.host_user_id) {
-    return 'nextRound host role requires host';
+    return { actorSeat, reason: 'nextRound host role requires host' };
   }
-  return null;
+  return { actorSeat, reason: null };
 }
 
 const wss = new WebSocketServer({ port: PORT });
 // eslint-disable-next-line no-console
-console.log(`[anmika-ws] relay-mode listening on :${PORT}`);
+console.log(`[anmika-ws] authoritative-core listening on :${PORT}`);
 
 wss.on('connection', async (ws, req) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
@@ -277,10 +288,10 @@ wss.on('connection', async (ws, req) => {
       // 生成し action.override を上書きしてから broadcast する [既存 client validation 経路も
       // 通せるよう、 action 構造はそのまま維持]。
       const action = msg.action ?? {};
-      const rejectReason = validateActionEnvelope(room, uid, seat, action);
-      if (rejectReason) {
+      const envelope = validateActionEnvelope(room, uid, seat, action);
+      if (envelope.reason) {
         // eslint-disable-next-line no-console
-        console.warn(`[anmika-ws] reject action room=${room.room_id} uid=${uid} reason=${rejectReason}`);
+        console.warn(`[anmika-ws] reject action room=${room.room_id} uid=${uid} reason=${envelope.reason}`);
         return;
       }
       if (action && action.type === 'rollSaiKoroDice') {
@@ -290,6 +301,23 @@ wss.on('connection', async (ws, req) => {
       }
       if (action && (action.type === 'nextRound' || action.type === 'nextMatch')) {
         action.preShuffledPool = serverShuffledPool();
+      }
+      if (!room.authority && action?.type !== 'nextMatch') {
+        // eslint-disable-next-line no-console
+        console.warn(`[anmika-ws] reject action room=${room.room_id} uid=${uid} reason=authority not initialized`);
+        return;
+      }
+      if (!room.authority && action?.type === 'nextMatch') {
+        room.authority = createRoomAuthority({
+          preShuffledPool: action.preShuffledPool,
+          qijia: normalizeQijia(action.qijia),
+        });
+      }
+      const authorityReason = room.authority?.validateAndApply(envelope.actorSeat, action, room.members.values()) ?? null;
+      if (authorityReason) {
+        // eslint-disable-next-line no-console
+        console.warn(`[anmika-ws] reject action room=${room.room_id} uid=${uid} reason=${authorityReason}`);
+        return;
       }
       const relay = { type: 'action', from_seat: seat, from_user_id: uid, action };
       // eslint-disable-next-line no-console

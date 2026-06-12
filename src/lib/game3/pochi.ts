@@ -90,6 +90,46 @@ export function trackPochiDraw(rawPai: unknown, corePai: string, hand: PochiHand
   return color;
 }
 
+export function shouldApplyPochiDrawMultiplier(opts: {
+  color: PochiColor | null;
+  corePai: string;
+  isLizhi: boolean;
+  isWhiteWaiting: boolean;
+}): opts is {
+  color: PochiColor;
+  corePai: 'z5';
+  isLizhi: true;
+  isWhiteWaiting: false;
+} {
+  return !!opts.color && opts.corePai === 'z5' && opts.isLizhi && !opts.isWhiteWaiting;
+}
+
+export function isReversePochiColor(color: PochiColor | null | undefined): boolean {
+  return color === 'red' || color === 'yellow';
+}
+
+export function resolvePochiPaiForDiscard(opts: {
+  requestedPai: string;
+  corePai: string;
+  expanded?: Record<string, number> | null;
+  lastZimoInfo: LastZimoPochiInfo;
+  player: PlayerId;
+}): string {
+  const expanded = opts.expanded;
+  if (!expanded || opts.corePai !== 'z5' || pochiColorFromPai(opts.requestedPai)) {
+    return opts.requestedPai;
+  }
+  const zimoRaw = opts.lastZimoInfo.player === opts.player && toCorePai(opts.lastZimoInfo.pai as string) === 'z5'
+    ? (opts.lastZimoInfo.pai as string)
+    : null;
+  if (zimoRaw && pochiColorFromPai(zimoRaw) && (expanded[zimoRaw] ?? 0) > 0) return zimoRaw;
+  for (const color of POCHI_COLORS) {
+    const physical = POCHI_PAI_BY_COLOR[color];
+    if ((expanded[physical] ?? 0) > 0) return physical;
+  }
+  return opts.requestedPai;
+}
+
 export function resolvePochiDiscardColor(opts: {
   player: PlayerId;
   paiForHand: string;

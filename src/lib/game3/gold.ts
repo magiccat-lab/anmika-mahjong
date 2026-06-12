@@ -93,3 +93,16 @@ export function resolveGoldDiscardFlag(opts: {
   }
   return isGold;
 }
+
+export function resolveGoldPaiForDiscard(opts: {
+  requestedPai: string;
+  corePai: string;
+  metaGold?: boolean;
+  expanded?: Record<string, number> | null;
+}): string {
+  const expanded = opts.expanded;
+  if (!expanded || opts.metaGold === false) return opts.requestedPai;
+  const physical = goldPaiFromCorePai(opts.corePai);
+  if (!physical || opts.requestedPai === physical) return opts.requestedPai;
+  return (expanded[physical] ?? 0) > 0 ? physical : opts.requestedPai;
+}

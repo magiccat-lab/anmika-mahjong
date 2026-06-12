@@ -36,13 +36,16 @@ import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotH
 import { applyFuyuChip as applyFuyuChipHelper, applyChipsOnHule as applyChipsOnHuleHelper, type HuleChipCtx } from './game3/huleChip';
 import { computeTileInventory, diffInventory, expectedInventory } from './game3/inventory';
 import { canNukiBeiFromState, consumeNukiBei } from './game3/bei';
-import { emptyGoldHand, hasGoldKita, resolveGoldDiscardFlag, trackGoldDraw, type GoldHand } from './game3/gold';
+import { emptyGoldHand, hasGoldKita, resolveGoldDiscardFlag, resolveGoldPaiForDiscard, trackGoldDraw, type GoldHand } from './game3/gold';
 import {
   emptyPochiHand,
+  isReversePochiColor,
   NEUTRAL_POCHI_MULTIPLIER,
   nextPochiMultiplier,
   normalizePochiMultiplier,
   resolvePochiDiscardColor,
+  resolvePochiPaiForDiscard,
+  shouldApplyPochiDrawMultiplier,
   trackPochiDraw,
   type PochiColor,
   type PochiHand,
@@ -768,24 +771,7 @@ export class Game3 {
     }
     trackGoldDraw(this.shan.lastZimoGold, pai, this.goldHand[player]);
     const rawColor = trackPochiDraw(rawPai, corePai, this.pochiHand[player]);
-    if (rawColor && corePai === 'z5') {
-      const c = rawColor;
-      // 白待ち check [ルール 2-3 補足: 白待ちなら逆ぽっち効果回避]
-      // ツモ前の手牌で z5 を待ってたか、 つまり z5 を加えるとアガリ形になるなら 「白待ち」
-      // [tingpai はツモ前の状態で z5 含むかで判定]
-      const tingBeforeZimo = this.getTingpaiListBeforeZimo(player);
-      const isWhiteWaiting = tingBeforeZimo.includes('z5');
-      // [2026-05-21 リョー仕様確定]: 「白ぽっちは局でリセット、 リーチ後のツモ時しか適用されない」
-      //   → pochi 倍率 set は **リーチ済 (lizhi) + 白待ちでない** ツモのみ。
-      //   リーチ前の z5 ツモは pochiHand stock のみ inc、 mul は変えない。
-      if (!isWhiteWaiting && this.lizhi.has(player)) {
-        this.applyPochiColorMultiplier(player, c);
-        // 逆ぽっち [赤/黄] ツモで kinpeiTarget 未選択なら強制自動
-        if ((c === 'yellow' || c === 'red') && this.kinpeiTarget[player] === null) {
-          this.autoResolveKinpei(player);
-        }
-      }
-    }
+    this.applyPochiDrawMultiplierIfNeeded(player, corePai, rawColor);
     // 直前ツモ情報を保存 [ツモ切り時の色判定用]
     this.lastZimoInfo = {
       player,
@@ -804,20 +790,8 @@ export class Game3 {
    *  共通 helper。 pochi 倍率効果 + lastZimoInfo + 華牌 push [重複保持] を まとめる */
   applyRinshanZimoEffects(player: PlayerId, pai: string, rawPai: any): void {
     const corePai = toCorePai(pai);
-    // ぽっち効果 [白ぽっち z5]
     const rawColor = pochiColorFromPai(rawPai);
-    if (rawColor && corePai === 'z5') {
-      const tingBeforeZimo = this.getTingpaiListBeforeZimo(player);
-      const isWhiteWaiting = tingBeforeZimo.includes('z5');
-      // [2026-05-21 リョー仕様]: pochi 倍率 set は **リーチ済 + 白待ちでない** ツモのみ
-      // (嶺上 / 北抜き 代替ツモも同様)
-      if (!isWhiteWaiting && this.lizhi.has(player)) {
-        this.applyPochiColorMultiplier(player, rawColor);
-        if ((rawColor === 'yellow' || rawColor === 'red') && this.kinpeiTarget[player] === null) {
-          this.autoResolveKinpei(player);
-        }
-      }
-    }
+    this.applyPochiDrawMultiplierIfNeeded(player, corePai, rawColor);
     // lastZimoInfo [ツモ切り meta 判定用]
     this.lastZimoInfo = {
       player,
@@ -826,6 +800,22 @@ export class Game3 {
       gold: this.shan.lastZimoGold && (pai === 'gp' || pai === 'gs' || pai === 'gN'),
     };
     this.events.push({ type: 'zimo', player, pai });
+  }
+
+  private applyPochiDrawMultiplierIfNeeded(player: PlayerId, corePai: string, color: PochiColor | null): void {
+    const isWhiteWaiting = corePai === 'z5' && this.getTingpaiListBeforeZimo(player).includes('z5');
+    if (!color || !shouldApplyPochiDrawMultiplier({
+      color,
+      corePai,
+      isLizhi: this.lizhi.has(player),
+      isWhiteWaiting,
+    })) {
+      return;
+    }
+    this.applyPochiColorMultiplier(player, color);
+    if (isReversePochiColor(color) && this.kinpeiTarget[player] === null) {
+      this.autoResolveKinpei(player);
+    }
   }
 
   dapai(pai: Pai, meta?: { gold?: boolean; pochi?: 'blue' | 'red' | 'green' | 'yellow' }): void {
@@ -855,22 +845,19 @@ export class Game3 {
     }
     let paiForHand: string = pai;
     const expanded = spInst._bingpai?.__anmika;
-    if (expanded) {
-      if (coreDapai === 'z5' && !pochiColorFromPai(pai as string)) {
-        const zimoRaw: string | null = this.lastZimoInfo.player === player && toCorePai(this.lastZimoInfo.pai as string) === 'z5'
-          ? (this.lastZimoInfo.pai as string)
-          : null;
-        if (zimoRaw && pochiColorFromPai(zimoRaw) && expanded[zimoRaw] > 0) paiForHand = zimoRaw;
-        else if (expanded.z5b > 0) paiForHand = 'z5b';
-        else if (expanded.z5r > 0) paiForHand = 'z5r';
-        else if (expanded.z5g > 0) paiForHand = 'z5g';
-        else if (expanded.z5y > 0) paiForHand = 'z5y';
-      } else if (coreDapai === 'p0' && pai !== 'gp' && meta?.gold !== false && expanded.gp > 0) {
-        paiForHand = 'gp';
-      } else if (coreDapai === 's0' && pai !== 'gs' && meta?.gold !== false && expanded.gs > 0) {
-        paiForHand = 'gs';
-      }
-    }
+    paiForHand = resolvePochiPaiForDiscard({
+      requestedPai: paiForHand,
+      corePai: coreDapai,
+      expanded,
+      lastZimoInfo: this.lastZimoInfo,
+      player,
+    });
+    paiForHand = resolveGoldPaiForDiscard({
+      requestedPai: paiForHand,
+      corePai: coreDapai,
+      metaGold: meta?.gold,
+      expanded,
+    });
     patchAnmikaShoupai(spInst).dapai(paiForHand);
     this.he.get(player).dapai(coreDapai);
     // リーチ宣言牌は he._pai 末尾に `_` suffix を追加 [UI 表示で 図形ごと 90 度横倒し表現用]

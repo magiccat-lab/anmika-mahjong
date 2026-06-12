@@ -6,6 +6,7 @@
 import type { StoreState } from '../store';
 import { innerDiscard, formatHuleResult, triggerSaiKoroIfAny, applyPingjuTransition, enqueueCutinState } from '../store';
 import { toCorePai } from '../helpers';
+import { enterFeverContinueStage } from './winPipeline';
 
 /** CPU 自動進行: 現家が CPU なら ツモ切り、 ループ */
 export function cpuStepImpl(initial: StoreState): StoreState {
@@ -42,7 +43,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
           s.game.feverWinCount[cur] += 1;
           s.roundEnded = false;
           if (!s.pendingFeverContinue) {
-            s.pendingFeverContinue = { winner: cur, isRon: false };
+            enterFeverContinueStage(s, { winner: cur, isRon: false });
           }
         } else {
           s.roundEnded = true;

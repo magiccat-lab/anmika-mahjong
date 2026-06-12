@@ -17,14 +17,35 @@ export type WinPipelineState = {
   owner: number | null;
 };
 
+export type PendingKinpei = {
+  winner: number;
+  isRon: boolean;
+  ronfrom: number | null;
+  otherWinners?: number[];
+  humanOthers?: number[];
+  cutinQueued?: boolean;
+};
+
+export type PendingFuyu = {
+  winner: number;
+  isRon: boolean;
+  ronfrom: number | null;
+  humanOthers?: number[];
+};
+
+export type PendingFeverContinue = {
+  winner: number;
+  isRon: boolean;
+};
+
 type WinPipelineLike = {
   game: Game3;
   awaitingRonDecision: boolean;
   pendingQianggang: { player: number } | null;
-  pendingFuyu: { winner: number } | null;
-  pendingKinpei: { winner: number } | null;
+  pendingFuyu: PendingFuyu | null;
+  pendingKinpei: PendingKinpei | null;
   pendingSaiKoro: { winner: number; chances?: Array<{ winner?: number }>; currentIdx?: number } | null;
-  pendingFeverContinue: { winner: number; isRon: boolean } | null;
+  pendingFeverContinue: PendingFeverContinue | null;
   pendingPingju: boolean;
   roundEnded: boolean;
 };
@@ -52,6 +73,33 @@ export function blockingWinPipelineReason(s: WinPipelineLike): string | null {
   return state.stage;
 }
 
+export function enterFuyuStage(s: WinPipelineLike, pending: PendingFuyu): void {
+  s.pendingFuyu = pending;
+  s.roundEnded = false;
+}
+
+export function clearFuyuStage(s: WinPipelineLike): void {
+  s.pendingFuyu = null;
+}
+
+export function enterKinpeiStage(s: WinPipelineLike, pending: PendingKinpei): void {
+  s.pendingKinpei = pending;
+  s.roundEnded = false;
+}
+
+export function clearKinpeiStage(s: WinPipelineLike): void {
+  s.pendingKinpei = null;
+}
+
+export function enterFeverContinueStage(s: WinPipelineLike, pending: PendingFeverContinue): void {
+  s.pendingFeverContinue = pending;
+  s.roundEnded = false;
+}
+
+export function clearFeverContinueStage(s: WinPipelineLike): void {
+  s.pendingFeverContinue = null;
+}
+
 export function settleAfterWin(
   s: WinPipelineLike,
   opts: { winner: PlayerId; isRon: boolean },
@@ -63,7 +111,7 @@ export function settleAfterWin(
   if (s.game.feverActive[opts.winner]) {
     if (!s.pendingFeverContinue) {
       s.game.feverWinCount[opts.winner] += 1;
-      s.pendingFeverContinue = { winner: opts.winner, isRon: opts.isRon };
+      enterFeverContinueStage(s, { winner: opts.winner, isRon: opts.isRon });
     }
     s.roundEnded = false;
     return;
