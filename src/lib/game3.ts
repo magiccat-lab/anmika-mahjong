@@ -9,7 +9,7 @@ import type { GameEvent, GameState, Lunban, Pai, PlayerId } from './types';
 import { Shan3, defaultSanmaRule, type ShanRule } from './shan3';
 
 // 共通 helper は helpers.ts に分離 [code clean-up 2026-05-10]
-import { DEBUG_LOG, dlog, normalizePai, toCorePai, isGoldPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, patchAnmikaShoupai, countGoldInHand, countPochiInHand, isPositiveZ5, isNegativeZ5, fanshuLevel, LEVEL_TO_FANSHU, isValidAnmikaTile } from './helpers';
+import { DEBUG_LOG, derror, dlog, normalizePai, toCorePai, isGoldPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, patchAnmikaShoupai, countGoldInHand, countPochiInHand, isPositiveZ5, isNegativeZ5, fanshuLevel, LEVEL_TO_FANSHU, isValidAnmikaTile } from './helpers';
 
 /** debug helper [P0-6b 調査用、 2026-05-12]: 指定牌が fulou に何枚あるか集計、
  *  赤 5 [s0/p0] と 通常 5 [s5/p5] は同視 */
@@ -513,8 +513,7 @@ export class Game3 {
       sp.zimo(replacement);
     } catch (e: any) {
       // P0-6b: sp.zimo が bingpai[n]==4 拒否で throw [既に 4 枚消費済の牌が rinshan に来た state corruption]
-      // eslint-disable-next-line no-console
-      console.log('!!!P0-6b nukibei sp.zimo throw', { player, replacement, rawReplacement, err: e?.message, bingpai: { m: [...sp._bingpai.m], p: [...sp._bingpai.p], s: [...sp._bingpai.s], z: [...sp._bingpai.z] }, fulou: [...sp._fulou] });
+      dlog('!!!P0-6b nukibei sp.zimo throw', { player, replacement, rawReplacement, err: e?.message, bingpai: { m: [...sp._bingpai.m], p: [...sp._bingpai.p], s: [...sp._bingpai.s], z: [...sp._bingpai.z] }, fulou: [...sp._fulou] });
       // R3 P0 #3 fix: shan / hand state 全 rollback、 partial mutate を残さない
       sp._bingpai.z[4] = _origZ4; sp._zimo = _origZimo;
       this.goldHand[player].z = _origGoldZ; this.nukidoraGold[player] = _origNukidoraGold;
@@ -542,8 +541,7 @@ export class Game3 {
     // P0-6b 検出 [2026-05-12]: nukibei rinshan で 既に ankan 済の牌が混入してないか
     const fulouCounts = countTileInFulou(sp, coreReplacement);
     if (fulouCounts >= 4) {
-      // eslint-disable-next-line no-console
-      console.log('!!!P0-6b nukibei rinshan 矛盾', { player, replacement, rawReplacement, fulouCounts, fulou: [...sp._fulou] });
+      dlog('!!!P0-6b nukibei rinshan 矛盾', { player, replacement, rawReplacement, fulouCounts, fulou: [...sp._fulou] });
     }
     // 2026-05-14 codex review fix: 通常 zimo と同じく lastDrawnHuapai 反映 + 白待ち回避
     if (this.shan.lastDrawnHuapai.length > 0) {
@@ -698,7 +696,7 @@ export class Game3 {
         const sp = buildShoupai(tiles[p]);
         this.shoupai.set(p, sp);
       } catch (e: any) {
-        console.error('[qipai shoupai error]', { player: p, tiles: tiles[p], err: e?.message });
+        derror('[qipai shoupai error]', { player: p, tiles: tiles[p], err: e?.message });
         this.shoupai.set(p, new Majiang.Shoupai([])); // empty fallback
       }
       this.he.set(p, new Majiang.He());
@@ -741,16 +739,14 @@ export class Game3 {
     {
       const fulouCount = countTileInFulou(spForZimo, corePai);
       if (fulouCount >= 4) {
-        // eslint-disable-next-line no-console
-        console.log('!!!P0-6b regular zimo 矛盾', { player, pai, rawPai, fulouCount, fulou: [...spForZimo._fulou], lastZimoGold: this.shan.lastZimoGold });
+        dlog('!!!P0-6b regular zimo 矛盾', { player, pai, rawPai, fulouCount, fulou: [...spForZimo._fulou], lastZimoGold: this.shan.lastZimoGold });
       }
     }
     // R4 P1 #14 fix + R11 P2 #3 fix: sp.zimo throw 時に shan latch も完全 rollback
     try {
       patchAnmikaShoupai(spForZimo).zimo(pai);
     } catch (e: any) {
-      // eslint-disable-next-line no-console
-      console.log('!!!sp.zimo throw [regular zimo]', { player, pai, err: e?.message });
+      dlog('!!!sp.zimo throw [regular zimo]', { player, pai, err: e?.message });
       // R11 P2 #3 fix: shan._pai / 華牌 / lastZimoGold / lastZimoPochi を 完全 restore
       (this.shan as any)._pai = _shanPaiSnap;
       this.shan.lastDrawnHuapai = _shanLastDrawnHuapaiSnap;
@@ -840,7 +836,7 @@ export class Game3 {
     const player = this.lunbanToPlayerId(this.state.lunban);
     const spInst = this.shoupai.get(player);
     if (!spInst) {
-      console.error('[dapai error] shoupai.get(player) undefined', { player, lunban: this.state.lunban, mapSize: this.shoupai.size, mapKeys: Array.from(this.shoupai.keys()) });
+      derror('[dapai error] shoupai.get(player) undefined', { player, lunban: this.state.lunban, mapSize: this.shoupai.size, mapKeys: Array.from(this.shoupai.keys()) });
       throw new Error(`shoupai not set for player ${player}`);
     }
     let paiForHand: string = pai;
@@ -3238,8 +3234,7 @@ export class Game3 {
       // P0-6b 検出: replacement が 既に fulou で 4 枚消費済の牌なら state corruption
       const fulouCount = countTileInFulou(sp, replacement);
       if (fulouCount >= 4) {
-        // eslint-disable-next-line no-console
-        console.log('!!!P0-6b declareKan rinshan 矛盾', { player, mianzi, replacement, fulouCount, fulou: [...sp._fulou], shanPaishu: this.shan.paishu });
+        dlog('!!!P0-6b declareKan rinshan 矛盾', { player, mianzi, replacement, fulouCount, fulou: [...sp._fulou], shanPaishu: this.shan.paishu });
       }
       // P0-6 検出: 暗槓 [\d{4}$] 直後 _zimo が ankan と同種だと 5 枚目存在 = state corruption
       // [V32 fuzz で発見、 2026-05-12 yuma 調査中、 root cause 未特定]
@@ -3248,8 +3243,7 @@ export class Game3 {
         const ankanN = mianzi[1]; // 第 1 字目の数字 [s8888 なら '8']
         const repN = replacement[1] === '0' ? '5' : replacement[1];
         if (ankanN === repN || (ankanN === '5' && replacement[1] === '0')) {
-          // eslint-disable-next-line no-console
-          console.log('!!!P0-6 corruption detect ankan+同種_zimo', { player, mianzi, replacement, shanPaishu: this.shan.paishu, shanRestFront: [...(this.shan as any)._pai].slice(0, 6), bingpaiPostAnkan: { m: [...sp._bingpai.m], p: [...sp._bingpai.p], s: [...sp._bingpai.s], z: [...sp._bingpai.z] } });
+          dlog('!!!P0-6 corruption detect ankan+同種_zimo', { player, mianzi, replacement, shanPaishu: this.shan.paishu, shanRestFront: [...(this.shan as any)._pai].slice(0, 6), bingpaiPostAnkan: { m: [...sp._bingpai.m], p: [...sp._bingpai.p], s: [...sp._bingpai.s], z: [...sp._bingpai.z] } });
         }
       }
     } catch {

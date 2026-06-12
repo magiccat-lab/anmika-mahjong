@@ -15,7 +15,6 @@
   import LobbyPanel from './lib/LobbyPanel.svelte';
   import RoomPanel from './lib/RoomPanel.svelte';
   import EntryMenu from './lib/EntryMenu.svelte';
-  import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
   import HeaderInfo from './lib/HeaderInfo.svelte';
@@ -29,6 +28,7 @@
   import { CUTIN_DURATION_MS, game, type StampId } from './lib/store';
   import type { PlayerId } from './lib/types';
   import { parseFulouList, fulouFlatTiles } from './lib/fulouDisplay';
+  import { derror, dlog, dwarn } from './lib/helpers';
 
   // スタンプ pallet 開閉 [自家「💬」 button 押下時 true]
   let stampPalletOpen = false;
@@ -101,8 +101,8 @@
     return [0,1,2].map(p => state.defen[p as PlayerId] - (($game.game.preHuleSnapshot as any).defen[p] ?? 0)) as [number, number, number];
   }
   // R6 P2 #13 fix: DEV / Playwright のみ debug log を発火、 production console を汚さない
-  $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) console.log('[seat-debug] selfPlayer=', selfPlayer, 'srv0=', srv0, 'srv1=', srv1, 'srv2=', srv2, 'rotateOffset=', rotateOffset, 'revealCheck(srv0)=', selfPlayer === srv0); }
-  $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) console.log('[disabled-debug] currentPlayer=', currentPlayer, 'lunban=', state.lunban, 'srv0=', srv0, 'isCurrent(self)=', currentPlayer === srv0, 'needsZimo=', needsZimo, '_zimo(cur)=', $game.game.shoupai.get(currentPlayer)?._zimo, '_zimo(srv0)=', $game.game.shoupai.get(srv0)?._zimo, 'awaitRon=', $game.awaitingRonDecision, 'awaitFulou=', $game.awaitingFulou); }
+  $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) dlog('[seat-debug] selfPlayer=', selfPlayer, 'srv0=', srv0, 'srv1=', srv1, 'srv2=', srv2, 'rotateOffset=', rotateOffset, 'revealCheck(srv0)=', selfPlayer === srv0); }
+  $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) dlog('[disabled-debug] currentPlayer=', currentPlayer, 'lunban=', state.lunban, 'srv0=', srv0, 'isCurrent(self)=', currentPlayer === srv0, 'needsZimo=', needsZimo, '_zimo(cur)=', $game.game.shoupai.get(currentPlayer)?._zimo, '_zimo(srv0)=', $game.game.shoupai.get(srv0)?._zimo, 'awaitRon=', $game.awaitingRonDecision, 'awaitFulou=', $game.awaitingFulou); }
 
   // 白ぽっち演出中は CPU / 自動ツモ切りを止めるので、driver より先に宣言しておく。
   type PochiRevealState = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean };
@@ -126,7 +126,7 @@
     if (ready && curMember?.is_cpu && key !== lastCpuDriverKey && !$game.lizhiPending) {
       lastCpuDriverKey = key;
       // R6 P2 #13: production では log 出さない
-      if ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver)) console.log('[host-cpu-driver] fire seat=', cur, 'name=', curMember.username, 'key=', key);
+      if ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver)) dlog('[host-cpu-driver] fire seat=', cur, 'name=', curMember.username, 'key=', key);
       setTimeout(() => {
         const snap = get(game);
         const curNow = snap.game.lunbanToPlayerId(snap.game.state.lunban);
@@ -167,18 +167,15 @@
     const lastPochi = ($game.game.shan as any)?.lastZimoPochi as ('blue'|'red'|'green'|'yellow'|null);
     if (zimoEvents.length > lastSeenZimoEventCount) {
       const lastZ = zimoEvents[zimoEvents.length - 1];
-      // eslint-disable-next-line no-console
-      if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] check', { lastZ, lastPochi, pochiReveal, lizhi: lastZ ? $game.game.lizhi.has(lastZ.player) : null });
+      if ((import.meta as any).env?.DEV) dlog('[pochi-cutin] check', { lastZ, lastPochi, pochiReveal, lizhi: lastZ ? $game.game.lizhi.has(lastZ.player) : null });
       // [2026-05-21 fix] lastZ.pai は raw colored (z5b/r/g/y) の場合もあるので startsWith 比較
       if (lastZ && typeof lastZ.pai === 'string' && lastZ.pai.startsWith('z5') && lastPochi && pochiReveal === null) {
         const shouldDisplayReveal = !onlineGameStarted || lastZ.player === selfPlayer;
         if (shouldDisplayReveal) {
-          // eslint-disable-next-line no-console
-          if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] LATCH', { player: lastZ.player, color: lastPochi });
+          if ((import.meta as any).env?.DEV) dlog('[pochi-cutin] LATCH', { player: lastZ.player, color: lastPochi });
           pochiReveal = { player: lastZ.player, color: lastPochi, isCpu: $game.cpu[lastZ.player] === true };
         } else {
-          // eslint-disable-next-line no-console
-          if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] skip (not local reveal)');
+          if ((import.meta as any).env?.DEV) dlog('[pochi-cutin] skip (not local reveal)');
         }
       }
       lastSeenZimoEventCount = zimoEvents.length;
@@ -243,7 +240,7 @@
       const sp = g.shoupai.get(pl);
       if (sp) dbg[`p${pl}`] = { 'p[0]': sp._bingpai.p[0], 'p[5]': sp._bingpai.p[5], 's[0]': sp._bingpai.s[0], 's[5]': sp._bingpai.s[5], 'z[4]': sp._bingpai.z[4], gold: g.goldHand[pl] };
     }
-    if ((window as any).__ANMIKA_DEBUG__) console.log('[tile inv]', JSON.stringify(dbg));
+    if ((window as any).__ANMIKA_DEBUG__) dlog('[tile inv]', JSON.stringify(dbg));
     for (const pl of [0, 1, 2] as const) {
       const sp = g.shoupai.get(pl);
       if (sp) {
@@ -1045,13 +1042,13 @@
       });
       if (!r.ok) {
         const detail = await r.text().catch(() => '');
-        console.error(`[anmika] ws-token ${r.status}: ${detail}`);
+        derror(`[anmika] ws-token ${r.status}: ${detail}`);
         return;
       }
       const data = (await r.json()) as { token: string };
       token = data.token;
     } catch (e) {
-      console.error('[anmika] ws-token fetch failed', e);
+      derror('[anmika] ws-token fetch failed', e);
       return;
     }
     const url = `${protocol}//${location.host}/ws/room/${currentRoomId}?token=${encodeURIComponent(token)}`;
@@ -1105,7 +1102,7 @@
           if (mem) from_seat = mem.seat;
         }
         if (from_seat === undefined) {
-          console.warn('[online] msg.action 受信 from_seat 解決失敗', msg);
+          dwarn('[online] msg.action 受信 from_seat 解決失敗', msg);
           return;
         }
         game.applyOnlineRemoteAction(from_seat, msg.action);
@@ -1317,11 +1314,11 @@
             const mno = typed?.detail?.match_no ?? typed?.match_no;
             console.info('[matches POST] 409 typed', { reason, match_no: mno });
             if (reason !== 'idempotency_hit' && reason !== 'unknown') {
-              console.warn('[matches POST] 409 unexpected reason', reason, detail);
+              dwarn('[matches POST] 409 unexpected reason', reason, detail);
             }
           } else {
             // R16 P0 #4 fix: POST 失敗時 nextMatch 進行を ブロック、 user に通知 + 再試行可能
-            console.warn('[matches POST] failed', r.status, detail);
+            dwarn('[matches POST] failed', r.status, detail);
             window.alert(`試合結果の保存に失敗 [HTTP ${r.status}]、 「次の試合へ」 を 再度押してリトライ。 ${detail.slice(0, 200)}`);
             __matchPostInflight = false;
             return;  // game.nextMatch せず 中断
@@ -1338,7 +1335,7 @@
         } catch {}
       } catch (e) {
         // R16 P0 #4 fix: ネットワーク error も同様 ブロック
-        console.warn('[matches POST] err', e);
+        dwarn('[matches POST] err', e);
         window.alert(`試合結果の保存中ネットワークエラー、 「次の試合へ」 再押下でリトライ ${String(e).slice(0, 200)}`);
         __matchPostInflight = false;
         return;
@@ -2641,11 +2638,6 @@
     padding: 12px;
     overflow: hidden;
   }
-  main.mode-single .center-area .center-info {
-    text-align: center;
-    color: #fff;
-    font-size: 14px;
-  }
 
   /* header 内の要素は header 内で自然 flow [すでに header に defen / action-row 含む] */
   /* header 外の panel [RoundEnd / ChipBreakdown / FeverWaits / GameEnd / DebugLog] は center に overlay */
@@ -2927,8 +2919,6 @@
   main.mode-single .dora-row .fever-inline-wait { display: inline-flex; align-items: center; gap: 2px; }
   main.mode-single .dora-row .fever-inline-remain { color: #ffd0e8; font-size: 11px; }
   main.mode-single .dora-row .dora-divider { color: #888; margin: 0 8px; }
-  main.mode-single .dora-row .dora-arrow { color: #c8d0d8; }
-  main.mode-single .dora-row .dora-meta { margin-left: 12px; color: #d8e0e8; font-weight: 500; }
   main.mode-single .dora-row {
     position: relative;
     justify-content: center;
@@ -3061,7 +3051,6 @@
     gap: 4px;
     align-items: center;
   }
-  main.mode-single .toolbar-yellow .tb-row.hot { background: rgba(255, 200, 80, 0.18); padding: 2px 4px; border-radius: 4px; }
   /* toolbar-red の hot は bg なし [floating button のみ、 リョー指示] */
   main.mode-single .toolbar-red .tb-row.hot { background: transparent !important; padding: 0 !important; }
   main.mode-single .toolbar .tb-row button {
@@ -3223,66 +3212,6 @@
     filter: hue-rotate(60deg) saturate(1.3) brightness(1.1);
   }
 
-  /* 左右の vertical side player [雀魂風 compact view] */
-  .single-side-player {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    color: #e8e8e8;
-    font-size: 12px;
-    align-items: stretch;
-    width: 100%;
-  }
-  .single-side-player.current {
-    background: rgba(212, 175, 55, 0.18);
-    border-left: 3px solid #d4af37;
-    padding-left: 4px;
-  }
-  .single-side-player .side-name { font-weight: bold; color: #ffd060; }
-  .single-side-player .side-feng { font-size: 18px; color: #80c0ff; font-weight: bold; }
-  .single-side-player .side-defen { font-size: 16px; color: #ffd060; font-weight: bold; }
-  .single-side-player .side-hand { color: #b0b0b0; font-size: 11px; }
-  .single-side-player .side-he { color: #b0b0b0; font-size: 11px; margin-top: 6px; }
-  .single-side-player .side-he-tiles {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    flex-wrap: wrap;
-    max-height: 200px;
-    overflow: hidden;
-  }
-  .single-side-player .side-he-tile {
-    background: #1a3a2a;
-    border: 1px solid #406050;
-    padding: 1px 4px;
-    font-size: 10px;
-    font-family: monospace;
-    color: #fff;
-    border-radius: 2px;
-  }
-  .single-side-player .side-he-tile.lizhi {
-    background: #d4af37;
-    color: #000;
-  }
-  .single-side-player .side-shoupai { margin-top: 6px; }
-  .single-side-player .side-shoupai-label { color: #b0b0b0; font-size: 11px; }
-  .single-side-player .side-shoupai-tiles {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    max-height: 180px;
-    overflow: hidden;
-  }
-  .single-side-player .side-mini-tile {
-    background: #fff;
-    color: #000;
-    padding: 1px 4px;
-    font-size: 10px;
-    font-family: monospace;
-    border-radius: 2px;
-    border: 1px solid #888;
-  }
-
   /* PlayerHandPanel / PlayerStatus 内部の色を 単色テーマに override */
   main.mode-single :global(.player-hand) {
     background: #143025 !important;
@@ -3390,9 +3319,6 @@
     grid-row: 1;
     grid-column: 1 / -1;
     overflow: auto;
-  }
-  main.mode-single .agari-unified-panel .agari-right {
-    display: none;
   }
   /* SaiKoroModal を agari panel と同じ領域に [リョー指示 2026-05-12] */
   main.mode-single :global(.modal.sai) {
@@ -3553,14 +3479,6 @@
   main.mode-single .agari-unified-panel .agari-left {
     flex: 1.5 1 0;
     min-width: 400px;
-  }
-  main.mode-single .agari-unified-panel .agari-right {
-    flex: 1 1 0;
-    min-width: 300px;
-  }
-  main.mode-single .agari-unified-panel .agari-right {
-    border-left: 1px solid rgba(212, 175, 55, 0.5);
-    padding-left: 16px;
   }
   /* unified panel 内の section / chip-breakdown は ボーダー / 背景 撤去 で
      入れ子 window 感を解消 [リョー指示 2026-05-12]、 内部 text 大きく */

@@ -8,7 +8,6 @@
   export let roomId: string;
   export let me: { user_id: string; username: string };
   export let isHost: boolean;
-  export let hostUserId: string;
   export let mySeat: number;
   export let onLeave: () => void = () => {};
 

@@ -33,6 +33,9 @@ const WS_SECRET =
   process.env.ANMIKA_SESSION_SECRET ||
   '';
 const INTERNAL_API_SECRET = process.env.ANMIKA_INTERNAL_SECRET || WS_SECRET;
+const WS_LOG_ENABLED = process.env.ANMIKA_WS_LOG !== '0';
+function wsLog(...args: unknown[]): void { if (WS_LOG_ENABLED) console.log(...args); }
+function wsWarn(...args: unknown[]): void { if (WS_LOG_ENABLED) console.warn(...args); }
 
 interface WsTokenPayload {
   uid: string;
@@ -143,8 +146,7 @@ function fireStart(room: Room, preShuffledPool: string[], qijia: number): void {
   room.started = true;
   room.pendingStart = null;
   room.authority = createRoomAuthority({ preShuffledPool, qijia });
-  // eslint-disable-next-line no-console
-  console.log(`[anmika-ws] room=${room.room_id} game started, pool len=${preShuffledPool?.length}`);
+  wsLog(`[anmika-ws] room=${room.room_id} game started, pool len=${preShuffledPool?.length}`);
   const startMsg = {
     type: 'start',
     preShuffledPool,
@@ -207,8 +209,7 @@ function validateActionEnvelope(room: Room, uid: string, seat: number, action: a
 }
 
 const wss = new WebSocketServer({ port: PORT });
-// eslint-disable-next-line no-console
-console.log(`[anmika-ws] authoritative-core listening on :${PORT}`);
+wsLog(`[anmika-ws] authoritative-core listening on :${PORT}`);
 
 wss.on('connection', async (ws, req) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
@@ -257,8 +258,7 @@ wss.on('connection', async (ws, req) => {
       }
     }
   }
-  // eslint-disable-next-line no-console
-  console.log(`[anmika-ws] join room=${room_id} uid=${uid} seat=${seat} (total=${room.members.size})`);
+  wsLog(`[anmika-ws] join room=${room_id} uid=${uid} seat=${seat} (total=${room.members.size})`);
   broadcastMembers(room);
   // pending start があり 3 人揃ったら発火 [race fix]
   if (!room.started && room.pendingStart && room.members.size >= 3) {
@@ -277,8 +277,7 @@ wss.on('connection', async (ws, req) => {
       if (room.members.size < 3) {
         // pending に積んで 3 人揃った瞬間に発火する [race fix]
         room.pendingStart = { preShuffledPool, qijia };
-        // eslint-disable-next-line no-console
-        console.log(`[anmika-ws] room=${room_id} start pending [size=${room.members.size}, waiting for 3]`);
+        wsLog(`[anmika-ws] room=${room_id} start pending [size=${room.members.size}, waiting for 3]`);
         return;
       }
       fireStart(room, preShuffledPool, qijia);
@@ -290,8 +289,7 @@ wss.on('connection', async (ws, req) => {
       const action = msg.action ?? {};
       const envelope = validateActionEnvelope(room, uid, seat, action);
       if (envelope.reason) {
-        // eslint-disable-next-line no-console
-        console.warn(`[anmika-ws] reject action room=${room.room_id} uid=${uid} reason=${envelope.reason}`);
+        wsWarn(`[anmika-ws] reject action room=${room.room_id} uid=${uid} reason=${envelope.reason}`);
         return;
       }
       if (action && action.type === 'rollSaiKoroDice') {
@@ -303,8 +301,7 @@ wss.on('connection', async (ws, req) => {
         action.preShuffledPool = serverShuffledPool();
       }
       if (!room.authority && action?.type !== 'nextMatch') {
-        // eslint-disable-next-line no-console
-        console.warn(`[anmika-ws] reject action room=${room.room_id} uid=${uid} reason=authority not initialized`);
+        wsWarn(`[anmika-ws] reject action room=${room.room_id} uid=${uid} reason=authority not initialized`);
         return;
       }
       if (!room.authority && action?.type === 'nextMatch') {
@@ -315,21 +312,18 @@ wss.on('connection', async (ws, req) => {
       }
       const authorityReason = room.authority?.validateAndApply(envelope.actorSeat, action, room.members.values()) ?? null;
       if (authorityReason) {
-        // eslint-disable-next-line no-console
-        console.warn(`[anmika-ws] reject action room=${room.room_id} uid=${uid} reason=${authorityReason}`);
+        wsWarn(`[anmika-ws] reject action room=${room.room_id} uid=${uid} reason=${authorityReason}`);
         return;
       }
       const relay = { type: 'action', from_seat: seat, from_user_id: uid, action };
-      // eslint-disable-next-line no-console
-      console.log(`[anmika-ws] action room=${room.room_id} from_seat=${seat} action=${JSON.stringify(action).slice(0,100)}`);
+      wsLog(`[anmika-ws] action room=${room.room_id} from_seat=${seat} action=${JSON.stringify(action).slice(0,100)}`);
       broadcastToAll(room, relay);
     }
   });
 
   ws.on('close', (code, reason) => {
     room.members.delete(uid);
-    // eslint-disable-next-line no-console
-    console.log(`[anmika-ws] leave room=${room_id} uid=${uid} code=${code} reason=${reason?.toString?.() ?? ''} (remain=${room.members.size})`);
+    wsLog(`[anmika-ws] leave room=${room_id} uid=${uid} code=${code} reason=${reason?.toString?.() ?? ''} (remain=${room.members.size})`);
     if (room.members.size === 0) {
       rooms.delete(room_id);
     } else {

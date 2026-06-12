@@ -691,7 +691,6 @@ function createGameStore() {
         // 再投入されて 「P1 判断待ち」 で詰む bug 解消
         const otherCands = ([0,1,2] as const).filter(p => p !== player && p !== s.lastDapai!.player && !(s.ronDeclaredPlayers ?? []).includes(p) && s.game.canRon(p as any, s.lastDapai!.pai, s.lastDapai!.player as any));
         const result = s.game.hule(player as any, s.lastDapai.pai, s.lastDapai.player as any);
-        // eslint-disable-next-line no-console
         dlog('[ron] player=', player, 'pai=', s.lastDapai.pai, 'fromPlayer=', s.lastDapai.player, 'result=', result, 'lizhi=', s.game.lizhi.has(player as any), 'fever=', s.game.feverActive[player as 0|1|2], 'feverWinCount=', s.game.feverWinCount[player as 0|1|2]);
         if (!result) {
           s.message = `player ${player} はロンできない [役なし or majiang-core 拒否]`;
@@ -1847,10 +1846,10 @@ function createGameStore() {
         // 通常打牌
         let pai: string | null = null;
         try { pai = s.game.pickBestDiscard(cur) ?? (sp._zimo as string); } catch (_e) { pai = sp._zimo as string; }
-        if (typeof (import.meta as any)?.env?.DEV === 'boolean' && (import.meta as any).env.DEV) console.log('[cpuStep-online] cur=', cur, 'pai=', pai);
+        if (typeof (import.meta as any)?.env?.DEV === 'boolean' && (import.meta as any).env.DEV) dlog('[cpuStep-online] cur=', cur, 'pai=', pai);
         if (pai) {
           const sent = sendOnlineAction({ type: 'discard', pai, cpuRelay: true, cpuSeat: cur });
-          if (typeof (import.meta as any)?.env?.DEV === 'boolean' && (import.meta as any).env.DEV) console.log('[cpuStep-online] sendOnlineAction returned=', sent);
+          if (typeof (import.meta as any)?.env?.DEV === 'boolean' && (import.meta as any).env.DEV) dlog('[cpuStep-online] sendOnlineAction returned=', sent);
         }
         return;
       }
@@ -2110,7 +2109,6 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     }
     return { ...s };
   }
-  // eslint-disable-next-line no-console
   dlog('[discard] from=', player, 'pai=', pai, 'meta=', meta, 'fever=', JSON.stringify(s.game.feverActive));
   try {
     s.game.dapai(pai, meta);
@@ -2124,7 +2122,6 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
   let ronCandidates = ([0, 1, 2] as const).filter(
     (p) => p !== player && s.game.canRon(p, pai, player as any)
   );
-  // eslint-disable-next-line no-console
   dlog('[discard] ronCands=', ronCandidates, 'tings=', ([0,1,2] as const).map(p => ({ p, ting: s.game.getTingpaiList(p as any), canR: s.game.canRon(p as any, pai, player as any), lizhi: s.game.lizhi.has(p as any), fever: s.game.feverActive[p as 0|1|2] })));
   // CPU が ron 候補なら自動ロン
   // ダブロン対応 [リョー指示]: 全 CPU ロン候補を連続処理、 親優先で lastWinner 設定

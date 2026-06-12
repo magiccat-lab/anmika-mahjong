@@ -22,6 +22,8 @@ export function isDebugEnabled(): boolean {
 /** 後方互換: 旧 const DEBUG_LOG 参照は初期値、 dlog は動的に判定 */
 export const DEBUG_LOG: boolean = isDebugEnabled();
 export function dlog(...args: any[]): void { if (isDebugEnabled()) console.log(...args); }
+export function dwarn(...args: any[]): void { if (isDebugEnabled()) console.warn(...args); }
+export function derror(...args: any[]): void { if (isDebugEnabled()) console.error(...args); }
 
 /** アンミカ独自: 萬子は m7 [=m1 扱い] と m9 の 2 種のみ存在、 m2-m6/m8 は牌として無い
  *  [ルール: m7 を m1 として扱い、 国士13面 / 順子 / 倍率計算 全 path で この前提を共有]

@@ -8,6 +8,12 @@ const projectRoot = fileURLToPath(new URL('.', import.meta.url))
 export default defineConfig({
   root: projectRoot,
   plugins: [svelte()],
+  build: {
+    // @3d-dice/dice-box ships large lazy-loaded physics/world chunks. They are
+    // loaded only when SaiKoroModal initializes, so keep the build warning focused
+    // on unexpected initial bundle growth instead of this intentional asset.
+    chunkSizeWarningLimit: 1600,
+  },
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',

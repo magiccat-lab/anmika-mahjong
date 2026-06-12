@@ -1,6 +1,7 @@
 ﻿
 // store action: resetDebug の純粋構築 [qipai 経由せず直接 shan / shoupai を組む]
 import { Game3, buildShoupai, pochiColorFromPai } from '../game3';
+import { dwarn } from '../helpers';
 import type { StoreState } from '../store';
 
 /** forceP0 / forceHua / goldNbei / forceShan で P0 の手牌 + 次以降のツモ順を直接組む
@@ -45,7 +46,7 @@ export function buildDebugState(
   for (const pai of forceP0) {
     const consumed = removeFromShan(pai);
     if (!consumed) {
-      console.warn('[resetDebug] shan に', pai, 'なし、 skip');
+      dwarn('[resetDebug] shan に', pai, 'なし、 skip');
     }
     if (pai === 'gp') ng.goldHand[0].p += 1;
     else if (pai === 'gs') ng.goldHand[0].s += 1;
@@ -72,7 +73,7 @@ export function buildDebugState(
   for (const t of forceShan) {
     const consumed = removeFromShan(t);
     if (!consumed) {
-      console.warn('[resetDebug] forceShan: shan に', t, 'なし、 skip');
+      dwarn('[resetDebug] forceShan: shan に', t, 'なし、 skip');
       forceShanConsumed.push(t); // skip した場合 そのまま push する [後の末尾 push で記録]
     } else {
       forceShanConsumed.push(consumed);

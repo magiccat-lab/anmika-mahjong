@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { Game3, buildShoupai } from '../game3';
 import type { PlayerId } from '../types';
 
-function buildG(opts: { shoupai?: string[][]; huapai?: string[][]; baopai?: string[]; benbang?: number } = {}): Game3 {
+function buildG(opts: { shoupai?: string[][]; huapai?: string[][]; baopai?: string[]; fubaopai?: string[]; benbang?: number } = {}): Game3 {
   const g = new Game3({ qijia: 0, changshu: 1 });
   g.state.benbang = opts.benbang ?? 0;
   for (const p of [0, 1, 2] as PlayerId[]) {
@@ -23,6 +23,7 @@ function buildG(opts: { shoupai?: string[][]; huapai?: string[][]; baopai?: stri
   const shanAny = g.shan as any;
   shanAny._pai = [];
   if (opts.baopai) shanAny._baopai = opts.baopai;
+  shanAny._fubaopai = opts.fubaopai ?? [];
   return g;
 }
 
