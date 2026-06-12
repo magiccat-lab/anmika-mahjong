@@ -19,15 +19,35 @@ describe('Game3 saveSnapshot / restoreSnapshot', () => {
     g.qipai();
     g.saveSnapshot();
     const original = { ...g.state.defen };
+    const originalHuapai2 = [...g.huapai[2]];
+    g.goldHand[0].p = 1;
+    g.pochiHand[1].red = 1;
+    g.huapai[2].push('f4');
+    g.nukidora[0] = 1;
+    g.nukidoraGold[1] = 1;
+    g.kinpeiTarget[2] = 'fuyu';
+    g.saveSnapshot();
     g.state.defen[0] = 99999;
     g.chipLedger[1] = 50;
     g.feverActive[2] = true;
     g.akiUsedCount[0] = 3;
+    g.goldHand[0].p = 0;
+    g.pochiHand[1].red = 0;
+    g.huapai[2].push('f3');
+    g.nukidora[0] = 0;
+    g.nukidoraGold[1] = 0;
+    g.kinpeiTarget[2] = null;
     g.restoreSnapshot();
     expect(g.state.defen[0]).toBe(original[0]);
     expect(g.chipLedger[1]).toBe(0);
     expect(g.feverActive[2]).toBe(false);
     expect(g.akiUsedCount[0]).toBe(0);
+    expect(g.goldHand[0].p).toBe(1);
+    expect(g.pochiHand[1].red).toBe(1);
+    expect(g.huapai[2]).toEqual([...originalHuapai2, 'f4']);
+    expect(g.nukidora[0]).toBe(1);
+    expect(g.nukidoraGold[1]).toBe(1);
+    expect(g.kinpeiTarget[2]).toBe('fuyu');
   });
 
   it('snapshot ナシで restoreSnapshot しても throw ナシ', () => {

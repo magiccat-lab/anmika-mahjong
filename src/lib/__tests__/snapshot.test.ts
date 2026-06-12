@@ -8,6 +8,16 @@ function makeRefs(overrides: Partial<any> = {}): any {
     chipLedger: { 0: 0, 1: 0, 2: 0 },
     akiUsedCount: { 0: 0, 1: 0, 2: 0 },
     feverActive: { 0: false, 1: false, 2: false },
+    goldHand: { 0: { p: 1, s: 0, z: 0 }, 1: { p: 0, s: 1, z: 0 }, 2: { p: 0, s: 0, z: 1 } },
+    pochiHand: {
+      0: { blue: 1, red: 0, green: 0, yellow: 0 },
+      1: { blue: 0, red: 1, green: 0, yellow: 0 },
+      2: { blue: 0, red: 0, green: 1, yellow: 0 },
+    },
+    huapai: { 0: ['f1'], 1: ['f2'], 2: ['f3'] },
+    nukidora: { 0: 1, 1: 0, 2: 0 },
+    nukidoraGold: { 0: 0, 1: 1, 2: 0 },
+    kinpeiTarget: { 0: 'haru', 1: null, 2: 'aki' },
     shan: {
       _pai: ['m7', 'm9', 'p1', 'p2'],
       _baopai: ['m7', 'p1'],
@@ -25,8 +35,14 @@ describe('saveSnapshot', () => {
     const snap = saveSnapshot(refs);
     refs.defen[0] = 99999;
     refs.chipLedger[1] = 88;
+    refs.goldHand[0].p = 0;
+    refs.pochiHand[1].red = 0;
+    refs.huapai[2].push('f4');
     expect(snap.defen[0]).toBe(35000);
     expect(snap.chipLedger[1]).toBe(0);
+    expect(snap.goldHand[0].p).toBe(1);
+    expect(snap.pochiHand[1].red).toBe(1);
+    expect(snap.huapai[2]).toEqual(['f3']);
   });
 
   it('baopai / fubaopai 長さを記録 [後の復元 用]', () => {
@@ -52,10 +68,22 @@ describe('restoreSnapshot', () => {
     refs.defen[0] = 99999;
     refs.chipLedger[1] = 50;
     refs.feverActive[2] = true;
+    refs.goldHand[2].z = 0;
+    refs.pochiHand[0].blue = 0;
+    refs.huapai[0].push('f4');
+    refs.nukidora[0] = 0;
+    refs.nukidoraGold[1] = 0;
+    refs.kinpeiTarget[2] = null;
     restoreSnapshot(refs, snap);
     expect(refs.defen[0]).toBe(35000);
     expect(refs.chipLedger[1]).toBe(0);
     expect(refs.feverActive[2]).toBe(false);
+    expect(refs.goldHand[2].z).toBe(1);
+    expect(refs.pochiHand[0].blue).toBe(1);
+    expect(refs.huapai[0]).toEqual(['f1']);
+    expect(refs.nukidora[0]).toBe(1);
+    expect(refs.nukidoraGold[1]).toBe(1);
+    expect(refs.kinpeiTarget[2]).toBe('aki');
     // mutate-in-place なので 参照同一
     expect(refs.defen).toBe(beforeRef);
   });

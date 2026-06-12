@@ -116,7 +116,62 @@ export function patchAnmikaShoupai(sp: any, tiles: string[] = []): any {
   for (const p of tiles) addAnmikaPai(sp, p, 1);
   const origZimo = sp.zimo.bind(sp);
   const origDapai = sp.dapai.bind(sp);
+  const origGang = sp.gang?.bind(sp);
   const origClone = sp.clone.bind(sp);
+  const consumeExpandedForCore = (counts: AnmikaCounts, core: string): AnmikaExpandedPai | null => {
+    if (core === 'z5') {
+      for (const cKey of ['z5b', 'z5r', 'z5g', 'z5y'] as const) {
+        if ((counts[cKey] ?? 0) > 0) {
+          addAnmikaPai(sp, cKey, -1);
+          return cKey;
+        }
+      }
+    }
+    if (core === 'p0' && (counts.gp ?? 0) > 0) {
+      addAnmikaPai(sp, 'gp', -1);
+      return 'gp';
+    }
+    if (core === 's0' && (counts.gs ?? 0) > 0) {
+      addAnmikaPai(sp, 'gs', -1);
+      return 'gs';
+    }
+    if (core === 'z4' && (counts.gN ?? 0) > 0) {
+      addAnmikaPai(sp, 'gN', -1);
+      return 'gN';
+    }
+    return null;
+  };
+  const handTilesFromFulou = (mianzi: string): string[] => {
+    const suit = mianzi[0];
+    const digits: Array<{ digit: string; pos: number }> = [];
+    for (let i = 1; i < mianzi.length; i++) {
+      if (/\d/.test(mianzi[i])) digits.push({ digit: mianzi[i], pos: i });
+    }
+    const dirPos = mianzi.search(/[+=\-]/);
+    const calledPos = dirPos >= 0
+      ? digits.filter((d) => d.pos < dirPos).at(-1)?.pos
+      : undefined;
+    return digits
+      .filter((d) => d.pos !== calledPos)
+      .map((d) => `${suit}${d.digit}`);
+  };
+  const handTilesFromGang = (mianzi: string): string[] => {
+    const suit = mianzi[0];
+    if (/^[mpsz]\d{4}$/.test(mianzi)) return mianzi.slice(1).split('').map((d) => `${suit}${d}`);
+    const dirPos = mianzi.search(/[+=\-]/);
+    if (dirPos >= 0 && dirPos < mianzi.length - 1 && /\d/.test(mianzi[mianzi.length - 1])) {
+      return [`${suit}${mianzi[mianzi.length - 1]}`];
+    }
+    return handTilesFromFulou(mianzi);
+  };
+  const recordExpandedFulou = (mianzi: string, handTiles: string[]): void => {
+    const counts = ensureAnmikaCounts(sp);
+    const consumed = handTiles
+      .map((core) => consumeExpandedForCore(counts, core))
+      .filter((p): p is AnmikaExpandedPai => !!p);
+    sp._anmikaFulouPhysical = sp._anmikaFulouPhysical ?? [];
+    sp._anmikaFulouPhysical.push({ mianzi, consumed });
+  };
   sp.zimo = (p: string, check = true) => {
     const raw = p?.replace(/_$/, '') ?? p;
     const ret = origZimo(toCorePai(p), check);
@@ -145,25 +200,20 @@ export function patchAnmikaShoupai(sp: any, tiles: string[] = []): any {
     sp.fulou = (mianzi: string, check = true) => {
       const ret = origFulou(mianzi, check);
       try {
-        const suit = mianzi[0];
-        if (suit !== 'z') return ret; // ぽっち対象は z5 のみ
-        const digits = mianzi.replace(/[+=\-]/g, '').slice(1); // 'z555-' → '555'
-        const z5Count = (digits.match(/5/g) || []).length;
-        if (z5Count === 0) return ret;
-        const hasDir = /[+=\-]/.test(mianzi);
-        const takenCount = hasDir ? 1 : 0;
-        const handConsume = Math.max(0, z5Count - takenCount);
-        const counts = ensureAnmikaCounts(sp);
-        let toConsume = handConsume;
-        for (const cKey of ['z5b', 'z5r', 'z5g', 'z5y'] as const) {
-          while (toConsume > 0 && (counts[cKey] ?? 0) > 0) {
-            addAnmikaPai(sp, cKey, -1);
-            toConsume -= 1;
-          }
-          if (toConsume === 0) break;
-        }
+        recordExpandedFulou(mianzi, handTilesFromFulou(mianzi));
       } catch {
         // anmika consume 失敗しても core fulou は成功してるので silent skip
+      }
+      return ret;
+    };
+  }
+  if (origGang) {
+    sp.gang = (mianzi: string, check = true) => {
+      const ret = origGang(mianzi, check);
+      try {
+        recordExpandedFulou(mianzi, handTilesFromGang(mianzi));
+      } catch {
+        // core gang は成功しているので metadata 失敗だけで止めない
       }
       return ret;
     };
@@ -172,6 +222,10 @@ export function patchAnmikaShoupai(sp: any, tiles: string[] = []): any {
     const cloned = patchAnmikaShoupai(origClone());
     cloned._bingpai.__anmika = { ...ensureAnmikaCounts(sp) };
     cloned._anmikaZimo = sp._anmikaZimo ?? null;
+    cloned._anmikaFulouPhysical = (sp._anmikaFulouPhysical ?? []).map((f: any) => ({
+      mianzi: f.mianzi,
+      consumed: [...(f.consumed ?? [])],
+    }));
     syncAnmikaBingpai(cloned);
     return cloned;
   };

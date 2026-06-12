@@ -49,14 +49,17 @@ function verifyWsToken(token: string): WsTokenPayload | null {
     if (typeof p.uid !== 'string' || typeof p.room_id !== 'string' || typeof p.seat !== 'number') {
       return null;
     }
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof p.exp !== 'number' || p.exp <= now) return null;
+    if (typeof p.iat !== 'number' || p.iat > now + 30) return null;
     return {
       uid: p.uid,
       username: typeof p.username === 'string' ? p.username : undefined,
       seat: p.seat,
       room_id: p.room_id,
       is_host: Boolean(p.is_host),
-      iat: typeof p.iat === 'number' ? p.iat : undefined,
-      exp: typeof p.exp === 'number' ? p.exp : undefined,
+      iat: p.iat,
+      exp: p.exp,
     };
   } catch (e) {
     return null;

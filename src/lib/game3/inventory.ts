@@ -10,6 +10,23 @@ const PLAYERS = [0, 1, 2] as const;
 export function computeTileInventory(g: any): Record<string, number> {
   const counts: Record<string, number> = {};
   const inc = (p: string) => { if (!p) return; counts[p] = (counts[p] ?? 0) + 1; };
+  const decLocal = (local: Record<string, number>, p: string) => {
+    if ((local[p] ?? 0) <= 0) return false;
+    local[p] -= 1;
+    return true;
+  };
+  const physicalFromLog = (meta: any, stripped: string): string | null => {
+    const logged = meta?.pai;
+    if ((logged === 'gp' || logged === 'gs' || logged === 'gN') && meta?.gold !== false) return logged;
+    if (logged === 'z5b' || logged === 'z5r' || logged === 'z5g' || logged === 'z5y') return logged;
+    if (meta?.gold && stripped === 'p0') return 'gp';
+    if (meta?.gold && stripped === 's0') return 'gs';
+    if (meta?.gold && stripped === 'z4') return 'gN';
+    if (meta?.pochi && toCorePai(stripped) === 'z5') {
+      return ({ blue: 'z5b', red: 'z5r', green: 'z5g', yellow: 'z5y' } as Record<string, string>)[meta.pochi] ?? 'z5';
+    }
+    return null;
+  };
 
   // shan._pai [live wall 専用、 R24 P2 #5/#12 fix 後]
   for (const p of ((g.shan as any)._pai ?? [])) inc(p);
@@ -59,6 +76,10 @@ export function computeTileInventory(g: any): Record<string, number> {
         for (let k = 0; k < ph.green; k++) inc('z5g');
         for (let k = 0; k < ph.yellow; k++) inc('z5y');
       }
+      const openMeta = ((sp as any)._anmikaFulou ?? []) as Array<{ mianzi?: string; taken?: string }>;
+      const physicalMeta = ((sp as any)._anmikaFulouPhysical ?? []) as Array<{ mianzi?: string; consumed?: string[] }>;
+      const usedOpenMeta = new Set<number>();
+      const usedPhysicalMeta = new Set<number>();
       for (const m of (sp._fulou ?? [])) {
         // majiang-core 表記: suite prefix 1 回 + 続く digit が各牌 [chi/pon/kan 共通]
         // 例: "m1-23" → m1, m2, m3 / "p444-" → p4, p4, p4 / "z5555_" → z5×4
@@ -67,12 +88,39 @@ export function computeTileInventory(g: any): Record<string, number> {
         if (stripped.length < 2) continue;
         const suite = stripped[0];
         if (!'mpsz'.includes(suite)) continue;
+        const local: Record<string, number> = {};
         for (let i = 1; i < stripped.length; i++) {
           const digit = stripped[i];
-          // z5 [ぽっち] は色情報が fulou notation に乗らない、 pochiHand + river meta 経由で
-          // 別 key [z5b/r/g/y] でカウント済なので、 fulou での z5 plain 加算は skip [leak 防止]
-          if (suite === 'z' && digit === '5') continue;
-          inc(suite + digit);
+          const key = suite + digit;
+          local[key] = (local[key] ?? 0) + 1;
+        }
+        const matchesMianzi = (entry: { mianzi?: string }) =>
+          !!entry?.mianzi && (entry.mianzi === m || String(m).startsWith(entry.mianzi));
+        const physicalMatches = physicalMeta
+          .map((f, idx) => ({ f, idx }))
+          .filter(({ f, idx }) => !usedPhysicalMeta.has(idx) && matchesMianzi(f));
+        for (const { f, idx } of physicalMatches) {
+          usedPhysicalMeta.add(idx);
+          for (const p of f.consumed ?? []) {
+            const core = toCorePai(p);
+            if (decLocal(local, core)) inc(p);
+          }
+        }
+        const openMatches = openMeta
+          .map((f, idx) => ({ f, idx }))
+          .filter(({ f, idx }) => !usedOpenMeta.has(idx) && matchesMianzi(f));
+        for (const { f, idx } of openMatches) {
+          usedOpenMeta.add(idx);
+          const taken = f.taken;
+          if (taken && taken !== toCorePai(taken)) {
+            const core = toCorePai(taken);
+            if (decLocal(local, core)) inc(taken);
+          }
+        }
+        for (const [key, cnt] of Object.entries(local)) {
+          // z5 の色が復元できない旧データは plain z5 として漏らさず、hard fuzz で metadata 欠落を拾う。
+          if (key === 'z5') continue;
+          for (let k = 0; k < cnt; k++) inc(key);
         }
       }
     }
@@ -86,27 +134,11 @@ export function computeTileInventory(g: any): Record<string, number> {
         const stripped = raw.replace(/[+=\-_*]/g, '');
         const meta = dlog[i];
         // R15 P1 #4 fix: 鳴かれた牌 [mark あり] は 鳴いた player の _fulou で count 済 →
-        // 通常牌は skip。 ただし ぽっち / 金 系 [meta.pochi / meta.gold] は _fulou notation
-        // で suite/digit のみで色情報 失うため、 河 meta 経由で 別 key [z5b/r/g/y, gp/gs/gN]
-        // で count する必要がある [_fulou 側は plain skip 済]
+        // 通常牌は skip。特殊牌も _anmikaFulou / _anmikaFulouPhysical で復元済。
         if (isFulou) {
-          if (meta?.gold && stripped === 'p0') inc('gp');
-          else if (meta?.gold && stripped === 's0') inc('gs');
-          else if (meta?.gold && stripped === 'z4') inc('gN');
-          else if (meta?.pochi && toCorePai(stripped) === 'z5') {
-            const colorKey = ({ blue: 'z5b', red: 'z5r', green: 'z5g', yellow: 'z5y' } as Record<string, string>)[meta.pochi];
-            inc(colorKey ?? 'z5');
-          }
-          // 通常牌は skip [_fulou で count 済]
           continue;
         }
-        if (meta?.gold && stripped === 'p0') inc('gp');
-        else if (meta?.gold && stripped === 's0') inc('gs');
-        else if (meta?.gold && stripped === 'z4') inc('gN');
-        else if (meta?.pochi && toCorePai(stripped) === 'z5') {
-          const colorKey = ({ blue: 'z5b', red: 'z5r', green: 'z5g', yellow: 'z5y' } as Record<string, string>)[meta.pochi];
-          inc(colorKey ?? 'z5');
-        } else inc(stripped);
+        inc(physicalFromLog(meta, stripped) ?? stripped);
       }
     }
     for (const hp of (g.huapai[pl] ?? [])) inc(hp);

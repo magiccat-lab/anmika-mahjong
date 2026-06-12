@@ -4,11 +4,25 @@
 // 2026-05-14 codex review fix: state.lizhibang / qianggangPending / events / chipBreakdown も対象に拡張
 import type { PlayerId } from './chip';
 
+const PLAYERS = [0, 1, 2] as const;
+
+type GoldHand = Record<PlayerId, { p: number; s: number; z: number }>;
+type PochiHand = Record<PlayerId, { blue: number; red: number; green: number; yellow: number }>;
+type Huapai = Record<PlayerId, string[]>;
+type PlayerCounts = Record<PlayerId, number>;
+type KinpeiTarget = Record<PlayerId, 'haru' | 'natsu' | 'aki' | 'fuyu' | null>;
+
 export type PreHuleSnapshot = {
   defen: Record<PlayerId, number>;
   chipLedger: Record<PlayerId, number>;
   akiUsedCount: Record<PlayerId, number>;
   feverActive: Record<PlayerId, boolean>;
+  goldHand: GoldHand;
+  pochiHand: PochiHand;
+  huapai: Huapai;
+  nukidora: PlayerCounts;
+  nukidoraGold: PlayerCounts;
+  kinpeiTarget: KinpeiTarget;
   shanSnapshot: any | null;
   baopaiLen: number;
   fubaopaiLen: number;
@@ -23,10 +37,56 @@ export type SnapshotRefs = {
   chipLedger: Record<PlayerId, number>;
   akiUsedCount: Record<PlayerId, number>;
   feverActive: Record<PlayerId, boolean>;
+  goldHand: GoldHand;
+  pochiHand: PochiHand;
+  huapai: Huapai;
+  nukidora: PlayerCounts;
+  nukidoraGold: PlayerCounts;
+  kinpeiTarget: KinpeiTarget;
   shan: any;
   state: { lizhibang: number };
   game: any; // for qianggangPending / events / chipBreakdown
 };
+
+function cloneGoldHand(src: Partial<GoldHand> | undefined): GoldHand {
+  return {
+    0: { p: src?.[0]?.p ?? 0, s: src?.[0]?.s ?? 0, z: src?.[0]?.z ?? 0 },
+    1: { p: src?.[1]?.p ?? 0, s: src?.[1]?.s ?? 0, z: src?.[1]?.z ?? 0 },
+    2: { p: src?.[2]?.p ?? 0, s: src?.[2]?.s ?? 0, z: src?.[2]?.z ?? 0 },
+  };
+}
+
+function clonePochiHand(src: Partial<PochiHand> | undefined): PochiHand {
+  return {
+    0: { blue: src?.[0]?.blue ?? 0, red: src?.[0]?.red ?? 0, green: src?.[0]?.green ?? 0, yellow: src?.[0]?.yellow ?? 0 },
+    1: { blue: src?.[1]?.blue ?? 0, red: src?.[1]?.red ?? 0, green: src?.[1]?.green ?? 0, yellow: src?.[1]?.yellow ?? 0 },
+    2: { blue: src?.[2]?.blue ?? 0, red: src?.[2]?.red ?? 0, green: src?.[2]?.green ?? 0, yellow: src?.[2]?.yellow ?? 0 },
+  };
+}
+
+function cloneHuapai(src: Partial<Huapai> | undefined): Huapai {
+  return {
+    0: [...(src?.[0] ?? [])],
+    1: [...(src?.[1] ?? [])],
+    2: [...(src?.[2] ?? [])],
+  };
+}
+
+function clonePlayerCounts(src: Partial<PlayerCounts> | undefined): PlayerCounts {
+  return {
+    0: src?.[0] ?? 0,
+    1: src?.[1] ?? 0,
+    2: src?.[2] ?? 0,
+  };
+}
+
+function cloneKinpeiTarget(src: Partial<KinpeiTarget> | undefined): KinpeiTarget {
+  return {
+    0: src?.[0] ?? null,
+    1: src?.[1] ?? null,
+    2: src?.[2] ?? null,
+  };
+}
 
 export function saveSnapshot(refs: SnapshotRefs): PreHuleSnapshot {
   return {
@@ -34,6 +94,12 @@ export function saveSnapshot(refs: SnapshotRefs): PreHuleSnapshot {
     chipLedger: { ...refs.chipLedger },
     akiUsedCount: { ...refs.akiUsedCount },
     feverActive: { ...refs.feverActive },
+    goldHand: cloneGoldHand(refs.goldHand),
+    pochiHand: clonePochiHand(refs.pochiHand),
+    huapai: cloneHuapai(refs.huapai),
+    nukidora: clonePlayerCounts(refs.nukidora),
+    nukidoraGold: clonePlayerCounts(refs.nukidoraGold),
+    kinpeiTarget: cloneKinpeiTarget(refs.kinpeiTarget),
     shanSnapshot: typeof refs.shan?.snapshot === 'function' ? refs.shan.snapshot() : null,
     baopaiLen: refs.shan.baopai.length,
     fubaopaiLen: (refs.shan.fubaopai ?? []).length,
@@ -52,6 +118,15 @@ export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null
   Object.assign(refs.chipLedger, snap.chipLedger);
   Object.assign(refs.akiUsedCount, snap.akiUsedCount);
   Object.assign(refs.feverActive, snap.feverActive);
+  for (const p of PLAYERS) {
+    Object.assign(refs.goldHand[p], snap.goldHand[p]);
+    Object.assign(refs.pochiHand[p], snap.pochiHand[p]);
+    refs.huapai[p].length = 0;
+    refs.huapai[p].push(...snap.huapai[p]);
+  }
+  Object.assign(refs.nukidora, snap.nukidora);
+  Object.assign(refs.nukidoraGold, snap.nukidoraGold);
+  Object.assign(refs.kinpeiTarget, snap.kinpeiTarget);
   if (snap.shanSnapshot && typeof refs.shan?.restore === 'function') {
     refs.shan.restore(snap.shanSnapshot);
   } else {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Game3 } from '../game3';
+import { Game3, buildShoupai } from '../game3';
 import type { PlayerId } from '../types';
 
 function freshGame(): Game3 {
@@ -9,6 +9,18 @@ function freshGame(): Game3 {
   g.state.benbang = 0;
   g.state.lizhibang = 0;
   g.chipLedger = { 0: 0, 1: 0, 2: 0 };
+  g.shoupai.set(1 as PlayerId, buildShoupai([
+    'm1', 'm1', 'm1',
+    'm9', 'm9', 'm9',
+    'p1', 'p1', 'p1',
+    's1', 's1', 's1',
+    'z1', 'z1',
+  ]));
+  g.huapai[1] = [];
+  g.nukidora[1] = 0;
+  g.nukidoraGold[1] = 0;
+  g.goldHand[1] = { p: 0, s: 0, z: 0 };
+  g.pochiHand[1] = { blue: 0, red: 0, green: 0, yellow: 0 };
   return g;
 }
 

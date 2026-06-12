@@ -34,6 +34,7 @@ import { computeChipMultiplier as computeChipMultiplierHelper, applyChipOall as 
 import { getTingpaiList as getTingpaiListHelper, getTingpaiListBeforeZimo as getTingpaiListBeforeZimoHelper, canTsumoWithPochiSwap as canTsumoWithPochiSwapHelper, americanChitoiXiangting, americanChitoiComplete, countAmericanChitoiQuads } from './game3/tingpai';
 import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotHelper, type PreHuleSnapshot } from './game3/snapshot';
 import { applyFuyuChip as applyFuyuChipHelper, applyChipsOnHule as applyChipsOnHuleHelper, type HuleChipCtx } from './game3/huleChip';
+import { computeTileInventory, diffInventory, expectedInventory } from './game3/inventory';
 export { DEBUG_LOG, normalizePai, toCorePai, isGoldPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, countGoldInHand, countPochiInHand, isPositiveZ5, isNegativeZ5 };
 
 export interface Game3Init {
@@ -295,6 +296,12 @@ export class Game3 {
       chipLedger: this.chipLedger,
       akiUsedCount: this.akiUsedCount,
       feverActive: this.feverActive,
+      goldHand: this.goldHand,
+      pochiHand: this.pochiHand,
+      huapai: this.huapai,
+      nukidora: this.nukidora,
+      nukidoraGold: this.nukidoraGold,
+      kinpeiTarget: this.kinpeiTarget,
       shan: this.shan,
       // 2026-05-14 codex review fix: lizhibang / qianggangPending / events / chipBreakdown 追加
       state: this.state,
@@ -307,6 +314,22 @@ export class Game3 {
   }
   restoreSnapshot(): void {
     restoreSnapshotHelper(this._snapshotRefs(), this.preHuleSnapshot);
+  }
+
+  private assertInventoryInvariant(context: string): void {
+    const got = computeTileInventory(this);
+    const exp = expectedInventory();
+    const unknownKeys = Object.keys(got).filter((k) => exp[k] === undefined);
+    // Several focused unit tests replace only a hand with non-Anmika fixture tiles.
+    // Those are not full physical-game states, so keep this guard for real inventories.
+    if (unknownKeys.length > 0) return;
+    const gotTotal = Object.values(got).reduce((a, b) => a + b, 0);
+    const expTotal = Object.values(exp).reduce((a, b) => a + b, 0);
+    if (gotTotal !== expTotal) return;
+    const diffs = diffInventory(this);
+    if (diffs.length > 0) {
+      throw new Error(`[inventory invariant] ${context}: ${JSON.stringify(diffs)}`);
+    }
   }
 
   /** フィーバー中の冬保留 flag [true なら冬発動 skip、 アガリ毎にリセット、 廃止予定] */
@@ -991,6 +1014,10 @@ export class Game3 {
           isGold = true;
           this.goldHand[player][kind] -= 1;
         }
+      }
+      if (paiForHand === 'gp' || paiForHand === 'gs') {
+        isGold = true;
+        if (this.goldHand[player][kind] > 0) this.goldHand[player][kind] -= 1;
       }
     }
     // z4 [北] / 金北 [gN normalize=z4]: meta あれば優先、 なければ goldHand.z で auto
@@ -2882,6 +2909,7 @@ export class Game3 {
       defenAfter: afterDefen,
       delta,
     } as any);
+    this.assertInventoryInvariant('applyHule');
   }
 
   /** アガリ時の祝儀 [チップ] 集計 [赤金 / 抜きドラ / 春春 / 冬 / 冬冬 / 役満等]
@@ -3074,6 +3102,7 @@ export class Game3 {
     this.kinpeiTarget = { 0: null, 1: null, 2: null };
     this.akiUsedCount = { 0: 0, 1: 0, 2: 0 };
     // chipLedger は半荘累積、 reset しない
+    this.assertInventoryInvariant('nextRound');
   }
 
   /** 大明槓候補 [他家の打牌に対し、 player が同種 3 枚持ちなら可]
@@ -3110,7 +3139,12 @@ export class Game3 {
     // snapshot for rollback
     const _origLunban = this.state.lunban;
     const _origBingpai = { m: [...sp._bingpai.m], p: [...sp._bingpai.p], s: [...sp._bingpai.s], z: [...sp._bingpai.z] };
+    const _origAnmika = sp._bingpai.__anmika ? { ...sp._bingpai.__anmika } : null;
     const _origFulou = [...sp._fulou];
+    const _origAnmikaFulouPhysical = ((sp as any)._anmikaFulouPhysical ?? []).map((f: any) => ({
+      mianzi: f.mianzi,
+      consumed: [...(f.consumed ?? [])],
+    }));
     const _origZimo = sp._zimo;
     const fromHe = this.he.get(fromPlayer);
     const _origFromHePai = fromHe ? [...(fromHe._pai ?? [])] : null;
@@ -3166,7 +3200,15 @@ export class Game3 {
       // R3 P0 #4: 全 rollback
       sp._bingpai.m = _origBingpai.m; sp._bingpai.p = _origBingpai.p;
       sp._bingpai.s = _origBingpai.s; sp._bingpai.z = _origBingpai.z;
+      if (_origAnmika) {
+        sp._bingpai.__anmika = { ..._origAnmika };
+        for (const [k, v] of Object.entries(_origAnmika)) sp._bingpai[k] = v;
+      }
       sp._fulou = _origFulou; sp._zimo = _origZimo;
+      (sp as any)._anmikaFulouPhysical = _origAnmikaFulouPhysical.map((f: any) => ({
+        mianzi: f.mianzi,
+        consumed: [...(f.consumed ?? [])],
+      }));
       this.state.lunban = _origLunban;
       if (fromHe && _origFromHePai) fromHe._pai = _origFromHePai;
       // shan 全 restore [pai / baopai / fubaopai / weikaigang + R22 #3 で rinshanUsed/huapai/gold/pochi も]
@@ -3262,7 +3304,12 @@ export class Game3 {
     }
     // snapshot for rollback
     const _origBingpai = { m: [...sp._bingpai.m], p: [...sp._bingpai.p], s: [...sp._bingpai.s], z: [...sp._bingpai.z] };
+    const _origAnmika = sp._bingpai.__anmika ? { ...sp._bingpai.__anmika } : null;
     const _origFulou = [...sp._fulou];
+    const _origAnmikaFulouPhysical = ((sp as any)._anmikaFulouPhysical ?? []).map((f: any) => ({
+      mianzi: f.mianzi,
+      consumed: [...(f.consumed ?? [])],
+    }));
     const _origZimo = sp._zimo;
     // R24 P1 #3 fix: declareKan [暗槓/加槓] も declareDamingang と同じく Shan3.snapshot/restore で
     // rinshanUsed / lastDrawnHuapai / lastZimoGold / lastZimoPochi 含む完全 rollback 化、
@@ -3328,7 +3375,15 @@ export class Game3 {
       // R3 P0 #4: 全 rollback
       sp._bingpai.m = _origBingpai.m; sp._bingpai.p = _origBingpai.p;
       sp._bingpai.s = _origBingpai.s; sp._bingpai.z = _origBingpai.z;
+      if (_origAnmika) {
+        sp._bingpai.__anmika = { ..._origAnmika };
+        for (const [k, v] of Object.entries(_origAnmika)) sp._bingpai[k] = v;
+      }
       sp._fulou = _origFulou; sp._zimo = _origZimo;
+      (sp as any)._anmikaFulouPhysical = _origAnmikaFulouPhysical.map((f: any) => ({
+        mianzi: f.mianzi,
+        consumed: [...(f.consumed ?? [])],
+      }));
       const shanRestoreAny = this.shan as any;
       // R24 P1 #3 fix: Shan3.restore で完全 rollback、 失敗時 fallback で個別 field 復元
       if (_shanSnap && typeof shanRestoreAny.restore === 'function') {

@@ -28,6 +28,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -53,6 +54,13 @@ PUBLIC_BASE_URL = os.environ.get("ANMIKA_PUBLIC_BASE_URL", "https://anmika.magic
 WS_SECRET = os.environ.get("ANMIKA_WS_SECRET") or SESSION_SECRET
 WS_TOKEN_TTL_SEC = int(os.environ.get("ANMIKA_WS_TOKEN_TTL_SEC", "60"))
 DISCORD_REDIRECT_URI = f"{PUBLIC_BASE_URL}/auth/discord/callback"
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("ANMIKA_CORS_ORIGINS", PUBLIC_BASE_URL).split(",")
+    if origin.strip()
+]
+if os.environ.get("ANMIKA_REQUIRE_SECRET") == "1" and os.environ.get("ANMIKA_TEST_AUTH") == "1":
+    raise RuntimeError("ANMIKA_TEST_AUTH must be disabled when ANMIKA_REQUIRE_SECRET=1")
 
 DB_PATH = Path(
     os.environ.get(
@@ -196,6 +204,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="anmika-mahjong online", version="0.1.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 # R21 P2 fix: https_only も環境変数で切替、 prod は HTTPS 必須にする
 _HTTPS_ONLY = os.environ.get("ANMIKA_SESSION_HTTPS_ONLY", "0") == "1"
 app.add_middleware(
@@ -388,7 +403,8 @@ async def issue_ws_token(request: Request):
 @app.get("/api/rooms")
 async def list_rooms(request: Request):
     """open 状態の部屋一覧 [認証必須]"""
-    if not current_user(request):
+    u = current_user(request)
+    if not u:
         raise HTTPException(status_code=401, detail="login required")
     with db_conn() as c:
         rows = c.execute(
@@ -473,12 +489,19 @@ async def create_room(request: Request):
 @app.get("/api/rooms/{room_id}")
 async def get_room(room_id: str, request: Request):
     """部屋詳細 [認証必須]"""
-    if not current_user(request):
+    u = current_user(request)
+    if not u:
         raise HTTPException(status_code=401, detail="login required")
     with db_conn() as c:
         room = c.execute("SELECT * FROM rooms WHERE room_id=?", (room_id,)).fetchone()
         if not room:
             raise HTTPException(status_code=404, detail="room not found")
+        membership = c.execute(
+            "SELECT 1 FROM room_members WHERE room_id=? AND user_id=?",
+            (room_id, u["user_id"]),
+        ).fetchone()
+        if not membership:
+            raise HTTPException(status_code=403, detail="not a room member")
         members = c.execute(
             """SELECT rm.seat, rm.user_id, rm.joined_at, u.username, u.avatar_url
                FROM room_members rm JOIN users u ON u.user_id = rm.user_id
