@@ -62,6 +62,7 @@ test.describe('integrity_check: live-play 系 bug 回帰', () => {
       const g = (window as any).__game;
       g.game.pochiMultiplier[0] = { defen: -1, chip: -2 };
       g.game.pochiMultiplier[1] = { defen: 1, chip: 4 };
+      g.roundEnded = true;
     });
     // nextRound 経由で 局を進める
     await page.evaluate(() => (window as any).__gameStore.nextRound());
