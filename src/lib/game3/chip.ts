@@ -2,7 +2,7 @@
 // game3.ts から切り出した chip 加算 helpers
 // 倍率合成 + breakdown 履歴記録は pure に近い形で context 引数化
 import { dlog } from '../helpers';
-import type { PochiMultiplier } from '../game3';
+import type { PochiMultiplier } from './pochi';
 
 export type PlayerId = 0 | 1 | 2;
 

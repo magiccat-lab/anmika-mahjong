@@ -4,6 +4,8 @@
 // 期待値 [赤/金/4 色ぽっち 別 key] と diff を返す。 z5g → z5 等の normalize 漏れ検出に使う。
 
 import { toCorePai } from '../helpers';
+import { goldPaiFromCorePai } from './gold';
+import { pochiPaiFromColor } from './pochi';
 
 const PLAYERS = [0, 1, 2] as const;
 
@@ -19,11 +21,12 @@ export function computeTileInventory(g: any): Record<string, number> {
     const logged = meta?.pai;
     if ((logged === 'gp' || logged === 'gs' || logged === 'gN') && meta?.gold !== false) return logged;
     if (logged === 'z5b' || logged === 'z5r' || logged === 'z5g' || logged === 'z5y') return logged;
-    if (meta?.gold && stripped === 'p0') return 'gp';
-    if (meta?.gold && stripped === 's0') return 'gs';
-    if (meta?.gold && stripped === 'z4') return 'gN';
+    if (meta?.gold) {
+      const goldPai = goldPaiFromCorePai(stripped);
+      if (goldPai) return goldPai;
+    }
     if (meta?.pochi && toCorePai(stripped) === 'z5') {
-      return ({ blue: 'z5b', red: 'z5r', green: 'z5g', yellow: 'z5y' } as Record<string, string>)[meta.pochi] ?? 'z5';
+      return pochiPaiFromColor(meta.pochi) ?? 'z5';
     }
     return null;
   };

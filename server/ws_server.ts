@@ -18,6 +18,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
 import { randomInt as cryptoRandomInt } from 'node:crypto';
+import { defaultSanmaRule, generateTilePool } from '../src/lib/shan3';
 
 const PORT = parseInt(process.env.ANMIKA_WS_PORT ?? '8791');
 const API_BASE = process.env.ANMIKA_API_BASE ?? 'http://127.0.0.1:8790';
@@ -29,6 +30,7 @@ const WS_SECRET =
   process.env.ANMIKA_WS_SECRET ||
   process.env.ANMIKA_SESSION_SECRET ||
   '';
+const INTERNAL_API_SECRET = process.env.ANMIKA_INTERNAL_SECRET || WS_SECRET;
 
 interface WsTokenPayload {
   uid: string;
@@ -87,14 +89,30 @@ interface Room {
 const rooms = new Map<string, Room>();
 
 async function fetchRoomMembersFromAPI(room_id: string): Promise<Array<{ seat: number; user_id: string; username: string }> | null> {
+  if (!INTERNAL_API_SECRET) return null;
   try {
-    const r = await fetch(`${API_BASE}/api/rooms/${room_id}`);
+    const r = await fetch(`${API_BASE}/api/internal/rooms/${room_id}/members`, {
+      headers: { 'X-Anmika-Internal-Secret': INTERNAL_API_SECRET },
+    });
     if (!r.ok) return null;
-    const data = await r.json() as { room: any; members: any[] };
+    const data = await r.json() as { members: any[] };
     return data.members ?? [];
   } catch (e) {
     return null;
   }
+}
+
+function normalizeQijia(value: unknown): number {
+  return value === 0 || value === 1 || value === 2 ? value : 0;
+}
+
+function serverShuffledPool(): string[] {
+  const pool = generateTilePool(defaultSanmaRule()).map(String);
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = cryptoRandomInt(0, i + 1);
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool;
 }
 
 function getOrCreateRoom(room_id: string, host_user_id: string): Room {
@@ -146,6 +164,35 @@ function broadcastToAll(room: Room, payload: any, exceptUid?: string): void {
       try { m.ws.send(msg); } catch (e) {}
     }
   }
+}
+
+const PLAYER_FIELD_ACTIONS = new Set(['ron', 'pass', 'pon', 'damingang']);
+
+function validateActionEnvelope(room: Room, uid: string, seat: number, action: any): string | null {
+  if (!action || typeof action !== 'object') return 'missing action object';
+  if (typeof action.type !== 'string') return 'missing action.type';
+
+  let actorSeat = seat;
+  if (action.cpuRelay === true) {
+    if (uid !== room.host_user_id) return 'cpuRelay requires host';
+    if (typeof action.cpuSeat !== 'number') return 'cpuRelay requires cpuSeat';
+    const cpu = Array.from(room.members.values()).find((m) => m.seat === action.cpuSeat && m.is_cpu);
+    if (!cpu) return `cpuRelay seat ${action.cpuSeat} is not a CPU member`;
+    actorSeat = action.cpuSeat;
+  }
+
+  if (PLAYER_FIELD_ACTIONS.has(action.type)) {
+    const target = action.player ?? actorSeat;
+    if (target !== actorSeat) return `${action.type}: player ${target} != actor seat ${actorSeat}`;
+  }
+
+  if (action.type === 'nextMatch' && uid !== room.host_user_id) {
+    return 'nextMatch requires host';
+  }
+  if (action.type === 'nextRound' && action.from_role === 'host' && uid !== room.host_user_id) {
+    return 'nextRound host role requires host';
+  }
+  return null;
 }
 
 const wss = new WebSocketServer({ port: PORT });
@@ -214,24 +261,35 @@ wss.on('connection', async (ws, req) => {
       // host のみ
       if (uid !== room.host_user_id) return;
       if (room.started) return;
+      const qijia = normalizeQijia(msg.qijia);
+      const preShuffledPool = serverShuffledPool();
       if (room.members.size < 3) {
         // pending に積んで 3 人揃った瞬間に発火する [race fix]
-        room.pendingStart = { preShuffledPool: msg.preShuffledPool, qijia: msg.qijia ?? 0 };
+        room.pendingStart = { preShuffledPool, qijia };
         // eslint-disable-next-line no-console
         console.log(`[anmika-ws] room=${room_id} start pending [size=${room.members.size}, waiting for 3]`);
         return;
       }
-      fireStart(room, msg.preShuffledPool, msg.qijia ?? 0);
+      fireStart(room, preShuffledPool, qijia);
     } else if (msg.type === 'action') {
       // [Phase B3 audit HIGH] サイコロは server で乱数生成し client override を信頼しない。
       // client が `rollSaiKoroDice` を送ってきたら、 server side で crypto.randomInt(1,7) × 2 を
       // 生成し action.override を上書きしてから broadcast する [既存 client validation 経路も
       // 通せるよう、 action 構造はそのまま維持]。
       const action = msg.action ?? {};
+      const rejectReason = validateActionEnvelope(room, uid, seat, action);
+      if (rejectReason) {
+        // eslint-disable-next-line no-console
+        console.warn(`[anmika-ws] reject action room=${room.room_id} uid=${uid} reason=${rejectReason}`);
+        return;
+      }
       if (action && action.type === 'rollSaiKoroDice') {
         const d1 = cryptoRandomInt(1, 7);
         const d2 = cryptoRandomInt(1, 7);
         action.override = [d1, d2];
+      }
+      if (action && (action.type === 'nextRound' || action.type === 'nextMatch')) {
+        action.preShuffledPool = serverShuffledPool();
       }
       const relay = { type: 'action', from_seat: seat, from_user_id: uid, action };
       // eslint-disable-next-line no-console

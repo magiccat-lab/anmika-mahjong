@@ -9,7 +9,7 @@ import type { GameEvent, GameState, Lunban, Pai, PlayerId } from './types';
 import { Shan3, defaultSanmaRule, type ShanRule } from './shan3';
 
 // 共通 helper は helpers.ts に分離 [code clean-up 2026-05-10]
-import { DEBUG_LOG, dlog, normalizePai, toCorePai, isGoldPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, addAnmikaPai, patchAnmikaShoupai, countGoldInHand, countPochiInHand, isPositiveZ5, isNegativeZ5, fanshuLevel, LEVEL_TO_FANSHU, isValidAnmikaTile } from './helpers';
+import { DEBUG_LOG, dlog, normalizePai, toCorePai, isGoldPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, patchAnmikaShoupai, countGoldInHand, countPochiInHand, isPositiveZ5, isNegativeZ5, fanshuLevel, LEVEL_TO_FANSHU, isValidAnmikaTile } from './helpers';
 
 /** debug helper [P0-6b 調査用、 2026-05-12]: 指定牌が fulou に何枚あるか集計、
  *  赤 5 [s0/p0] と 通常 5 [s5/p5] は同視 */
@@ -35,7 +35,28 @@ import { getTingpaiList as getTingpaiListHelper, getTingpaiListBeforeZimo as get
 import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotHelper, type PreHuleSnapshot } from './game3/snapshot';
 import { applyFuyuChip as applyFuyuChipHelper, applyChipsOnHule as applyChipsOnHuleHelper, type HuleChipCtx } from './game3/huleChip';
 import { computeTileInventory, diffInventory, expectedInventory } from './game3/inventory';
+import { canNukiBeiFromState, consumeNukiBei } from './game3/bei';
+import { emptyGoldHand, hasGoldKita, resolveGoldDiscardFlag, trackGoldDraw, type GoldHand } from './game3/gold';
+import {
+  emptyPochiHand,
+  NEUTRAL_POCHI_MULTIPLIER,
+  nextPochiMultiplier,
+  normalizePochiMultiplier,
+  resolvePochiDiscardColor,
+  trackPochiDraw,
+  type PochiColor,
+  type PochiHand,
+  type PochiMultiplier,
+} from './game3/pochi';
 export { DEBUG_LOG, normalizePai, toCorePai, isGoldPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, countGoldInHand, countPochiInHand, isPositiveZ5, isNegativeZ5 };
+export {
+  NEUTRAL_POCHI_MULTIPLIER,
+  nextPochiMultiplier,
+  normalizePochiMultiplier,
+  pochiMultiplierForColor,
+  type PochiColor,
+  type PochiMultiplier,
+} from './game3/pochi';
 
 export interface Game3Init {
   shanRule?: ShanRule;
@@ -45,55 +66,6 @@ export interface Game3Init {
   changshu?: number;
   /** オンライン対戦用: 全 client で同じ pool を渡して同期 qipai [リョー指示 2026-05-13] */
   preShuffledPool?: any[];
-}
-
-export type PochiMultiplier = { defen: number; chip: number };
-type PochiColor = 'blue' | 'red' | 'green' | 'yellow';
-
-export const NEUTRAL_POCHI_MULTIPLIER: PochiMultiplier = { defen: 1, chip: 1 };
-
-export function normalizePochiMultiplier(v: unknown): PochiMultiplier {
-  if (v && typeof v === 'object') {
-    const pm = v as Partial<PochiMultiplier>;
-    const defen = typeof pm.defen === 'number' ? pm.defen : 1;
-    const chip = typeof pm.chip === 'number' ? pm.chip : 1;
-    return { defen, chip };
-  }
-  if (typeof v === 'number') return { defen: v < 0 ? -1 : 1, chip: v };
-  return { ...NEUTRAL_POCHI_MULTIPLIER };
-}
-
-export function pochiMultiplierForColor(color: PochiColor): PochiMultiplier {
-  if (color === 'blue') return { defen: 1, chip: 2 };
-  if (color === 'green') return { defen: 1, chip: 1 };
-  if (color === 'red') return { defen: -1, chip: -2 };
-  return { defen: -1, chip: -1 };
-}
-
-export function nextPochiMultiplier(currentValue: unknown, color: PochiColor): PochiMultiplier {
-  const current = normalizePochiMultiplier(currentValue);
-  const incoming = pochiMultiplierForColor(color);
-  if (current.defen === 1 && current.chip === 1) return incoming;
-
-  const currentPositive = current.defen > 0;
-  const incomingPositive = incoming.defen > 0;
-  if (currentPositive === incomingPositive) {
-    const sign = currentPositive ? 1 : -1;
-    return {
-      defen: sign * Math.max(Math.abs(current.defen), Math.abs(incoming.defen)),
-      chip: sign * Math.max(Math.abs(current.chip), Math.abs(incoming.chip)),
-    };
-  }
-  if (!currentPositive && incomingPositive) {
-    return {
-      defen: current.defen * -1 * incoming.defen,
-      chip: current.chip * -2 * incoming.chip,
-    };
-  }
-  return {
-    defen: current.defen * incoming.defen,
-    chip: current.chip * incoming.chip,
-  };
 }
 
 /** アンミカ独自: 7m を 1m 同等扱いで国士 / 清老頭判定 [簡略版]
@@ -245,20 +217,20 @@ export class Game3 {
 
   /** プレイヤー別の金牌保持数 [アンミカ独自レイヤー、 majiang-core は赤として認識]
    *  各プレイヤーの 5p / 5s / z4 の金牌の保有枚数。 配牌・ツモで +、 dapai / fulou で -。 */
-  goldHand: Record<PlayerId, { p: number; s: number; z: number }> = {
-    0: { p: 0, s: 0, z: 0 },
-    1: { p: 0, s: 0, z: 0 },
-    2: { p: 0, s: 0, z: 0 },
+  goldHand: Record<PlayerId, GoldHand> = {
+    0: emptyGoldHand(),
+    1: emptyGoldHand(),
+    2: emptyGoldHand(),
   };
 
   /** プレイヤー別の華牌 [春夏秋冬 f1-f4] 保有 */
   huapai: Record<PlayerId, string[]> = { 0: [], 1: [], 2: [] };
 
   /** プレイヤー別の白ぽっち色保有数 [青/赤/緑/黄]、 z5 4 枚それぞれの色を track */
-  pochiHand: Record<PlayerId, { blue: number; red: number; green: number; yellow: number }> = {
-    0: { blue: 0, red: 0, green: 0, yellow: 0 },
-    1: { blue: 0, red: 0, green: 0, yellow: 0 },
-    2: { blue: 0, red: 0, green: 0, yellow: 0 },
+  pochiHand: Record<PlayerId, PochiHand> = {
+    0: emptyPochiHand(),
+    1: emptyPochiHand(),
+    2: emptyPochiHand(),
   };
 
   /** 直前のツモ牌情報 [player, pai, pochiColor]、 ツモ切りの色判定用 */
@@ -347,7 +319,7 @@ export class Game3 {
   setKinpeiChoice(player: PlayerId, target: 'haru' | 'natsu' | 'aki' | 'fuyu'): boolean {
     if (this.kinpeiTarget[player] !== null) return false;
     // 金北の強化は 手牌 or 抜き で持ってる時に適用 [リョー指示 2026-05-12]
-    if (this.goldHand[player].z === 0 && (this.nukidoraGold[player] ?? 0) === 0) return false;
+    if (!hasGoldKita(this, player)) return false;
     // 抜いてる華と一致確認
     const has = this.huapai[player].includes(`f${ {haru:1,natsu:2,aki:3,fuyu:4}[target] }`);
     if (!has) return false;
@@ -367,7 +339,7 @@ export class Game3 {
    *  [リョー指示 2026-05-12: 手牌 0 + 金北抜きの場合 ドラ表示の華で自動強化、 完全 0 ならスキップ] */
   autoResolveKinpei(player: PlayerId): void {
     if (this.kinpeiTarget[player] !== null) return;
-    if (this.goldHand[player].z === 0 && (this.nukidoraGold[player] ?? 0) === 0) return;
+    if (!hasGoldKita(this, player)) return;
     const huaSources: string[] = [...this.huapai[player]];
     // ドラ表示牌 / 裏ドラ表示牌の 華 [f1-f4] も candidate
     const baopai = (this.shan as any)?.baopai ?? [];
@@ -474,15 +446,7 @@ export class Game3 {
    *  フィーバー中の非フィーバー player は ツモ牌が z4 の時のみ抜き可 [手牌から不可] */
   canNukiBei(player: PlayerId): boolean {
     const sp = this.shoupai.get(player);
-    if (!sp) return false;
-    if (!sp._zimo) return false;
-    if (sp._zimo.length > 2) return false; // 副露直後の擬似 zimo は除外
-    // フィーバー中の非フィーバー player は ツモ牌 z4 のみ抜ける、 手牌の z4 は不可
-    const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => this.feverActive[p]);
-    if (someoneFever && !this.feverActive[player]) {
-      return toCorePai(sp._zimo) === 'z4';
-    }
-    return sp._bingpai?.z?.[4] >= 1;
+    return canNukiBeiFromState(sp, player, this.feverActive);
   }
 
   /** 北抜き実行 [z4 を 1 枚抜き、 抜きドラ +1、 王牌から代替ツモ + 王牌サイズ -1]
@@ -503,22 +467,18 @@ export class Game3 {
     // 金北 / 通常 z4 区別 [リョー指示 2026-05-12 + R12 P2 #5 fix 2026-05-14]
     // 旧: goldHand.z>0 なら常に金北優先 → 通常北クリックでも金北が抜かれる bug
     // 新: meta.gold で明示、 meta なしなら 通常北優先 [通常北ナシなら 金北 fallback]
-    const goldZ4 = this.goldHand[player].z;
-    const totalZ4 = _origZ4;
-    const normalZ4 = totalZ4 - goldZ4;
-    if (meta?.gold === true && goldZ4 > 0) {
-      this.goldHand[player].z -= 1;
-      addAnmikaPai(sp, 'gN', -1);
-      this.nukidoraGold[player] += 1;
-    } else if (normalZ4 > 0) {
-      this.nukidora[player] += 1;
-    } else if (goldZ4 > 0) {
-      this.goldHand[player].z -= 1;
-      addAnmikaPai(sp, 'gN', -1);
-      this.nukidoraGold[player] += 1;
-    } else {
-      this.nukidora[player] += 1;
-    }
+    const nuki = { value: this.nukidora[player] };
+    const nukiGold = { value: this.nukidoraGold[player] };
+    consumeNukiBei({
+      sp,
+      metaGold: meta?.gold,
+      totalZ4: _origZ4,
+      goldHand: this.goldHand[player],
+      nukidora: nuki,
+      nukidoraGold: nukiGold,
+    });
+    this.nukidora[player] = nuki.value;
+    this.nukidoraGold[player] = nukiGold.value;
     this.justNukidBei[player] = true; // 次の dapai までポン抑制
     // 王牌から代替ツモ
     if (this.shan.paishu === 0) {
@@ -571,15 +531,8 @@ export class Game3 {
       return null;
     }
     // 金 / pochi tracking [通常 zimo 同じ処理]
-    if (this.shan.lastZimoGold) {
-      if (replacement === 'gp') this.goldHand[player].p += 1;
-      else if (replacement === 'gs') this.goldHand[player].s += 1;
-      else if (replacement === 'gN') this.goldHand[player].z += 1;
-    }
-    const pochiColor = pochiColorFromPai(rawReplacement);
-    if (pochiColor && coreReplacement === 'z5') {
-      this.pochiHand[player][pochiColor] += 1;
-    }
+    trackGoldDraw(this.shan.lastZimoGold, replacement, this.goldHand[player]);
+    trackPochiDraw(rawReplacement, coreReplacement, this.pochiHand[player]);
     // R10 P0 #5 #6 fix: 北抜き代替ツモ でも ぽっち効果 + lastZimoInfo 反映
     this.applyRinshanZimoEffects(player, replacement, rawReplacement);
     this.lingshangActive[player] = true;
@@ -711,15 +664,15 @@ export class Game3 {
   qipai(): void {
     const tiles: Record<PlayerId, Pai[]> = { 0: [], 1: [], 2: [] };
     this.goldHand = {
-      0: { p: 0, s: 0, z: 0 },
-      1: { p: 0, s: 0, z: 0 },
-      2: { p: 0, s: 0, z: 0 },
+      0: emptyGoldHand(),
+      1: emptyGoldHand(),
+      2: emptyGoldHand(),
     };
     this.huapai = { 0: [], 1: [], 2: [] };
     this.pochiHand = {
-      0: { blue: 0, red: 0, green: 0, yellow: 0 },
-      1: { blue: 0, red: 0, green: 0, yellow: 0 },
-      2: { blue: 0, red: 0, green: 0, yellow: 0 },
+      0: emptyPochiHand(),
+      1: emptyPochiHand(),
+      2: emptyPochiHand(),
     };
     for (let i = 0; i < 13; i++) {
       for (const p of [0, 1, 2] as PlayerId[]) {
@@ -732,13 +685,8 @@ export class Game3 {
             this.huapai[p].push(hp);
           }
         }
-        if (this.shan.lastZimoGold) {
-          if (pai === 'gp') this.goldHand[p].p += 1;
-          else if (pai === 'gs') this.goldHand[p].s += 1;
-          else if (pai === 'gN') this.goldHand[p].z += 1;
-        }
-        const pochiColor = pochiColorFromPai(rawPai);
-        if (pochiColor) this.pochiHand[p][pochiColor] += 1;
+        trackGoldDraw(this.shan.lastZimoGold, pai, this.goldHand[p]);
+        trackPochiDraw(rawPai, toCorePai(pai), this.pochiHand[p]);
       }
     }
     for (const p of [0, 1, 2] as PlayerId[]) {
@@ -818,14 +766,9 @@ export class Game3 {
         // 春効果は アガリ時に winner のみ集計 [リョー新ルール]、 局中加算なし
       }
     }
-    if (this.shan.lastZimoGold) {
-      if (pai === 'gp') this.goldHand[player].p += 1;
-      else if (pai === 'gs') this.goldHand[player].s += 1;
-      else if (pai === 'gN') this.goldHand[player].z += 1;
-    }
-    const rawColor = pochiColorFromPai(rawPai);
+    trackGoldDraw(this.shan.lastZimoGold, pai, this.goldHand[player]);
+    const rawColor = trackPochiDraw(rawPai, corePai, this.pochiHand[player]);
     if (rawColor && corePai === 'z5') {
-      this.pochiHand[player][rawColor] += 1;
       const c = rawColor;
       // 白待ち check [ルール 2-3 補足: 白待ちなら逆ぽっち効果回避]
       // ツモ前の手牌で z5 を待ってたか、 つまり z5 を加えるとアガリ形になるなら 「白待ち」
@@ -949,10 +892,7 @@ export class Game3 {
     let isGold = meta?.gold ?? false;
     // meta 未指定で z5: 直前ツモが z5 同色なら ツモ切り扱いで ツモ色を優先採用
     // それ以外は pochiHand から先頭色取り出し
-    const rawPochiColor = pochiColorFromPai(paiForHand);
-    if (rawPochiColor) pochiColor = rawPochiColor;
     if (coreDapai === 'z5') {
-      const ph = this.pochiHand[player];
       // [2026-05-16 fix: 河の z5 色消える bug 真因解消]
       //   旧 code [2026-05-14 codex review fix] は 「ph 在庫 0 なら discardLog.pochi=null」
       //   だったが、 これは pochiHand stock counter [v33 fuzz invariant 対象] と
@@ -963,33 +903,15 @@ export class Game3 {
       //     - tsumokiri [lastZimoInfo z5 同色] → ツモ色を必ず採用、 stock も best-effort decrement
       //     - fallback → ph 先頭色 採用 [従来通り]、 全 0 なら 真に色不明で undefined のまま
       //   → 表示は entry.pochi に従う、 stock 在庫 0 でも色情報は失わない
-      const dec = (color: 'blue' | 'red' | 'green' | 'yellow') => {
-        if ((ph as any)[color] > 0) (ph as any)[color] -= 1;
-      };
-      if (rawPochiColor) {
-        pochiColor = rawPochiColor;
-        dec(rawPochiColor);
-      } else if (meta?.pochi) {
-        // 明示 meta あり: 在庫の有無に関わらず entry に記録、 在庫があれば 1 枚消費
-        const mp = meta.pochi as 'blue' | 'red' | 'green' | 'yellow';
-        pochiColor = mp;
-        dec(mp);
-      } else if (this.lastZimoInfo.player === player && toCorePai(this.lastZimoInfo.pai as string) === 'z5' && this.lastZimoInfo.pochi) {
-        // tsumokiri 経路: 直前ツモ色を採用、 在庫があれば 1 枚消費
-        const tp = this.lastZimoInfo.pochi as 'blue' | 'red' | 'green' | 'yellow';
-        pochiColor = tp;
-        dec(tp);
-      } else {
-        // fallback [CPU / 手出し meta なし]: 先頭色 [青→赤→緑→黄]、 全 0 なら undefined
-        if (ph.blue > 0) { pochiColor = 'blue'; ph.blue -= 1; }
-        else if (ph.red > 0) { pochiColor = 'red'; ph.red -= 1; }
-        else if (ph.green > 0) { pochiColor = 'green'; ph.green -= 1; }
-        else if (ph.yellow > 0) { pochiColor = 'yellow'; ph.yellow -= 1; }
-      }
+      pochiColor = resolvePochiDiscardColor({
+        player,
+        paiForHand,
+        metaColor: meta?.pochi,
+        hand: this.pochiHand[player],
+        lastZimoInfo: this.lastZimoInfo,
+      });
     }
     if (coreDapai === 'p0' || coreDapai === 's0') {
-      const kind = coreDapai === 'p0' ? 'p' : 's';
-      if (paiForHand === 'gp' || paiForHand === 'gs') isGold = true;
       // [2026-05-16 fix: 河の gold 5p/5s 色消える bug 真因解消、 z5 ぽっち色 fix と同 pattern]
       //   旧 code [2026-05-14 codex review fix] は 「goldHand[kind]===0 なら gold=false 強制」
       //   だったが、 これは goldHand stock counter [v33 fuzz invariant 対象] と
@@ -999,39 +921,28 @@ export class Game3 {
       //     - tsumokiri [lastZimoInfo 同色 gold] → ツモ gold flag を必ず採用、 stock も best-effort decrement
       //     - fallback → 在庫あれば gold 採用 [従来通り]、 なければ false
       //   → 表示は entry.gold に従う、 stock 在庫 0 でも gold 情報は失わない
-      if (meta && typeof meta.gold === 'boolean') {
-        // 明示 meta あり: 在庫の有無に関わらず entry に記録、 在庫があれば 1 枚消費 [clamp 0]
-        isGold = meta.gold;
-        if (meta.gold && this.goldHand[player][kind] > 0) {
-          this.goldHand[player][kind] -= 1;
-        }
-      } else {
-        // meta 未指定 [tsumokiri / CPU 経路]: 直前ツモ情報を優先、 なければ goldHand fallback
-        if (this.lastZimoInfo.player === player && toCorePai(this.lastZimoInfo.pai as string) === coreDapai) {
-          isGold = !!this.lastZimoInfo.gold;
-          if (isGold && this.goldHand[player][kind] > 0) this.goldHand[player][kind] -= 1;
-        } else if (this.goldHand[player][kind] > 0) {
-          isGold = true;
-          this.goldHand[player][kind] -= 1;
-        }
-      }
-      if (paiForHand === 'gp' || paiForHand === 'gs') {
-        isGold = true;
-        if (this.goldHand[player][kind] > 0) this.goldHand[player][kind] -= 1;
-      }
+      isGold = resolveGoldDiscardFlag({
+        player,
+        corePai: coreDapai,
+        paiForHand,
+        metaGold: meta?.gold,
+        initialGold: isGold,
+        hand: this.goldHand[player],
+        lastZimoInfo: this.lastZimoInfo,
+      });
     }
     // z4 [北] / 金北 [gN normalize=z4]: meta あれば優先、 なければ goldHand.z で auto
     if (coreDapai === 'z4') {
       // [2026-05-16 fix: 同 pattern、 meta あり時 在庫 0 でも gold flag 保持]
-      if (meta && typeof meta.gold === 'boolean') {
-        isGold = meta.gold;
-        if (meta.gold && this.goldHand[player].z > 0) {
-          this.goldHand[player].z -= 1;
-        }
-      } else if (this.lastZimoInfo.player === player && toCorePai(this.lastZimoInfo.pai as string) === 'z4') {
-        isGold = !!this.lastZimoInfo.gold;
-        if (isGold && this.goldHand[player].z > 0) this.goldHand[player].z -= 1;
-      }
+      isGold = resolveGoldDiscardFlag({
+        player,
+        corePai: coreDapai,
+        paiForHand,
+        metaGold: meta?.gold,
+        initialGold: isGold,
+        hand: this.goldHand[player],
+        lastZimoInfo: this.lastZimoInfo,
+      });
     }
     // ツモ切り判定 [手出し / ツモ切り の UI 区別用 2026-05-15]
     //   直前 zimo 情報の player + pai が dapai と一致 → ツモ切り
@@ -3071,9 +2982,9 @@ export class Game3 {
     this.snapshotLocked = false;
     this.diyizimo = true;
     this.goldHand = {
-      0: { p: 0, s: 0, z: 0 },
-      1: { p: 0, s: 0, z: 0 },
-      2: { p: 0, s: 0, z: 0 },
+      0: emptyGoldHand(),
+      1: emptyGoldHand(),
+      2: emptyGoldHand(),
     };
     this.huapai = { 0: [], 1: [], 2: [] };
     this.feverActive = { 0: false, 1: false, 2: false };
@@ -3082,9 +2993,9 @@ export class Game3 {
     this.shuvariActive = { 0: false, 1: false, 2: false };
     // shuvariUsed は半荘累積、 reset しない
     this.pochiHand = {
-      0: { blue: 0, red: 0, green: 0, yellow: 0 },
-      1: { blue: 0, red: 0, green: 0, yellow: 0 },
-      2: { blue: 0, red: 0, green: 0, yellow: 0 },
+      0: emptyPochiHand(),
+      1: emptyPochiHand(),
+      2: emptyPochiHand(),
     };
     this.discardLog = { 0: [], 1: [], 2: [] };
     // ぽっち効果は kyoku 単位。 fever 継続中も nextRound [局終了] で neutral に戻す。
@@ -3179,15 +3090,8 @@ export class Game3 {
       sp.zimo(replacement);
       this.shan.kaigang();
       // R8 P1 #8 fix: 嶺上で gold / pochi / 華牌 を 通常 zimo と同じく反映
-      if (this.shan.lastZimoGold) {
-        if (replacement === 'gp') this.goldHand[player].p += 1;
-        else if (replacement === 'gs') this.goldHand[player].s += 1;
-        else if (replacement === 'gN') this.goldHand[player].z += 1;
-      }
-      const pochiColor = pochiColorFromPai(rawReplacement);
-      if (pochiColor && coreReplacement === 'z5') {
-        this.pochiHand[player][pochiColor] += 1;
-      }
+      trackGoldDraw(this.shan.lastZimoGold, replacement, this.goldHand[player]);
+      trackPochiDraw(rawReplacement, coreReplacement, this.pochiHand[player]);
       // R10 P0 #5 #6 fix: 大明槓 嶺上 でも ぽっち効果 + lastZimoInfo 反映
       this.applyRinshanZimoEffects(player, replacement, rawReplacement);
       if (this.shan.lastDrawnHuapai.length > 0) {
@@ -3336,15 +3240,8 @@ export class Game3 {
       // カン後即ドラ表開示 [カンドラあり前提]
       this.shan.kaigang();
       // R8 P1 #8 fix: 嶺上で gold / pochi / 華牌 を 反映 [大明槓と同様]
-      if (this.shan.lastZimoGold) {
-        if (replacement === 'gp') this.goldHand[player].p += 1;
-        else if (replacement === 'gs') this.goldHand[player].s += 1;
-        else if (replacement === 'gN') this.goldHand[player].z += 1;
-      }
-      const pochiColor = pochiColorFromPai(rawReplacement);
-      if (pochiColor && coreReplacement === 'z5') {
-        this.pochiHand[player][pochiColor] += 1;
-      }
+      trackGoldDraw(this.shan.lastZimoGold, replacement, this.goldHand[player]);
+      trackPochiDraw(rawReplacement, coreReplacement, this.pochiHand[player]);
       // R10 P0 #5 #6 fix: 暗槓 / 加槓 嶺上 でも ぽっち効果 + lastZimoInfo 反映
       this.applyRinshanZimoEffects(player, replacement, rawReplacement);
       if (this.shan.lastDrawnHuapai.length > 0) {

@@ -10,12 +10,14 @@
 
 import { dlog } from '../helpers';
 import type { PlayerId } from './chip';
+import { hasGoldKita as hasGoldKitaTile, type GoldHand } from './gold';
+import type { PochiHand } from './pochi';
 
 export interface HuleChipCtx {
   shoupai: Map<PlayerId, any>;
   he: Map<PlayerId, any>;
-  goldHand: Record<PlayerId, { p: number; s: number; z: number }>;
-  pochiHand: Record<PlayerId, { blue: number; red: number; green: number; yellow: number }>;
+  goldHand: Record<PlayerId, GoldHand>;
+  pochiHand: Record<PlayerId, PochiHand>;
   huapai: Record<PlayerId, string[]>;
   nukidora: Record<PlayerId, number>;
   nukidoraGold?: Record<PlayerId, number>;
@@ -448,7 +450,7 @@ export function applyChipsOnHule(
   // declareNukiBei で goldHand.z 減らして nukidoraGold に移行 → 抜き済 金北で
   // 「夏夏金北 ×4」 「秋秋金北 祝儀」 が発動しなかった。
   // 「持ってた / 持ってる 金北」 で判定 [goldHand.z + nukidoraGold]
-  const hasGoldKita = ctx.goldHand[winner].z > 0 || ((ctx as any).nukidoraGold?.[winner] ?? 0) > 0;
+  const hasGoldKita = hasGoldKitaTile(ctx, winner);
   if (hasGoldKita) {
     const huaW = hua;
     const harus = huaW.filter((h) => h === 'f1').length;

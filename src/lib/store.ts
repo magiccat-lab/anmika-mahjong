@@ -9,6 +9,8 @@ import { buildDebugState } from './store/debug';
 import { cpuStepImpl, autoAdvanceImpl } from './store/cpuActions';
 import { generateTilePool, defaultSanmaRule } from './shan3';
 import { declareKanImpl, ponImpl, damingangImpl } from './store/fulouActions';
+import { hasGoldKita } from './game3/gold';
+import { blockingWinPipelineReason, settleAfterWin } from './store/winPipeline';
 
 /** 12 種スタンプ ID [テキスト frame で先行、 後追いで画像差替予定]
  *  game state 副作用なし、 純粋 cosmetic [_action_log にも入らない、 reload 復元なし] */
@@ -661,7 +663,7 @@ function createGameStore() {
           }
         }
         // 金北 auto-resolve は CPU only [人間は modal で必ず選択、 リョー指示 2026-05-12]
-        if ((s.game.goldHand[player as 0|1|2].z > 0 || (s.game.nukidoraGold[player as 0|1|2] ?? 0) > 0) && s.game.kinpeiTarget[player as 0|1|2] === null && s.cpu[player as 0|1|2]) {
+        if (hasGoldKita(s.game, player as PlayerId) && s.game.kinpeiTarget[player as 0|1|2] === null && s.cpu[player as 0|1|2]) {
           s.game.autoResolveKinpei(player as any);
         }
         // フィーバー + 払い状態 [pochiPaymentMode] では 金北 強化先 modal をスキップ、 自動確定
@@ -692,7 +694,7 @@ function createGameStore() {
         for (const p of otherCands) {
           if (s.cpu[p as 0|1|2]) {
             // CPU auto-ron [従来通り、 CPU は即決]
-            if (s.game.goldHand[p as 0|1|2].z > 0 || (s.game.nukidoraGold[p as 0|1|2] ?? 0) > 0) s.game.autoResolveKinpei(p as any);
+            if (hasGoldKita(s.game, p as PlayerId)) s.game.autoResolveKinpei(p as any);
             const r2 = s.game.hule(p as any, ld.pai, ld.player as any);
             if (r2) {
               s.game.applyHule(r2, p as any, ld.player as any);
@@ -742,7 +744,7 @@ function createGameStore() {
         if (humanOthers.length > 0) {
           // R9 P1 #8 fix: humanOthers 残り時も pendingKinpei を 作って winner の金北選択権を保持。
           // 全 human が pass / ron した後 finalize 時に 既存 pendingKinpei を踏襲する
-          if ((s.game.goldHand[player as 0|1|2].z > 0 || (s.game.nukidoraGold[player as 0|1|2] ?? 0) > 0) && !s.cpu[player as 0|1|2] && !isFeverPayAuto_ron && !s.pendingKinpei) {
+          if (hasGoldKita(s.game, player as PlayerId) && !s.cpu[player as 0|1|2] && !isFeverPayAuto_ron && !s.pendingKinpei) {
             const otherWinners = allRonResults.filter(r => r.player !== player).map(r => r.player);
             s.pendingKinpei = { winner: player, isRon: true, ronfrom: s.lastDapai!.player, otherWinners, humanOthers, cutinQueued: true };
           }
@@ -761,7 +763,7 @@ function createGameStore() {
         // ただし フィーバー + 払い [reverse pochi] state なら 自動確定で modal スキップ
         // R7 P1 #6 fix: 金北手牌内 [goldHand.z > 0] も modal 対象、 nukidoraGold だけだと
         // 抜く前の金北で強化選択漏れ
-        if ((s.game.goldHand[player as 0|1|2].z > 0 || (s.game.nukidoraGold[player as 0|1|2] ?? 0) > 0) && !s.cpu[player as 0|1|2] && !isFeverPayAuto_ron) {
+        if (hasGoldKita(s.game, player as PlayerId) && !s.cpu[player as 0|1|2] && !isFeverPayAuto_ron) {
           // R4 P1 #10 fix: ダブロン CPU 他 winner を otherWinners に持って、 selectKinpei で 再適用する
           const otherWinners = allRonResults.filter(r => r.player !== player).map(r => r.player);
           s.pendingKinpei = { winner: player, isRon: true, ronfrom: s.lastDapai!.player, otherWinners, cutinQueued: true };
@@ -772,16 +774,7 @@ function createGameStore() {
           s.roundEnded = true;
           s.message += ` [❄️ 冬自動実行、 局終了]`;
         }
-        if (isFever) {
-          s.game.feverWinCount[player as 0|1|2] += 1;
-          s.roundEnded = false;
-          // pendingKinpei modal 待ち以外は 「続行」 button で user 操作待ち
-          if (!s.pendingKinpei) {
-            s.pendingFeverContinue = { winner: player, isRon: true };
-          }
-        } else {
-          s.roundEnded = true;
-        }
+        settleAfterWin(s, { winner: player as PlayerId, isRon: true });
         return { ...s };
       });
     },
@@ -802,7 +795,7 @@ function createGameStore() {
         s.pendingFuyu = null;
         // 続行: ron or tsumo の続きを内部呼出 [簡略: action を再度呼び直す]
         // 既存の hule + applyHule を inline で
-        if ((s.game.goldHand[winner as 0|1|2].z > 0 || (s.game.nukidoraGold[winner as 0|1|2] ?? 0) > 0) && s.game.kinpeiTarget[winner as 0|1|2] === null && s.game.huapai[winner as 0|1|2].length > 0 && !s.cpu[winner as 0|1|2]) {
+        if (hasGoldKita(s.game, winner as PlayerId) && s.game.kinpeiTarget[winner as 0|1|2] === null && s.game.huapai[winner as 0|1|2].length > 0 && !s.cpu[winner as 0|1|2]) {
           // R6 P1 #4 fix: 冬 modal 経由でも otherWinners [ダブロン CPU 他候補] を計算して保存、
           // selectKinpei で 再 hule する時に CPU ダブロン分を救済
           let otherWinners: number[] = [];
@@ -837,7 +830,7 @@ function createGameStore() {
           const otherCands = ([0,1,2] as const).filter(p => p !== winner && p !== ld.player && s.game.canRon(p as any, ld.pai, ld.player as any));
           for (const p of otherCands) {
             if (s.cpu[p as 0|1|2]) {
-              if (s.game.goldHand[p as 0|1|2].z > 0 || (s.game.nukidoraGold[p as 0|1|2] ?? 0) > 0) s.game.autoResolveKinpei(p as any);
+              if (hasGoldKita(s.game, p as PlayerId)) s.game.autoResolveKinpei(p as any);
               const r2 = s.game.hule(p as any, ld.pai, ld.player as any);
               if (r2) {
                 s.game.applyHule(r2, p as any, ld.player as any);
@@ -875,14 +868,7 @@ function createGameStore() {
           s = enqueueCutinState(s, isRon ? 'ron' : 'tsumo', rr.player as PlayerId);
           s = triggerSaiKoroIfAny(s, rr.result, rr.player);
         }
-        if (isFever) {
-          s.game.feverWinCount[winner as 0|1|2] += 1;
-          s.roundEnded = false;
-          // 「続行」 button で user 操作待ち [zimo / lunban advance はその時]
-          s.pendingFeverContinue = { winner, isRon };
-        } else {
-          s.roundEnded = true;
-        }
+        settleAfterWin(s, { winner: winner as PlayerId, isRon });
         return { ...s };
       });
     },
@@ -945,7 +931,7 @@ function createGameStore() {
         // snapshot 復元で消えた CPU ダブロンの点数・チップ・サイコロ chance を回復
         const allResults: Array<{ player: number; result: any }> = [{ player: winner, result }];
         for (const ow of otherWinners) {
-          if (s.game.goldHand[ow as 0|1|2].z > 0 || (s.game.nukidoraGold[ow as 0|1|2] ?? 0) > 0) s.game.autoResolveKinpei(ow as any);
+          if (hasGoldKita(s.game, ow as PlayerId)) s.game.autoResolveKinpei(ow as any);
           const r2 = isRon && ronfrom !== null
             ? s.game.hule(ow as any, s.lastDapai!.pai, ronfrom as any)
             : s.game.hule(ow as any);
@@ -1005,13 +991,7 @@ function createGameStore() {
         }
         s.game.snapshotLocked = false;
         // fever 継続: 次家へ advance、 selectKinpei が ron/tsumo を兼ねるので両 path 対応
-        if (isFever) {
-          s.game.feverWinCount[winner as 0|1|2] += 1;
-          s.roundEnded = false;
-          s.pendingFeverContinue = { winner, isRon };
-        } else {
-          s.roundEnded = true;
-        }
+        settleAfterWin(s, { winner: winner as PlayerId, isRon });
         return { ...s };
       });
     },
@@ -1360,7 +1340,7 @@ function createGameStore() {
             const ronResults: Array<{ player: number; result: any }> = [];
             for (const p of cpuRemaining) {
               // R5 P1 #4 fix: human pass 後 CPU 後発ロン でも 金北 autoResolve、 通常 path と揃える
-              if (s.game.goldHand[p as 0|1|2].z > 0 || (s.game.nukidoraGold[p as 0|1|2] ?? 0) > 0) {
+              if (hasGoldKita(s.game, p as PlayerId)) {
                 s.game.autoResolveKinpei(p as any);
               }
               const result = s.game.hule(p as any, s.lastDapai.pai, s.lastDapai.player as any);
@@ -1380,15 +1360,8 @@ function createGameStore() {
               s.awaitingRonDecision = false;
               // R18 #4 fix: pass 後 CPU ロンで fever 継続抜けてた、 winner が fever 中なら
               // pendingFeverContinue にして 通常 ロンと揃える
-              const winnerSeat = s.lastWinner as 0|1|2;
-              const isFeverWin = s.game.feverActive[winnerSeat];
-              if (isFeverWin) {
-                s.game.feverWinCount[winnerSeat] += 1;
-                s.pendingFeverContinue = { winner: winnerSeat, isRon: true };
-                s.roundEnded = false;
-              } else {
-                s.roundEnded = true;
-              }
+              const winnerSeat = s.lastWinner as PlayerId;
+              settleAfterWin(s, { winner: winnerSeat, isRon: true });
               s.ronPassedPlayers = [];
               for (const rr of ronResults) {
                 s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
@@ -1445,16 +1418,7 @@ function createGameStore() {
           // fever check: 最後に宣言した winner を基準に
           const lastWinner = s.lastWinner;
           if (lastWinner !== null) {
-            const isFever = s.game.feverActive[lastWinner as 0|1|2];
-            if (isFever) {
-              s.game.feverWinCount[lastWinner as 0|1|2] += 1;
-              s.roundEnded = false;
-              if (!s.pendingKinpei && !s.pendingFeverContinue) {
-                s.pendingFeverContinue = { winner: lastWinner, isRon: true };
-              }
-            } else {
-              s.roundEnded = true;
-            }
+            settleAfterWin(s, { winner: lastWinner as PlayerId, isRon: true });
           } else {
             s.roundEnded = true;
           }
@@ -1513,7 +1477,7 @@ function createGameStore() {
         // 冬選択時は 局終了 [リョー仕様 2026-05-12]
         const isFeverPayAuto_tsumo = s.game.feverActive[player] && s.game.pochiPaymentMode[player];
         // R7 P1 #6 fix: 金北手牌内 [goldHand.z > 0] も modal 対象に追加
-        if ((s.game.goldHand[player].z > 0 || (s.game.nukidoraGold[player] ?? 0) > 0) && s.game.kinpeiTarget[player] === null && s.game.huapai[player as 0|1|2].length > 0 && !s.cpu[player] && !isFeverPayAuto_tsumo) {
+        if (hasGoldKita(s.game, player as PlayerId) && s.game.kinpeiTarget[player] === null && s.game.huapai[player as 0|1|2].length > 0 && !s.cpu[player] && !isFeverPayAuto_tsumo) {
           // 2026-05-14 codex review P1 fix: pendingKinpei 化前に saveSnapshot
           saveHuleSnapshot(s.game);
           s.pendingKinpei = { winner: player, isRon: false, ronfrom: null };
@@ -1539,18 +1503,7 @@ function createGameStore() {
         s.ronResults = [];
         s = enqueueCutinState(s, 'tsumo', player as PlayerId);
         s = triggerSaiKoroIfAny(s, result, player);
-        if (isFever) {
-          s.game.feverWinCount[player as 0|1|2] += 1;
-          s.roundEnded = false;
-          // pendingFeverContinue 設定で agari panel 表示 + 「フィーバー継続」 button 表示
-          if (!s.pendingKinpei) {
-            s.pendingFeverContinue = { winner: player, isRon: false };
-          }
-          // 次 step は continueFever で innerDiscard(z5) → lunban advance、 ここでは
-          // lastHuleResult / lastWinner はそのまま保持 [panel 表示用]
-        } else {
-          s.roundEnded = true;
-        }
+        settleAfterWin(s, { winner: player as PlayerId, isRon: false });
         return { ...s };
       });
     },
@@ -1614,7 +1567,7 @@ function createGameStore() {
             s.lastDapai = { player, pai: kakanPai };
             const ronResults: Array<{ player: number; result: any }> = [];
             for (const p of cpuRonCands) {
-              if (s.game.goldHand[p as 0|1|2].z > 0 || (s.game.nukidoraGold[p as 0|1|2] ?? 0) > 0) {
+              if (hasGoldKita(s.game, p as PlayerId)) {
                 s.game.autoResolveKinpei(p as any);
               }
               const r = s.game.hule(p as any, kakanPai, player as any);
@@ -1630,14 +1583,8 @@ function createGameStore() {
               s.lastWinner = oyaWon ? oyaWon.player : ronResults[ronResults.length - 1].player;
               s.lastHuleResult = ronResults[ronResults.length - 1].result;
               // R18 #4 fix: CPU 槍槓 ロンも fever 継続対応 [旧 roundEnded=true 固定で fever 抜け]
-              const winnerSeatQ = s.lastWinner as 0|1|2;
-              if (s.game.feverActive[winnerSeatQ]) {
-                s.game.feverWinCount[winnerSeatQ] += 1;
-                s.pendingFeverContinue = { winner: winnerSeatQ, isRon: true };
-                s.roundEnded = false;
-              } else {
-                s.roundEnded = true;
-              }
+              const winnerSeatQ = s.lastWinner as PlayerId;
+              settleAfterWin(s, { winner: winnerSeatQ, isRon: true });
               s.message = `🎉 CPU 槍槓 ron: ${ronResults.map(r => `p${r.player}`).join('/')}`;
               for (const rr of ronResults) {
                 s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
@@ -1723,26 +1670,9 @@ function createGameStore() {
       // finalize 後も queue 残 chance 飛ばし防止。 advanceSaiKoro が null にした後のみ進行可
       {
         const s = get(store) as StoreState;
-        // R7 P1 #4 fix: pendingSaiKoro 以外の modal も nextRound 拒否、
-        // 金北 / フィーバー継続 / 冬 / awaitingRonDecision をスキップさせない
-        if (s.pendingSaiKoro !== null) {
-          dlog('[nextRound] reject: pendingSaiKoro 存在中');
-          return;
-        }
-        if (s.pendingKinpei !== null) {
-          dlog('[nextRound] reject: pendingKinpei 存在中');
-          return;
-        }
-        if (s.pendingFeverContinue !== null) {
-          dlog('[nextRound] reject: pendingFeverContinue 存在中');
-          return;
-        }
-        if (s.pendingFuyu !== null) {
-          dlog('[nextRound] reject: pendingFuyu 存在中');
-          return;
-        }
-        if (s.awaitingRonDecision) {
-          dlog('[nextRound] reject: awaitingRonDecision 中');
+        const blocking = blockingWinPipelineReason(s);
+        if (blocking) {
+          dlog(`[nextRound] reject: win pipeline pending [${blocking}]`);
           return;
         }
         // R12 P1 #8 fix: roundEnded / 半荘 finished 必須。 旧 code は modal だけ見てて、
@@ -2005,9 +1935,9 @@ function createGameStore() {
           dlog('[nextMatch] reject: 半荘 未終了 [state.finished=false]');
           return;
         }
-        // pending modal 中も拒否
-        if (s.pendingSaiKoro || s.pendingKinpei || s.pendingFeverContinue || s.pendingFuyu || s.awaitingRonDecision) {
-          dlog('[nextMatch] reject: pending modal / ロン判定中');
+        const blocking = blockingWinPipelineReason(s);
+        if (blocking) {
+          dlog(`[nextMatch] reject: win pipeline pending [${blocking}]`);
           return;
         }
       }
@@ -2251,7 +2181,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     if (cpuRonCands.length > 1) s.game.snapshotLocked = true;
     for (const p of cpuRonCands) {
       // R7 P1 #6 fix: CPU 直ロン経路 [discard 直後] でも autoResolveKinpei、 通常 path と揃え
-      if (s.game.goldHand[p as 0|1|2].z > 0 || (s.game.nukidoraGold[p as 0|1|2] ?? 0) > 0) {
+      if (hasGoldKita(s.game, p as PlayerId)) {
         s.game.autoResolveKinpei(p as any);
       }
       // fromPlayer 渡し忘れで ronpaiWithDir null → hule が ロン認識せず役なし扱いになる bug fix
@@ -2290,14 +2220,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
         s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
         s = triggerSaiKoroIfAny(s, rr.result, rr.player);
       }
-      const isFever = s.game.feverActive[winner as 0|1|2];
-      if (isFever) {
-        s.game.feverWinCount[winner as 0|1|2] += 1;
-        s.roundEnded = false;
-        s.pendingFeverContinue = { winner, isRon: true };
-      } else {
-        s.roundEnded = true;
-      }
+      settleAfterWin(s, { winner: winner as PlayerId, isRon: true });
       s.game.snapshotLocked = false;
       return { ...s };
     }

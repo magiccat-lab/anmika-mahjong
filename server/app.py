@@ -52,6 +52,7 @@ PUBLIC_BASE_URL = os.environ.get("ANMIKA_PUBLIC_BASE_URL", "https://anmika.magic
 # WS token 用 secret [Phase B1、 codex audit HIGH]。
 # Node 側 ws_server.ts と共有して JWT verify する。 default は SESSION_SECRET と同値。
 WS_SECRET = os.environ.get("ANMIKA_WS_SECRET") or SESSION_SECRET
+INTERNAL_API_SECRET = os.environ.get("ANMIKA_INTERNAL_SECRET") or WS_SECRET
 WS_TOKEN_TTL_SEC = int(os.environ.get("ANMIKA_WS_TOKEN_TTL_SEC", "60"))
 DISCORD_REDIRECT_URI = f"{PUBLIC_BASE_URL}/auth/discord/callback"
 CORS_ORIGINS = [
@@ -350,6 +351,14 @@ def _gen_room_id() -> str:
     return "".join(_secrets.choice(chars) for _ in range(4))
 
 
+def _require_internal_secret(request: Request) -> None:
+    supplied = request.headers.get("x-anmika-internal-secret", "")
+    if not INTERNAL_API_SECRET:
+        raise HTTPException(status_code=503, detail="internal auth unavailable")
+    if not _secrets.compare_digest(supplied, INTERNAL_API_SECRET):
+        raise HTTPException(status_code=403, detail="forbidden")
+
+
 @app.post("/api/ws-token")
 async def issue_ws_token(request: Request):
     """WS 接続用 短期 JWT を発行 [Phase B1、 codex audit HIGH 1]。
@@ -509,6 +518,23 @@ async def get_room(room_id: str, request: Request):
             (room_id,),
         ).fetchall()
     return {"room": dict(room), "members": [dict(m) for m in members]}
+
+
+@app.get("/api/internal/rooms/{room_id}/members")
+async def get_room_members_internal(room_id: str, request: Request):
+    _require_internal_secret(request)
+    room_id = room_id.strip().upper()
+    with db_conn() as c:
+        room = c.execute("SELECT room_id FROM rooms WHERE room_id=?", (room_id,)).fetchone()
+        if not room:
+            raise HTTPException(status_code=404, detail="room not found")
+        members = c.execute(
+            """SELECT rm.seat, u.user_id, u.username
+               FROM room_members rm JOIN users u ON u.user_id = rm.user_id
+               WHERE rm.room_id=? ORDER BY rm.seat""",
+            (room_id,),
+        ).fetchall()
+    return {"members": [dict(m) for m in members]}
 
 
 def _archive_or_delete_room(c: sqlite3.Connection, room_id: str) -> bool:
