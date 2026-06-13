@@ -3033,6 +3033,7 @@ export class Game3 {
     const _origBingpai = { m: [...sp._bingpai.m], p: [...sp._bingpai.p], s: [...sp._bingpai.s], z: [...sp._bingpai.z] };
     const _origAnmika = sp._bingpai.__anmika ? { ...sp._bingpai.__anmika } : null;
     const _origFulou = [...sp._fulou];
+    const _origAnmikaFulou = ((sp as any)._anmikaFulou ?? []).map((f: any) => ({ ...f }));
     const _origAnmikaFulouPhysical = ((sp as any)._anmikaFulouPhysical ?? []).map((f: any) => ({
       mianzi: f.mianzi,
       consumed: [...(f.consumed ?? [])],
@@ -3090,6 +3091,7 @@ export class Game3 {
         for (const [k, v] of Object.entries(_origAnmika)) sp._bingpai[k] = v;
       }
       sp._fulou = _origFulou; sp._zimo = _origZimo;
+      (sp as any)._anmikaFulou = _origAnmikaFulou.map((f: any) => ({ ...f }));
       (sp as any)._anmikaFulouPhysical = _origAnmikaFulouPhysical.map((f: any) => ({
         mianzi: f.mianzi,
         consumed: [...(f.consumed ?? [])],

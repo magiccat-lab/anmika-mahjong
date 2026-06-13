@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseMianzi, parseFulouList, fulouFlatTiles, isNakiHePai } from '../fulouDisplay';
+import { applyAnmikaFulouIdentity, parseMianzi, parseFulouList, fulouFlatTiles, isNakiHePai } from '../fulouDisplay';
 
 describe('fulouDisplay.parseMianzi', () => {
   describe('F2: pon (3 牌副露) の 方向 mark → rotateIdx', () => {
@@ -78,6 +78,50 @@ describe('fulouDisplay.parseMianzi', () => {
     it('fulouFlatTiles は 加槓 tile も含めて flat 化 [countDora 用]', () => {
       const flat = fulouFlatTiles(['m111+1', 'p333-']);
       expect(flat).toEqual(['m1', 'm1', 'm1', 'm1', 'p3', 'p3', 'p3']);
+    });
+  });
+
+  describe('applyAnmikaFulouIdentity', () => {
+    it('鳴かれた白ぽっちと手から晒した白ぽっちを副露表示に戻す', () => {
+      const r = applyAnmikaFulouIdentity(
+        'z555+',
+        parseMianzi('z555+'),
+        [{ mianzi: 'z555+', taken: 'z5r' }],
+        [{ mianzi: 'z555+', consumed: ['z5b', 'z5g'] }],
+        0,
+      );
+
+      expect(r.tiles).toEqual(['z5r', 'z5b', 'z5g']);
+      expect(r.rotateIdx).toBe(0);
+    });
+
+    it('鳴かれた白がplainでも横倒し位置を手牌側ぽっちで上書きしない', () => {
+      const r = applyAnmikaFulouIdentity(
+        'z555-',
+        parseMianzi('z555-'),
+        [{ mianzi: 'z555-', taken: 'z5' }],
+        [{ mianzi: 'z555-', consumed: ['z5b', 'z5g'] }],
+        2,
+      );
+
+      expect(r.tiles).toEqual(['z5b', 'z5g', 'z5']);
+      expect(r.rotateIdx).toBe(2);
+    });
+
+    it('加槓した4枚目の白ぽっちもkakanTileに残す', () => {
+      const r = applyAnmikaFulouIdentity(
+        'z555+5',
+        parseMianzi('z555+5'),
+        [{ mianzi: 'z555+', taken: 'z5r' }],
+        [
+          { mianzi: 'z555+', consumed: ['z5b', 'z5g'] },
+          { mianzi: 'z555+5', consumed: ['z5y'] },
+        ],
+        0,
+      );
+
+      expect(r.tiles).toEqual(['z5r', 'z5b', 'z5g']);
+      expect(r.kakanTile).toBe('z5y');
     });
   });
 

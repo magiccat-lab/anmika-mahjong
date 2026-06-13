@@ -27,7 +27,7 @@
   import CutinOverlay from './lib/CutinOverlay.svelte';
   import { CUTIN_DURATION_MS, game, type StampId } from './lib/store';
   import type { PlayerId } from './lib/types';
-  import { parseFulouList, fulouFlatTiles } from './lib/fulouDisplay';
+  import { applyAnmikaFulouIdentity, parseFulouList, fulouFlatTiles } from './lib/fulouDisplay';
   import { derror, dlog, dwarn } from './lib/helpers';
 
   // スタンプ pallet 開閉 [自家「💬」 button 押下時 true]
@@ -678,24 +678,17 @@
 
   function fulouMianzi(sp: any, player: number): import('./lib/fulouDisplay').FulouMianzi[] {
     if (!sp || !sp._fulou) return [];
-    const parsed = parseFulouList(sp._fulou as string[]);
+    const rawFulou = sp._fulou as string[];
+    const parsed = parseFulouList(rawFulou);
     const meta = sp._anmikaFulou ?? [];
+    const physicalMeta = sp._anmikaFulouPhysical ?? [];
     return parsed.map((m, i) => {
       const entry = meta[i] ?? {};
       // viewer-relative に rotateIdx 上書き [fromPlayer 不明時は parseMianzi の値を維持]
       const adjustedRotate = entry.from != null
         ? viewerRotateIdx(player, entry.from, m.rotateIdx)
         : m.rotateIdx;
-      const taken = entry.taken;
-      let tiles = m.tiles;
-      if (taken && (taken === 'gp' || taken === 'gs' || taken === 'gN'
-          || taken === 'z5b' || taken === 'z5r' || taken === 'z5g' || taken === 'z5y')) {
-        tiles = [...m.tiles];
-        if (adjustedRotate !== null && adjustedRotate >= 0 && adjustedRotate < tiles.length) {
-          tiles[adjustedRotate] = taken;
-        }
-      }
-      return { ...m, tiles, rotateIdx: adjustedRotate };
+      return applyAnmikaFulouIdentity(rawFulou[i] ?? '', m, meta, physicalMeta, adjustedRotate);
     });
   }
 

@@ -54,7 +54,31 @@ describe('colored/gold pai identity', () => {
     expect(g.declarePon(ponPlayer, 'z555+', fromPlayer)).toBe(true);
     const sp = g.shoupai.get(ponPlayer)!;
     expect(sp._anmikaFulou.at(-1)).toMatchObject({ mianzi: 'z555+', taken: 'z5r' });
+    expect(sp._anmikaFulouPhysical.at(-1)).toMatchObject({ mianzi: 'z555+', consumed: ['z5b', 'z5g'] });
+    expect(sp._bingpai.__anmika.z5b).toBe(0);
+    expect(sp._bingpai.__anmika.z5g).toBe(0);
     expect(g.events.at(-1)).toMatchObject({ type: 'fulou', player: ponPlayer, from: fromPlayer, pai: 'z5r' });
+  });
+
+  it('failed z5 damingang rolls back colored fulou metadata', () => {
+    const g = new Game3({ qijia: 0 });
+    const kanPlayer = 1 as PlayerId;
+    const fromPlayer = 0 as PlayerId;
+    g.shoupai.set(kanPlayer, buildShoupai(['z5b', 'z5g', 'z5y', 'p1', 'p2', 'p3', 's1', 's2', 's3', 'm7', 'm9', 'z1', 'z2']));
+    g.he.set(fromPlayer, new Majiang.He());
+    g.discardLog[fromPlayer].push({ pai: 'z5r', pochi: 'red' });
+    (g.shan as any)._pai = ['p1'];
+    (g.shan as any)._rinshan = [];
+
+    const sp = g.shoupai.get(kanPlayer)!;
+    expect(g.declareDamingang(kanPlayer, 'z5555+', fromPlayer)).toBeNull();
+
+    expect(sp._fulou).toEqual([]);
+    expect(sp._anmikaFulou ?? []).toEqual([]);
+    expect(sp._anmikaFulouPhysical ?? []).toEqual([]);
+    expect(sp._bingpai.__anmika.z5b).toBe(1);
+    expect(sp._bingpai.__anmika.z5g).toBe(1);
+    expect(sp._bingpai.__anmika.z5y).toBe(1);
   });
 
   it('all z5 colors can be drawn and discarded without becoming plain z5', () => {

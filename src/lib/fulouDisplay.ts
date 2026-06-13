@@ -28,6 +28,16 @@ export type FulouMianzi = {
   kakanTile: string | null;
 };
 
+export type FulouOpenMeta = {
+  mianzi?: string;
+  taken?: string | null;
+};
+
+export type FulouPhysicalMeta = {
+  mianzi?: string;
+  consumed?: string[];
+};
+
 /**
  * mianzi 文字列 1 件を 表示用 struct に parse。
  * `m111+1` → { tiles: [m1,m1,m1], rotateIdx: 0, kakanTile: 'm1' }
@@ -81,6 +91,85 @@ export function parseMianzi(m: string): FulouMianzi {
 export function parseFulouList(fulou: string[] | undefined | null): FulouMianzi[] {
   if (!fulou) return [];
   return fulou.map(parseMianzi);
+}
+
+function toCoreDisplayPai(p: string): string {
+  if (typeof p === 'string' && p.length > 2 && p[0] === 'z' && p[1] === '5') return 'z5';
+  if (p === 'gp') return 'p0';
+  if (p === 'gs') return 's0';
+  if (p === 'gN') return 'z4';
+  return p;
+}
+
+function isPhysicalDisplayPai(p: string | null | undefined): p is string {
+  return p === 'gp' || p === 'gs' || p === 'gN'
+    || p === 'z5b' || p === 'z5r' || p === 'z5g' || p === 'z5y';
+}
+
+function matchesMianzi(entry: { mianzi?: string } | null | undefined, current: string): boolean {
+  return !!entry?.mianzi && (entry.mianzi === current || current.startsWith(entry.mianzi));
+}
+
+function isKakanMianzi(mianzi: string | undefined): boolean {
+  return !!mianzi && /^[mpsz]\d{3}[\+\=\-]\d$/.test(mianzi);
+}
+
+/**
+ * アンミカ拡張牌 [金 / 白ぽっち] の物理 identity を副露表示へ戻す。
+ *
+ * majiang-core の _fulou は `z555+` のような core 表記だけを保持するため、
+ * 呼ばれた牌は _anmikaFulou.taken、手から晒した牌は _anmikaFulouPhysical.consumed
+ * から復元する。
+ */
+export function applyAnmikaFulouIdentity(
+  mianzi: string,
+  parsed: FulouMianzi,
+  openMeta: FulouOpenMeta[] = [],
+  physicalMeta: FulouPhysicalMeta[] = [],
+  rotateIdx: number | null = parsed.rotateIdx,
+): FulouMianzi {
+  const tiles = [...parsed.tiles];
+  let kakanTile = parsed.kakanTile;
+  const occupied = new Set<number>();
+  const matchedOpen = openMeta.filter((entry) => matchesMianzi(entry, mianzi));
+
+  // 鳴かれた牌の位置は、plain z5 でも手牌側の色付き牌で上書きしない。
+  if (matchedOpen.length > 0 && rotateIdx !== null && rotateIdx >= 0 && rotateIdx < tiles.length) {
+    occupied.add(rotateIdx);
+  }
+
+  const taken = matchedOpen.map((entry) => entry.taken).find(isPhysicalDisplayPai);
+  if (taken && rotateIdx !== null && rotateIdx >= 0 && rotateIdx < tiles.length) {
+    tiles[rotateIdx] = taken;
+  }
+
+  const replaceTile = (physical: string): boolean => {
+    const core = toCoreDisplayPai(physical);
+    for (let i = 0; i < tiles.length; i++) {
+      if (occupied.has(i)) continue;
+      if (toCoreDisplayPai(tiles[i]) === core) {
+        tiles[i] = physical;
+        occupied.add(i);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const matchedPhysical = physicalMeta.filter((entry) => matchesMianzi(entry, mianzi));
+  for (const entry of matchedPhysical) {
+    const isKakanEntry = isKakanMianzi(entry.mianzi) && entry.mianzi === mianzi;
+    for (const physical of entry.consumed ?? []) {
+      if (!isPhysicalDisplayPai(physical)) continue;
+      if (isKakanEntry && kakanTile && toCoreDisplayPai(kakanTile) === toCoreDisplayPai(physical)) {
+        kakanTile = physical;
+        continue;
+      }
+      replaceTile(physical);
+    }
+  }
+
+  return { ...parsed, tiles, kakanTile, rotateIdx };
 }
 
 /**
