@@ -67,12 +67,13 @@ test(`連続 ${N_MATCHES} 試合 play-through: 各試合 finished 到達 / chip 
                 currentIdx: ps.currentIdx,
                 chancesLen: ps.chances?.length,
                 winner: ps.winner,
+                selectedCombo: ps.selectedCombo,
+                rolls: ps.rolls,
+                finalized: ps.finalized,
+                summary: ps.summary,
                 chances: ps.chances?.map((c: any) => ({
                   name: c.name,
-                  selectedSmall: c.selectedSmall,
-                  selectedLarge: c.selectedLarge,
-                  rolledDice: c.rolledDice,
-                  resolved: c.resolved,
+                  winner: c.winner,
                 })),
               } : null,
               awaitingRonDecision: !!g.awaitingRonDecision,
@@ -88,11 +89,9 @@ test(`連続 ${N_MATCHES} 試合 play-through: 各試合 finished 到達 / chip 
           const game = (window as any).__game;
           const ps = game.pendingSaiKoro;
           if (!ps) return;
-          const cur = ps.chances[ps.currentIdx];
-          if (!cur) { store.advanceSaiKoro?.(); return; }
-          if (!cur.selectedSmall && !cur.selectedLarge) {
+          if (!ps.selectedCombo) {
             store.selectSaiKoroCombo?.(1, 6);  // ゾロ目以外 [store が same value reject]
-          } else if (!cur.rolledDice) {
+          } else if (!ps.finalized) {
             store.rollSaiKoroDice?.([2, 3]);  // 非ゾロ [ゾロ目は finalize count 入らない]
           } else {
             store.advanceSaiKoro?.();

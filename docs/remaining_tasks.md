@@ -57,6 +57,7 @@ Use this as the normal pre-push/pre-release gate:
 npm.cmd run check
 npm.cmd run build
 npm.cmd test
+npm.cmd run e2e:local
 npm.cmd run e2e:online
 ```
 
@@ -68,4 +69,3 @@ python -m venv .venv-online-e2e
 $env:PYTHON = (Resolve-Path -LiteralPath '.\.venv-online-e2e\Scripts\python.exe').Path
 npm.cmd run e2e:online
 ```
-

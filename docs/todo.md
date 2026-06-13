@@ -21,6 +21,7 @@ Run these before release or deployment:
 - `npm.cmd run check`
 - `npm.cmd run build`
 - `npm.cmd test`
+- `npm.cmd run e2e:local`
 - `npm.cmd run e2e:online`
 
 For online E2E, use a Python interpreter with `server/requirements.txt` installed and set `PYTHON` if it is not on PATH.
@@ -30,8 +31,8 @@ For online E2E, use a Python interpreter with `server/requirements.txt` installe
 These are not current blockers, but are worth doing when the project has a cleanup window.
 
 - Add `npm run e2e:online` to CI once the CI runner has Python server dependencies.
+- Add `npm run e2e:local` to CI for browser regression coverage that does not need the FastAPI server.
 - Revisit bundle splitting if the dice-box lazy chunks grow substantially beyond the current intentional size.
 - Keep `rg -n "console\\.(log|debug|warn|error)" src server tools` limited to logging wrappers, test code, and CLI plumbing.
 - Keep old rule/spec notes in focused docs instead of growing one large mixed TODO.
 - Periodically run the online E2E after touching room, auth, websocket, nextRound, nextMatch, or SaiKoro flows.
-

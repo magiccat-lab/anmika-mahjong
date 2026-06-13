@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,15 +9,20 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const isWin = process.platform === 'win32';
 const npmCmd = isWin ? 'npm.cmd' : 'npm';
 const npxCmd = isWin ? 'npx.cmd' : 'npx';
-const port = Number(process.env.ANMIKA_E2E_PORT || 8790);
-const host = process.env.ANMIKA_E2E_HOST || '127.0.0.1';
+const port = Number(process.env.ANMIKA_LOCAL_E2E_PORT || 4273);
+const host = process.env.ANMIKA_LOCAL_E2E_HOST || '127.0.0.1';
 const baseUrl = `http://${host}:${port}`;
 const tmpDir = path.join(root, '.tmp');
-const dbPath = path.join(tmpDir, 'online-e2e.sqlite3');
+
+function cmdShimArgs(cmd, args) {
+  return isWin && cmd.endsWith('.cmd')
+    ? { cmd: process.env.ComSpec || 'cmd.exe', args: ['/d', '/c', [cmd, ...args].join(' ')] }
+    : { cmd, args };
+}
 
 function run(cmd, args, opts = {}) {
-  const useCmdShim = isWin && cmd.endsWith('.cmd');
-  const res = spawnSync(useCmdShim ? (process.env.ComSpec || 'cmd.exe') : cmd, useCmdShim ? ['/d', '/s', '/c', cmd, ...args] : args, {
+  const shim = cmdShimArgs(cmd, args);
+  const res = spawnSync(shim.cmd, shim.args, {
     cwd: root,
     stdio: 'inherit',
     shell: false,
@@ -28,27 +34,13 @@ function run(cmd, args, opts = {}) {
   }
 }
 
-function canRunPython(cmd, args) {
-  const res = spawnSync(cmd, [...args, '-c', 'import fastapi, uvicorn, jwt'], {
+function spawnManaged(cmd, args, opts = {}) {
+  const shim = cmdShimArgs(cmd, args);
+  return spawn(shim.cmd, shim.args, {
     cwd: root,
-    stdio: 'ignore',
     shell: false,
+    ...opts,
   });
-  return res.status === 0;
-}
-
-function resolvePython() {
-  const candidates = [];
-  if (process.env.PYTHON) candidates.push([process.env.PYTHON, []]);
-  candidates.push(['python', []]);
-  candidates.push(['python3', []]);
-  if (isWin) candidates.push(['py', ['-3']]);
-  for (const [cmd, args] of candidates) {
-    if (canRunPython(cmd, args)) return { cmd, args };
-  }
-  throw new Error(
-    'Python with server deps not found. Install server/requirements.txt or run with PYTHON pointing at that interpreter.',
-  );
 }
 
 function waitForHttp(url, timeoutMs = 30000) {
@@ -57,7 +49,7 @@ function waitForHttp(url, timeoutMs = 30000) {
     const tick = async () => {
       try {
         const r = await fetch(url);
-        if (r.status < 500) {
+        if (r.ok) {
           resolve();
           return;
         }
@@ -92,44 +84,40 @@ async function stopProcess(child) {
   }
 }
 
+async function localSpecFiles() {
+  const names = await readdir(path.join(root, 'tests'));
+  return names
+    .filter((name) => name.endsWith('.spec.ts') && name !== 'online.spec.ts')
+    .map((name) => `tests/${name}`);
+}
+
 async function main() {
   if (await isPortOpen(port)) {
     throw new Error(`Port ${port} is already in use`);
   }
   mkdirSync(tmpDir, { recursive: true });
-  rmSync(dbPath, { force: true });
-
-  const python = resolvePython();
   run(npmCmd, ['run', 'build']);
 
-  const secret = process.env.ANMIKA_E2E_SECRET || 'anmika-online-e2e-secret-2026-06-13';
   const env = {
     ...process.env,
-    ANMIKA_TEST_AUTH: '1',
-    ANMIKA_REQUIRE_SECRET: '0',
-    ANMIKA_SESSION_SECRET: secret,
-    ANMIKA_WS_SECRET: secret,
-    ANMIKA_INTERNAL_SECRET: secret,
-    ANMIKA_DB_PATH: dbPath,
-    ANMIKA_PUBLIC_BASE_URL: baseUrl,
+    ANMIKA_BASE_URL: baseUrl,
+    ANMIKA_E2E_SERVER_AUTH: '0',
+    ANMIKA_N_MATCHES: process.env.ANMIKA_N_MATCHES || '2',
   };
-  const server = spawn(
-    python.cmd,
-    [...python.args, '-m', 'uvicorn', 'server.app:app', '--host', host, '--port', String(port)],
-    { cwd: root, env, stdio: 'inherit', shell: false },
-  );
+  const preview = spawnManaged(npxCmd, ['vite', 'preview', '--host', host, '--port', String(port)], {
+    env,
+    stdio: 'inherit',
+  });
 
   let exitCode = 0;
   try {
     await waitForHttp(baseUrl);
-    run(npxCmd, ['playwright', 'test', 'tests/online.spec.ts', 'tests/lizhi_bugs.spec.ts'], {
-      env: { ANMIKA_BASE_URL: baseUrl, ANMIKA_E2E_SERVER_AUTH: '1' },
-    });
+    run(npxCmd, ['playwright', 'test', ...(await localSpecFiles())], { env });
   } catch (e) {
     exitCode = 1;
     console.error(e?.stack || e);
   } finally {
-    await stopProcess(server);
+    await stopProcess(preview);
   }
   process.exit(exitCode);
 }

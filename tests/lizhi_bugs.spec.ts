@@ -4,6 +4,8 @@
 import { test, expect, BrowserContext, Page } from '@playwright/test';
 
 const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const HAS_SERVER_AUTH = process.env.ANMIKA_E2E_SERVER_AUTH === '1';
+const serverAuthTest = HAS_SERVER_AUTH ? test : test.skip;
 
 async function fakeLogin(ctx: BrowserContext, user_id: string, username: string) {
   const r = await ctx.request.post(`${BASE}/auth/test/login`, {
@@ -12,7 +14,7 @@ async function fakeLogin(ctx: BrowserContext, user_id: string, username: string)
   if (!r.ok()) throw new Error(`fakeLogin failed: ${r.status()} ${await r.text()}`);
 }
 
-test('bug 1 + 2 自走検査: lizhi button self filter + 河 lizhi-tile 1 件のみ', async ({ browser }) => {
+serverAuthTest('bug 1 + 2 自走検査: lizhi button self filter + 河 lizhi-tile 1 件のみ', async ({ browser }) => {
   test.setTimeout(120000);
   const ts = Date.now();
   const ctxA = await browser.newContext();
@@ -95,9 +97,7 @@ test('bug 1 + 2 自走検査: lizhi button self filter + 河 lizhi-tile 1 件の
 
 test('bug 2 厳密検証: lizhi 宣言→多回 dapai で 河 _ は 1 件のみ [リョー指示 自走 test]', async ({ browser }) => {
   test.setTimeout(120000);
-  const ts = Date.now();
   const ctxA = await browser.newContext();
-  await fakeLogin(ctxA, `lzS_${ts}`, 'PSolo');
   const pA = await ctxA.newPage();
   try {
     // single mode で localhost build を使う [online 不要、 単純検証]

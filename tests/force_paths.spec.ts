@@ -60,10 +60,8 @@ test('流局強制: shan を空近くまで進めて pingju 到達 → nextRound
         const g = (window as any).__game;
         const ps = g.pendingSaiKoro;
         if (!ps) return;
-        const cur = ps.chances[ps.currentIdx];
-        if (!cur) { store.advanceSaiKoro?.(); return; }
-        if (!cur.selectedSmall && !cur.selectedLarge) store.selectSaiKoroCombo?.(1, 6);
-        else if (!cur.rolledDice) store.rollSaiKoroDice?.([2, 3]);
+        if (!ps.selectedCombo) store.selectSaiKoroCombo?.(1, 6);
+        else if (!ps.finalized) store.rollSaiKoroDice?.([2, 3]);
         else store.advanceSaiKoro?.();
       });
     } else {
