@@ -79,12 +79,22 @@ test('流局強制: shan を空近くまで進めて pingju 到達 → nextRound
     return { finished: !!g.game?.state?.finished, jushu: g.game?.state?.jushu };
   });
   console.log('[before recovery]', JSON.stringify(before));
+  // This test checks recovery from the forced terminal state, not the next
+  // CPU-played hand. Disable CPU before recovering so app-level timers cannot
+  // advance the new hand and make the assertion racey.
+  await page.evaluate(() => {
+    const g = (window as any).__game;
+    const store = (window as any).__gameStore;
+    for (const p of [0, 1, 2]) {
+      if (g.cpu?.[p] === true) store.toggleCpu?.(p);
+    }
+  });
   if (before.finished) {
     await page.evaluate(() => (window as any).__gameStore.nextMatch({ finalize: true, resetChip: false }));
   } else {
     await page.evaluate(() => (window as any).__gameStore.nextRound());
   }
-  await page.waitForTimeout(2000);
+  await page.waitForFunction(() => !(window as any).__game?.pendingPingju, undefined, { timeout: 5000 });
 
   const after = await page.evaluate(() => {
     const g = (window as any).__game;
