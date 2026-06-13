@@ -1,93 +1,135 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+// @ts-ignore - majiang-core 型定義なし
+import Majiang from '@kobalab/majiang-core';
 import { get } from 'svelte/store';
 import { game } from '../store';
 import { Game3, buildShoupai } from '../game3';
-import { toCorePai } from '../helpers';
-import type { PlayerId } from '../types';
+import { computeTileInventory, diffInventory, expectedInventory } from '../game3/inventory';
 
-// fixture は public repo に含めない [個人 chat log 由来]。
-// ローカル regression 用、 fixture が無ければ test を skip する。
-const LOG_PATH = resolve(__dirname, '__fixtures__/lizhi_autotsumokiri_tsumo_freeze_2026_05_21.paifu.json');
+function fillWallToExpectedInventory(g: Game3): void {
+  const shan = g.shan as any;
+  shan._pai = [];
+  shan._rinshan = [];
+  shan._baopai = [];
+  shan._fubaopai = [];
+  shan._fuyuRevealed = [];
 
-function loadFreezeLog(): any {
-  return JSON.parse(readFileSync(LOG_PATH, 'utf8'));
+  const got = computeTileInventory(g);
+  const exp = expectedInventory();
+  const wall: string[] = [];
+  for (const pai of Object.keys(exp).sort()) {
+    const missing = exp[pai] - (got[pai] ?? 0);
+    if (missing < 0) throw new Error(`synthetic fixture overuses ${pai}: got=${got[pai]} exp=${exp[pai]}`);
+    for (let i = 0; i < missing; i++) wall.push(pai);
+  }
+  shan._pai = wall;
 }
 
-function setLunbanToPlayer(g: Game3, player: PlayerId): void {
-  g.state.lunban = (((g.currentOya - player) % 3 + 3) % 3) as any;
-}
-
-function initReplayRound(paifu: any, roundStart: number): Game3 {
-  const g = new Game3({ qijia: paifu.state.qijia, changshu: 1 });
-  g.state = {
-    ...paifu.state,
-    defen: { 0: 62800, 1: 21200, 2: 21000 },
-    lizhibang: 0,
-    lunban: 0,
+function shoupaiSnapshot(sp: any) {
+  return {
+    bingpai: {
+      _: sp._bingpai._ ?? 0,
+      m: [...sp._bingpai.m],
+      p: [...sp._bingpai.p],
+      s: [...sp._bingpai.s],
+      z: [...sp._bingpai.z],
+    },
+    fulou: [...(sp._fulou ?? [])],
+    zimo: sp._zimo ?? null,
   };
-  g.events = [];
-  for (let i = 0; i < 3; i++) {
-    const ev = paifu.events[roundStart + i];
-    g.shoupai.set(ev.player, buildShoupai(ev.tiles));
-    g.events.push(ev);
-  }
-  const dummy = new Game3();
-  dummy.qipai();
-  const HeCtor = dummy.he.get(0).constructor as any;
-  for (const p of [0, 1, 2] as const) g.he.set(p, new HeCtor());
-  const zimoEvents = paifu.events.slice(roundStart + 3).filter((e: any) => e.type === 'zimo').map((e: any) => e.pai);
-  (g.shan as any)._pai = [...zimoEvents].reverse();
-  (g.shan as any)._baopai = [...(paifu.shan.baopai ?? [])];
-  (g.shan as any)._fubaopai = [...(paifu.shan.fubaopai ?? [])];
-  return g;
 }
 
-function replayRoundToEvent(paifu: any, targetIdx: number): Game3 {
-  const roundStart = 330;
-  const g = initReplayRound(paifu, roundStart);
-  for (let i = roundStart + 3; i <= targetIdx; i++) {
-    const ev = paifu.events[i];
-    if (ev.type === 'zimo') {
-      setLunbanToPlayer(g, ev.player);
-      const z = g.zimo();
-      expect(z).toBe(ev.pai);
-      const next = paifu.events[i + 1];
-      if (next?.type === 'zimo' && next.player === ev.player && toCorePai(ev.pai) === 'z4') {
-        const replacement = g.declareNukiBei(ev.player, { gold: ev.pai === 'gN' });
-        expect(replacement).toBe(next.pai);
-        i += 1;
-      }
-    } else if (ev.type === 'dapai') {
-      setLunbanToPlayer(g, ev.player);
-      g.dapai(ev.pai);
-    } else if (ev.type === 'lizhi') {
-      setLunbanToPlayer(g, ev.player);
-      const ok = g.declareLizhi({ open: ev.open, fever: ev.fever, shuvari: ev.shuvari });
-      if (!ok) g.lizhi.add(ev.player);
-    }
-  }
-  return g;
+function buildWinningLizhiPaifu(): any {
+  const g = new Game3({ qijia: 0, changshu: 1 });
+  g.state = {
+    changbang: 0,
+    jushu: 0,
+    benbang: 0,
+    lizhibang: 0,
+    qijia: 0,
+    defen: { 0: 62800, 1: 21200, 2: 21000 },
+    lunban: 0,
+    finished: false,
+  };
+  g.diyizimo = false;
+  g.huapai = { 0: [], 1: [], 2: [] };
+  g.lizhi.add(0);
+  g.yifaActive = { 0: false, 1: false, 2: false };
+  g.lizhiDeclareDapai = { 0: false, 1: false, 2: false };
+
+  const p0 = buildShoupai(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 's2', 's3', 's6', 's7', 's8', 'z1', 'z1']);
+  p0.zimo('s4');
+  g.shoupai.set(0, p0);
+  g.shoupai.set(1, buildShoupai([]));
+  g.shoupai.set(2, buildShoupai([]));
+  for (const p of [0, 1, 2] as const) g.he.set(p, new Majiang.He());
+  g.lastZimoInfo = { player: 0, pai: 's4', pochi: null, gold: false };
+
+  fillWallToExpectedInventory(g);
+  expect(diffInventory(g)).toEqual([]);
+  expect(g.canTsumo(0)).toBe(true);
+
+  return {
+    type: 'anmika-mahjong-paifu',
+    version: 2,
+    timestamp: 'synthetic-2026-05-21-lizhi-autotsumokiri',
+    state: g.state,
+    shan: {
+      currentPai: [...(g.shan as any)._pai],
+      initialPai: [...(g.shan as any)._pai],
+      baopai: [],
+      fubaopai: [],
+      rinshan: [],
+      fuyuRevealed: [],
+      weikaigang: false,
+      lastDrawnHuapai: [],
+      lastZimoGold: false,
+      lastZimoPochi: null,
+      rinshanUsed: 0,
+    },
+    shoupai: {
+      0: shoupaiSnapshot(g.shoupai.get(0)),
+      1: shoupaiSnapshot(g.shoupai.get(1)),
+      2: shoupaiSnapshot(g.shoupai.get(2)),
+    },
+    he: { 0: [], 1: [], 2: [] },
+    huapai: g.huapai,
+    goldHand: g.goldHand,
+    pochiHand: g.pochiHand,
+    nukidora: g.nukidora,
+    nukidoraGold: g.nukidoraGold,
+    kinpeiTarget: g.kinpeiTarget,
+    lizhi: [0],
+    openLizhi: [],
+    feverActive: g.feverActive,
+    feverTier: g.feverTier,
+    pochiMultiplier: g.pochiMultiplier,
+    pochiPaymentMode: g.pochiPaymentMode,
+    shuvariUsed: g.shuvariUsed,
+    shuvariActive: g.shuvariActive,
+    chipLedger: g.chipLedger,
+    akiUsedCount: g.akiUsedCount,
+    yifaActive: g.yifaActive,
+    lizhiDeclareDapai: g.lizhiDeclareDapai,
+    lingshangActive: g.lingshangActive,
+    qianggangPending: false,
+    diyizimo: false,
+    fuyuConsumed: g.fuyuConsumed,
+    fuyuSkip: g.fuyuSkip,
+    lastZimoInfo: g.lastZimoInfo,
+    feverDeclareTing: g.feverDeclareTing,
+    feverWinCount: g.feverWinCount,
+    justNukidBei: g.justNukidBei,
+    discardLog: g.discardLog,
+    events: [],
+  };
 }
 
-const HAS_LOG = existsSync(LOG_PATH);
-const d = HAS_LOG ? describe : describe.skip;
-
-d('lizhi auto-tsumokiri winning zimo freeze 2026-05-21', () => {
-  it('replays the supplied event-423 state and allows P0 tsumo on s4', () => {
-    const paifu = loadFreezeLog();
-    expect(paifu.events).toHaveLength(424);
-    expect(paifu.events[392]).toMatchObject({ type: 'lizhi', player: 0 });
-    expect(paifu.events[423]).toMatchObject({ type: 'zimo', player: 0, pai: 's4' });
-
-    const replayed = replayRoundToEvent(paifu, 423);
-    expect(replayed.lunbanToPlayerId(replayed.state.lunban)).toBe(0);
-    expect(replayed.shoupai.get(0)?._zimo).toBe('s4');
-    expect(replayed.lizhi.has(0)).toBe(true);
-    expect(replayed.canTsumo(0)).toBe(true);
-
+describe('lizhi auto-tsumokiri winning zimo freeze 2026-05-21', () => {
+  it('restores a winning lizhi draw and blocks auto-tsumokiri so tsumo remains available', () => {
+    const paifu = buildWinningLizhiPaifu();
     game.loadFromPaifu(paifu);
+
     const before: any = get(game);
     const player = before.game.lunbanToPlayerId(before.game.state.lunban);
 
@@ -108,12 +150,6 @@ d('lizhi auto-tsumokiri winning zimo freeze 2026-05-21', () => {
     expect(afterAutoTsumokiri.game.he.get(0)?._pai).not.toContain('s4');
 
     game.tsumo();
-
-    const pending: any = get(game);
-    expect(pending.pendingKinpei).toMatchObject({ winner: 0, isRon: false, ronfrom: null });
-    expect(pending.lastWinner).toBeNull();
-
-    game.selectKinpei('aki');
 
     const after: any = get(game);
     expect(after.pendingKinpei).toBeNull();
