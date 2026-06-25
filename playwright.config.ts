@@ -5,8 +5,17 @@ export default defineConfig({
   testMatch: ['**/*.spec.ts'],
   fullyParallel: false,
   workers: 1,
-  // R14 follow-up: 一括 run で context 間干渉の flaky [force_paths 等]、
-  // retry=1 で 2 回目 isolation 試行、 game logic regression は vitest で覆われる
   retries: 1,
   reporter: 'line',
+  use: {
+    baseURL: 'http://127.0.0.1:8790',
+  },
+  webServer: [
+    {
+      command: 'ANMIKA_TEST_AUTH=1 python -m uvicorn server.app:app --host 127.0.0.1 --port 8790',
+      port: 8790,
+      reuseExistingServer: !process.env.CI,
+      timeout: 15_000,
+    },
+  ],
 });

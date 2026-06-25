@@ -16,8 +16,7 @@
   export let onRoll: (override?: [number, number]) => void;
   export let onAdvance: () => void;
 
-  import { onDestroy } from 'svelte';
-  import { derror, dlog } from './helpers';
+  import { onMount, onDestroy } from 'svelte';
 
   $: chance = chances[currentIdx];
   $: nonZoroCount = rolls.filter((r) => !r.zoro).length;
@@ -46,7 +45,7 @@
       // @ts-ignore - no types shipped
       const mod = await import('@3d-dice/dice-box');
       const DiceBox = (mod as any).default ?? mod;
-      dlog('[dice-box] init start');
+      if ((import.meta as any).env?.DEV) console.log('[dice-box] init start');
       diceBox = new DiceBox('#dicebox-stage', {
         assetPath: '/assets/dice-box/',
         theme: 'default',
@@ -62,7 +61,7 @@
         mass: 1,
       });
       diceBox.onRollComplete = (results: any[]) => {
-        dlog('[dice-box] onRollComplete', results);
+        if ((import.meta as any).env?.DEV) console.log('[dice-box] onRollComplete', results);
         let override: [number, number] | undefined = undefined;
         try {
           const grp = (results ?? [])[0];
@@ -83,13 +82,14 @@
         if (drumAudio) { try { drumAudio.pause(); drumAudio.currentTime = 0; } catch (e) {} drumAudio = null; }
       };
       await diceBox.init();
-      dlog('[dice-box] init complete');
+      if ((import.meta as any).env?.DEV) console.log('[dice-box] init complete');
       // Babylon WebGL render loop が canvas 認識するまで 1000ms wait [1 投目 visible 確保]
       await new Promise((r) => setTimeout(r, 1000));
       diceBoxReady = true;
-      dlog('[dice-box] ready [user 操作受付開始]');
+      if ((import.meta as any).env?.DEV) console.log('[dice-box] ready [user 操作受付開始]');
     } catch (e) {
-      derror('[dice-box] init failed', e);
+      // eslint-disable-next-line no-console
+      console.error('[dice-box] init failed', e);
     }
   }
   $: if (diceStageEl) tryInitDiceBox();
@@ -117,7 +117,8 @@
         diceBox.clear();
         diceBox.roll('2d6');
       } catch (e) {
-        derror('[dice-box] roll failed', e);
+        // eslint-disable-next-line no-console
+        console.error('[dice-box] roll failed', e);
         rolling = false;
         onRoll();
       }

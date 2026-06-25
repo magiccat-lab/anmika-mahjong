@@ -15,6 +15,7 @@
   import LobbyPanel from './lib/LobbyPanel.svelte';
   import RoomPanel from './lib/RoomPanel.svelte';
   import EntryMenu from './lib/EntryMenu.svelte';
+  import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
   import HeaderInfo from './lib/HeaderInfo.svelte';
@@ -27,8 +28,7 @@
   import CutinOverlay from './lib/CutinOverlay.svelte';
   import { CUTIN_DURATION_MS, game, type StampId } from './lib/store';
   import type { PlayerId } from './lib/types';
-  import { applyAnmikaFulouIdentity, parseFulouList, fulouFlatTiles } from './lib/fulouDisplay';
-  import { derror, dlog, dwarn } from './lib/helpers';
+  import { parseFulouList, fulouFlatTiles } from './lib/fulouDisplay';
 
   // スタンプ pallet 開閉 [自家「💬」 button 押下時 true]
   let stampPalletOpen = false;
@@ -52,7 +52,6 @@
   }
   onDestroy(() => {
     if (cutinTimer !== null) clearTimeout(cutinTimer);
-    if (autoTsumoKiriTimer !== null) clearTimeout(autoTsumoKiriTimer);
   });
 
   const PLAYERS = [0, 1, 2] as const satisfies readonly PlayerId[];
@@ -101,21 +100,15 @@
     return [0,1,2].map(p => state.defen[p as PlayerId] - (($game.game.preHuleSnapshot as any).defen[p] ?? 0)) as [number, number, number];
   }
   // R6 P2 #13 fix: DEV / Playwright のみ debug log を発火、 production console を汚さない
-  $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) dlog('[seat-debug] selfPlayer=', selfPlayer, 'srv0=', srv0, 'srv1=', srv1, 'srv2=', srv2, 'rotateOffset=', rotateOffset, 'revealCheck(srv0)=', selfPlayer === srv0); }
-  $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) dlog('[disabled-debug] currentPlayer=', currentPlayer, 'lunban=', state.lunban, 'srv0=', srv0, 'isCurrent(self)=', currentPlayer === srv0, 'needsZimo=', needsZimo, '_zimo(cur)=', $game.game.shoupai.get(currentPlayer)?._zimo, '_zimo(srv0)=', $game.game.shoupai.get(srv0)?._zimo, 'awaitRon=', $game.awaitingRonDecision, 'awaitFulou=', $game.awaitingFulou); }
-
-  // 白ぽっち演出中は CPU / 自動ツモ切りを止めるので、driver より先に宣言しておく。
-  type PochiRevealState = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean };
-  let pochiReveal: PochiRevealState | null = null;
-  let lastSeenZimoEventCount = 0;
-  let lastSeenGameRef: any = null;
+  $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) console.log('[seat-debug] selfPlayer=', selfPlayer, 'srv0=', srv0, 'srv1=', srv1, 'srv2=', srv2, 'rotateOffset=', rotateOffset, 'revealCheck(srv0)=', selfPlayer === srv0); }
+  $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) console.log('[disabled-debug] currentPlayer=', currentPlayer, 'lunban=', state.lunban, 'srv0=', srv0, 'isCurrent(self)=', currentPlayer === srv0, 'needsZimo=', needsZimo, '_zimo(cur)=', $game.game.shoupai.get(currentPlayer)?._zimo, '_zimo(srv0)=', $game.game.shoupai.get(srv0)?._zimo, 'awaitRon=', $game.awaitingRonDecision, 'awaitFulou=', $game.awaitingFulou); }
 
   // host が CPU 番のみ駆動 [連発防止: 同じ局・同じ lunban に対し 1 回だけ fire]
   let lastCpuDriverKey = '';
   $: if (onlineGameStarted && onlineRoomMeta?.isHost) {
     const cur = $game.game.lunbanToPlayerId($game.game.state.lunban);
     const curMember = onlineMembers.find((m) => m.seat === cur);
-    const ready = pochiReveal === null && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei;
+    const ready = !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei;
     // R4 P1 #19 fix: 副露後 _zimo が mianzi 固定文字列で同一 key のまま再発火しない bug。
     // events.length + 河 count + shoupai string ハッシュ を key に混ぜて 状態変化を捕捉。
     // ready 条件にも !$game.lizhiPending を追加
@@ -126,15 +119,10 @@
     if (ready && curMember?.is_cpu && key !== lastCpuDriverKey && !$game.lizhiPending) {
       lastCpuDriverKey = key;
       // R6 P2 #13: production では log 出さない
-      if ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver)) dlog('[host-cpu-driver] fire seat=', cur, 'name=', curMember.username, 'key=', key);
+      if ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver)) console.log('[host-cpu-driver] fire seat=', cur, 'name=', curMember.username, 'key=', key);
       setTimeout(() => {
-        const snap = get(game);
-        const curNow = snap.game.lunbanToPlayerId(snap.game.state.lunban);
-        const stillReady = pochiReveal === null
-          && !snap.roundEnded && !snap.awaitingRonDecision && !snap.awaitingFulou
-          && !snap.pendingFeverContinue && !snap.pendingFuyu && !snap.pendingKinpei;
-        if (curNow === cur && stillReady) game.cpuStep();
-        else lastCpuDriverKey = '';
+        const curNow = $game.game.lunbanToPlayerId($game.game.state.lunban);
+        if (curNow === cur) game.cpuStep();
       }, 1500);  // リョー指示 2026-05-14: 5000 → 1500ms に短縮
     }
   }
@@ -156,6 +144,9 @@
 
   // 白ぽっち ツモ演出 [リョー指示 2026-05-13]
   // shan.lastZimoPochi が non-null になった瞬間を latch、 modal 表示用
+  let pochiReveal: { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean } | null = null;
+  let lastSeenZimoEventCount = 0;
+  let lastSeenGameRef: any = null;
   $: {
     // game instance 切替 [resetDebug / reset] 検出で latch reset
     if ($game.game !== lastSeenGameRef) {
@@ -167,15 +158,18 @@
     const lastPochi = ($game.game.shan as any)?.lastZimoPochi as ('blue'|'red'|'green'|'yellow'|null);
     if (zimoEvents.length > lastSeenZimoEventCount) {
       const lastZ = zimoEvents[zimoEvents.length - 1];
-      if ((import.meta as any).env?.DEV) dlog('[pochi-cutin] check', { lastZ, lastPochi, pochiReveal, lizhi: lastZ ? $game.game.lizhi.has(lastZ.player) : null });
+      // eslint-disable-next-line no-console
+      if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] check', { lastZ, lastPochi, pochiReveal, lizhi: lastZ ? $game.game.lizhi.has(lastZ.player) : null });
       // [2026-05-21 fix] lastZ.pai は raw colored (z5b/r/g/y) の場合もあるので startsWith 比較
       if (lastZ && typeof lastZ.pai === 'string' && lastZ.pai.startsWith('z5') && lastPochi && pochiReveal === null) {
-        const shouldDisplayReveal = !onlineGameStarted || lastZ.player === selfPlayer;
-        if (shouldDisplayReveal) {
-          if ((import.meta as any).env?.DEV) dlog('[pochi-cutin] LATCH', { player: lastZ.player, color: lastPochi });
+        const isLizhi = $game.game.lizhi.has(lastZ.player);
+        if (isLizhi) {
+          // eslint-disable-next-line no-console
+          if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] LATCH', { player: lastZ.player, color: lastPochi });
           pochiReveal = { player: lastZ.player, color: lastPochi, isCpu: $game.cpu[lastZ.player] === true };
         } else {
-          if ((import.meta as any).env?.DEV) dlog('[pochi-cutin] skip (not local reveal)');
+          // eslint-disable-next-line no-console
+          if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] skip (not lizhi)');
         }
       }
       lastSeenZimoEventCount = zimoEvents.length;
@@ -240,7 +234,7 @@
       const sp = g.shoupai.get(pl);
       if (sp) dbg[`p${pl}`] = { 'p[0]': sp._bingpai.p[0], 'p[5]': sp._bingpai.p[5], 's[0]': sp._bingpai.s[0], 's[5]': sp._bingpai.s[5], 'z[4]': sp._bingpai.z[4], gold: g.goldHand[pl] };
     }
-    if ((window as any).__ANMIKA_DEBUG__) dlog('[tile inv]', JSON.stringify(dbg));
+    if ((window as any).__ANMIKA_DEBUG__) console.log('[tile inv]', JSON.stringify(dbg));
     for (const pl of [0, 1, 2] as const) {
       const sp = g.shoupai.get(pl);
       if (sp) {
@@ -678,17 +672,24 @@
 
   function fulouMianzi(sp: any, player: number): import('./lib/fulouDisplay').FulouMianzi[] {
     if (!sp || !sp._fulou) return [];
-    const rawFulou = sp._fulou as string[];
-    const parsed = parseFulouList(rawFulou);
+    const parsed = parseFulouList(sp._fulou as string[]);
     const meta = sp._anmikaFulou ?? [];
-    const physicalMeta = sp._anmikaFulouPhysical ?? [];
     return parsed.map((m, i) => {
       const entry = meta[i] ?? {};
       // viewer-relative に rotateIdx 上書き [fromPlayer 不明時は parseMianzi の値を維持]
       const adjustedRotate = entry.from != null
         ? viewerRotateIdx(player, entry.from, m.rotateIdx)
         : m.rotateIdx;
-      return applyAnmikaFulouIdentity(rawFulou[i] ?? '', m, meta, physicalMeta, adjustedRotate);
+      const taken = entry.taken;
+      let tiles = m.tiles;
+      if (taken && (taken === 'gp' || taken === 'gs' || taken === 'gN'
+          || taken === 'z5b' || taken === 'z5r' || taken === 'z5g' || taken === 'z5y')) {
+        tiles = [...m.tiles];
+        if (adjustedRotate !== null && adjustedRotate >= 0 && adjustedRotate < tiles.length) {
+          tiles[adjustedRotate] = taken;
+        }
+      }
+      return { ...m, tiles, rotateIdx: adjustedRotate };
     });
   }
 
@@ -1035,13 +1036,13 @@
       });
       if (!r.ok) {
         const detail = await r.text().catch(() => '');
-        derror(`[anmika] ws-token ${r.status}: ${detail}`);
+        console.error(`[anmika] ws-token ${r.status}: ${detail}`);
         return;
       }
       const data = (await r.json()) as { token: string };
       token = data.token;
     } catch (e) {
-      derror('[anmika] ws-token fetch failed', e);
+      console.error('[anmika] ws-token fetch failed', e);
       return;
     }
     const url = `${protocol}//${location.host}/ws/room/${currentRoomId}?token=${encodeURIComponent(token)}`;
@@ -1095,7 +1096,7 @@
           if (mem) from_seat = mem.seat;
         }
         if (from_seat === undefined) {
-          dwarn('[online] msg.action 受信 from_seat 解決失敗', msg);
+          console.warn('[online] msg.action 受信 from_seat 解決失敗', msg);
           return;
         }
         game.applyOnlineRemoteAction(from_seat, msg.action);
@@ -1307,11 +1308,11 @@
             const mno = typed?.detail?.match_no ?? typed?.match_no;
             console.info('[matches POST] 409 typed', { reason, match_no: mno });
             if (reason !== 'idempotency_hit' && reason !== 'unknown') {
-              dwarn('[matches POST] 409 unexpected reason', reason, detail);
+              console.warn('[matches POST] 409 unexpected reason', reason, detail);
             }
           } else {
             // R16 P0 #4 fix: POST 失敗時 nextMatch 進行を ブロック、 user に通知 + 再試行可能
-            dwarn('[matches POST] failed', r.status, detail);
+            console.warn('[matches POST] failed', r.status, detail);
             window.alert(`試合結果の保存に失敗 [HTTP ${r.status}]、 「次の試合へ」 を 再度押してリトライ。 ${detail.slice(0, 200)}`);
             __matchPostInflight = false;
             return;  // game.nextMatch せず 中断
@@ -1328,7 +1329,7 @@
         } catch {}
       } catch (e) {
         // R16 P0 #4 fix: ネットワーク error も同様 ブロック
-        dwarn('[matches POST] err', e);
+        console.warn('[matches POST] err', e);
         window.alert(`試合結果の保存中ネットワークエラー、 「次の試合へ」 再押下でリトライ ${String(e).slice(0, 200)}`);
         __matchPostInflight = false;
         return;
@@ -1436,21 +1437,15 @@
   let lastCpuStepKey: string | null = null;
   $: {
     const cur = $game.game.lunbanToPlayerId($game.game.state.lunban);
-    const key = `${state.jushu}-${state.lunban}-${$game.game.events.length}-${($game as any)._cpuStepStalled ?? 0}`;
+    const key = `${state.jushu}-${state.lunban}`;
     const canStep = !onlineGameStarted && viewMode === 'single' && !$game.roundEnded
       && !$game.awaitingRonDecision && !$game.awaitingFulou
       && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
-      && pochiReveal === null
-      && cur !== selfPlayer && $game.cpu[cur];
+      && cur !== 0 && $game.cpu[cur];
     if (canStep && lastCpuStepKey !== key) {
       lastCpuStepKey = key;
-      setTimeout(() => {
-        const snap = get(game);
-        const curNow = snap.game.lunbanToPlayerId(snap.game.state.lunban);
-        if (pochiReveal === null && curNow === cur) game.cpuStep();
-        else lastCpuStepKey = null;
-      }, cpuDelayMs);
-    } else if (!canStep && (cur === selfPlayer || $game.roundEnded)) {
+      setTimeout(() => game.cpuStep(), cpuDelayMs);
+    } else if (!canStep && (cur === 0 || $game.roundEnded)) {
       lastCpuStepKey = null;
     }
   }
@@ -1462,7 +1457,6 @@
   $: if (viewMode === 'single' && !onlineGameStarted && $game.roundEnded && $game.lastWinner !== null
         && $game.cpu[$game.lastWinner as PlayerId] && !state.finished
         && !$game.pendingKinpei && !$game.pendingFuyu && !$game.pendingSaiKoro
-        && pochiReveal === null
         && !$game.lastDapai  // ron 時は lastDapai が残ってる、 tsumo のみ
         && !cpuAutoAdvanceFired) {
     cpuAutoAdvanceFired = true;
@@ -1478,31 +1472,26 @@
   // 自動ツモ切り [自家 番 + zimo あり + 局進行中]
   // 2026-05-14 codex review #3 fix: !onlineGameStarted 明示 + currentPlayer === selfPlayer
   // [hardcoded 0 を 廃止、 online は dora row checkbox 非表示で更に二重防御]
-  let autoTsumoKiriTimer: ReturnType<typeof setTimeout> | null = null;
-  $: {
-    const baseAutoTsumoKiri = viewMode === 'single' && !onlineGameStarted && !$game.roundEnded
-      && !$game.awaitingRonDecision && !$game.awaitingFulou
-      && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
-      && !$game.lizhiPending
-      && pochiReveal === null
-      && $game.game.lunbanToPlayerId($game.game.state.lunban) === selfPlayer
-      && !!$game.lastZimo
-      && !canTsumo;
-    const shouldAutoTsumoKiri = baseAutoTsumoKiri
-      && (autoTsumoKiri || $game.game.lizhi.has(selfPlayer as PlayerId));
-    if (shouldAutoTsumoKiri && autoTsumoKiriTimer === null) {
-      const target = selfPlayer as PlayerId;
-      const zimo = $game.lastZimo;
-      autoTsumoKiriTimer = setTimeout(() => {
-        autoTsumoKiriTimer = null;
-        const snap = get(game);
-        const cur = snap.game.lunbanToPlayerId(snap.game.state.lunban);
-        if (pochiReveal === null && cur === target && snap.lastZimo === zimo) game.tsumokiri(target);
-      }, 600);
-    } else if (!shouldAutoTsumoKiri && autoTsumoKiriTimer !== null) {
-      clearTimeout(autoTsumoKiriTimer);
-      autoTsumoKiriTimer = null;
-    }
+  $: if (viewMode === 'single' && !onlineGameStarted && autoTsumoKiri && !$game.roundEnded
+        && !$game.awaitingRonDecision && !$game.awaitingFulou
+        && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
+        && !$game.lizhiPending
+        && $game.game.lunbanToPlayerId($game.game.state.lunban) === selfPlayer
+        && $game.lastZimo
+        && !canTsumo) {
+    setTimeout(() => game.tsumokiri(), 600);
+  }
+  // [2026-05-21] リーチ済 player は autoTsumoKiri checkbox に関わらず 自動ツモ切り強制
+  // (リーチ後の打牌制限ルール、 ツモ可なら停止して ツモボタン待ち)
+  $: if (viewMode === 'single' && !onlineGameStarted && !$game.roundEnded
+        && !$game.awaitingRonDecision && !$game.awaitingFulou
+        && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
+        && !$game.lizhiPending
+        && $game.game.lunbanToPlayerId($game.game.state.lunban) === selfPlayer
+        && $game.game.lizhi.has(selfPlayer)
+        && $game.lastZimo
+        && !canTsumo) {
+    setTimeout(() => game.tsumokiri(), 600);
   }
 </script>
 
@@ -2631,7 +2620,6 @@
     padding: 12px;
     overflow: hidden;
   }
-
   /* header 内の要素は header 内で自然 flow [すでに header に defen / action-row 含む] */
   /* header 外の panel [RoundEnd / ChipBreakdown / FeverWaits / GameEnd / DebugLog] は center に overlay */
   main.mode-single :global(section.hule-panel),
@@ -3203,6 +3191,22 @@
   main.mode-single .vtile.back-orange :global(.tile.down) {
     /* オレンジ寄りの黄色 [リョー指示] */
     filter: hue-rotate(60deg) saturate(1.3) brightness(1.1);
+  }
+
+  /* 左右の vertical side player [雀魂風 compact view] */
+  .single-side-player {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #e8e8e8;
+    font-size: 12px;
+    align-items: stretch;
+    width: 100%;
+  }
+  .single-side-player.current {
+    background: rgba(212, 175, 55, 0.18);
+    border-left: 3px solid #d4af37;
+    padding-left: 4px;
   }
 
   /* PlayerHandPanel / PlayerStatus 内部の色を 単色テーマに override */

@@ -1,46 +1,25 @@
-# anmika Progress
+# アンミカ三麻 開発進捗 [2026-06-25 時点]
 
-Updated: 2026-06-13
+## 公開 URL
 
-## Current State
+https://anmika.magiccatlab.com/
 
-The project is green on the local quality gates used for the cleanup sweep.
+## 実装済み概要
 
-- Unit/regression tests: green.
-- Svelte/TypeScript check: 0 errors, 0 warnings.
-- Production build: success with no Svelte or chunk-size warnings.
-- Playwright smoke: green.
-- Online E2E: green through `npm run e2e:online`.
+基本三麻 (配/ツモ/打牌/ロン/リーチ/ポン/カン/北抜き/流局/連荘/半荘) / 厳密フリテン / 喰い替え禁止 / 三麻独自点数計算 / サイコロチャンス (3D dice UI + シュバリ) / 春夏秋冬収納効果 / 金北強化選択 / ぽっち 4 色 + 神ぽっち / フィーバー (ダブル/トリプル) / chip v7 (祝儀計算 + 全倍率) / 間八萬 / オープン立直 / ダブロン / トビ賞 / オンライン対戦 (WebSocket) / AI (リーチ/ポン/カン/打牌 ukeire)
 
-## 2026-06-13 Cleanup
+## 残 TODO
 
-Completed the remaining cleanup tasks from `docs/remaining_tasks.md`.
+`docs/todo.md` 参照。
 
-- Removed stale Svelte warning sources:
-  - deleted unused `OnlineGameView.hostUserId` prop.
-  - removed dead CSS selectors for old center/dora/side-player/agari-right layouts.
-- Centralized debug logging:
-  - added `dwarn` and `derror` next to `dlog`.
-  - moved browser gameplay logs through debug-gated helpers.
-  - added `ANMIKA_WS_LOG=0` control for Node websocket server logs.
-- Managed intentional dice-box lazy chunk size:
-  - added `build.chunkSizeWarningLimit` with an explanatory comment.
-- Added online E2E runner:
-  - `tools/run_online_e2e.mjs`
-  - `npm run e2e:online`
-  - runs build, starts FastAPI with test auth and an isolated SQLite DB, runs `tests/online.spec.ts`, then stops the server.
-- Refreshed docs:
-  - `docs/todo.md`
-  - `docs/progress.md`
-  - `docs/remaining_tasks.md`
+## 主要ファイル
 
-## Useful Commands
-
-```powershell
-npm.cmd run check
-npm.cmd run build
-npm.cmd test
-$env:PYTHON = (Resolve-Path -LiteralPath '.\.venv-online-e2e\Scripts\python.exe').Path
-npm.cmd run e2e:online
-```
-
+- `src/lib/game3.ts` Game3 class、 三麻ゲーム state + 役判定 / 点数計算
+- `src/lib/shan3.ts` 山 / ドラ / ぽっち色 / 金 metadata
+- `src/lib/store.ts` Svelte store wrapper、 action 集約
+- `src/App.svelte` UI
+- `src/lib/Tile.svelte` 牌画像 svg 描画
+- `src/lib/OnlineGameView.svelte` オンライン対戦 view
+- `src/lib/SaiKoroModal.svelte` サイコロチャンス modal
+- `src/lib/diceBoxSingleton.ts` 3D dice-box singleton
+- `docs/api_spec.md` majiang-core API spec + アンミカ対応表

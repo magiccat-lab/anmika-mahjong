@@ -1,38 +1,61 @@
-# anmika TODO
+# アンミカ三麻 TODO リスト
 
-Updated: 2026-06-13
+最終更新: 2026-06-25
 
-## Short-Term Status
+## 高優先 [仕様実装]
 
-No known short-term cleanup blockers remain after the 2026-06-13 sweep.
+### 役 / 翻数
+- [ ] アメリカ七対子 [4 枚使い 1 種 +4 ハン、 8 枚使いで +10 ハン]
+- [ ] 大車輪 [チンイツ七対子] 役満化
+- [ ] 小車輪 6 ハン [ホンイツ七対子]
+- [ ] 混老対 6 ハン [七対子+対々込み 8 ハン]
+- [ ] 鳴き四華 / 鳴き八華 chip [サイコロ依存]
 
-The previous cleanup list is tracked in `docs/remaining_tasks.md` and has been completed:
+### 北の役満特殊化 [ルール 2-4]
+- [ ] 四喜和: 北抜き z4 を手牌使用可
+- [ ] 国士無双: 同上
+- [ ] 抜き直後の他家ポン不可
 
-- Svelte warnings reduced to 0.
-- Production build chunk warning is intentionally managed in `vite.config.ts`.
-- Browser/server debug logging is centralized behind debug/log gates.
-- Online E2E can be run with one command: `npm run e2e:online`.
-- Old docs were refreshed into this shorter TODO and `docs/progress.md`.
+### 間八萬
+- [ ] 厳密判定 [m7+m9 持ち + z5 swap で m8 確定の判定]、 現状簡略
 
-## Release Gate
+### ぽっち
+- [ ] 神ぽっち色判定 厳密化 [shan._pochiColor 公開 API 経由]
 
-Run these before release or deployment:
+### chip
+- [ ] 全 chip 加算箇所に label 付与 [春 / 一発 / 裏 / 赤 / 金 / 抜きドラ済、 残りも]
 
-- `npm.cmd run check`
-- `npm.cmd run build`
-- `npm.cmd test`
-- `npm.cmd run e2e:local`
-- `npm.cmd run e2e:online`
+### フィーバー
+- [ ] 待ち牌全消失で 1 人テンパイ流局 [ルール 5-2]
+- [ ] 7m 暗刻フィーバー対応確認
 
-For online E2E, use a Python interpreter with `server/requirements.txt` installed and set `PYTHON` if it is not on PATH.
+### ダブロン
+- [ ] 親アガリ含めば連荘 [動作確認要]
+- [ ] Q&A 3 「秋優先 → 金北優先」 順序
 
-## Maintenance Backlog
+## 中優先 [品質 / 検証]
 
-These are not current blockers, but are worth doing when the project has a cleanup window.
+### 牌数整合
+- [ ] 全 116 牌チェッカーで 116 ピッタリ確認
+  - v33_inventory_fuzz で 字牌 ±1 [z6/z7 主] と 華牌 ±1 [f1-f4] を allowed 通過
+  - 仮説: pickNonHua で 華 skip した時の _baopai 位置ズレ
 
-- Add `npm run e2e:online` to CI once the CI runner has Python server dependencies.
-- Add `npm run e2e:local` to CI for browser regression coverage that does not need the FastAPI server.
-- Revisit bundle splitting if the dice-box lazy chunks grow substantially beyond the current intentional size.
-- Keep `rg -n "console\\.(log|debug|warn|error)" src server tools` limited to logging wrappers, test code, and CLI plumbing.
-- Keep old rule/spec notes in focused docs instead of growing one large mixed TODO.
-- Periodically run the online E2E after touching room, auth, websocket, nextRound, nextMatch, or SaiKoro flows.
+### 動作確認
+- [ ] 春効果 [新ルール] = haru 枚数 × 抜き華総枚数 オール
+- [ ] 春金北 ×2、 春春金北 ×4
+- [ ] 連続ぽっち倍率 例 [青→赤→緑 = 8 倍 / 黄→緑→赤→青 = 16 倍]
+- [ ] 副露時 chip 半減
+- [ ] 牌譜 JSON ロード時の state 復元
+
+## 低優先 [構造改修]
+
+### コード分割
+- [ ] game3.ts 分割 [hule.ts / yaku.ts / chip.ts / state.ts]
+- [ ] App.svelte panel 別 component 化
+- [ ] shan3 の _gold / _pochiColor 撤去
+
+## 除外 [リョー指示]
+
+- 罰則 [チョンボ / ぽっちこぼし]
+- かんぱーわん [間八萬 ✓ 実装済]
+- ぽっちこぼし

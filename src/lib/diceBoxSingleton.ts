@@ -9,8 +9,6 @@
 //   SaiKoroModal unmount: detachCanvas() で hidden host に return
 //   roll: rollDice() Promise で 2d6 結果 取得
 
-import { derror, dlog } from './helpers';
-
 let diceBox: any = null;
 let diceBoxPromise: Promise<any> | null = null;
 let onRollResolve: ((vals: [number, number] | null) => void) | null = null;
@@ -38,10 +36,10 @@ export function initDiceBox(hostSelector: string): Promise<any> {
       // @ts-ignore - no types shipped
       const mod = await import('@3d-dice/dice-box');
       const DiceBox = (mod as any).default ?? mod;
-      dlog('[dice-singleton] init on', hostSelector);
+      if ((import.meta as any).env?.DEV) console.log('[dice-singleton] init on', hostSelector);
       diceBox = new DiceBox(hostSelector, DICE_BOX_CONFIG);
       diceBox.onRollComplete = (results: any[]) => {
-        dlog('[dice-singleton] roll complete', results);
+        if ((import.meta as any).env?.DEV) console.log('[dice-singleton] roll complete', results);
         let vals: [number, number] | null = null;
         try {
           const grp = (results ?? [])[0];
@@ -60,10 +58,11 @@ export function initDiceBox(hostSelector: string): Promise<any> {
         }
       };
       await diceBox.init();
-      dlog('[dice-singleton] init complete');
+      if ((import.meta as any).env?.DEV) console.log('[dice-singleton] init complete');
       return diceBox;
     } catch (e) {
-      derror('[dice-singleton] init failed', e);
+      // eslint-disable-next-line no-console
+      console.error('[dice-singleton] init failed', e);
       diceBoxPromise = null;
       throw e;
     }
