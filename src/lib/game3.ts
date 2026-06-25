@@ -295,8 +295,13 @@ export class Game3 {
       chipLedger: this.chipLedger,
       akiUsedCount: this.akiUsedCount,
       feverActive: this.feverActive,
+      goldHand: this.goldHand,
+      pochiHand: this.pochiHand,
+      huapai: this.huapai,
+      nukidora: this.nukidora,
+      nukidoraGold: this.nukidoraGold,
+      kinpeiTarget: this.kinpeiTarget,
       shan: this.shan,
-      // 2026-05-14 codex review fix: lizhibang / qianggangPending / events / chipBreakdown 追加
       state: this.state,
       game: this,
     };
