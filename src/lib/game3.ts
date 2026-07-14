@@ -36,6 +36,17 @@ import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotH
 import { applyFuyuChip as applyFuyuChipHelper, applyChipsOnHule as applyChipsOnHuleHelper, type HuleChipCtx } from './game3/huleChip';
 import { resolvePhysicalDiscardPai, restorePhysicalHandState, snapshotPhysicalHandState } from './game3/tileIdentity';
 import { evaluateWinPoints } from './game3/settlement';
+import {
+  createFirstTurnState,
+  hasAnyFirstTurnEligibility,
+  isFirstTurnTsumoEligible,
+  isRenhouEligible,
+  markFirstTurnCall,
+  markFirstTurnDiscard,
+  markFirstTurnDraw,
+  normalizeFirstTurnState,
+  type FirstTurnState,
+} from './game3/firstTurn';
 export { DEBUG_LOG, normalizePai, toCorePai, isGoldPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, countGoldInHand, countPochiInHand, isPositiveZ5, isNegativeZ5 };
 
 export interface Game3Init {
@@ -215,8 +226,31 @@ export class Game3 {
    *  zimo (通常) で false に戻す */
   lingshangActive: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false };
 
-  /** 配牌・第一打が終わってない state、 天和 / 地和 判定用 [diyizimo フラグ] */
-  diyizimo: boolean = true;
+  /** 席別の第一巡状態。天和・地和・人和を他家の打牌から独立して判定する。 */
+  firstTurnState: FirstTurnState = createFirstTurnState();
+
+  /** 旧牌譜・テスト互換。新規ロジックは firstTurnState と席別 predicate を使う。 */
+  get diyizimo(): boolean { return hasAnyFirstTurnEligibility(this.firstTurnState); }
+  set diyizimo(value: boolean) {
+    if (value) {
+      this.firstTurnState = createFirstTurnState();
+      return;
+    }
+    this.firstTurnState = createFirstTurnState();
+    this.firstTurnState.callOccurred = true;
+  }
+
+  restoreFirstTurnState(value: unknown): void {
+    this.firstTurnState = normalizeFirstTurnState(value);
+  }
+
+  isFirstTurnTsumoEligible(player: PlayerId): boolean {
+    return isFirstTurnTsumoEligible(this.firstTurnState, player);
+  }
+
+  isRenhouEligible(player: PlayerId): boolean {
+    return isRenhouEligible(this.firstTurnState, player, this.currentOya);
+  }
 
   /** 加槓直後で「他家ロン取れる」 window、 加槓 declare で true / 嶺上ツモ後 false */
   qianggangPending: boolean = false;
@@ -559,6 +593,7 @@ export class Game3 {
     }
     // 王牌 1 枚消費 [16→15→14→13→12 まで]
     this.shan.consumeWangpai();
+    markFirstTurnCall(this.firstTurnState);
     return replacement;
   }
   /** 北抜き直後 [次 dapai までポン抑制]、 dapai で false に reset */
@@ -671,6 +706,7 @@ export class Game3 {
 
   /** 配牌 [13 枚 × 3 人]、 同時に金牌 / 華牌の player 別カウント */
   qipai(): void {
+    this.firstTurnState = createFirstTurnState();
     const tiles: Record<PlayerId, Pai[]> = { 0: [], 1: [], 2: [] };
     this.goldHand = {
       0: { p: 0, s: 0, z: 0 },
@@ -811,6 +847,7 @@ export class Game3 {
       gold: this.shan.lastZimoGold && (pai === 'gp' || pai === 'gs' || pai === 'gN'),
     };
     this.events.push({ type: 'zimo', player, pai });
+    markFirstTurnDraw(this.firstTurnState, player);
     dlog('[zimo]', { player, pai, rawPai, pochi: rawColor, gold: this.shan.lastZimoGold, drawnHua: [...this.shan.lastDrawnHuapai], huapaiAfter: [...this.huapai[player]] });
     return pai;
   }
@@ -1003,7 +1040,7 @@ export class Game3 {
     // 嶺上消失: 普通の dapai 後は嶺上開花対象外
     this.lingshangActive[player] = false;
     // 第一打終了 [天和 / 地和 失効]
-    this.diyizimo = false;
+    markFirstTurnDiscard(this.firstTurnState, player);
     // 次の lunban に [3 麻なので mod 3]
     this.state.lunban = ((this.state.lunban + 1) % 3) as Lunban;
   }
@@ -1434,7 +1471,7 @@ export class Game3 {
     this.state.lunban = (((this.currentOya - player) % 3 + 3) % 3) as Lunban;
     // 副露介入で他家の一発消失、 自分も一発消失 [副露ありはリーチ後の対象外]
     this.yifaActive = { 0: false, 1: false, 2: false };
-    this.diyizimo = false;
+    markFirstTurnCall(this.firstTurnState);
     // [2026-05-15 fix bug B] 副露 [鳴き] した player は シュバ倍率を強制 解除。
     // 仕様: シュバ発動条件 = ゾロ目連続 → リーチ + シュバ宣言、 副露とは両立しない。
     // 通常 path では declareLizhi 経由でしか shuvariActive=true にならないが、
@@ -1627,7 +1664,7 @@ export class Game3 {
     const isHaidi = this.shan.paishu === 0 ? (ronpai ? 2 : 1) : 0;
     // 天和 / 地和: 配牌直後 [diyizimo true]、 ツモアガリで親=天和 / 子=地和
     let isTianhu = 0;
-    if (this.diyizimo && !ronpai) {
+    if (this.isFirstTurnTsumoEligible(player) && !ronpai) {
       // 2026-05-14 codex review fix: 現親判定で 子アガリ後の天和/地和 を正しく判定
       isTianhu = (player === this.currentOya) ? 1 : 2;
     }
@@ -2517,7 +2554,7 @@ export class Game3 {
 
     // 天和 / 地和 [diyizimo + ツモ] = ダブル役満
     // 2026-05-14 codex review fix: 現親判定で 子アガリ後局の天和/地和 ダブル昇格を正しく
-    if (this.diyizimo && !isRon) {
+    if (this.isFirstTurnTsumoEligible(player) && !isRon) {
       const isOya = player === this.currentOya;
       const tianHuName = isOya ? '天和' : '地和';
       if (result.hupai.some((h: any) => h.name === tianHuName)) {
@@ -2531,7 +2568,7 @@ export class Game3 {
 
     // 人和 [子配牌 + 第一ツモ前ロン] = ダブル役満
     // 2026-05-14 codex review fix: 現親判定で 子アガリ後の人和 判定が正しく
-    if (this.diyizimo && isRon && player !== this.currentOya) {
+    if (this.isRenhouEligible(player) && isRon) {
       result.hupai.push({ name: '人和 [ダブル役満]', fanshu: '**' });
       result.damanguan = (result.damanguan ?? 0) + 2;
       result.fanshu = undefined;
@@ -3003,7 +3040,7 @@ export class Game3 {
     this.lingshangActive = { 0: false, 1: false, 2: false };
     this.qianggangPending = false;
     this.snapshotLocked = false;
-    this.diyizimo = true;
+    this.firstTurnState = createFirstTurnState();
     this.goldHand = {
       0: { p: 0, s: 0, z: 0 },
       1: { p: 0, s: 0, z: 0 },
@@ -3161,7 +3198,7 @@ export class Game3 {
       // 副露 と 同様 ゾロ目連続 シュバ宣言 と両立しない。
       this.shuvariActive[player] = false;
     }
-    this.diyizimo = false;
+    if (replacement !== null) markFirstTurnCall(this.firstTurnState);
     return replacement;
   }
 
@@ -3325,7 +3362,7 @@ export class Game3 {
       }
       this.events.push({ type: 'gang', player, mianzi });
     }
-    this.diyizimo = false;
+    if (replacement !== null) markFirstTurnCall(this.firstTurnState);
     return replacement;
   }
 

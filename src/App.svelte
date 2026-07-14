@@ -525,6 +525,7 @@
       lingshangActive: { ...g.lingshangActive },
       qianggangPending: g.qianggangPending,
       diyizimo: g.diyizimo,
+      firstTurnState: g.firstTurnState,
       pochiPaymentMode: { ...g.pochiPaymentMode },
       fuyuConsumed: { ...g.fuyuConsumed },
       fuyuSkip: { ...g.fuyuSkip },

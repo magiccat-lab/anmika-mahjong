@@ -75,9 +75,14 @@ describe('Game3 diyizimo lifecycle', () => {
   it('1 回目 dapai で diyizimo = false [天和 失効]', () => {
     const g = new Game3();
     g.qipai();
+    const oya = g.currentOya;
     const z = g.zimo();
     g.dapai(z!);
-    expect(g.diyizimo).toBe(false);
+    expect(g.isFirstTurnTsumoEligible(oya)).toBe(false);
+    expect(g.diyizimo).toBe(true); // 未ツモの子は人和資格を保持
+    for (const p of [0, 1, 2] as PlayerId[]) {
+      if (p !== oya) expect(g.isRenhouEligible(p)).toBe(true);
+    }
   });
 
   it('副露介入 [declarePon 経由] で diyizimo + 全 yifa 強制 reset', () => {

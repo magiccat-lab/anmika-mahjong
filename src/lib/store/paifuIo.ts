@@ -156,7 +156,8 @@ export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, b
   // 加槓 window が閉じた後の stale flag とみなして落とす。
   const anyLingshangActive = Object.values(ng.lingshangActive).some(Boolean);
   ng.qianggangPending = (paifu.qianggangPending ?? false) && !anyLingshangActive;
-  ng.diyizimo = paifu.diyizimo ?? false;
+  if (paifu.firstTurnState) ng.restoreFirstTurnState(paifu.firstTurnState);
+  else ng.diyizimo = paifu.diyizimo ?? false;
   ng.fuyuConsumed = paifu.fuyuConsumed ?? { 0: false, 1: false, 2: false };
   ng.fuyuSkip = paifu.fuyuSkip ?? { 0: false, 1: false, 2: false };
   ng.lastZimoInfo = paifu.lastZimoInfo ?? { player: null, pai: null, pochi: null, gold: false };
