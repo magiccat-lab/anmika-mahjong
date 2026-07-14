@@ -2378,20 +2378,48 @@ export class Game3 {
     // サイコロチャンス記録 [リョー指示: 画面実装は後回し、 記録のみ]
     result.saiKoroChances = result.saiKoroChances ?? [];
     const saiMode: 'tsumo' | 'ron' = isRon ? 'ron' : 'tsumo';
-    const addSai = (name: string, baseChip: 70 | 140 | 35 | 100 | 300, shuvariApplicable: boolean, count: number = 1, plusMinus: '+' | '-' = '+') => {
-      result.saiKoroChances.push({ name, baseChip, shuvariApplicable, count, plusMinus, mode: saiMode });
+    const registeredSaiAwardKeys = new Set<string>(
+      result.saiKoroChances
+        .map((chance: any) => chance?.awardKey)
+        .filter((key: unknown): key is string => typeof key === 'string'),
+    );
+    const addSai = (awardKey: string, name: string, baseChip: 70 | 140 | 35 | 100 | 300, shuvariApplicable: boolean, count: number = 1, plusMinus: '+' | '-' = '+') => {
+      if (registeredSaiAwardKeys.has(awardKey)) return;
+      registeredSaiAwardKeys.add(awardKey);
+      result.saiKoroChances.push({ awardKey, name, baseChip, shuvariApplicable, count, plusMinus, mode: saiMode });
+    };
+    const YAKUMAN_SAI_BASE = {
+      カラス: 140,
+      八連荘: 140,
+      天和: 140,
+      地和: 140,
+      人和: 140,
+      その他本役満: 70,
+    } as const;
+    // 裁定待ち #10: 天和系がダブル役満でも、現時点の出目当て回数は1回。
+    const TENHOU_FAMILY_SAI_COUNT = 1;
+    const dedicatedYakumanAwards = [
+      { role: 'カラス', awardKey: 'yakuman:カラス', name: 'カラス [出目当て効果 ×2]', baseChip: YAKUMAN_SAI_BASE.カラス, shuvariApplicable: true, count: 1, yakumanUnits: 1 },
+      { role: '八連荘', awardKey: 'yakuman:八連荘', name: '八連荘', baseChip: YAKUMAN_SAI_BASE.八連荘, shuvariApplicable: true, count: 1, yakumanUnits: 1 },
+      { role: '天和', awardKey: 'yakuman:天和', name: '天和', baseChip: YAKUMAN_SAI_BASE.天和, shuvariApplicable: false, count: TENHOU_FAMILY_SAI_COUNT, yakumanUnits: 2 },
+      { role: '地和', awardKey: 'yakuman:地和', name: '地和', baseChip: YAKUMAN_SAI_BASE.地和, shuvariApplicable: false, count: TENHOU_FAMILY_SAI_COUNT, yakumanUnits: 2 },
+      { role: '人和', awardKey: 'yakuman:人和', name: '人和', baseChip: YAKUMAN_SAI_BASE.人和, shuvariApplicable: false, count: TENHOU_FAMILY_SAI_COUNT, yakumanUnits: 2 },
+    ] as const;
+    const hasAwardRole = (role: string): boolean => result.hupai.some(
+      (h: any) => typeof h.name === 'string' && h.name.startsWith(role),
+    );
+    const registerDedicatedYakuman = (role: string): void => {
+      const award = dedicatedYakumanAwards.find((candidate) => candidate.role === role);
+      if (!award || !hasAwardRole(award.role)) return;
+      addSai(award.awardKey, award.name, award.baseChip, award.shuvariApplicable, award.count);
     };
     // R9 P1 #3 fix: 三連刻 / 本役満アガリ saiKoro 抽出を 全 post-process の 最後 に移動
     // [元: ここ 1867-1884、 移動先: 関数末尾 「本役満 / 三連刻 サイコロ抽出」]
     // 間八萬ツモ [本役満] = 既に damanguan>=1 で記録済
     // リーのみ [カラス] = 出目当て効果 2 倍 [サイコロチャンス記録 + flag]
-    if (result.hupai.some((h: any) => h.name?.startsWith('カラス'))) {
-      addSai('カラス [出目当て効果 ×2]', 140, true);
-    }
+    registerDedicatedYakuman('カラス');
     // 八連荘 [親アガリ 8 本場+] = 140 chip サイコロ
-    if (result.hupai.some((h: any) => h.name?.startsWith('八連荘'))) {
-      addSai('八連荘', 140, true);
-    }
+    registerDedicatedYakuman('八連荘');
     // 白ぽっち即ツモの祝儀 0 枚サイコロは applyHule で chip 集計後に判定する。
     // オールスター: 赤 5p + 赤 5s + 金 5p + 金 5s 揃い [bingpai[s][0] には金分も含まれる、
     // 純粋な赤は bingpai[s][0] - goldHand[s] で算出]
@@ -2411,7 +2439,7 @@ export class Game3 {
     const hasGold5p = (goldP + ronGoldP) >= 1;
     const hasGold5s = (goldS + ronGoldS) >= 1;
     if (hasRed5p && hasRed5s && hasGold5p && hasGold5s) {
-      addSai('オールスター', 70, true);
+      addSai('オールスター', 'オールスター', 70, true);
       result.hupai.push({ name: 'オールスター [赤金 4 枚揃い]', fanshu: 0 });
     }
 
@@ -2625,25 +2653,25 @@ export class Game3 {
       this.applyChipOall(player, 100, { bypassShuvari: true, bypassPochi: true, bypassFever: true });
       result.hupai.push({ name: '八華 [+100オール]', fanshu: 0 });
       // サイコロチャンス: 八華 = 出目当て 2 回 [副露時 base 35 / 面前 70]
-      addSai('八華', hasFulou ? 35 : 70, true, 2);
+      addSai('八華', '八華', hasFulou ? 35 : 70, true, 2);
     } else if (hasAll4Hua && nukiTotal >= 4) {
       this.applyChipOall(player, 100, { bypassShuvari: true, bypassPochi: true, bypassFever: true });
       result.hupai.push({ name: '四華四北 [+100オール]', fanshu: 0 });
       // サイコロチャンス: 四華四北 = 出目当て 2 回、 シュバ非適用
-      addSai('四華四北', 70, false, 2);
+      addSai('四華四北', '四華四北', 70, false, 2);
     } else if (hasAll4Hua) {
       // 四華 [単独] サイコロチャンス [副露時 35 / 面前 70]
-      addSai('四華', hasFulou ? 35 : 70, true);
+      addSai('四華', '四華', hasFulou ? 35 : 70, true);
     }
     if (huaCount >= 8 && nukiTotal >= 4) {
       this.applyChipOall(player, 200, { bypassShuvari: true, bypassPochi: true, bypassFever: true });
       result.hupai.push({ name: '八華四北 [+300オール]', fanshu: 0 });
       // サイコロチャンス: 八華四北 = 出目当て 3 回、 シュバ非適用
-      addSai('八華四北', 70, false, 3);
+      addSai('八華四北', '八華四北', 70, false, 3);
     } else if (nukiTotal >= 4 && !hasAll4Hua) {
       // [2026-05-21 リョー指示] 四北 単独 サイコロチャンス [八華四北 / 四華四北 と排他]
       // base 70 シュバ適用 出目当て 1 回
-      addSai('四北', 70, true);
+      addSai('四北', '四北', 70, true);
     }
 
     // 白暗カンアガリ サイコロチャンス [面前 / 副露問わず、 z5 暗槓を含むアガリ]
@@ -2660,21 +2688,29 @@ export class Game3 {
       return !openZ5Kans.has(raw);
     });
     if (hasZ5Ankan) {
-      addSai('白暗カンアガリ', 70, true);
+      addSai('白暗カンアガリ', '白暗カンアガリ', 70, true);
     }
     // R9 P1 #3 fix: 全 post-process 完了後に 「本役満 / 三連刻 / 三色同刻」 のサイコロ抽出を実行、
     // 旧 code は 三連刻 / 四連刻 / 萬子混一色 検出 前 に走らせてて これら役の本役満 saiKoro 発火しなかった
     // R10 P0 #4 fix: 三連刻 / 三色同刻 は post-process で suffix 付き [例: '三連刻 [m1-3]'、
     // '三色同刻 [アンミカ 4翻]'] に改名されるため、 完全一致では 拾えない。 includes で判定
     if (isMenzen) {
-      if (result.hupai.some((h: any) => typeof h.name === 'string' && h.name.startsWith('三連刻'))) addSai('三連刻', 70, true);
-      if (result.hupai.some((h: any) => typeof h.name === 'string' && h.name.startsWith('三色同刻'))) addSai('三色同刻', 70, true);
+      if (result.hupai.some((h: any) => typeof h.name === 'string' && h.name.startsWith('三連刻'))) addSai('三連刻', '三連刻', 70, true);
+      if (result.hupai.some((h: any) => typeof h.name === 'string' && h.name.startsWith('三色同刻'))) addSai('三色同刻', '三色同刻', 70, true);
     }
     const hasYakumanMarker = (result.hupai ?? []).some((h: any) => h.fanshu === '*' || h.fanshu === '**');
     if ((result.damanguan ?? 0) >= 1 || hasYakumanMarker) {
-      const dmg = result.damanguan ?? (hasYakumanMarker ? 1 : 0);
-      const count = Math.max(1, dmg);
-      addSai('本役満アガリ', 70, false, count);
+      // 天和系は後段で役名が確定するため、ここで全専用役を再走査する。
+      // 先に登録済みのカラス・八連荘は awardKey で no-op になる。
+      for (const award of dedicatedYakumanAwards) registerDedicatedYakuman(award.role);
+      const dedicatedYakumanUnits = dedicatedYakumanAwards
+        .filter((award) => hasAwardRole(award.role))
+        .reduce((sum, award) => sum + award.yakumanUnits, 0);
+      const totalYakumanUnits = Math.max(hasYakumanMarker ? 1 : 0, result.damanguan ?? 0);
+      const genericYakumanCount = Math.max(0, totalYakumanUnits - dedicatedYakumanUnits);
+      if (genericYakumanCount > 0) {
+        addSai('yakuman:その他本役満', '本役満アガリ', YAKUMAN_SAI_BASE.その他本役満, false, genericYakumanCount);
+      }
     }
   }
 
