@@ -54,6 +54,41 @@ describe('server RoomAuthority', () => {
     expect(reason).toContain('round is not ended');
   });
 
+  it('rejects host nextRound while the round is still live', () => {
+    const a = authority();
+    const before = { ...a.game.state };
+    const reason = a.validateAndApply(a.currentPlayer(), {
+      type: 'nextRound',
+      from_role: 'host',
+      preShuffledPool: pool(),
+    }, members);
+
+    expect(reason).toContain('round is not ended');
+    expect(a.game.state).toEqual(before);
+  });
+
+  it('acknowledges a duplicate nextRound without advancing a second time', () => {
+    const a = authority();
+    const winner = a.currentPlayer();
+    vi.spyOn(a.game, 'canTsumo').mockReturnValue(true);
+    expect(a.validateAndApply(winner, { type: 'tsumo' }, members)).toBeNull();
+
+    const action = { type: 'nextRound', from_role: 'host', preShuffledPool: pool() };
+    expect(a.validateAndApply(winner, action, members)).toBeNull();
+    const afterFirst = {
+      changbang: a.game.state.changbang,
+      jushu: a.game.state.jushu,
+      benbang: a.game.state.benbang,
+    };
+
+    expect(a.validateAndApply(winner, { ...action, preShuffledPool: pool() }, members)).toBeNull();
+    expect({
+      changbang: a.game.state.changbang,
+      jushu: a.game.state.jushu,
+      benbang: a.game.state.benbang,
+    }).toEqual(afterFirst);
+  });
+
   it.each(['rollSaiKoroDice', 'selectSaiKoroCombo', 'advanceSaiKoro'])(
     'rejects live-round %s even for the current player',
     (type) => {

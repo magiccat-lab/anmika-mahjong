@@ -58,6 +58,8 @@ export class RoomAuthority {
   pendingQianggang: PendingQianggang | null = null;
   roundEnded = false;
   lastWinner: PlayerId | null = null;
+  /** commandId 導入前のWSA-A7暫定冪等窓。次局開始後、最初の非nextRound操作まで有効。 */
+  private duplicateNextRoundAckOpen = false;
 
   constructor(init: RoomAuthorityInit) {
     this.game = new Game3({
@@ -85,6 +87,7 @@ export class RoomAuthority {
     if (!action || typeof action !== 'object' || typeof action.type !== 'string') {
       return 'missing action.type';
     }
+    if (action.type !== 'nextRound') this.duplicateNextRoundAckOpen = false;
 
     try {
       switch (action.type) {
@@ -393,12 +396,14 @@ export class RoomAuthority {
     if (!Array.isArray(action.preShuffledPool) || action.preShuffledPool.length === 0) {
       return 'nextRound: missing server preShuffledPool';
     }
-    if (!this.roundEnded && action.from_role !== 'host') {
+    if (!this.roundEnded) {
+      if (this.duplicateNextRoundAckOpen) return null;
       return 'nextRound: round is not ended';
     }
-    const winner = this.roundEnded ? this.lastWinner : null;
+    const winner = this.lastWinner;
     this.game.nextRound({ winner, preShuffledPool: action.preShuffledPool as Pai[] });
     this.startKyoku();
+    this.duplicateNextRoundAckOpen = true;
     return null;
   }
 
