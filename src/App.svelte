@@ -29,6 +29,7 @@
   import { CUTIN_DURATION_MS, game, type StampId } from './lib/store';
   import type { PlayerId } from './lib/types';
   import { parseFulouList, fulouFlatTiles } from './lib/fulouDisplay';
+  import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
 
   // スタンプ pallet 開閉 [自家「💬」 button 押下時 true]
   let stampPalletOpen = false;
@@ -1216,6 +1217,41 @@
 
   // ツモ切り auto モード [リョー指示 2026-05-12 checkbox 化]
   let autoTsumoKiri = false;
+  function readAutoTsumokiriToken(): AutoTsumokiriToken | null {
+    const snap = get(game);
+    const player = snap.game.lunbanToPlayerId(snap.game.state.lunban);
+    const phaseReady = viewMode === 'single'
+      && !onlineGameStarted
+      && !snap.roundEnded
+      && !snap.awaitingRonDecision
+      && !snap.awaitingFulou
+      && !snap.pendingFuyu
+      && !snap.pendingKinpei
+      && !snap.pendingSaiKoro
+      && !snap.pendingFeverContinue
+      && !snap.lizhiPending
+      && player === selfPlayer
+      && !!snap.lastZimo
+      && !snap.game.canTsumo(player);
+    const enabled = autoTsumoKiri || snap.game.lizhi.has(player);
+    if (!phaseReady || !enabled) return null;
+    const stateNow = snap.game.state;
+    const revision = [
+      stateNow.changbang,
+      stateNow.jushu,
+      stateNow.benbang,
+      stateNow.lunban,
+      snap.game.events?.length ?? 0,
+      snap.lastZimo,
+    ].join(':');
+    return { player, revision };
+  }
+  const autoTsumokiriScheduler = createAutoTsumokiriScheduler({
+    delayMs: 600,
+    readCurrent: readAutoTsumokiriToken,
+    fire: (expectedPlayer) => game.tsumokiri(expectedPlayer),
+  });
+  onDestroy(() => autoTsumokiriScheduler.cancel());
   // 次の試合へ時 chip リセット option [リョー指示、 default 持越し]
   let resetChipOnNextMatch = false;
   let __matchPostInflight = false;
@@ -1469,29 +1505,19 @@
   }
   $: if (!$game.roundEnded) cpuAutoAdvanceFired = false;
 
-  // 自動ツモ切り [自家 番 + zimo あり + 局進行中]
-  // 2026-05-14 codex review #3 fix: !onlineGameStarted 明示 + currentPlayer === selfPlayer
-  // [hardcoded 0 を 廃止、 online は dora row checkbox 非表示で更に二重防御]
-  $: if (viewMode === 'single' && !onlineGameStarted && autoTsumoKiri && !$game.roundEnded
-        && !$game.awaitingRonDecision && !$game.awaitingFulou
-        && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
-        && !$game.lizhiPending
-        && $game.game.lunbanToPlayerId($game.game.state.lunban) === selfPlayer
-        && $game.lastZimo
-        && !canTsumo) {
-    setTimeout(() => game.tsumokiri(), 600);
-  }
-  // [2026-05-21] リーチ済 player は autoTsumoKiri checkbox に関わらず 自動ツモ切り強制
-  // (リーチ後の打牌制限ルール、 ツモ可なら停止して ツモボタン待ち)
-  $: if (viewMode === 'single' && !onlineGameStarted && !$game.roundEnded
-        && !$game.awaitingRonDecision && !$game.awaitingFulou
-        && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
-        && !$game.lizhiPending
-        && $game.game.lunbanToPlayerId($game.game.state.lunban) === selfPlayer
-        && $game.game.lizhi.has(selfPlayer)
-        && $game.lastZimo
-        && !canTsumo) {
-    setTimeout(() => game.tsumokiri(), 600);
+  // WSA-A8: checkbox 自動とリーチ強制を同じキャンセル可能 scheduler に統合。
+  // 発火時にも player・phase・局面 revision を readAutoTsumokiriToken で再検証する。
+  $: {
+    // 依存を明示し、Svelte が phase 変化ごとに予約を更新できるようにする。
+    void viewMode; void onlineGameStarted; void autoTsumoKiri; void selfPlayer;
+    void state.lunban; void state.jushu; void state.changbang; void state.benbang;
+    void $game.roundEnded; void $game.awaitingRonDecision; void $game.awaitingFulou;
+    void $game.pendingFuyu; void $game.pendingKinpei; void $game.pendingSaiKoro;
+    void $game.pendingFeverContinue; void $game.lizhiPending; void $game.lastZimo;
+    void $game.game.events.length; void canTsumo;
+    const token = readAutoTsumokiriToken();
+    if (token) autoTsumokiriScheduler.schedule(token);
+    else autoTsumokiriScheduler.cancel();
   }
 </script>
 

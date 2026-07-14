@@ -1800,6 +1800,9 @@ function createGameStore() {
       if (!checkOnlineGate({ type: 'tsumokiri' }, 'currentPlayer')) return;
       if (sendOnlineAction({ type: 'tsumokiri' })) return;
       update((s) => {
+        if (s.roundEnded || s.awaitingRonDecision || s.awaitingFulou
+            || s.pendingFuyu || s.pendingKinpei || s.pendingSaiKoro
+            || s.pendingFeverContinue || (s.lizhiPending ?? null) !== null) return { ...s };
         if (!s.lastZimo) return { ...s };
         const player = s.game.lunbanToPlayerId(s.game.state.lunban);
         if (expectedPlayer !== undefined && player !== expectedPlayer) return { ...s };
