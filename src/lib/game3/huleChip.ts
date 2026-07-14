@@ -12,6 +12,7 @@ import { dlog } from '../helpers';
 import type { PlayerId } from './chip';
 import { hasGoldKita as hasGoldKitaTile, type GoldHand } from './gold';
 import type { PochiHand } from './pochi';
+import { claimTileIdentity } from './claimTile';
 
 export interface HuleChipCtx {
   shoupai: Map<PlayerId, any>;
@@ -266,18 +267,11 @@ export function applyChipsOnHule(
 ): void {
   // 祝儀 panel 表示用: shuvari 使用状況を result に記録 [リョー指示 2026-05-12]
   result.shuvariUsedThisRound = !!ctx.shuvariActive?.[winner];
-  // ロン牌が金 [p0/s0] だった場合の補正 [リョー指示 2026-05-12]:
-  //   ロン牌は winner._bingpai に追加されてるが goldHand には記録されてないため、
-  //   discardLog[loser] の最後の entry から gold marker を取得して 1 枚分加算する
-  let ronGoldP = 0;
-  let ronGoldS = 0;
-  if (loser !== null && ctx.discardLog) {
-    const lastEntry = ctx.discardLog[loser]?.at(-1);
-    if (lastEntry?.gold) {
-      if (lastEntry.pai === 'p0') ronGoldP = 1;
-      else if (lastEntry.pai === 's0') ronGoldS = 1;
-    }
-  }
+  // The result carries the physical claim tile. River display metadata is not
+  // authoritative and may be absent after reconnect or snapshot restoration.
+  const claim = loser !== null ? claimTileIdentity(ctx.ronpai) : claimTileIdentity(null);
+  const ronGoldP = claim.goldSuit === 'p' ? 1 : 0;
+  const ronGoldS = claim.goldSuit === 's' ? 1 : 0;
   // 2026-05-14 user 報告 fix: goldHand は cumulative で discard / 副露 で漏れる case あり、
   // hule 時に 実 hand + fulou の '0' marker 数 で cap、 累積 ズレた金 5 chip 過剰計上を防ぐ
   const sp = ctx.shoupai.get(winner);
@@ -309,6 +303,8 @@ export function applyChipsOnHule(
       if (ms.includes('0')) redCount += (ms.match(/0/g)?.length ?? 0);
     }
   }
+  if (claim.core === 'p0') redCount += 1;
+  if (claim.core === 's0') redCount += 1;
   redCount = Math.max(0, redCount - winnerGoldCount);
 
   const payByMode = (n: number, label?: string) => {

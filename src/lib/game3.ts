@@ -47,6 +47,7 @@ import {
   normalizeFirstTurnState,
   type FirstTurnState,
 } from './game3/firstTurn';
+import { claimTileIdentity } from './game3/claimTile';
 export { DEBUG_LOG, normalizePai, toCorePai, isGoldPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, countGoldInHand, countPochiInHand, isPositiveZ5, isNegativeZ5 };
 
 export interface Game3Init {
@@ -1557,8 +1558,9 @@ export class Game3 {
       //  - 自家河に z5 / m8 があってもフリテン化しない [リョー指示]
       const isKanpa = paiIsZ5 && this.isKanpaman(player, 'z5');
       if (isKanpa && fromPlayer !== null) {
-        const discardEntry = this.discardLog[fromPlayer]?.at(-1);
-        if (discardEntry?.pochi === 'red' || discardEntry?.pochi === 'yellow') {
+        const physicalColor = claimTileIdentity(pai as string).pochiColor
+          ?? this.discardLog[fromPlayer]?.at(-1)?.pochi;
+        if (physicalColor === 'red' || physicalColor === 'yellow') {
           return false;
         }
       }
@@ -1655,7 +1657,7 @@ export class Game3 {
       // 反時計 [2026-05-13 fix]: from が player の上家=diff 1、下家=diff 2
       const diff = (fromPlayer - player + 3) % 3;
       const dir = diff === 1 ? '+' : (diff === 2 ? '-' : '');
-      if (dir) ronpaiWithDir = ronpai.slice(0, 2) + dir;
+      if (dir) ronpaiWithDir = toCorePai(ronpai).slice(0, 2) + dir;
     }
     const isLizhi = this.lizhi.has(player) ? 1 : 0;
     const isYifa = this.yifaActive[player];
@@ -2233,7 +2235,7 @@ export class Game3 {
       // 三連刻 / 混一色 / 国士13面 で false positive / negative
       // canRon の動作: 手牌 z5 → swap tile [_bp.z[5]-=1, _bp[s][n]+=1]、 ロン牌は元 z5 のまま [_bp.z[5]+=1]
       // つまり swap tile +1、 z5 ±0 が正しい view
-      const ronView = (isRon && ronpaiOrig) ? ronpaiOrig : (isRon ? agariPai : null);
+      const ronView = (isRon && ronpaiOrig) ? toCorePai(ronpaiOrig) : (isRon ? toCorePai(agariPai ?? '') : null);
       if (ronView && ronView.length >= 2) {
         const sCh = ronView[0];
         const nN = parseInt(ronView[1], 10);
@@ -2245,7 +2247,9 @@ export class Game3 {
     })();
 
     // 間八萬 [かんぱーまん]: m7/m9 持ち + アガリ牌 z5 [ぽっち経由 m8、 山に m8 はない]
-    if (this.isKanpaman(player, agariPai)) {
+    const claimIdentity = claimTileIdentity(isRon ? ronpaiOrig : null);
+    const kanpamanAgariPai = isRon && claimIdentity.core === 'z5' ? claimIdentity.raw : agariPai;
+    if (this.isKanpaman(player, kanpamanAgariPai)) {
       if (!isRon) {
         result.hupai.push({ name: '間八萬 [本役満ツモ]', fanshu: '*' });
         result.fanshu = undefined;
@@ -2435,16 +2439,11 @@ export class Game3 {
     // オールスター: 赤 5p + 赤 5s + 金 5p + 金 5s 揃い [bingpai[s][0] には金分も含まれる、
     // 純粋な赤は bingpai[s][0] - goldHand[s] で算出]
     // R9 P1 #1 fix: ロン時 ronpai が p0 / s0 [赤] や gp / gs [金] の場合 _bp 経由で 含む。
-    // ロン牌の金 / 赤 判定は discardLog[fromPlayer].at(-1) の gold / pochi で判別
+    // ロン牌の金 / 赤は result が保持する物理 claim tile から判別する。
     const goldP = this.goldHand[player].p ?? 0;
     const goldS = this.goldHand[player].s ?? 0;
-    // ロン牌が金 5p / 金 5s なら golds 加算 [自家 goldHand には入らない、 ロン時の祝儀 source]
-    let ronGoldP = 0, ronGoldS = 0;
-    if (isRon && fromPlayer !== null) {
-      const lastDiscard = this.discardLog[fromPlayer]?.at(-1);
-      if (lastDiscard?.gold && lastDiscard.pai === 'p0') ronGoldP = 1;
-      else if (lastDiscard?.gold && lastDiscard.pai === 's0') ronGoldS = 1;
-    }
+    const ronGoldP = isRon && claimIdentity.goldSuit === 'p' ? 1 : 0;
+    const ronGoldS = isRon && claimIdentity.goldSuit === 's' ? 1 : 0;
     const hasRed5p = ((_bp.p[0] ?? 0) - goldP - ronGoldP) >= 1;
     const hasRed5s = ((_bp.s[0] ?? 0) - goldS - ronGoldS) >= 1;
     const hasGold5p = (goldP + ronGoldP) >= 1;

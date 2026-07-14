@@ -16,20 +16,24 @@ export function isKanpaman(shoupai: any, agariPai: string | null): boolean {
   if ((shoupai._bingpai.m[9] ?? 0) < 1) return false;
   try {
     const spClone = shoupai.clone();
-    if ((spClone._bingpai.z[5] ?? 0) >= 1) {
+    const agariAlreadyInHand = spClone._zimo && toCorePai(spClone._zimo) === 'z5';
+    if (agariAlreadyInHand) {
+      // ツモ時は z5 がすでに手牌へ加算済みなので、その実牌だけを m8 に置換する。
       spClone._bingpai.z[5] -= 1;
-      spClone._bingpai.m[8] = (spClone._bingpai.m[8] ?? 0) + 1;
-      // [2026-05-21 fix] _zimo は z5b/r/g/y 等 raw colored pochi 可、 toCorePai 比較
-      if (spClone._zimo && toCorePai(spClone._zimo) === 'z5') spClone._zimo = 'm8';
-      const decompositions = Majiang.Util.hule_mianzi(spClone);
-      if (!decompositions || decompositions.length === 0) return false;
-      for (const d of decompositions) {
-        if (Array.isArray(d) && d.some((m: string) => m === 'm789' || m.startsWith('m789'))) {
-          return true;
-        }
-      }
-      return false;
     }
+    // ロン時の shoupai は和了牌を含まない13枚。手牌内の別の z5 は残したまま、
+    // 今回の物理ロン牌 z5 を m8 として1枚加える。
+    spClone._bingpai.m[8] = (spClone._bingpai.m[8] ?? 0) + 1;
+    spClone._zimo = 'm8';
+    const decompositions = Majiang.Util.hule_mianzi(spClone);
+    if (!decompositions || decompositions.length === 0) return false;
+    for (const d of decompositions) {
+      // hule_mianzi は和了牌位置を `m78_!9` のような記号付きで返す。
+      if (Array.isArray(d) && d.some((m: string) => m.replace(/[^m\d]/g, '') === 'm789')) {
+        return true;
+      }
+    }
+    return false;
   } catch { /* skip */ }
   return false;
 }

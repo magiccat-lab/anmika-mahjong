@@ -68,3 +68,18 @@ describe('isKanpaman [間八萬厳密判定]', () => {
     expect(isKanpaman(sp, 'z5')).toBe(false);
   });
 });
+
+describe('isKanpaman claim boundary', () => {
+  it('uses a green pochi ron tile as m8 without relying on a river entry', () => {
+    const sp = buildShoupai(['m7', 'm9', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 's4', 's5', 's6', 's2', 's2']);
+
+    expect(isKanpaman(sp, 'z5g-')).toBe(true);
+  });
+
+  it('replaces an already drawn z5 instead of adding the winning tile twice', () => {
+    const sp = buildShoupai(['m7', 'm9', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 's4', 's5', 's6', 's2', 's2']);
+    sp.zimo('z5');
+
+    expect(isKanpaman(sp, 'z5')).toBe(true);
+  });
+});

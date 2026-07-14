@@ -2150,11 +2150,12 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     return { ...s };
   }
   (s as any)._lastDapaiFailed = false;
-  s.lastDapai = { player, pai };
+  const committedPai = s.game.discardLog[player as PlayerId]?.at(-1)?.pai ?? pai;
+  s.lastDapai = { player, pai: committedPai };
   let ronCandidates = ([0, 1, 2] as const).filter(
-    (p) => p !== player && s.game.canRon(p, pai, player as any)
+    (p) => p !== player && s.game.canRon(p, committedPai, player as any)
   );
-  dlog('[discard] ronCands=', ronCandidates, 'tings=', ([0,1,2] as const).map(p => ({ p, ting: s.game.getTingpaiList(p as any), canR: s.game.canRon(p as any, pai, player as any), lizhi: s.game.lizhi.has(p as any), fever: s.game.feverActive[p as 0|1|2] })));
+  dlog('[discard] ronCands=', ronCandidates, 'tings=', ([0,1,2] as const).map(p => ({ p, ting: s.game.getTingpaiList(p as any), canR: s.game.canRon(p as any, committedPai, player as any), lizhi: s.game.lizhi.has(p as any), fever: s.game.feverActive[p as 0|1|2] })));
   // CPU が ron 候補なら自動ロン
   // ダブロン対応 [リョー指示]: 全 CPU ロン候補を連続処理、 親優先で lastWinner 設定
   // R3 P1 #6 fix: human ron 候補が同時存在する場合は CPU auto-ron を保留、
@@ -2173,7 +2174,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
         s.game.autoResolveKinpei(p as any);
       }
       // fromPlayer 渡し忘れで ronpaiWithDir null → hule が ロン認識せず役なし扱いになる bug fix
-      const result = s.game.hule(p as any, pai, player as any);
+      const result = s.game.hule(p as any, committedPai, player as any);
       if (result) {
         ronResults.push({ player: p, result });
       }
@@ -2221,9 +2222,9 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     if (p === player) continue;
     // フィーバー中は フィーバー player 以外 副露不可
     if (someoneFever && !s.game.feverActive[p]) continue;
-    const m = s.game.getPonCandidates(p, player as any, pai);
+    const m = s.game.getPonCandidates(p, player as any, committedPai);
     if (m.length > 0) ponCands.push({ player: p, mianzi: m });
-    const km = s.game.getDamingangCandidates(p, player as any, pai);
+    const km = s.game.getDamingangCandidates(p, player as any, committedPai);
     if (km.length > 0) kanCands.push({ player: p, mianzi: km });
   }
   // 抜き直後 ポン抑制 flag は ここまでで pon 候補 build 終了 → consume として clear
@@ -2236,15 +2237,16 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
   //   - 風牌 [z1-z3] は changfengZ または cand.player の zifengZ と一致時のみ pon
   //   - それ以外は見送り
   if (ronCandidates.length === 0) {
-    const isSanyuanpai = pai[0] === 'z' && (pai[1] === '5' || pai[1] === '6' || pai[1] === '7');
-    const isFengpai = pai[0] === 'z' && (pai[1] === '1' || pai[1] === '2' || pai[1] === '3');
-    const paiN = isFengpai ? parseInt(pai[1]) : -1;
+    const committedCore = toCorePai(committedPai);
+    const isSanyuanpai = committedCore[0] === 'z' && (committedCore[1] === '5' || committedCore[1] === '6' || committedCore[1] === '7');
+    const isFengpai = committedCore[0] === 'z' && (committedCore[1] === '1' || committedCore[1] === '2' || committedCore[1] === '3');
+    const paiN = isFengpai ? parseInt(committedCore[1]) : -1;
     const changfengZ = s.game.changfengZ;
     // ポン後 シャンテン推定 [簡易]: estimateXiangtingWithExtra で +1 zimo 相当 評価
     // [リョー指示 2026-05-21 自走 CPU 教育: ポン判定にシャンテン進化チェック追加]
     const ponAdvancesShanten = (p: 0|1|2): boolean => {
       try {
-        const { base, withExtra } = s.game.estimateXiangtingWithExtra(p, pai);
+        const { base, withExtra } = s.game.estimateXiangtingWithExtra(p, committedCore);
         return base <= 2 && withExtra < base;
       } catch { return false; }
     };
@@ -2261,7 +2263,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
         // フィーバーリーチ権利が消える [2026-05-21 リョー指摘 fix]。
         const sp = s.game.shoupai.get(cand.player as 0|1|2);
         const fulouCount = sp?._fulou?.length ?? 0;
-        const isSeven = (pai[0] === 'm' || pai[0] === 'p' || pai[0] === 's') && pai[1] === '7';
+        const isSeven = (committedCore[0] === 'm' || committedCore[0] === 'p' || committedCore[0] === 's') && committedCore[1] === '7';
         if (isSeven) {
           shouldPon = false;
         } else if (fulouCount >= 1 && ponAdvancesShanten(cand.player as 0|1|2)) {
