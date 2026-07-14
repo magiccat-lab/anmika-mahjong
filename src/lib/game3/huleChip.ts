@@ -433,9 +433,9 @@ export function applyChipsOnHule(
   if (isMenzen && result.hupai) {
     let menzenChip = 0;
     for (const h of result.hupai) {
-      if (h.name === '混一色' || h.name === '混一色（喰い下がり）') menzenChip = Math.max(menzenChip, 5);
-      if (h.name === '清一色' || h.name === '清一色（喰い下がり）') menzenChip = Math.max(menzenChip, 10);
-      if (h.name === '二盃口') menzenChip = Math.max(menzenChip, 15);
+      if (h.name === '混一色' || h.name === '混一色（喰い下がり）') menzenChip += 5;
+      if (h.name === '清一色' || h.name === '清一色（喰い下がり）') menzenChip += 10;
+      if (h.name === '二盃口') menzenChip += 15;
     }
     if (menzenChip > 0) {
       if (loser === null) {
