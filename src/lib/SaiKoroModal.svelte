@@ -16,7 +16,8 @@
   export let onRoll: (override?: [number, number]) => void;
   export let onAdvance: () => void;
 
-  import { onMount, onDestroy } from 'svelte';
+  import { onDestroy } from 'svelte';
+  import { createSaiKoroWatchdogs } from './saiKoroWatchdogs';
 
   $: chance = chances[currentIdx];
   $: nonZoroCount = rolls.filter((r) => !r.zoro).length;
@@ -36,11 +37,54 @@
   let diceStageEl: HTMLDivElement | null = null;
   let diceBox: any = null;
   let diceBoxReady = false;
-  let pendingResultCallback: ((override?: [number, number]) => void) | null = null;
+  let diceBoxInitializing = false;
+  let use2DFallback = false;
+  let destroyed = false;
+  let fallbackRollTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingResultCallback: (() => void) | null = null;
+
+  function stopDrumAudio() {
+    if (!drumAudio) return;
+    try { drumAudio.pause(); drumAudio.currentTime = 0; } catch (e) {}
+    drumAudio = null;
+  }
+
+  function completePendingRoll() {
+    const callback = pendingResultCallback;
+    pendingResultCallback = null;
+    rolling = false;
+    stopDrumAudio();
+    callback?.();
+  }
+
+  function activate2DFallback(reason: string) {
+    if (destroyed) return;
+    diceBoxReady = false;
+    use2DFallback = true;
+    try { diceBox?.clear?.(); } catch (e) {}
+    if ((import.meta as any).env?.DEV) console.warn('[dice-box] 2D fallback:', reason);
+  }
+
+  const watchdogs = createSaiKoroWatchdogs({
+    onInitTimeout: () => activate2DFallback('initialization timeout'),
+    onRollTimeout: () => {
+      activate2DFallback('roll completion timeout');
+      completePendingRoll();
+    },
+  });
+
+  function failActive3DRoll(reason: string, error?: unknown) {
+    if (!watchdogs.completeRoll()) return;
+    if (error) console.error('[dice-box] roll failed', error);
+    activate2DFallback(reason);
+    completePendingRoll();
+  }
 
   // modal 内 dice-box init + button enable 遅延 [リョー指示 2026-05-13 旧 path revert]
   async function tryInitDiceBox() {
-    if (diceBoxReady || !diceStageEl) return;
+    if (diceBoxReady || diceBoxInitializing || use2DFallback || destroyed || !diceStageEl) return;
+    diceBoxInitializing = true;
+    watchdogs.armInit();
     try {
       // @ts-ignore - no types shipped
       const mod = await import('@3d-dice/dice-box');
@@ -62,39 +106,39 @@
       });
       diceBox.onRollComplete = (results: any[]) => {
         if ((import.meta as any).env?.DEV) console.log('[dice-box] onRollComplete', results);
-        let override: [number, number] | undefined = undefined;
-        try {
-          const grp = (results ?? [])[0];
-          const rs = grp?.rolls ?? [];
-          const d1 = rs[0]?.value;
-          const d2 = rs[1]?.value;
-          if (typeof d1 === 'number' && typeof d2 === 'number'
-              && d1 >= 1 && d1 <= 6 && d2 >= 1 && d2 <= 6) {
-            override = [d1, d2];
-          }
-        } catch (e) {}
-        rolling = false;
-        if (pendingResultCallback) {
-          const cb = pendingResultCallback;
-          pendingResultCallback = null;
-          cb(override);
-        }
-        if (drumAudio) { try { drumAudio.pause(); drumAudio.currentTime = 0; } catch (e) {} drumAudio = null; }
+        // 出目は store/server が確定する。3D 物理結果は演出専用でロジックへ渡さない。
+        if (!watchdogs.completeRoll()) return;
+        completePendingRoll();
       };
       await diceBox.init();
       if ((import.meta as any).env?.DEV) console.log('[dice-box] init complete');
       // Babylon WebGL render loop が canvas 認識するまで 1000ms wait [1 投目 visible 確保]
       await new Promise((r) => setTimeout(r, 1000));
+      if (!watchdogs.completeInit() || destroyed || use2DFallback) {
+        try { diceBox?.clear?.(); } catch (e) {}
+        return;
+      }
       diceBoxReady = true;
       if ((import.meta as any).env?.DEV) console.log('[dice-box] ready [user 操作受付開始]');
     } catch (e) {
+      watchdogs.completeInit();
       // eslint-disable-next-line no-console
       console.error('[dice-box] init failed', e);
+      activate2DFallback('initialization failed');
+    } finally {
+      diceBoxInitializing = false;
     }
   }
   $: if (diceStageEl) tryInitDiceBox();
 
   onDestroy(() => {
+    destroyed = true;
+    watchdogs.cancel();
+    if (fallbackRollTimer !== null) clearTimeout(fallbackRollTimer);
+    fallbackRollTimer = null;
+    pendingResultCallback = null;
+    rolling = false;
+    stopDrumAudio();
     try { diceBox?.clear?.(); } catch (e) {}
   });
 
@@ -112,21 +156,22 @@
     rolling = true;
     drumAudio = playSE('/sounds/drum_roll.mp3', 0.55);
     if (diceBoxReady && diceBox) {
-      pendingResultCallback = (override) => onRoll(override);
+      pendingResultCallback = () => onRoll();
+      watchdogs.armRoll();
       try {
         diceBox.clear();
-        diceBox.roll('2d6');
+        const rollPromise = diceBox.roll('2d6');
+        if (rollPromise && typeof rollPromise.catch === 'function') {
+          rollPromise.catch((e: unknown) => failActive3DRoll('roll promise rejected', e));
+        }
       } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('[dice-box] roll failed', e);
-        rolling = false;
-        onRoll();
+        failActive3DRoll('roll threw', e);
       }
     } else {
-      setTimeout(() => {
-        if (drumAudio) { try { drumAudio.pause(); drumAudio.currentTime = 0; } catch (e) {} drumAudio = null; }
-        rolling = false;
-        onRoll();
+      pendingResultCallback = () => onRoll();
+      fallbackRollTimer = setTimeout(() => {
+        fallbackRollTimer = null;
+        completePendingRoll();
       }, 800);
     }
   }
@@ -150,13 +195,15 @@
           rolling = true;
           drumAudio = playSE('/sounds/drum_roll.mp3', 0.55);
           pendingResultCallback = () => { /* 物理結果は捨てる、 値は WS sync で確定済 */ };
+          watchdogs.armRoll();
           try {
             diceBox.clear();
-            diceBox.roll('2d6');
+            const rollPromise = diceBox.roll('2d6');
+            if (rollPromise && typeof rollPromise.catch === 'function') {
+              rollPromise.catch((e: unknown) => failActive3DRoll('spectator roll promise rejected', e));
+            }
           } catch (e) {
-            rolling = false;
-            pendingResultCallback = null;
-            if (drumAudio) { try { drumAudio.pause(); } catch (_) {} drumAudio = null; }
+            failActive3DRoll('spectator roll threw', e);
           }
         }
       }
@@ -192,8 +239,16 @@
         {/each}
       </div>
       {#if !finalized}
-        <div id="dicebox-stage" class="dicebox-stage" bind:this={diceStageEl}></div>
-        {#if !diceBoxReady}
+        <div id="dicebox-stage" class="dicebox-stage" bind:this={diceStageEl}>
+          {#if use2DFallback}
+            <div class="dice-2d" aria-label="2Dサイコロ表示">
+              <span>{displayD1}</span><span>{displayD2}</span>
+            </div>
+          {/if}
+        </div>
+        {#if use2DFallback}
+          <div class="dice-fallback-note">2D表示で続行します</div>
+        {:else if !diceBoxReady}
           <div class="dice-warming">⏳ サイコロ準備中…</div>
         {/if}
         <!-- 直近 roll 結果 [text fallback] -->
@@ -202,7 +257,7 @@
         {/if}
         <div class="info">残り {rollsLeft} 振り | 現 {hits} hit</div>
         <div class="actions">
-          <button class="roll-btn" on:click={handleRoll} disabled={rolling || !diceBoxReady || !canOperate}>{rolling ? '🎲 振っています…' : (!diceBoxReady ? '⏳ サイコロ準備中…' : (canOperate ? '🎲 サイコロを振る' : '🎲 上がり者の振り待ち…'))}</button>
+          <button class="roll-btn" on:click={handleRoll} disabled={rolling || (!diceBoxReady && !use2DFallback) || !canOperate}>{rolling ? '🎲 振っています…' : ((!diceBoxReady && !use2DFallback) ? '⏳ サイコロ準備中…' : (canOperate ? (use2DFallback ? '🎲 サイコロを振る [2D]' : '🎲 サイコロを振る') : '🎲 上がり者の振り待ち…'))}</button>
         </div>
       {:else}
         <div class="result">
@@ -260,6 +315,33 @@
     color: #d4af37;
     margin: 4px 0;
     font-style: italic;
+  }
+  .dice-2d {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    pointer-events: none;
+  }
+  .dice-2d span {
+    display: grid;
+    place-items: center;
+    width: 58px;
+    height: 58px;
+    border-radius: 10px;
+    background: #fff;
+    color: #111;
+    border: 3px solid #d4af37;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+    font: 700 28px/1 monospace;
+  }
+  .dice-fallback-note {
+    color: #d4af37;
+    font-size: 12px;
+    text-align: center;
+    margin: 4px 0;
   }
   :global(#dicebox-stage canvas),
   :global(.dicebox-stage canvas) {
