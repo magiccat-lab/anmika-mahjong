@@ -29,7 +29,9 @@ import {
   finishRonDecisionStage,
   replaceReactionCandidates,
   replaceSaiKoroChances,
+  settleRonResultsInKamichaOrder,
   settleAfterWin,
+  sortRonResultsByKamicha,
   type PendingFeverContinue,
   type PendingFuyu,
   type PendingKinpei,
@@ -697,7 +699,7 @@ function createGameStore() {
           return { ...s };
         }
         if (otherCands.length > 0) s.game.snapshotLocked = true;
-        s.game.applyHule(result, player as any, s.lastDapai.player as any);
+        result._anmikaRonSettlementDeferred = true;
         // R3 P1 #5 fix: 人間 他候補 への 自動ロン強制 を廃止、 CPU 候補のみ auto-ron。
         // human 候補は ron / pass の判断機会を持つべき。 ron 後も awaitingRonDecision を継続させ、
         // 他人間候補の ron / pass を待つ [ronPassedPlayers に既 pass 済が居る場合は除外]
@@ -710,7 +712,7 @@ function createGameStore() {
             if (hasGoldKita(s.game, p as PlayerId)) s.game.autoResolveKinpei(p as any);
             const r2 = s.game.hule(p as any, ld.pai, ld.player as any);
             if (r2) {
-              s.game.applyHule(r2, p as any, ld.player as any);
+              r2._anmikaRonSettlementDeferred = true;
               ronResults.push({ player: p, result: r2 });
             }
           } else {
@@ -720,16 +722,10 @@ function createGameStore() {
             }
           }
         }
-        // 2026-05-14 Round 2 codex fix P2 #11: 全 winner の saiKoroChances を統合して queue 化
-        // 旧: 最初の winner [player] のみ trigger、 もう一方の chances は失われる
-        // 新: 全 winner の chances を 順に append、 lastWinner の context で trigger [chances 順番保持]
-        // R13 P0 #3 緩和: ron / pass の pending modal reject を awaitingRonDecision 中除外したので
-        // inline trigger で OK [前 R13 fix で finalize 側に移動したが allResults 跨ぎで欠落する case あり、 戻す]
-        for (const rr of ronResults) {
-          s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
-          s = triggerSaiKoroIfAny(s, rr.result, rr.player);
-        }
-        const allRonResults = mergeRonResults(s.ronResults, ronResults);
+        let allRonResults = sortRonResultsByKamicha(
+          ld.player as PlayerId,
+          mergeRonResults(s.ronResults, ronResults),
+        );
         s.ronResults = allRonResults;
         const isFever = s.game.feverActive[player as 0|1|2];
         const feverNote = isFever ? '🔥 [フィーバー継続中、 次局へ進まず待ち継続]' : '';
@@ -759,11 +755,25 @@ function createGameStore() {
           // 全 human が pass / ron した後 finalize 時に 既存 pendingKinpei を踏襲する
           if (hasGoldKita(s.game, player as PlayerId) && !s.cpu[player as 0|1|2] && !isFeverPayAuto_ron && !s.pendingKinpei) {
             const otherWinners = allRonResults.filter(r => r.player !== player).map(r => r.player);
-            enterKinpeiStage(s, { winner: player, isRon: true, ronfrom: s.lastDapai!.player, otherWinners, humanOthers, cutinQueued: true });
+            enterKinpeiStage(s, { winner: player, isRon: true, ronfrom: s.lastDapai!.player, otherWinners, humanOthers, cutinQueued: false });
           }
           continueRonDecisionStage(s);
           s.message += ` [他 human 候補 p${humanOthers.join('/')} 判断待ち]`;
           return { ...s };
+        }
+        allRonResults = settleRonResultsInKamichaOrder(s.game, ld.player as PlayerId, allRonResults);
+        s.ronResults = allRonResults;
+        s.lastHuleResult = allRonResults[allRonResults.length - 1].result;
+        if (allRonResults.length > 1) {
+          s.message = `🎉🎉 ダブロン! ${formatRonResults(allRonResults)} ${feverNote}`;
+        } else {
+          s.message = `🎉 player ${player} ロン和了！ ${formatHuleResult(result)} ${feverNote}`;
+        }
+        for (const rr of allRonResults) {
+          if (rr.result?._anmikaRonEffectsQueued) continue;
+          s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
+          s = triggerSaiKoroIfAny(s, rr.result, rr.player);
+          rr.result._anmikaRonEffectsQueued = true;
         }
         s.game.snapshotLocked = false;
         finishRonDecisionStage(s);
@@ -1328,12 +1338,15 @@ function createGameStore() {
               }
               const result = s.game.hule(p as any, s.lastDapai.pai, s.lastDapai.player as any);
               if (result) {
-                s.game.applyHule(result, p as any, s.lastDapai.player as any);
                 ronResults.push({ player: p, result });
               }
             }
             if (ronResults.length > 0) {
-              const allRonResults = mergeRonResults(s.ronResults, ronResults);
+              const allRonResults = settleRonResultsInKamichaOrder(
+                s.game,
+                s.lastDapai.player as PlayerId,
+                mergeRonResults(s.ronResults, ronResults),
+              );
               s.ronResults = allRonResults;
               s.lastWinner = winnerByOya(s.game, allRonResults);
               s.lastHuleResult = allRonResults[allRonResults.length - 1].result;
@@ -1346,7 +1359,7 @@ function createGameStore() {
               const winnerSeat = s.lastWinner as PlayerId;
               settleAfterWin(s, { winner: winnerSeat, isRon: true });
               s.ronPassedPlayers = [];
-              for (const rr of ronResults) {
+              for (const rr of allRonResults) {
                 s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
                 s = triggerSaiKoroIfAny(s, rr.result, rr.player);
               }
@@ -1385,10 +1398,26 @@ function createGameStore() {
           s.ronDeclaredPlayers = [];
           return declareKanImpl(s, pq.mianzi);
         }
-        // R3 follow-up #29: ron 宣言済 player が居る場合は 既に hule 適用済なので
-        // 「次の手番へ」 [zimo] には進まず、 finalize [roundEnded / fever 等] へ。
-        // lastWinner は最初の ron 時に既に set されてる
+        // R3 follow-up #29: ron 宣言済 player が居る場合は「次の手番へ」へ進まず finalize。
+        // WSA-A6: 他候補の pass 待ち中は精算を保留しているため、ここで上家順に確定する。
         if ((s.ronDeclaredPlayers ?? []).length > 0) {
+          const hasDeferredSettlement = (s.ronResults ?? []).some((rr) =>
+            rr.result?._anmikaRonSettlementDeferred && !rr.result?._anmikaRonSettlementApplied
+          );
+          if (hasDeferredSettlement && s.lastDapai) {
+            s.ronResults = settleRonResultsInKamichaOrder(
+              s.game,
+              s.lastDapai.player as PlayerId,
+              s.ronResults,
+            );
+            for (const rr of s.ronResults) {
+              if (rr.result?._anmikaRonEffectsQueued) continue;
+              s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
+              s = triggerSaiKoroIfAny(s, rr.result, rr.player);
+              rr.result._anmikaRonEffectsQueued = true;
+            }
+            s.game.snapshotLocked = false;
+          }
           if ((s.ronResults ?? []).length > 1) {
             s.message = `🎉🎉 ダブロン! ${formatRonResults(s.ronResults)}`;
             s.lastWinner = winnerByOya(s.game, s.ronResults);
@@ -2130,7 +2159,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
   const cpuRonCands = ronCandidates.filter(p => s.cpu[p as 0|1|2]);
   const humanRonCands = ronCandidates.filter(p => !s.cpu[p as 0|1|2]);
   if (cpuRonCands.length > 0 && humanRonCands.length === 0) {
-    const ronResults: Array<{ player: number; result: any }> = [];
+    let ronResults: Array<{ player: number; result: any }> = [];
     // 2026-05-14 codex review P1 fix: ダブロンで各 winner ごとに saveSnapshot すると
     // 2 人目の snapshot が 1 人目 適用後 になる。 全 hule 適用前に 1 度だけ saveSnapshot
     saveHuleSnapshot(s.game);
@@ -2143,7 +2172,6 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
       // fromPlayer 渡し忘れで ronpaiWithDir null → hule が ロン認識せず役なし扱いになる bug fix
       const result = s.game.hule(p as any, pai, player as any);
       if (result) {
-        s.game.applyHule(result, p as any, player as any);
         ronResults.push({ player: p, result });
       }
     }
@@ -2156,6 +2184,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
       // CPU 候補を ronCandidates から除外、 残りが空なら zimo に進む
       ronCandidates = ronCandidates.filter(p => !s.cpu[p as 0|1|2]);
     } else {
+      ronResults = settleRonResultsInKamichaOrder(s.game, player as PlayerId, ronResults);
       // 親アガリ含む場合 lastWinner = 親 [連荘継続]、 そうでなければ最後のアガリ player
       // 2026-05-14 Round 2 codex fix P1 #5: 現親判定で CPU ダブロン後の連荘継続 [子アガリ後の現親 が含まれた時]
       const oya = s.game.currentOya;

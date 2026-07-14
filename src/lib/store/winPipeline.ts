@@ -70,6 +70,33 @@ export type PendingSaiKoro = {
   summary: { hits: number; chipN: number; zoroBonusTotal: number } | null;
 };
 
+export type RonResult = { player: number; result: any };
+
+/** 放銃者から反時計回り [p0→p2→p1] に近い勝者を先にする。 */
+export function sortRonResultsByKamicha(
+  discarder: PlayerId,
+  results: RonResult[],
+): RonResult[] {
+  const distance = (player: number): number => (discarder - player + 3) % 3;
+  return [...results].sort((a, b) => distance(a.player) - distance(b.player));
+}
+
+/** WSA-A6 settlement seam. Every batch goes through the same upper-seat order
+ * before applyHule, so the first claimant of riichi deposits is deterministic. */
+export function settleRonResultsInKamichaOrder(
+  game: Game3,
+  discarder: PlayerId,
+  results: RonResult[],
+): RonResult[] {
+  const sorted = sortRonResultsByKamicha(discarder, results);
+  for (const claim of sorted) {
+    if (claim.result?._anmikaRonSettlementApplied) continue;
+    game.applyHule(claim.result, claim.player as PlayerId, discarder);
+    claim.result._anmikaRonSettlementApplied = true;
+  }
+  return sorted;
+}
+
 type WinPipelineLike = {
   game: Game3;
   awaitingRonDecision: boolean;
