@@ -414,11 +414,17 @@ export class RoomAuthority {
   }
 
   private validatePostWinAction(actor: PlayerId, type: string): string | null {
-    if (!this.roundEnded && type !== 'rollSaiKoroDice') return `${type}: no win is pending`;
+    if (!this.roundEnded) return `${type}: no win is pending`;
     if (type === 'rollSaiKoroDice' || type === 'selectSaiKoroCombo' || type === 'advanceSaiKoro') {
+      // WS-A stopgap: authority does not yet own the per-chance winner. Until the
+      // canonical post-win state moves server-side, limit dice controls to a
+      // winner recorded for this round. WS-B/C must tighten this to
+      // chances[currentIdx].winner === actor.
+      const isRoundWinner = actor === this.lastWinner || this.ronDeclaredPlayers.includes(actor);
+      if (!isRoundWinner) return `${type}: actor ${actor} is not a round winner`;
       return null;
     }
-    if (this.lastWinner !== null && actor !== this.lastWinner && type !== 'rollSaiKoroDice') {
+    if (this.lastWinner !== null && actor !== this.lastWinner) {
       return `${type}: actor ${actor} is not last winner ${this.lastWinner}`;
     }
     if (type === 'agariyame') this.game.agariyame();

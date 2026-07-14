@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createRoomAuthority, type RoomAuthority } from '../../../server/authority';
 import { toCorePai } from '../helpers';
 import { defaultSanmaRule, generateTilePool } from '../shan3';
@@ -52,5 +52,46 @@ describe('server RoomAuthority', () => {
     const a = authority();
     const reason = a.validateAndApply(a.currentPlayer(), { type: 'nextRound', preShuffledPool: pool() }, members);
     expect(reason).toContain('round is not ended');
+  });
+
+  it.each(['rollSaiKoroDice', 'selectSaiKoroCombo', 'advanceSaiKoro'])(
+    'rejects live-round %s even for the current player',
+    (type) => {
+      const a = authority();
+      const reason = a.validateAndApply(a.currentPlayer(), { type }, members);
+      expect(reason).toContain('no win is pending');
+    },
+  );
+
+  it.each(['rollSaiKoroDice', 'selectSaiKoroCombo', 'advanceSaiKoro'])(
+    'allows only the tsumo winner to perform %s',
+    (type) => {
+      const a = authority();
+      const winner = a.currentPlayer();
+      const other = ((winner + 1) % 3) as 0 | 1 | 2;
+      vi.spyOn(a.game, 'canTsumo').mockReturnValue(true);
+
+      expect(a.validateAndApply(winner, { type: 'tsumo' }, members)).toBeNull();
+      expect(a.validateAndApply(other, { type }, members)).toContain('not a round winner');
+      expect(a.validateAndApply(winner, { type }, members)).toBeNull();
+    },
+  );
+
+  it('allows every declared ron winner to perform post-win dice actions', () => {
+    const a = authority();
+    const discarder = a.currentPlayer();
+    const winners = ([0, 1, 2] as const).filter((p) => p !== discarder);
+    vi.spyOn(a.game, 'canRon').mockReturnValue(true);
+
+    expect(a.validateAndApply(discarder, {
+      type: 'discard',
+      pai: firstNonBeiDiscard(a),
+    }, members)).toBeNull();
+    expect(a.validateAndApply(winners[0], { type: 'ron', player: winners[0] }, members)).toBeNull();
+    expect(a.validateAndApply(winners[1], { type: 'ron', player: winners[1] }, members)).toBeNull();
+
+    expect(a.validateAndApply(winners[0], { type: 'rollSaiKoroDice' }, members)).toBeNull();
+    expect(a.validateAndApply(winners[1], { type: 'advanceSaiKoro' }, members)).toBeNull();
+    expect(a.validateAndApply(discarder, { type: 'selectSaiKoroCombo' }, members)).toContain('not a round winner');
   });
 });
