@@ -34,6 +34,7 @@ import { computeChipMultiplier as computeChipMultiplierHelper, applyChipOall as 
 import { getTingpaiList as getTingpaiListHelper, getTingpaiListBeforeZimo as getTingpaiListBeforeZimoHelper, canTsumoWithPochiSwap as canTsumoWithPochiSwapHelper, americanChitoiXiangting, americanChitoiComplete, countAmericanChitoiQuads } from './game3/tingpai';
 import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotHelper, type PreHuleSnapshot } from './game3/snapshot';
 import { applyFuyuChip as applyFuyuChipHelper, applyChipsOnHule as applyChipsOnHuleHelper, type HuleChipCtx } from './game3/huleChip';
+import { resolvePhysicalDiscardPai, restorePhysicalHandState, snapshotPhysicalHandState } from './game3/tileIdentity';
 export { DEBUG_LOG, normalizePai, toCorePai, isGoldPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, countGoldInHand, countPochiInHand, isPositiveZ5, isNegativeZ5 };
 
 export interface Game3Init {
@@ -870,7 +871,8 @@ export class Game3 {
     // 2026-05-14 codex review fix: 「北は河に切れない」 仕様を Game3 API で保証。
     // dapai('z4') 直叩き は declareNukiBei に auto-route [silent redirect、 既存 test 互換]
     // R8 P2 #1 fix: 北抜き不可なら throw [silent return で lastDapai に z4 残る bug 解消]
-    const coreDapai = toCorePai(pai);
+    const requestedPai = String(pai).replace(/[_*]$/, '');
+    const coreDapai = toCorePai(requestedPai);
     if (coreDapai === 'z4') {
       const _player = this.lunbanToPlayerId(this.state.lunban);
       if (!this.canNukiBei(_player)) {
@@ -888,24 +890,15 @@ export class Game3 {
       console.error('[dapai error] shoupai.get(player) undefined', { player, lunban: this.state.lunban, mapSize: this.shoupai.size, mapKeys: Array.from(this.shoupai.keys()) });
       throw new Error(`shoupai not set for player ${player}`);
     }
-    let paiForHand: string = pai;
+    let paiForHand: string = requestedPai;
     const expanded = spInst._bingpai?.__anmika;
-    if (expanded) {
-      if (coreDapai === 'z5' && !pochiColorFromPai(pai as string)) {
-        const zimoRaw: string | null = this.lastZimoInfo.player === player && toCorePai(this.lastZimoInfo.pai as string) === 'z5'
-          ? (this.lastZimoInfo.pai as string)
-          : null;
-        if (zimoRaw && pochiColorFromPai(zimoRaw) && expanded[zimoRaw] > 0) paiForHand = zimoRaw;
-        else if (expanded.z5b > 0) paiForHand = 'z5b';
-        else if (expanded.z5r > 0) paiForHand = 'z5r';
-        else if (expanded.z5g > 0) paiForHand = 'z5g';
-        else if (expanded.z5y > 0) paiForHand = 'z5y';
-      } else if (coreDapai === 'p0' && pai !== 'gp' && meta?.gold !== false && expanded.gp > 0) {
-        paiForHand = 'gp';
-      } else if (coreDapai === 's0' && pai !== 'gs' && meta?.gold !== false && expanded.gs > 0) {
-        paiForHand = 'gs';
-      }
-    }
+    paiForHand = resolvePhysicalDiscardPai({
+      requestedPai,
+      meta,
+      lastDrawnPai: this.lastZimoInfo.player === player ? this.lastZimoInfo.pai : null,
+      expanded,
+      bingpai: spInst._bingpai,
+    });
     patchAnmikaShoupai(spInst).dapai(paiForHand);
     this.he.get(player).dapai(coreDapai);
     // リーチ宣言牌は he._pai 末尾に `_` suffix を追加 [UI 表示で 図形ごと 90 度横倒し表現用]
@@ -984,14 +977,13 @@ export class Game3 {
           this.goldHand[player][kind] -= 1;
         }
       } else {
-        // meta 未指定 [tsumokiri / CPU 経路]: 直前ツモ情報を優先、 なければ goldHand fallback
-        if (this.lastZimoInfo.player === player && toCorePai(this.lastZimoInfo.pai as string) === coreDapai) {
-          isGold = !!this.lastZimoInfo.gold;
-          if (isGold && this.goldHand[player][kind] > 0) this.goldHand[player][kind] -= 1;
-        } else if (this.goldHand[player][kind] > 0) {
-          isGold = true;
-          this.goldHand[player][kind] -= 1;
-        }
+        // The resolved physical face is authoritative.  Never infer gold again
+        // from a parallel stock counter after the hand has already mutated.
+        const legacyGoldDraw = this.lastZimoInfo.player === player
+          && toCorePai(this.lastZimoInfo.pai as string) === coreDapai
+          && this.lastZimoInfo.gold === true;
+        isGold = paiForHand === (kind === 'p' ? 'gp' : 'gs') || legacyGoldDraw;
+        if (isGold && this.goldHand[player][kind] > 0) this.goldHand[player][kind] -= 1;
       }
     }
     // z4 [北] / 金北 [gN normalize=z4]: meta あれば優先、 なければ goldHand.z で auto
@@ -3149,6 +3141,7 @@ export class Game3 {
     const _origBingpai = { m: [...sp._bingpai.m], p: [...sp._bingpai.p], s: [...sp._bingpai.s], z: [...sp._bingpai.z] };
     const _origFulou = [...sp._fulou];
     const _origZimo = sp._zimo;
+    const _origPhysicalHand = snapshotPhysicalHandState(sp);
     const fromHe = this.he.get(fromPlayer);
     const _origFromHePai = fromHe ? [...(fromHe._pai ?? [])] : null;
     // R22 #3 fix: shan 全 state snapshot [rinshanUsed / lastDrawnHuapai / lastZimoGold/Pochi 含む]
@@ -3204,6 +3197,7 @@ export class Game3 {
       sp._bingpai.m = _origBingpai.m; sp._bingpai.p = _origBingpai.p;
       sp._bingpai.s = _origBingpai.s; sp._bingpai.z = _origBingpai.z;
       sp._fulou = _origFulou; sp._zimo = _origZimo;
+      restorePhysicalHandState(sp, _origPhysicalHand);
       this.state.lunban = _origLunban;
       if (fromHe && _origFromHePai) fromHe._pai = _origFromHePai;
       // shan 全 restore [pai / baopai / fubaopai / weikaigang + R22 #3 で rinshanUsed/huapai/gold/pochi も]
@@ -3304,6 +3298,7 @@ export class Game3 {
     const _origBingpai = { m: [...sp._bingpai.m], p: [...sp._bingpai.p], s: [...sp._bingpai.s], z: [...sp._bingpai.z] };
     const _origFulou = [...sp._fulou];
     const _origZimo = sp._zimo;
+    const _origPhysicalHand = snapshotPhysicalHandState(sp);
     // R24 P1 #3 fix: declareKan [暗槓/加槓] も declareDamingang と同じく Shan3.snapshot/restore で
     // rinshanUsed / lastDrawnHuapai / lastZimoGold / lastZimoPochi 含む完全 rollback 化、
     // 旧 code は _pai/_baopai/_fubaopai/_weikaigang のみ個別復元で rinshanUsed 等 残ってた
@@ -3367,6 +3362,7 @@ export class Game3 {
       sp._bingpai.m = _origBingpai.m; sp._bingpai.p = _origBingpai.p;
       sp._bingpai.s = _origBingpai.s; sp._bingpai.z = _origBingpai.z;
       sp._fulou = _origFulou; sp._zimo = _origZimo;
+      restorePhysicalHandState(sp, _origPhysicalHand);
       const shanRestoreAny = this.shan as any;
       // R24 P1 #3 fix: Shan3.restore で完全 rollback、 失敗時 fallback で個別 field 復元
       if (_shanSnap && typeof shanRestoreAny.restore === 'function') {
