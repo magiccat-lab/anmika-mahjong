@@ -228,14 +228,8 @@ export function isFeverWaitExhausted(
     for (const [, sp] of shoupaiAll) {
       if (!sp) continue;
       visible += sp._bingpai?.[ss]?.[nn] ?? 0;
-      // R20 #4 fix: 5 待ちは p0/s0 [赤] + gp/gs [金] も同じ 5 として count
-      if (nn === 5 && (ss === 'p' || ss === 's')) {
-        visible += sp._bingpai?.[ss]?.[0] ?? 0;
-        // goldHand.p/.s [金 5] も visible
-        const gh = (sp as any)._goldHand ?? null;
-        // game3 の goldHand は 別 map、 ここでは shoupai が持たないので別経路、 簡易 skip
-        if (gh) visible += (ss === 'p' ? gh.p : ss === 's' ? gh.s : 0) ?? 0;
-      }
+      // _bingpai[s][5] は通常・赤・金を合算した core 5 の現物数。
+      // _bingpai[s][0] / goldHand を重ねると手牌内だけ二重計上になる。
       for (const m of sp._fulou ?? []) {
         visible += countTileInMianzi(m as string, ss + nn);
       }
