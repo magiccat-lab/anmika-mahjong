@@ -463,15 +463,17 @@ export function applyChipsOnHule(
       // 2026-05-15 bug Y fix: 旧 R23 #1 fix は result.fenpei [4麻 majiang-core 計算] を ×3 して
       // state.defen に加算してたが、 fenpei は 3麻 winnerGain と乖離してて 中途半端な 100 単位の
       // ズレが発生 [+10100 等]。 applyHule で実反映済の delta [3麻実点] を ×3 加算に修正
-      if (ctx.state?.defen && ctx.beforeDefen) {
+      if (!(result as any)._pointPaymentMultiplierApplied && ctx.state?.defen && ctx.beforeDefen) {
         for (const p of [0, 1, 2] as PlayerId[]) {
           const realDelta = ((ctx.state.defen as any)[p] ?? 0) - (ctx.beforeDefen[p] ?? 0);
           (ctx.state.defen as any)[p] = ((ctx.state.defen as any)[p] ?? 0) + realDelta * 3;
         }
       }
-      if (result.defen !== undefined) result.defen = result.defen * 4;
-      if (result.defen3 !== undefined) result.defen3 = result.defen3 * 4;
-      if (result.fenpei) result.fenpei = result.fenpei.map((x: number) => x * 4);
+      if (!(result as any)._pointPaymentMultiplierApplied) {
+        if (result.defen !== undefined) result.defen = result.defen * 4;
+        if (result.defen3 !== undefined) result.defen3 = result.defen3 * 4;
+        if (result.fenpei) result.fenpei = result.fenpei.map((x: number) => x * 4);
+      }
       label = '夏夏金北 [打点 ×4]';
     } else if (target === 'natsu' && natsus === 1) {
       label = '夏金北 [+2 段アップ適用済]';

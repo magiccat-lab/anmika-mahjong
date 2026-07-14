@@ -34,10 +34,10 @@ describe('tobi transition regression 2026-05-21', () => {
     g.applyHule({ fanshu: 2, fu: 30, hupai: [] }, 1 as PlayerId, null);
 
     expect(g.state.defen[1]).toBeLessThan(0);
-    expect(g.chipLedger[0]).toBe(5);
-    expect(g.chipLedger[2]).toBe(5);
-    expect(g.chipLedger[1]).toBe(-10);
-    expect(g.chipBreakdown.filter((b) => b.label.includes('トビ賞 [p1 飛び]'))).toHaveLength(2);
+    expect(g.chipLedger[0]).toBe(0);
+    expect(g.chipLedger[2]).toBe(0);
+    expect(g.chipLedger[1]).toBe(0);
+    expect(g.chipBreakdown.filter((b) => b.label.includes('トビ賞 [p1 飛び]'))).toHaveLength(0);
   });
 
   it('ツモで 2 人同時に >=0 から <0 へ落ちたら 2 人分のトビ賞が付く', () => {

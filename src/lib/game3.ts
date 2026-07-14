@@ -35,6 +35,7 @@ import { getTingpaiList as getTingpaiListHelper, getTingpaiListBeforeZimo as get
 import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotHelper, type PreHuleSnapshot } from './game3/snapshot';
 import { applyFuyuChip as applyFuyuChipHelper, applyChipsOnHule as applyChipsOnHuleHelper, type HuleChipCtx } from './game3/huleChip';
 import { resolvePhysicalDiscardPai, restorePhysicalHandState, snapshotPhysicalHandState } from './game3/tileIdentity';
+import { evaluateWinPoints } from './game3/settlement';
 export { DEBUG_LOG, normalizePai, toCorePai, isGoldPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, countGoldInHand, countPochiInHand, isPositiveZ5, isNegativeZ5 };
 
 export interface Game3Init {
@@ -146,26 +147,6 @@ function anmikaTry7mYakuman(sp: any, ronpai: string | null): any {
     defen: 8000, // base、 applyHule で再計算される
     fenpei: [0, 0, 0, 0],
   };
-}
-
-/** 三麻 base 点計算 [fu × 2^(fanshu+2)、 切上満貫あり [4 翻 30 符等もマンガン]、 役満上限] */
-function computeSanmaBase(result: any): number {
-  const fu = result.fu ?? 30;
-  const fanshu = result.fanshu ?? 0;
-  const damanguan = result.damanguan ?? 0;
-  // 役満系 [damanguan セット時 or fanshu>=13]: damanguan 倍率を掛ける、 数え役満は damanguan=1 扱い
-  if (damanguan && damanguan > 0) return 8000 * damanguan;
-  if (fanshu >= 24) return 12000; // 6 倍満
-  if (fanshu >= 18) return 10000; // 5 倍満
-  if (fanshu >= 13) return 8000;  // 数え役満 [複数役満は damanguan で表現]
-  if (fanshu >= 11) return 6000;  // 三倍満
-  if (fanshu >= 8) return 4000;   // 倍満
-  if (fanshu >= 6) return 3000;  // 跳満
-  if (fanshu >= 5) return 2000;  // 満貫
-  // 切上満貫: raw が 1920 [4 翻 30 符 / 3 翻 60 符等] ならマンガン扱い
-  const raw = fu * Math.pow(2, fanshu + 2);
-  if (raw === 1920) return 2000;
-  return Math.min(raw, 2000);
 }
 
 function resultHasYakuman(result: any): boolean {
@@ -2158,6 +2139,7 @@ export class Game3 {
     // - 夏夏金北 [natsu>=2]: +N 段アップは取消、 後続 applyChipsOnHule で base ×4
     const isNatsuKinpei = this.kinpeiTarget[player] === 'natsu';
     const natsuKinpeiActive = natsu >= 2 && isNatsuKinpei;  // 夏夏金北 [×4]
+    if (natsuKinpeiActive) (result as any)._pointPaymentMultiplier = 4;
     const natsuEffect = natsu + (isNatsuKinpei && natsu === 1 ? 1 : 0);  // 夏金北単体 = natsu=2 相当
     // 夏: 打点ランクアップ N 段 [マンガン未満なら直接マンガン、 マンガン以降は段階アップ]
     if (natsuEffect > 0 && !natsuKinpeiActive) {
@@ -2751,71 +2733,19 @@ export class Game3 {
     const feverMul = this.feverActive[winner]
       ? (this.feverTier[winner] === 3 ? 4 : this.feverTier[winner] === 2 ? 2 : 1)
       : 1;
-    const baseRaw = computeSanmaBase(result);
-    const base = baseRaw * feverMul;
-    const ceil100 = (n: number) => Math.ceil(n / 100) * 100;
-    let winnerGain = 0;
-    if (loser !== null) {
-      // ロン
-      const ronPay = isOya ? ceil100(base * 6) : ceil100(base * 4);
-      const benbangBonus = this.state.benbang * 2000;
-      const total = ronPay + benbangBonus;
-      this.state.defen[winner] += total;
-      this.state.defen[loser] -= total;
-      winnerGain = total;
-    } else {
-      // ツモ
-      const benbangEach = this.state.benbang * 1000;
-      const tsumoBonus = 1000;
-      if (isOya) {
-        const koPay = ceil100(base * 2) + benbangEach + tsumoBonus;
-        for (const p of [0, 1, 2] as PlayerId[]) {
-          if (p === winner) continue;
-          this.state.defen[p] -= koPay;
-          winnerGain += koPay;
-        }
-      } else {
-        const oyaPay = ceil100(base * 2) + benbangEach + tsumoBonus;
-        const koPay = ceil100(base * 1) + benbangEach + tsumoBonus;
-        for (const p of [0, 1, 2] as PlayerId[]) {
-          if (p === winner) continue;
-          if (p === oyaSeat) {
-            this.state.defen[p] -= oyaPay;
-            winnerGain += oyaPay;
-          } else {
-            this.state.defen[p] -= koPay;
-            winnerGain += koPay;
-          }
-        }
-      }
-      this.state.defen[winner] += winnerGain;
-    }
-    // 逆ぽっち: 上で動いた defen delta を × -1 で反転 [リーチ供託は次の step で別途加算なので影響外]
-    if (isPochiReverse) {
-      if (loser !== null) {
-        // ron: winner += total, loser -= total を反転
-        this.state.defen[winner] -= 2 * winnerGain;
-        this.state.defen[loser] += 2 * winnerGain;
-      } else {
-        // tsumo: winner += winnerGain と 各 non-winner -= payment を全 反転
-        this.state.defen[winner] -= 2 * winnerGain;
-        if (isOya) {
-          const koPay = ceil100(base * 2) + this.state.benbang * 1000 + 1000;
-          for (const p of [0, 1, 2] as PlayerId[]) {
-            if (p === winner) continue;
-            this.state.defen[p] += 2 * koPay;
-          }
-        } else {
-          const oyaPay = ceil100(base * 2) + this.state.benbang * 1000 + 1000;
-          const koPay = ceil100(base * 1) + this.state.benbang * 1000 + 1000;
-          for (const p of [0, 1, 2] as PlayerId[]) {
-            if (p === winner) continue;
-            this.state.defen[p] += 2 * (p === oyaSeat ? oyaPay : koPay);
-          }
-        }
-      }
-      winnerGain = -winnerGain; // result.defen / defen3 に書き戻す用
-    }
+    const pointEvaluation = evaluateWinPoints({
+      result,
+      winner,
+      loser,
+      oya: oyaSeat,
+      benbang: this.state.benbang,
+      feverMultiplier: feverMul,
+      pointMultiplier: Number((result as any)._pointPaymentMultiplier ?? 1),
+      reverse: isPochiReverse,
+    });
+    for (const p of [0, 1, 2] as PlayerId[]) this.state.defen[p] += pointEvaluation.deltas[p];
+    let winnerGain = pointEvaluation.winnerGain;
+    (result as any)._pointPaymentMultiplierApplied = true;
     // リーチ供託は winner [origWinner] に [反転対象外、 常時受取]
     this.state.defen[winner] += this.state.lizhibang * 1000;
     this.state.lizhibang = 0;
@@ -2853,6 +2783,9 @@ export class Game3 {
     const preDefen = beforeDefen;
     for (const p of [0, 1, 2] as PlayerId[]) {
       if (preDefen[p] >= 0 && this.state.defen[p] < 0) {
+        // Reverse-pochi tsumo can make the winner self-bust.  The match ends,
+        // but no opponent is awarded a tobi prize for that self-inflicted loss.
+        if (p === winner && isPochiReverse && loser === null) continue;
         for (const recipient of [0, 1, 2] as PlayerId[]) {
           if (recipient === p) continue;
           if (delta[recipient] > 0) {
