@@ -3225,6 +3225,9 @@ export class Game3 {
     // リョー仕様: 嶺上 16 - 華枚数 ≥ 1 [= rinshan.length >= 1] なら カン OK。
     const rinshanLen = (this.shan as any)._rinshan?.length ?? 0;
     if (rinshanLen < 1) return [];
+    // WSA-A2: 初期ドラ・秋ドラの総枚数ではなく、カン由来ドラ4回を上限にする。
+    // gangzimo と同じ述語を候補生成にも使い、表示後の silent failure を防ぐ。
+    if (!this.shan.canOpenKanDora) return [];
     try {
       return sp.get_gang_mianzi() ?? [];
     } catch {

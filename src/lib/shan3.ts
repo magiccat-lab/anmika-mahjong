@@ -30,6 +30,10 @@ export class Shan3 {
   private _closed: boolean;
   /** 直前の zimo / gangzimo で出した牌が金だったか */
   lastZimoGold: boolean = false;
+  /** カンによって追加したドラの回数。秋ドラ等の追加表示とは別枠で最大4回。 */
+  kanDoraCount: number = 0;
+
+  get canOpenKanDora(): boolean { return this.kanDoraCount < 4; }
 
   /** 初期 shuffle 後の _pai snapshot [牌譜再現用、 split 前の full pool] */
   _initialPai: Pai[] = [];
@@ -95,6 +99,7 @@ export class Shan3 {
     lastDrawnHuapai: Pai[];
     lastZimoGold: boolean;
     lastZimoPochi: 'blue' | 'red' | 'green' | 'yellow' | null;
+    kanDoraCount: number;
     weikaigang: boolean;
     baopai: Pai[];
     fubaopai: Pai[] | null;
@@ -106,6 +111,7 @@ export class Shan3 {
       lastDrawnHuapai: [...this.lastDrawnHuapai],
       lastZimoGold: this.lastZimoGold,
       lastZimoPochi: this.lastZimoPochi,
+      kanDoraCount: this.kanDoraCount,
       weikaigang: this._weikaigang,
       baopai: [...this._baopai],
       fubaopai: this._fubaopai ? [...this._fubaopai] : null,
@@ -118,6 +124,7 @@ export class Shan3 {
     this.lastDrawnHuapai = [...snap.lastDrawnHuapai];
     this.lastZimoGold = snap.lastZimoGold;
     this.lastZimoPochi = snap.lastZimoPochi;
+    this.kanDoraCount = snap.kanDoraCount ?? 0;
     this._weikaigang = snap.weikaigang;
     this._baopai = [...snap.baopai];
     this._fubaopai = snap.fubaopai ? [...snap.fubaopai] : null;
@@ -205,7 +212,7 @@ export class Shan3 {
     if (this._closed) throw new Error('shan closed');
     if (this.paishu === 0) throw new Error('shan exhausted');
     if (this._weikaigang) throw new Error('kaigang pending');
-    if (this._baopai.length === 5) throw new Error('5 dora max');
+    if (!this.canOpenKanDora) throw new Error('4 kan dora max');
     this._weikaigang = true;
     this.lastZimoGold = false;
     this.lastDrawnHuapai = [];
@@ -239,6 +246,7 @@ export class Shan3 {
     // リョー指示: カン後のドラ表は山末尾から 1 枚 [残山 -1]
     this.drawNewDora(false);
     if (this._fubaopai) this.drawNewDora(true);
+    this.kanDoraCount += 1;
     this._weikaigang = false;
   }
 
