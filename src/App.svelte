@@ -199,6 +199,73 @@
         && $game.game.canRon(p as any, $game.lastDapai!.pai, $game.lastDapai!.player as any))
     : [];
 
+  type ActionStatus = { text: string; tone: 'action' | 'waiting' | 'complete' };
+
+  function describeActionStatus(
+    snapshot: any,
+    activePlayer: number,
+    myself: number,
+    ronPlayers: number[],
+    waitingForDraw: boolean,
+    tsumoAvailable: boolean,
+  ): ActionStatus {
+    const sai = snapshot.pendingSaiKoro;
+    if (sai) {
+      const chance = sai.chances?.[sai.currentIdx];
+      const owner = chance?.winner ?? sai.winner;
+      return owner === myself
+        ? { text: 'サイコロを操作', tone: 'action' }
+        : { text: `P${owner} のサイコロ待ち`, tone: 'waiting' };
+    }
+    if (snapshot.pendingFuyu) {
+      return snapshot.pendingFuyu.winner === myself
+        ? { text: '冬の効果を選択', tone: 'action' }
+        : { text: `P${snapshot.pendingFuyu.winner} の冬選択待ち`, tone: 'waiting' };
+    }
+    if (snapshot.pendingKinpei) {
+      return snapshot.pendingKinpei.winner === myself
+        ? { text: '金北の強化先を選択', tone: 'action' }
+        : { text: `P${snapshot.pendingKinpei.winner} の金北選択待ち`, tone: 'waiting' };
+    }
+    if (snapshot.pendingFeverContinue) {
+      return snapshot.pendingFeverContinue.winner === myself
+        ? { text: 'フィーバーを続行', tone: 'action' }
+        : { text: `P${snapshot.pendingFeverContinue.winner} の続行待ち`, tone: 'waiting' };
+    }
+    if (snapshot.awaitingRonDecision) {
+      if (ronPlayers.includes(myself)) {
+        return snapshot.game.shuvariActive[myself]
+          ? { text: 'ロンしてください（強制）', tone: 'action' }
+          : { text: 'ロン／見送るを選択', tone: 'action' };
+      }
+      return { text: 'ロン判定待ち', tone: 'waiting' };
+    }
+    if (snapshot.awaitingFulou) {
+      const canCall = [...(snapshot.ponCandidates ?? []), ...(snapshot.kanCandidates ?? [])]
+        .some((candidate: any) => candidate.player === myself && (candidate.mianzi?.length ?? 0) > 0);
+      return canCall
+        ? { text: '鳴く／見送るを選択', tone: 'action' }
+        : { text: '鳴き判定待ち', tone: 'waiting' };
+    }
+    if (snapshot.pendingPingju) return { text: '流局処理中', tone: 'waiting' };
+    if (snapshot.pendingQianggang) return { text: '槍槓判定中', tone: 'waiting' };
+    if (snapshot.roundEnded) return { text: '局終了', tone: 'complete' };
+    if (snapshot.lizhiPending !== null) {
+      return snapshot.lizhiPending === myself
+        ? { text: 'リーチする捨て牌を選択', tone: 'action' }
+        : { text: `P${snapshot.lizhiPending} のリーチ牌待ち`, tone: 'waiting' };
+    }
+    if (activePlayer === myself) {
+      if (waitingForDraw) return { text: 'ツモを進めてください', tone: 'action' };
+      return tsumoAvailable
+        ? { text: 'ツモ和了／打牌を選択', tone: 'action' }
+        : { text: '打牌を選んでください', tone: 'action' };
+    }
+    return { text: `P${activePlayer} の手番`, tone: 'waiting' };
+  }
+
+  $: actionStatus = describeActionStatus($game, currentPlayer, selfPlayer, ronCandidates, needsZimo, canTsumo);
+
   // 牌譜 [event log] 全件
   $: events = $game.game.events;
   // ツモ履歴 [全 zimo event]
@@ -1563,6 +1630,10 @@
   </div>
 {:else}
 <main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)}>
+  <div class="orientation-notice" role="status">
+    <strong>端末を横向きにしてください</strong>
+    <span>対局画面は横向きで全体を確認できます</span>
+  </div>
   <header>
     <h1>アンミカ三麻 [{viewMode === 'online' && onlineGameStarted ? `オンライン [部屋 ${currentRoomId}]` : (viewMode === 'single' ? '一人回しモード' : 'phase 1 dev')}]
       <button class="mode-toggle" on:click={() => { appMode = 'menu'; viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>
@@ -1700,7 +1771,7 @@
     {/if}
     {#if $game.awaitingFulou}
       <div class="action-row hot">
-        <span class="row-label alert">⚠ {$game.message} [debug: selfPlayer={selfPlayer} ponCands={JSON.stringify($game.ponCandidates.map((c) => c.player))} kanCands={JSON.stringify($game.kanCandidates.map((c) => c.player))}]</span>
+        <span class="row-label alert">⚠ {$game.message}</span>
         {#each $game.ponCandidates.filter((c) => c.player === selfPlayer) as cand}
           {#each cand.mianzi as m}
             <button class="pon-btn" on:click={() => game.pon(cand.player, m)}>p{cand.player} ポン [{m}]</button>
@@ -1816,34 +1887,40 @@
   {#if viewMode === 'single'}
     <!-- 上部 row: フィーバー待ち [左、 ドラ表と同列 inline] + ドラ表示牌 + 設定 -->
     <div class="dora-row">
-      {#if feverWaits.length > 0}
-        <span class="fever-inline-label">🔥 フィーバー</span>
-        {#each feverWaits as fw}
-          <span class="fever-inline-player">p{fw.player}:</span>
-          {#each fw.waits as w}
-            <span class="fever-inline-wait">
-              <Tile pai={w.tile} size="md" />
-              <span class="fever-inline-remain">残{w.remain}</span>
-            </span>
+      <span class="turn-status status-{actionStatus.tone}" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        {actionStatus.text}
+      </span>
+      <div class="dora-main">
+        {#if feverWaits.length > 0}
+          <span class="fever-inline-label">🔥 フィーバー</span>
+          {#each feverWaits as fw}
+            <span class="fever-inline-player">p{fw.player}:</span>
+            {#each fw.waits as w}
+              <span class="fever-inline-wait">
+                <Tile pai={w.tile} size="md" />
+                <span class="fever-inline-remain">残{w.remain}</span>
+              </span>
+            {/each}
           {/each}
+          <span class="dora-divider">|</span>
+        {/if}
+        <span class="dora-label">ドラ表</span>
+        {#each baopai.filter((t) => typeof t === 'string' && !t.startsWith('f')) as t}
+          <Tile pai={t} size="md" />
         {/each}
-        <span class="dora-divider">|</span>
-      {/if}
-      <span class="dora-label">ドラ表</span>
-      {#each baopai.filter((t) => typeof t === 'string' && !t.startsWith('f')) as t}
-        <Tile pai={t} size="md" />
-      {/each}
+      </div>
       <div class="settings-group">
         {#if !onlineGameStarted}
-          <label><input type="checkbox" bind:checked={autoTsumoKiri}>ツモ切り</label>
+          <label title="自分の手番を自動でツモ切り"><input type="checkbox" bind:checked={autoTsumoKiri}>ツモ切り</label>
         {/if}
         {#if !onlineGameStarted}
-          <label><input type="checkbox" checked={revealAll} on:change={toggleRevealAll}>他家手牌</label>
-          <label><input type="checkbox" bind:checked={cpuSlowMode}>CPU ラグ</label>
-          <button on:click={() => { viewMode = 'online'; }} style="background:#5865f2;color:#fff;border:0;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:700;font-size:12px;">🌐 オンライン対戦</button>
-          <button on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : '安全な手番開始時に保存できます'} style="background:#4060a0;color:#fff;border:0;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:700;font-size:12px;">📂 牌譜保存</button>
+          <label title="他家の手牌を表示"><input type="checkbox" checked={revealAll} on:change={toggleRevealAll}>他家手牌</label>
+          <label title="CPU の操作を2.5秒遅らせる"><input type="checkbox" bind:checked={cpuSlowMode}>CPU ラグ</label>
+          <button class="table-setting-btn online" on:click={() => { viewMode = 'online'; }} title="オンライン対戦へ" aria-label="オンライン対戦へ">🌐 <span class="settings-label">オンライン対戦</span></button>
+          <button class="table-setting-btn save" on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : '安全な手番開始時に保存できます'} aria-label="牌譜保存">📂 <span class="settings-label">牌譜保存</span></button>
         {:else}
-          <button on:click={() => { disconnectOnline(); viewMode = 'online'; }} style="background:#aa4040;color:#fff;border:0;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:700;font-size:12px;">× 退出</button>
+          <button class="table-setting-btn leave" on:click={() => { disconnectOnline(); viewMode = 'online'; }} title="対局から退出" aria-label="対局から退出">× <span class="settings-label">退出</span></button>
         {/if}
       </div>
     </div>
@@ -1863,7 +1940,7 @@
         <div class="ron-choice-panel">
           <button class="ron-half" on:click={() => game.ron(selfPlayer)}>P{$game.lastDapai?.player ?? '?'}→P{selfPlayer} ロン</button>
           {#if !ronCandidates.some((p) => $game.game.shuvariActive[p as PlayerId])}
-            <button class="skip-half" on:click={() => game.pass()}>スキップ</button>
+            <button class="skip-half" on:click={() => game.pass()}>見送る</button>
           {/if}
         </div>
       {/if}
@@ -2006,7 +2083,7 @@
               <div class="tb-row hot"><button class="kan-btn" on:click={() => game.damingang(cand.player, m)}>カン</button></div>
             {/each}
           {/each}
-          <div class="tb-row"><button on:click={() => game.pass()}>スキップ</button></div>
+          <div class="tb-row"><button on:click={() => game.pass()}>見送る</button></div>
         {/if}
         <!-- 2026-05-14 codex review #3 fix: 続行 / drawNext も winner / currentPlayer===selfPlayer gate -->
         {#if $game.pendingFeverContinue && !$game.pendingSaiKoro && (!onlineGameStarted || $game.pendingFeverContinue.winner === selfPlayer)}
@@ -2360,6 +2437,16 @@
     cursor: pointer;
   }
   button:hover:not(:disabled) { background: #e8e8e8; }
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+    filter: saturate(0.55);
+  }
+  button:focus-visible,
+  input:focus-visible {
+    outline: 3px solid #ffd060;
+    outline-offset: 2px;
+  }
   .action-row {
     display: flex;
     flex-wrap: wrap;
@@ -2517,6 +2604,10 @@
     vertical-align: middle;
   }
   .cpu-speed-toggle input { vertical-align: middle; }
+
+  .orientation-notice {
+    display: none;
+  }
 
   /* 一人回しモード [single、 雀魂風 grid 全画面 layout] */
   main.mode-single .action-row.debug,
@@ -2911,10 +3002,9 @@
   /* dora 表示 row [nuki row の上] */
   main.mode-single .dora-row {
     grid-area: dora;
-    display: flex;
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) auto minmax(150px, 1fr);
     align-items: center;
-    justify-content: center;
     gap: 6px;
     padding: 4px 8px;
     background: rgba(0, 0, 0, 0.25);
@@ -2922,6 +3012,46 @@
     color: #f0f0f0;
     font-size: 13px;
     font-weight: 500;
+    position: relative;
+  }
+  main.mode-single .turn-status {
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 9px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.28);
+    color: #e8e8e8;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  main.mode-single .turn-status .status-dot {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 8px;
+    border-radius: 50%;
+    background: #aab7b0;
+  }
+  main.mode-single .turn-status.status-action {
+    color: #1a1820;
+    background: #ffd060;
+    border-color: #ffe89b;
+    box-shadow: 0 0 0 2px rgba(255, 208, 96, 0.18);
+  }
+  main.mode-single .turn-status.status-action .status-dot { background: #c04040; }
+  main.mode-single .turn-status.status-complete .status-dot { background: #5dbbff; }
+  main.mode-single .dora-main {
+    justify-self: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
   }
   main.mode-single .dora-row .dora-label { color: #ffe080; font-weight: 700; }
   main.mode-single .dora-row .fever-inline-label { color: #ff80c0; font-weight: 700; }
@@ -2929,10 +3059,6 @@
   main.mode-single .dora-row .fever-inline-wait { display: inline-flex; align-items: center; gap: 2px; }
   main.mode-single .dora-row .fever-inline-remain { color: #ffd0e8; font-size: 11px; }
   main.mode-single .dora-row .dora-divider { color: #888; margin: 0 8px; }
-  main.mode-single .dora-row {
-    position: relative;
-    justify-content: center;
-  }
   main.mode-single .fever-waits-sidebar {
     position: fixed !important;
     top: 60px !important;
@@ -2961,13 +3087,11 @@
     margin: 2px 0;
   }
   main.mode-single .dora-row .settings-group {
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
+    position: static;
+    justify-self: end;
     display: flex;
     flex-direction: row;
-    gap: 16px;
+    gap: 10px;
     align-items: center;
     color: #f0f0f0;
     font-size: 13px;
@@ -2978,12 +3102,26 @@
     align-items: center;
     gap: 4px;
     cursor: pointer;
+    white-space: nowrap;
   }
   main.mode-single .dora-row .settings-group input[type="checkbox"] {
     width: 14px;
     height: 14px;
     accent-color: #d4af37;
   }
+  main.mode-single .table-setting-btn {
+    min-height: 32px;
+    padding: 5px 10px;
+    border: 0;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  main.mode-single .table-setting-btn.online { background: #5865f2; }
+  main.mode-single .table-setting-btn.save { background: #4060a0; }
+  main.mode-single .table-setting-btn.leave { background: #aa4040; }
+  main.mode-single .table-setting-btn:hover:not(:disabled) { filter: brightness(1.15); }
 
   /* seat-bottom: toolbars row 上 / P0 hand 下 の 縦 stack [リョー指示 2026-05-12] */
   main.mode-single .seat-bottom {
@@ -3638,6 +3776,109 @@
   main.mode-single :global(.benbang-label),
   main.mode-single :global(.lizhibang-label),
   main.mode-single :global(.paishu-label) { color: #b0b0b0 !important; }
+
+  /* 狭い横画面では操作欄をアイコン中心にし、ドラ表示との重なりを防ぐ。 */
+  @media (max-width: 900px) and (orientation: landscape) {
+    main.mode-single {
+      grid-template-columns: 15vmin minmax(0, 1fr) 15vmin;
+      gap: 4px;
+    }
+    main.mode-single .dora-row {
+      grid-template-columns: auto minmax(56px, 1fr) auto;
+      gap: 5px;
+      padding: 2px 4px;
+    }
+    main.mode-single .turn-status {
+      max-width: 150px;
+      padding: 3px 7px;
+      gap: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 11px;
+    }
+    main.mode-single .dora-main { gap: 3px; }
+    main.mode-single .dora-label { font-size: 11px; }
+    main.mode-single .dora-row .settings-group {
+      gap: 6px;
+      font-size: 11px;
+    }
+    main.mode-single .dora-row .settings-group label { gap: 2px; }
+    main.mode-single .dora-row .settings-group input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+    }
+    main.mode-single .table-setting-btn {
+      min-width: 34px;
+      min-height: 32px;
+      padding: 4px 8px;
+    }
+    main.mode-single .settings-label { display: none; }
+  }
+
+  /* 高さの低いスマホ横画面でも、中央得点と自家手牌を画面内へ収める。 */
+  @media (max-height: 500px) and (orientation: landscape) {
+    main.mode-single .score-box {
+      grid-template-columns: minmax(62px, 1fr) minmax(66px, 0.9fr) minmax(62px, 1fr);
+      grid-template-rows: 28px minmax(0, 1fr) minmax(68px, 0.9fr);
+    }
+    main.mode-single .score-box .score-side.score-top {
+      padding: 3px 0;
+      font-size: 14px;
+    }
+    main.mode-single .score-box .score-side.score-left,
+    main.mode-single .score-box .score-side.score-right { padding: 2px; }
+    main.mode-single .score-box .score-side.score-bottom {
+      align-self: stretch;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 1px 3px;
+    }
+    main.mode-single .score-box .sname { font-size: 13px; letter-spacing: 0; }
+    main.mode-single .score-box .sval { font-size: 18px; letter-spacing: 0; }
+    main.mode-single .score-box .ssub { margin-top: 1px; font-size: 10px; line-height: 1.05; }
+    main.mode-single .score-box .score-side.is-oya .sname::before {
+      margin-bottom: 0;
+      font-size: 12px;
+    }
+    main.mode-single .score-box .benbang { font-size: 14px; }
+    main.mode-single .score-box .paishu { font-size: 17px; }
+    main.mode-single .seat-bottom { gap: 2px; }
+    main.mode-single .seat-bottom > :global(section.player) { padding: 2px 4px !important; }
+  }
+
+  /* スマホ縦向きでは卓が欠けるため、誤操作できる半端な盤面を見せず案内する。 */
+  @media (max-width: 700px) and (orientation: portrait) {
+    main.mode-single .orientation-notice {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 32px;
+      box-sizing: border-box;
+      background: radial-gradient(circle at center, #2f604b 0%, #143025 75%);
+      color: #fff;
+      text-align: center;
+    }
+    main.mode-single .orientation-notice::before {
+      content: '↻';
+      color: #ffd060;
+      font-size: 64px;
+      line-height: 1;
+    }
+    main.mode-single .orientation-notice strong {
+      color: #ffd060;
+      font-size: 22px;
+    }
+    main.mode-single .orientation-notice span {
+      color: #d8e4df;
+      font-size: 14px;
+    }
+  }
 
   .debug-btn {
     background: #ddd;
