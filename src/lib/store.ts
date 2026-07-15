@@ -2464,6 +2464,8 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
       for (const rr of ronResults) {
         s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
         s = triggerSaiKoroIfAny(s, rr.result, rr.player);
+        // CPU ロン経路でも ack gate を設定 [tsumo 側 cpuActions.ts:60 と同等]
+        if (s.pendingSaiKoro) s.cpuWinAck = false;
       }
       settleAfterWin(s, { winner: winner as PlayerId, isRon: true });
       s.game.snapshotLocked = false;
