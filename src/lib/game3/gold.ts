@@ -82,24 +82,28 @@ export function resolveGoldDiscardFlag(opts: {
   const physicalSuit = goldSuitFromPhysicalPai(opts.paiForHand);
   if (physicalSuit === suit) isGold = true;
 
+  // 判定経路が複数成立しても手持ち金の消費は1枚まで。
+  // (物理金牌 + metaGold/lastZimo 一致が重なると2枚減っていた)
+  let shouldConsume = false;
   if (typeof opts.metaGold === 'boolean') {
     isGold = opts.metaGold;
-    if (opts.metaGold) consumeGold(opts.hand, suit);
+    shouldConsume = opts.metaGold;
   } else if (
     opts.lastZimoInfo.player === opts.player
     && toCorePai(opts.lastZimoInfo.pai as string) === opts.corePai
   ) {
     isGold = !!opts.lastZimoInfo.gold;
-    if (isGold) consumeGold(opts.hand, suit);
+    shouldConsume = isGold;
   } else if (opts.hand[suit] > 0) {
     isGold = true;
-    consumeGold(opts.hand, suit);
+    shouldConsume = true;
   }
 
   if (physicalSuit === suit) {
     isGold = true;
-    consumeGold(opts.hand, suit);
+    shouldConsume = true;
   }
+  if (shouldConsume) consumeGold(opts.hand, suit);
   return isGold;
 }
 
