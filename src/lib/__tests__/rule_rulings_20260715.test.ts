@@ -80,6 +80,8 @@ describe('2026-07-15確定裁定', () => {
   it('秋表示華はsnapshot復元後も金北候補として検証できる', () => {
     const g = new Game3();
     g.qipai();
+    // ランダム配山の表示華混入で not.toContain('f4') が揺れないよう固定
+    (g.shan as any)._baopai = ['m1'];
     const player = 0 as PlayerId;
     g.goldHand[player].z = 1;
     expect(g.effectiveHuapaiAtHule(player)).not.toContain('f4');
