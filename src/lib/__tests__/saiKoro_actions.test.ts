@@ -91,4 +91,46 @@ describe('saiKoro actions [no-op / 基本進行]', () => {
     // 仕様 2026-05-21: ロン + 非フィーバーなら ぽっち bypass、 倍率 1
     expect(entry?.multiplier).toBe(1);
   });
+
+  it('シュバサイならシュバ宣言なしでも連続ゾロ目特典を適用する', () => {
+    const s = get(game);
+    s.game.shuvariActive[0] = false;
+    s.pendingSaiKoro = {
+      winner: 0 as PlayerId,
+      chances: [{ name: 'shuvari dice', baseChip: 1, shuvariApplicable: true, count: 1, plusMinus: '+' as const }],
+      currentIdx: 0,
+      selectedCombo: [1, 2],
+      rolls: [],
+      finalized: false,
+      summary: null,
+    } as any;
+    game.rollSaiKoroDice([2, 2]);
+    game.rollSaiKoroDice([2, 2]);
+    const after = get(game);
+    const entry = after.game.chipBreakdown.at(-1);
+    expect(entry?.label).toContain('シュバゾロ連続特典');
+    expect(entry?.base).toBe(22);
+  });
+
+  it('ロン由来サイコロはフィーバー中でもぽっちだけを除外する', () => {
+    const s = get(game);
+    s.game.feverActive[0] = true;
+    s.game.feverTier[0] = 2;
+    s.game.pochiMultiplier[0] = { defen: -1, chip: -2 };
+    s.pendingSaiKoro = {
+      winner: 0 as PlayerId,
+      chances: [{ name: 'fever ron dice', baseChip: 1, shuvariApplicable: true, count: 1, plusMinus: '+' as const, mode: 'ron' }],
+      currentIdx: 0,
+      selectedCombo: [1, 2],
+      rolls: [],
+      finalized: false,
+      summary: null,
+    } as any;
+    for (let i = 0; i < 4; i++) game.rollSaiKoroDice([1, 2]);
+    const after = get(game);
+    const entry = after.game.chipBreakdown.at(-1);
+    expect(entry?.multiplier).toBe(2); // フィーバー×2のみ。ぽっち-2は掛けない。
+    expect(entry?.total).toBe(8);
+    expect(after.pendingSaiKoro?.summary?.chipN).toBe(8);
+  });
 });

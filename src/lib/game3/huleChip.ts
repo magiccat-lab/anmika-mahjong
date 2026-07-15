@@ -330,9 +330,13 @@ export function applyChipsOnHule(
     else ctx.applyChipOall(winner, uradora.fanshu, { label: lbl });
   }
 
-  // 春/夏/秋/冬 効果は 自分抜き分のみ [リョー指示 2026-05-12、 ドラ表示の華は count しない]
+  // 表示された華も和了時に抜いた扱い。裏はリーチ和了時だけ含める。
   const huaBase = ctx.huapai[winner];
   const hua = [...huaBase];
+  for (const p of (ctx.shan.baopai ?? [])) if (typeof p === 'string' && /^f[1-4]$/.test(p)) hua.push(p);
+  if (ctx.lizhi.has(winner)) {
+    for (const p of (ctx.shan.fubaopai ?? [])) if (typeof p === 'string' && /^f[1-4]$/.test(p)) hua.push(p);
+  }
   dlog('[haru chip]', { winner, huaBase, hua });
   const haruCount = hua.filter((p) => p === 'f1').length;
   if (haruCount >= 1) {
@@ -354,11 +358,7 @@ export function applyChipsOnHule(
     result.hupai.push({ name: `${fullLabel} [${totalHua}枚×${multiplier} = ${totalHua * multiplier}オール]`, fanshu: 0 });
   }
 
-  const visibleFuyuBaopai = (ctx.shan.baopai ?? []).filter((p: any) => p === 'f4').length;
-  const uraFuyuBaopai = ctx.lizhi.has(winner)
-    ? ((ctx.shan.fubaopai ?? []).filter((p: any) => p === 'f4').length)
-    : 0;
-  const fuyuCount = hua.filter((p) => p === 'f4').length + visibleFuyuBaopai + uraFuyuBaopai;
+  const fuyuCount = hua.filter((p) => p === 'f4').length;
   const isFuyuKinpei = ctx.kinpeiTarget[winner] === 'fuyu';
   const inFever = ctx.feverActive[winner];
   if (fuyuCount >= 1) {
@@ -382,27 +382,23 @@ export function applyChipsOnHule(
     } else {
       ctx.applyChipFromLoser(winner, loser, ronChips, { label: `役満ロン ×${dama}` });
     }
-    // 役満ツモ 13翻超過 chip ボーナス [リョー指示 2026-05-11]
+    // 本役満 13翻超過 chip ボーナス [ツモ・ロン共通]
     // 「役満以外でハン数を計算して 13翻超えたら超過枚数分 chip」、 夏除く
-    if (loser === null) {
-      // 夏 fanshu 加算分を除外: hupai 中の 「夏 [打点ランクアップ ...翻相当]」 entry の fanshu 合計を引く
-      const natsuBoostFan = (result.hupai ?? [])
-        .filter((h: any) => typeof h.name === 'string' && h.name.startsWith('夏 ') && h.name.includes('ランクアップ'))
-        .reduce((s: number, h: any) => s + (typeof h.fanshu === 'number' ? h.fanshu : 0), 0);
-      // 役満以外で集計した fanshu = 通常 fanshu (役満は damanguan で計上、 fanshu は undefined にされてる場合あり)
-      // result.fanshu が undefined のときは hupai から数字 fanshu を合算
-      let baseFanshu: number;
-      if (typeof result.fanshu === 'number') baseFanshu = result.fanshu;
-      else {
-        baseFanshu = (result.hupai ?? [])
-          .filter((h: any) => typeof h.fanshu === 'number')
-          .reduce((s: number, h: any) => s + h.fanshu, 0);
-      }
-      const eligibleFanshu = baseFanshu - natsuBoostFan;
-      if (eligibleFanshu > 13) {
-        const bonusN = eligibleFanshu - 13;
-        ctx.applyChipOall(winner, bonusN, { label: `役満ツモ 13翻超過 ×${bonusN} [夏除く]` });
-      }
+    // 夏 fanshu 加算分を除外: hupai 中の 「夏 [打点ランクアップ ...翻相当]」 entry の fanshu 合計を引く
+    const natsuBoostFan = (result.hupai ?? [])
+      .filter((h: any) => typeof h.name === 'string' && h.name.startsWith('夏 ') && h.name.includes('ランクアップ'))
+      .reduce((s: number, h: any) => s + (typeof h.fanshu === 'number' ? h.fanshu : 0), 0);
+    // 役満以外で集計した fanshu。result.fanshu が無ければ個別役の数字を合算する。
+    const baseFanshu = typeof result.fanshu === 'number'
+      ? result.fanshu
+      : (result.hupai ?? [])
+        .filter((h: any) => typeof h.fanshu === 'number')
+        .reduce((s: number, h: any) => s + h.fanshu, 0);
+    const eligibleFanshu = baseFanshu - natsuBoostFan;
+    if (eligibleFanshu > 13) {
+      const bonusN = eligibleFanshu - 13;
+      if (loser === null) ctx.applyChipOall(winner, bonusN, { label: `役満ツモ 13翻超過 ×${bonusN} [夏除く]` });
+      else ctx.applyChipFromLoser(winner, loser, bonusN, { label: `役満ロン 13翻超過 ×${bonusN} [夏除く]` });
     }
   } else if (result.fanshu !== undefined && result.fanshu >= 11) {
     // 打点ランク chip [リョー指示 2026-05-12]:

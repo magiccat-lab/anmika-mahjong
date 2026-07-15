@@ -50,6 +50,15 @@ describe('Game3 declareLizhi', () => {
     expect(g.openLizhi.has(player)).toBe(true);
   });
 
+  it('オープンリーチは2000点未満からも供託し、箱下まで許可する', () => {
+    const g = makeTenpaiLunbanGame();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    g.state.defen[player] = -500;
+    expect(g.declareLizhi({ open: true })).toBe(true);
+    expect(g.state.defen[player]).toBe(-2500);
+    expect(g.state.lizhibang).toBe(2);
+  });
+
   it('オープン 3 軒目 block: 既 2 人 open なら 3 人目 open は false', () => {
     const g = makeTenpaiLunbanGame();
     g.openLizhi.add(1 as PlayerId);

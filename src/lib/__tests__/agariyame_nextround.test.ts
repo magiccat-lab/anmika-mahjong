@@ -14,8 +14,20 @@ describe('Game3 canAgariyame', () => {
     g.qipai();
     g.state.changbang = 0; // changshu-1 = 0
     g.state.jushu = 2;
+    g.state.defen = { 0: 30000, 1: 40000, 2: 30000 };
     // qijia=0, jushu=2 → currentOya = (0-2+3)%3 = 1
     expect(g.canAgariyame(1 as PlayerId)).toBe(true);
+  });
+
+  it('オーラス親でも40000点未満、またはトップでなければ不可', () => {
+    const g = new Game3({ qijia: 0, changshu: 1 });
+    g.qipai();
+    g.state.changbang = 0;
+    g.state.jushu = 2;
+    g.state.defen = { 0: 35000, 1: 39900, 2: 35100 };
+    expect(g.canAgariyame(1 as PlayerId)).toBe(false);
+    g.state.defen = { 0: 41000, 1: 40000, 2: 19000 };
+    expect(g.canAgariyame(1 as PlayerId)).toBe(false);
   });
 
   it('子アガリは false [現親判断 のみ]', () => {

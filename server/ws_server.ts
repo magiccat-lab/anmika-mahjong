@@ -418,7 +418,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       postWinAction = { type: 'selectFuyu', use: true };
     } else if (canonical.pendingKinpei) {
       postWinOwner = canonical.pendingKinpei.winner;
-      const hua = canonical.game.huapai[postWinOwner as 0 | 1 | 2] ?? [];
+      const hua = canonical.pendingKinpei.availableHuapai
+        ?? canonical.game.effectiveHuapaiAtHule(postWinOwner as 0 | 1 | 2);
       const target = hua.includes('f4') ? 'fuyu'
         : hua.includes('f3') ? 'aki'
         : hua.includes('f2') ? 'natsu'
@@ -495,6 +496,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         if (!live || live.roundEnded || live.currentPlayer() !== current) return;
         let action: Record<string, unknown>;
         if (live.game.canTsumo(current)) action = { type: 'tsumo' };
+        else if (live.game.getForcedLizhiKanCandidates(current).length > 0) {
+          action = { type: 'declareKan', mianzi: live.game.getForcedLizhiKanCandidates(current)[0] };
+        }
         else if (live.lastZimo && toCorePai(live.lastZimo) === 'z4' && live.game.canNukiBei(current)) action = { type: 'nukiBei' };
         else {
           const sp = live.game.shoupai.get(current);

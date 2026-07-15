@@ -31,10 +31,10 @@ describe('Game3 canLizhi', () => {
     expect(g.canLizhi(player)).toBe(false);
   });
 
-  it('point 負 で false [defen < 0]', () => {
+  it('箱下でもリーチ可能 [defen < 0]', () => {
     const { g, player } = makeTenpaiGame();
     g.state.defen[player] = -1;
-    expect(g.canLizhi(player)).toBe(false);
+    expect(g.canLizhi(player)).toBe(true);
   });
 
   it('point 0 でも リーチ可能 [トビ扱い、 0 以上 OK]', () => {

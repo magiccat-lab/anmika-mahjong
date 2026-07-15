@@ -1653,11 +1653,9 @@
             <span class="fever-cond-hint">[{feverDapaiTiles.join('/')} 切れば fever、 他は通常リーチ]</span>
           {/if}
         {/if}
-        {#if $game.game.state.defen[currentPlayer] >= 2000}
-          <button class="lizhi-btn open" class:active={lpActive && lp.open && !lp.shuvari} on:click={() => game.lizhi({open:true})}>オープン</button>
-          {#if !$game.game.shuvariUsed[currentPlayer]}
-            <button class="lizhi-btn shuvari-open" class:active={lpActive && lp.open && lp.shuvari} on:click={() => game.lizhi({shuvari:true, open:true})}>シュバオープン</button>
-          {/if}
+        <button class="lizhi-btn open" class:active={lpActive && lp.open && !lp.shuvari} on:click={() => game.lizhi({open:true})}>オープン</button>
+        {#if !$game.game.shuvariUsed[currentPlayer]}
+          <button class="lizhi-btn shuvari-open" class:active={lpActive && lp.open && lp.shuvari} on:click={() => game.lizhi({shuvari:true, open:true})}>シュバオープン</button>
         {/if}
       </div>
     {/if}
@@ -1734,7 +1732,7 @@
     <!-- 2026-05-14 ゆーま 自走 bug fix: online で winner != selfPlayer の client にも
          modal が出てて 誤クリックで他人の金北選択を送れた、 winner のみ表示に gate -->
     {#if $game.pendingKinpei && viewMode !== 'single' && (!onlineGameStarted || $game.pendingKinpei.winner === selfPlayer)}
-      <KinpeiModal winner={$game.pendingKinpei.winner} huapai={$game.game.huapai[$game.pendingKinpei.winner as PlayerId]} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
+      <KinpeiModal winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
     {/if}
     <!-- 2026-05-14: 非 winner client にも modal は見せる [dice 物理動画 WS sync を視認可能に]、
          操作は canOperate prop で完全遮断、 store 側 send-gate でも二重防御 -->
@@ -1751,7 +1749,7 @@
         rolls={$game.pendingSaiKoro.rolls}
         finalized={$game.pendingSaiKoro.finalized}
         summary={$game.pendingSaiKoro.summary}
-        chipMultiplier={$game.game.computeChipMultiplier(_chanceOwner, { bypassShuvari: true, bypassFever: false })}
+        chipMultiplier={$game.game.computeChipMultiplier(_chanceOwner, { bypassShuvari: true, bypassFever: false, bypassPochi: (_curChance as any)?.mode === 'ron', mode: (_curChance as any)?.mode ?? 'tsumo' })}
         onSelectCombo={(a, b) => game.selectSaiKoroCombo(a, b)}
         onRoll={(override?: [number, number]) => game.rollSaiKoroDice(override)}
         onAdvance={() => game.advanceSaiKoro()}
@@ -1971,11 +1969,9 @@
                 <span class="fever-cond-hint">[{feverDapaiTiles.join('/')} 切れば fever]</span>
               {/if}
             {/if}
-            {#if $game.game.state.defen[currentPlayer] >= 2000}
-              <button class="lizhi-btn open" on:click={() => game.lizhi({open:true})}>オープン</button>
-              {#if !$game.game.shuvariUsed[currentPlayer]}
-                <button class="lizhi-btn shuvari-open" on:click={() => game.lizhi({shuvari:true, open:true})}>シュバオープン</button>
-              {/if}
+            <button class="lizhi-btn open" on:click={() => game.lizhi({open:true})}>オープン</button>
+            {#if !$game.game.shuvariUsed[currentPlayer]}
+              <button class="lizhi-btn shuvari-open" on:click={() => game.lizhi({shuvari:true, open:true})}>シュバオープン</button>
             {/if}
           </div>
         {/if}
@@ -2210,26 +2206,27 @@
       </div>
       <!-- 2026-05-14 codex review #3 fix: inline Kinpei は winner 限定 -->
       {#if $game.pendingKinpei && viewMode === 'single' && (!onlineGameStarted || $game.pendingKinpei.winner === selfPlayer)}
+        {@const effectiveKinpeiHua = $game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)}
         <div class="kinpei-inline">
           <div class="kinpei-title">金北 強化対象 [P{$game.pendingKinpei.winner} 選択]</div>
           <div class="kinpei-btns">
-            {#if $game.game.huapai[$game.pendingKinpei.winner as PlayerId].includes('f1')}
+            {#if effectiveKinpeiHua.includes('f1')}
               <button class="kinpei-btn haru" on:click={() => game.selectKinpei('haru')}>春</button>
             {/if}
-            {#if $game.game.huapai[$game.pendingKinpei.winner as PlayerId].includes('f2')}
+            {#if effectiveKinpeiHua.includes('f2')}
               <button class="kinpei-btn natsu" on:click={() => game.selectKinpei('natsu')}>夏</button>
             {/if}
-            {#if $game.game.huapai[$game.pendingKinpei.winner as PlayerId].includes('f3')}
+            {#if effectiveKinpeiHua.includes('f3')}
               <button class="kinpei-btn aki" on:click={() => game.selectKinpei('aki')}>秋</button>
             {/if}
-            {#if $game.game.huapai[$game.pendingKinpei.winner as PlayerId].includes('f4')}
+            {#if effectiveKinpeiHua.includes('f4')}
               <button class="kinpei-btn fuyu" on:click={() => game.selectKinpei('fuyu')}>冬</button>
             {/if}
             {#if $game.game.feverActive[$game.pendingKinpei.winner as PlayerId]}
               <button class="kinpei-btn hold" on:click={() => game.selectKinpei(null)}>保留 [今局のみ]</button>
             {/if}
             <!-- 2026-05-14 fix [user 報告]: 華牌なし時 button が無くて止まる対策、 「強化なし」 を常時表示 -->
-            {#if !($game.game.huapai[$game.pendingKinpei.winner as PlayerId].some((p: string) => p === 'f1' || p === 'f2' || p === 'f3' || p === 'f4'))}
+            {#if !(effectiveKinpeiHua.some((p: string) => p === 'f1' || p === 'f2' || p === 'f3' || p === 'f4'))}
               <button class="kinpei-btn hold" on:click={() => game.selectKinpei(null)}>強化対象なし [次へ]</button>
             {/if}
           </div>

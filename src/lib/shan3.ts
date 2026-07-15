@@ -52,27 +52,15 @@ export class Shan3 {
     }
     this._initialPai = [...raw];
     // R24 P2 #5/#12 fix: 物理切出
-    // 1) 表 dora 2 枚 を raw[4..] 非華牌 から取って raw から remove
-    // 2) 裏 dora 2 枚 を 残り raw[..] 非華牌 から取って raw から remove [fudora=true 時]
+    // 1) 表 dora 2 枚 を raw[4..] から取って raw から remove [華牌も表示可]
+    // 2) 裏 dora 2 枚 を 残り raw[4..] から取って raw から remove [fudora=true 時、華牌も表示可]
     // 3) 嶺上 reserve 16 枚 を raw 先頭 から取って raw から remove [華牌混入 OK、 gangzimo で skip 処理]
     // 4) 残り raw を _pai [live wall] とする
-    const removeNonHuaAt = (arr: Pai[], startIdx: number, count: number): Pai[] => {
-      const picks: Pai[] = [];
-      let i = startIdx;
-      while (picks.length < count && i < arr.length) {
-        const p = arr[i];
-        if (typeof p === 'string' && !p.startsWith('f')) {
-          picks.push(p);
-          arr.splice(i, 1);
-          // splice 後 i は そのまま [次 element が i に来る]
-          continue;
-        }
-        i++;
-      }
-      return picks;
-    };
-    this._baopai = removeNonHuaAt(raw, 4, 2);
-    this._fubaopai = rule.fudora ? removeNonHuaAt(raw, 4, 2) : null;
+    const removeAt = (arr: Pai[], startIdx: number, count: number): Pai[] => (
+      arr.splice(startIdx, Math.min(count, Math.max(0, arr.length - startIdx)))
+    );
+    this._baopai = removeAt(raw, 4, 2);
+    this._fubaopai = rule.fudora ? removeAt(raw, 4, 2) : null;
     // 嶺上 16 枚 [先頭から]、 raw 不足時は ある分のみ
     const rinshanCount = Math.min(16, raw.length);
     this._rinshan = raw.splice(0, rinshanCount);

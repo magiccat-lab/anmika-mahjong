@@ -62,6 +62,18 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       safety++;
       continue;
     }
+    const forcedLizhiKan = s.game.getForcedLizhiKanCandidates(cur);
+    if (forcedLizhiKan.length > 0) {
+      const replacement = s.game.declareKan(cur, forcedLizhiKan[0]);
+      if (!replacement) {
+        s.message = `[CPU] player ${cur} 強制カン失敗 [${forcedLizhiKan[0]}]`;
+        break;
+      }
+      s.lastZimo = replacement;
+      s.message = `[CPU 強制カン] player ${cur} 暗槓 [${forcedLizhiKan[0]}]、 嶺上 ${replacement}`;
+      safety++;
+      continue;
+    }
     if (s.game.canLizhi(cur)) {
       // CPU リーチ 戦略性 [リョー指示 2026-05-14 CPU 打牌精度向上]:
       //   - 待ち牌が 山 + 他家手 で 0 枚 [枯渇] なら 見送り [リーチ供託の無駄打ち回避]

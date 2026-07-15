@@ -343,12 +343,16 @@ export class Game3 {
   kinpeiTarget: Record<PlayerId, 'haru' | 'natsu' | 'aki' | 'fuyu' | null> = { 0: null, 1: null, 2: null };
 
   /** 金北強化を選択 [外部 UI から 1 回のみ呼ぶ、 既に選択済なら無視] */
-  setKinpeiChoice(player: PlayerId, target: 'haru' | 'natsu' | 'aki' | 'fuyu'): boolean {
+  setKinpeiChoice(
+    player: PlayerId,
+    target: 'haru' | 'natsu' | 'aki' | 'fuyu',
+    availableHuapai: string[] = this.effectiveHuapaiAtHule(player),
+  ): boolean {
     if (this.kinpeiTarget[player] !== null) return false;
     // 金北の強化は 手牌 or 抜き で持ってる時に適用 [リョー指示 2026-05-12]
     if (this.goldHand[player].z === 0 && (this.nukidoraGold[player] ?? 0) === 0) return false;
-    // 抜いてる華と一致確認
-    const has = this.huapai[player].includes(`f${ {haru:1,natsu:2,aki:3,fuyu:4}[target] }`);
+    // 自分で抜いた華 + 表示中の華 [リーチ和了時は裏も] と一致確認
+    const has = availableHuapai.includes(`f${ {haru:1,natsu:2,aki:3,fuyu:4}[target] }`);
     if (!has) return false;
     this.kinpeiTarget[player] = target;
     return true;
@@ -362,18 +366,31 @@ export class Game3 {
     this.kinpeiTarget[player] = null;
   }
 
+  /** 和了時に「抜いた扱い」となる華牌。
+   *  自分で抜いた華に、表ドラ表示の華と、リーチ和了時だけ裏ドラ表示の華を加える。
+   *  秋効果で追加表示された華も shan の表示列に残るため同じ経路で含まれる。 */
+  effectiveHuapaiAtHule(player: PlayerId): string[] {
+    const hua: string[] = [...(this.huapai[player] ?? [])];
+    for (const p of (this.shan?.baopai ?? [])) {
+      if (typeof p === 'string' && /^f[1-4]$/.test(p)) hua.push(p);
+    }
+    if (this.lizhi.has(player)) {
+      for (const p of (this.shan?.fubaopai ?? [])) {
+        if (typeof p === 'string' && /^f[1-4]$/.test(p)) hua.push(p);
+      }
+    }
+    return hua;
+  }
+
   /** 強制自動: 抜いてる華 [手牌] + ドラ表示牌 / 裏ドラ表示牌 の華 から 冬>秋>夏>春 priority で選ぶ
    *  [リョー指示 2026-05-12: 手牌 0 + 金北抜きの場合 ドラ表示の華で自動強化、 完全 0 ならスキップ] */
-  autoResolveKinpei(player: PlayerId): void {
+  autoResolveKinpei(
+    player: PlayerId,
+    availableHuapai: string[] = this.effectiveHuapaiAtHule(player),
+  ): void {
     if (this.kinpeiTarget[player] !== null) return;
     if (this.goldHand[player].z === 0 && (this.nukidoraGold[player] ?? 0) === 0) return;
-    const huaSources: string[] = [...this.huapai[player]];
-    // ドラ表示牌 / 裏ドラ表示牌の 華 [f1-f4] も candidate
-    const baopai = (this.shan as any)?.baopai ?? [];
-    const fubaopai = (this.shan as any)?.fubaopai ?? [];
-    for (const p of [...baopai, ...fubaopai]) {
-      if (typeof p === 'string' && p.startsWith('f')) huaSources.push(p);
-    }
+    const huaSources = availableHuapai;
     const counts = {
       haru: huaSources.filter((p) => p === 'f1').length,
       natsu: huaSources.filter((p) => p === 'f2').length,
@@ -476,6 +493,9 @@ export class Game3 {
     if (!sp) return false;
     if (!sp._zimo) return false;
     if (sp._zimo.length > 2) return false; // 副露直後の擬似 zimo は除外
+    // リーチ宣言牌の確定前は他 action 不可。成立後に待ち不変の暗槓があればカンを優先する。
+    if (this.lizhiDeclareDapai[player]) return false;
+    if (this.lizhi.has(player) && this.getForcedLizhiKanCandidates(player).length > 0) return false;
     // フィーバー中の非フィーバー player は ツモ牌 z4 のみ抜ける、 手牌の z4 は不可
     const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => this.feverActive[p]);
     if (someoneFever && !this.feverActive[player]) {
@@ -890,6 +910,12 @@ export class Game3 {
     // 2026-05-14 codex review fix: 「北は河に切れない」 仕様を Game3 API で保証。
     // dapai('z4') 直叩き は declareNukiBei に auto-route [silent redirect、 既存 test 互換]
     // R8 P2 #1 fix: 北抜き不可なら throw [silent return で lastDapai に z4 残る bug 解消]
+    const player = this.lunbanToPlayerId(this.state.lunban);
+    // リーチ後の待ち不変暗槓は強制。リーチ宣言牌を切る瞬間だけは宣言成立に必要なので除外する。
+    const forcedKan = this.getForcedLizhiKanCandidates(player);
+    if (!this.lizhiDeclareDapai[player] && forcedKan.length > 0) {
+      throw new Error(`リーチ後の待ち不変カンが必須 [${forcedKan.join(',')}]`);
+    }
     const requestedPai = String(pai).replace(/[_*]$/, '');
     const coreDapai = toCorePai(requestedPai);
     if (coreDapai === 'z4') {
@@ -903,7 +929,6 @@ export class Game3 {
       }
       return;
     }
-    const player = this.lunbanToPlayerId(this.state.lunban);
     const spInst = this.shoupai.get(player);
     if (!spInst) {
       console.error('[dapai error] shoupai.get(player) undefined', { player, lunban: this.state.lunban, mapSize: this.shoupai.size, mapKeys: Array.from(this.shoupai.keys()) });
@@ -1724,26 +1749,15 @@ export class Game3 {
     if (aki > 0) {
       const isLizhi = this.lizhi.has(player);
       dlog('[aki effect] pushing', { player, aki, willAddBaopai: aki, isLizhi });
-      // 秋効果: 華が出たらドラ表示領域には残しつつ、次の通常牌までめくる。
-      // 途中で f3 が出ても効果回数は増やさない [秋金北の過剰めくり防止]。
+      // 秋効果でめくった華もその表示枠を占め、和了時に抜いた扱い。
+      // 華だから通常牌まで飛ばすことはせず、f3 [秋] の場合だけ新たな秋効果を1回追加する。
       let akiRemaining = aki;
-      const drawWithCascade = (isFu: boolean): string | null => {
-        let newPai = this.shan.drawNewDora(isFu);
-        while (newPai && newPai.startsWith('f')) {
-          // [Fix 2026-05-13]: ドラめくり由来の f を huapai[player] に push しない
-          // L1033 コメント 「ドラ表示由来の華は 4華/8華 対象外」 と整合
-          // 春夏秋冬 打点 [applyHuapaiEffect L1270-1275] は baopai/fubaopai 由来の f も
-          // 別途 hua array に追加しているので、 huapai に push しなくても 打点計算は維持される
-          // 秋効果中にめくれた f3 は「華牌なので飛ばす」だけにする。
-          // ここで効果回数を増やすと、秋金北が秋秋以上に増殖して 3 枚めくりになる。
-          newPai = this.shan.drawNewDora(isFu);
-        }
-        return newPai;
-      };
       while (akiRemaining > 0) {
-        drawWithCascade(false);
-        if (isLizhi) drawWithCascade(true);
+        let newlyRevealedAki = 0;
+        if (this.shan.drawNewDora(false) === 'f3') newlyRevealedAki += 1;
+        if (isLizhi && this.shan.drawNewDora(true) === 'f3') newlyRevealedAki += 1;
         akiRemaining -= 1;
+        akiRemaining += newlyRevealedAki;
         if (this.shan.paishu === 0) break;
       }
       param.baopai = (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
@@ -2153,18 +2167,11 @@ export class Game3 {
     if (!result || result.fanshu === undefined) return;
     // ルール 2-2: ドラ表示牌の華牌もアガリ時に抜いたものとして計算
     // [リーチアガリ時のみ裏ドラの華も追加]
-    const hua = [...this.huapai[player]];
-    const isLizhiAgari = this.lizhi.has(player);
-    for (const p of (this.shan.baopai ?? [])) if (typeof p === 'string' && p.startsWith('f')) hua.push(p);
-    if (isLizhiAgari) {
-      for (const p of (this.shan.fubaopai ?? [])) if (typeof p === 'string' && p.startsWith('f')) hua.push(p);
-    }
+    const hua = this.effectiveHuapaiAtHule(player);
     const haru = hua.filter((p) => p === 'f1').length;
     const natsu = hua.filter((p) => p === 'f2').length;
     const aki = hua.filter((p) => p === 'f3').length;
-    // 2026-05-14 codex review fix: 冬 [アリス] は 「実際に抜いた / 使う選択 した player」 限定の効果、
-    // baopai/fubaopai 表示牌由来は冬 effect の対象外。 own huapai 限定 count に変更
-    const fuyu = this.huapai[player].filter((p) => p === 'f4').length;
+    const fuyu = hua.filter((p) => p === 'f4').length;
     result.hupai = result.hupai ?? [];
 
     // 秋効果は hule 前に baopai 物理追加で対応済 [majiang-core が「ドラ N / 裏ドラ N」
@@ -2411,7 +2418,7 @@ export class Game3 {
       人和: 140,
       その他本役満: 70,
     } as const;
-    // 裁定待ち #10: 天和系がダブル役満でも、現時点の出目当て回数は1回。
+    // 2026-07-15確定: 天和系がダブル役満でも出目当ては140×1回。
     const TENHOU_FAMILY_SAI_COUNT = 1;
     const dedicatedYakumanAwards = [
       { role: 'カラス', awardKey: 'yakuman:カラス', name: 'カラス [出目当て効果 ×2]', baseChip: YAKUMAN_SAI_BASE.カラス, shuvariApplicable: true, count: 1, yakumanUnits: 1 },
@@ -2981,6 +2988,8 @@ export class Game3 {
     if (winner !== this.currentOya) return false;
     if (this.state.changbang !== this.changshu - 1) return false;
     if (this.state.jushu !== 2) return false;
+    if (this.state.defen[winner] < 40000) return false;
+    if (this.state.defen[winner] !== Math.max(...Object.values(this.state.defen))) return false;
     return true;
   }
 
@@ -3215,6 +3224,8 @@ export class Game3 {
   getKanCandidates(player: PlayerId): string[] {
     const sp = this.shoupai.get(player);
     if (!sp) return [];
+    // リーチ宣言牌をまだ切っていない間は、先に宣言打牌を完了させる。
+    if (this.lizhi.has(player) && this.lizhiDeclareDapai[player]) return [];
     const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => this.feverActive[p]);
     if (someoneFever && !this.feverActive[player]) return [];
     // [2026-05-15 bug 9 fix] 嶺上 [_rinshan] 残量 check:
@@ -3228,9 +3239,34 @@ export class Game3 {
     // gangzimo と同じ述語を候補生成にも使い、表示後の silent failure を防ぐ。
     if (!this.shan.canOpenKanDora) return [];
     try {
-      return sp.get_gang_mianzi() ?? [];
+      const candidates = (sp.get_gang_mianzi() ?? []) as string[];
+      if (!this.lizhi.has(player)) return candidates;
+      return candidates.filter((mianzi) => this.isWaitPreservingLizhiKan(player, mianzi));
     } catch {
       return [];
+    }
+  }
+
+  /** リーチ後に強制される、待ち不変の合法暗槓候補。 */
+  getForcedLizhiKanCandidates(player: PlayerId): string[] {
+    if (!this.lizhi.has(player)) return [];
+    return this.getKanCandidates(player);
+  }
+
+  /** リーチ後暗槓の前後で待ちが完全一致するか。判定不能時は安全側で不可。 */
+  private isWaitPreservingLizhiKan(player: PlayerId, mianzi: string): boolean {
+    if (!/^[mpsz]\d{4}$/.test(mianzi)) return false;
+    const sp = this.shoupai.get(player);
+    if (!sp) return false;
+    try {
+      // リーチ待ちはツモ牌を除いた宣言済み13枚で比較する。
+      const tingBefore = new Set(this.getTingpaiListBeforeZimo(player));
+      const spAfter = sp.clone();
+      spAfter.gang(mianzi);
+      const tingAfter = new Set((Majiang.Util.tingpai(spAfter) ?? []) as string[]);
+      return tingBefore.size === tingAfter.size && [...tingBefore].every((tile) => tingAfter.has(tile));
+    } catch {
+      return false;
     }
   }
 
@@ -3239,29 +3275,14 @@ export class Game3 {
   declareKan(player: PlayerId, mianzi: string): Pai | null {
     const sp = this.shoupai.get(player);
     if (!sp) return null;
+    if (this.lizhi.has(player) && this.lizhiDeclareDapai[player]) return null;
     dlog('[declareKan]', { player, mianzi, baopaiBefore: [...this.shan.baopai] });
     // [2026-05-15 bug 6 fix] リーチ後 ankan: 待ち変動 禁止。
     //   ankan 前後で tingpai が 一致しない場合 reject [テンパイ崩れ防止]。
     //   加槓 [\d{3}[+=-]\d$] は元々 リーチ中 不可なので 影響なし。 ankan のみ check。
-    const isAnkanReq = !!mianzi.match(/^[mpsz]\d{4}$/);
-    if (isAnkanReq && this.lizhi.has(player)) {
-      try {
-        const tingBefore = new Set((Majiang.Util.tingpai(sp) ?? []) as string[]);
-        const sp_after = sp.clone();
-        try { sp_after.gang(mianzi); } catch { return null; }
-        // ankan 後は 13 枚 + 嶺上ツモ 不要時点の tingpai を取る [_zimo は ankan で消費済]
-        const tingAfter = new Set((Majiang.Util.tingpai(sp_after) ?? []) as string[]);
-        if (tingBefore.size !== tingAfter.size) {
-          dlog('[declareKan] reject: lizhi 中 ankan で 待ち変動', { player, mianzi, tingBefore: [...tingBefore], tingAfter: [...tingAfter] });
-          return null;
-        }
-        for (const t of tingBefore) {
-          if (!tingAfter.has(t)) {
-            dlog('[declareKan] reject: lizhi 中 ankan で 待ち変動', { player, mianzi, tingBefore: [...tingBefore], tingAfter: [...tingAfter] });
-            return null;
-          }
-        }
-      } catch { /* 判定失敗時は安全側で reject せず 続行 [既存挙動互換] */ }
+    if (this.lizhi.has(player) && !this.isWaitPreservingLizhiKan(player, mianzi)) {
+      dlog('[declareKan] reject: リーチ中の待ち変動または判定不能カン', { player, mianzi });
+      return null;
     }
     // snapshot for rollback
     const _origBingpai = { m: [...sp._bingpai.m], p: [...sp._bingpai.p], s: [...sp._bingpai.s], z: [...sp._bingpai.z] };
@@ -3453,13 +3474,12 @@ export class Game3 {
    *  field 自体は 古い参照保護で 残置、 値は 未使用 */
   tobiChipPaid: boolean = false;
 
-  /** リーチ可能か [ツモ後・聴牌・点棒 1000 以上・副露ナシ。 ただし暗槓は門前扱いで OK] */
+  /** リーチ可能か [ツモ後・聴牌・副露ナシ。箱下からの宣言も可、暗槓は門前扱い] */
   canLizhi(player: PlayerId): boolean {
     if (this.lizhi.has(player)) return false;
     const sp = this.shoupai.get(player);
     if (!sp) return false;
-    // ルール 1.1 リーチ 0 点持ち可 [トビ扱い、 流局や他家アガリで負け]、 0 以上で OK
-    if (this.state.defen[player] < 0) return false;
+    // 箱下リーチ可。点棒不足・負点を理由に宣言を止めず、供託後さらに負値になり得る。
     // 副露 check: 暗槓 [\d{4} form、 方向 mark 無し] のみなら門前扱いで OK
     if (sp._fulou && sp._fulou.length > 0) {
       const hasNonAnkan = sp._fulou.some((m: string) => !m.match(/^[mpsz]\d{4}$/));
@@ -3500,8 +3520,6 @@ export class Game3 {
       dlog('[lizhi] fever 宣言 reject [feverCheck false]', { player });
       return false;
     }
-    // R3 P2 #16 fix: opts.open は 2000 点 コスト、 残点 2000 点未満なら reject
-    if (opts.open && this.state.defen[player] < 2000) return false;
     const cost = opts.open ? 2000 : 1000;
     this.state.defen[player] -= cost;
     this.state.lizhibang += opts.open ? 2 : 1;

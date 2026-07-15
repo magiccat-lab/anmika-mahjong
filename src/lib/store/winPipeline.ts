@@ -22,16 +22,24 @@ export type PendingKinpei = {
   winner: number;
   isRon: boolean;
   ronfrom: number | null;
+  /** 和了計算で新たに表示された華を、snapshot 復元後も選択肢として保持する。 */
+  availableHuapai?: string[];
   otherWinners?: number[];
   humanOthers?: number[];
   cutinQueued?: boolean;
+  /** この和了で冬の使用可否を既に選択済みなら、金北再計算後に再表示しない。 */
+  fuyuDecisionMade?: boolean;
 };
 
 export type PendingFuyu = {
   winner: number;
   isRon: boolean;
   ronfrom: number | null;
+  /** 秋効果で表示された冬を、snapshot 復元後の冬・金北選択へ引き継ぐ。 */
+  availableHuapai?: string[];
+  otherWinners?: number[];
   humanOthers?: number[];
+  cutinQueued?: boolean;
 };
 
 export type PendingFeverContinue = {
