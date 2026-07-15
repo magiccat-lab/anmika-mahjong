@@ -170,7 +170,7 @@ export function enqueueCutinState(s: StoreState, id: CutinId, seat?: PlayerId): 
   return s;
 }
 
-function createGameStore() {
+export function createGameStore() {
   const game = new Game3();
   game.qipai();
   const firstPai = game.zimo();
@@ -216,6 +216,10 @@ function createGameStore() {
   let iAmHost = false;
   // 2026-05-14 R3 P0 #1: applyOnlineRemoteAction で cpuRelay 検証用、 host seat を保持
   let hostSeat: 0 | 1 | 2 | null = null;
+  let onlineRevision = 0;
+  let onlineMatchId = 1;
+  let onlineRoundId = 1;
+  let commandSequence = 0;
   /** send 前 gate: online で 自席が action 主体 [現手番 or 候補] かを check、 不正は false で send 抑止 */
   function checkOnlineGate(action: any, requiredSeat: 'currentPlayer' | 'me' | 'winner' | 'host' | 'lastWinner' | 'oya'): boolean {
     if (!onlineMode) return true; // single mode は通す
@@ -250,9 +254,22 @@ function createGameStore() {
     }
   }
   function sendOnlineAction(action: any): boolean {
-    if (!onlineMode || isApplyingRemote || !onlineWs || onlineWs.readyState !== WebSocket.OPEN) return false;
+    if (!onlineMode || isApplyingRemote) return false;
+    // 接続断中に local reducer へ fall through すると、再接続前に盤面が分岐する。
+    // onlineMode 中は socket が閉じていても操作を消費し、sync 復元を待つ。
+    if (!onlineWs || onlineWs.readyState !== WebSocket.OPEN) return true;
     try {
-      onlineWs.send(JSON.stringify({ type: 'action', action }));
+      const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${(++commandSequence).toString(36)}`;
+      onlineWs.send(JSON.stringify({
+        type: 'action',
+        commandId: `cli:${myOnlineSeat ?? 'x'}:${randomPart}`,
+        expectedVersion: onlineRevision,
+        matchId: onlineMatchId,
+        roundId: onlineRoundId,
+        action,
+      }));
       return true;
     } catch (e) {
       return false;
@@ -262,13 +279,16 @@ function createGameStore() {
   return {
     subscribe,
     /** オンライン対戦 接続 & game init: preShuffledPool 受信時に呼ぶ */
-    initOnlineGame(opts: { ws: WebSocket; preShuffledPool: string[]; qijia: 0|1|2; cpuSeats?: number[]; mySeat?: 0|1|2; isHost?: boolean; hostSeat?: 0|1|2 }) {
+    initOnlineGame(opts: { ws: WebSocket; preShuffledPool: string[]; qijia: 0|1|2; cpuSeats?: number[]; mySeat?: 0|1|2; isHost?: boolean; hostSeat?: 0|1|2; revision?: number; matchId?: number; roundId?: number }) {
       onlineWs = opts.ws;
       onlineMode = true;
       myOnlineSeat = opts.mySeat ?? null;
       iAmHost = opts.isHost ?? false;
       hostSeat = opts.hostSeat ?? null;
-      (window as any).__anmikaOnline = true;
+      onlineRevision = opts.revision ?? 0;
+      onlineMatchId = opts.matchId ?? 1;
+      onlineRoundId = opts.roundId ?? 1;
+      if (typeof window !== 'undefined') (window as any).__anmikaOnline = true;
       const ng = new Game3({ qijia: opts.qijia, preShuffledPool: opts.preShuffledPool });
       ng.qipai();
       const fp = ng.zimo();
@@ -305,6 +325,23 @@ function createGameStore() {
         cutin: null,
         cutinQueue: [],
       });
+    },
+    setOnlineProtocolState(opts: { ws?: WebSocket; revision: number; matchId: number; roundId: number }) {
+      if (opts.ws) onlineWs = opts.ws;
+      onlineRevision = opts.revision;
+      onlineMatchId = opts.matchId;
+      onlineRoundId = opts.roundId;
+    },
+    getOnlineProtocolState() {
+      return { revision: onlineRevision, matchId: onlineMatchId, roundId: onlineRoundId };
+    },
+    /** Server-side canonical replay can update CPU ownership without rebuilding the game. */
+    setCpuSeats(cpuSeats: number[]) {
+      const next: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false };
+      for (const seat of cpuSeats) {
+        if (seat === 0 || seat === 1 || seat === 2) next[seat] = true;
+      }
+      update((state) => ({ ...state, cpu: next }));
     },
     /** オンライン: 自分以外の seat の action [server から relay 受信] を local apply
      *  2026-05-14 codex review #1 fix: from_seat と action.player / 現在手番 / 候補者 の
@@ -432,15 +469,12 @@ function createGameStore() {
           }
           // host 限定 action: nextRound、 sai 関連 [winner と host 重複 case 多い]
           case 'nextRound': {
-            // R3 P1 #10 fix: winner null [流局] でも host のみ許可
-            // R8 P0 #2 fix: winner が CPU の場合は host 代理 も許可、 旧 code は winner 一致だけだったので
-            // CPU 和了で次局進めない bug 解消
+            // Server authority accepts the winner or the host. Every client
+            // must replay the same host-issued command even when a human guest
+            // won; rejecting it here split the room at the next round.
             if (winner !== null) {
-              const winnerIsCpu = s.cpu[winner as 0|1|2] === true;
-              if (from_seat !== winner) {
-                if (!(winnerIsCpu && hostSeat !== null && from_seat === hostSeat)) {
-                  return reject(`nextRound: ${from_seat} ≠ winner ${winner} (winnerIsCpu=${winnerIsCpu} hostSeat=${hostSeat})`);
-                }
+              if (from_seat !== winner && (hostSeat === null || from_seat !== hostSeat)) {
+                return reject(`nextRound: ${from_seat} is neither winner ${winner} nor host ${hostSeat}`);
               }
             } else {
               if (hostSeat !== null && from_seat !== hostSeat) return reject(`nextRound: 流局 nextRound は host [seat ${hostSeat}] のみ、 from=${from_seat}`);
@@ -510,6 +544,9 @@ function createGameStore() {
       myOnlineSeat = null;
       iAmHost = false;
       hostSeat = null;
+      onlineRevision = 0;
+      onlineMatchId = 1;
+      onlineRoundId = 1;
       if (typeof window !== 'undefined') {
         (window as any).__anmikaOnline = false;
         (window as any).__anmikaIsHost = false;

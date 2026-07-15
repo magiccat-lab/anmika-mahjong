@@ -8,9 +8,12 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+__pycache__/
+*.py[cod]
 .npm-cache/
 .tmp/
 .venv-online-e2e/
+.playwright-browsers/
 dist
 dist-ssr
 *.local

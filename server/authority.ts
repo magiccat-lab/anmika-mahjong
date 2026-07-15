@@ -1,4 +1,6 @@
 import { Game3 } from '../src/lib/game3';
+import { createGameStore, type StoreState } from '../src/lib/store';
+import { get } from 'svelte/store';
 import { toCorePai } from '../src/lib/helpers';
 import { resolveNukiBeiMeta } from '../src/lib/game3/bei';
 import type { Pai, PlayerId } from '../src/lib/types';
@@ -46,6 +48,7 @@ function chooseWinnerByOya(game: Game3, winners: PlayerId[]): PlayerId {
 
 export class RoomAuthority {
   game: Game3;
+  private readonly canonicalStore = createGameStore();
   lastZimo: Pai | null = null;
   lastDapai: LastDapai | null = null;
   awaitingRonDecision = false;
@@ -58,6 +61,8 @@ export class RoomAuthority {
   pendingQianggang: PendingQianggang | null = null;
   roundEnded = false;
   lastWinner: PlayerId | null = null;
+  private cpuSeats = new Set<PlayerId>();
+  private deferredCpuRon: PlayerId[] = [];
   /** commandId 導入前のWSA-A7暫定冪等窓。次局開始後、最初の非nextRound操作まで有効。 */
   private duplicateNextRoundAckOpen = false;
 
@@ -67,6 +72,10 @@ export class RoomAuthority {
       preShuffledPool: init.preShuffledPool as Pai[],
     });
     this.startKyoku();
+    this.canonicalStore.reset({
+      preShuffledPool: init.preShuffledPool,
+      qijia: asPlayerId(init.qijia) ?? 0,
+    });
   }
 
   resetMatch(init: RoomAuthorityInit): void {
@@ -77,11 +86,34 @@ export class RoomAuthority {
     this.startKyoku();
   }
 
+  canonicalState(): StoreState {
+    return get(this.canonicalStore);
+  }
+
+  isPostWinResolved(): boolean {
+    const state = this.canonicalState();
+    return state.roundEnded
+      && !state.awaitingRonDecision
+      && !state.awaitingFulou
+      && !state.pendingFuyu
+      && !state.pendingKinpei
+      && !state.pendingFeverContinue
+      && !state.pendingSaiKoro
+      && !state.pendingQianggang;
+  }
+
   currentPlayer(): PlayerId {
     return this.game.lunbanToPlayerId(this.game.state.lunban);
   }
 
   validateAndApply(actorSeat: number, action: any, _members: Iterable<AuthorityMember> = []): string | null {
+    this.cpuSeats = new Set(
+      Array.from(_members)
+        .filter((member) => member.is_cpu)
+        .map((member) => asPlayerId(member.seat))
+        .filter((seat): seat is PlayerId => seat !== null),
+    );
+    this.canonicalStore.setCpuSeats([...this.cpuSeats]);
     const actor = asPlayerId(actorSeat);
     if (actor === null) return `invalid actor seat ${actorSeat}`;
     if (!action || typeof action !== 'object' || typeof action.type !== 'string') {
@@ -89,40 +121,90 @@ export class RoomAuthority {
     }
     if (action.type !== 'nextRound') this.duplicateNextRoundAckOpen = false;
 
+    let reason: string | null;
     try {
       switch (action.type) {
         case 'discard':
-          return this.applyDiscard(actor, String(action.pai ?? ''), action.meta);
+          reason = this.applyDiscard(actor, String(action.pai ?? ''), action.meta); break;
         case 'tsumokiri':
-          return this.applyTsumokiri(actor);
+          reason = this.applyTsumokiri(actor); break;
         case 'drawNext':
-          return this.applyDrawNext(actor);
+          reason = this.applyDrawNext(actor); break;
         case 'tsumo':
-          return this.applyTsumo(actor);
+          reason = this.applyTsumo(actor); break;
         case 'ron':
-          return this.applyRon(actor, action.player);
+          reason = this.applyRon(actor, action.player); break;
         case 'pass':
-          return this.applyPass(actor);
+          reason = this.applyPass(actor); break;
         case 'pon':
-          return this.applyPon(actor, action.player, action.mianzi);
+          reason = this.applyPon(actor, action.player, action.mianzi); break;
         case 'damingang':
-          return this.applyDamingang(actor, action.player, action.mianzi);
+          reason = this.applyDamingang(actor, action.player, action.mianzi); break;
         case 'declareKan':
-          return this.applyDeclareKan(actor, action.mianzi);
+          reason = this.applyDeclareKan(actor, action.mianzi); break;
         case 'nukiBei':
-          return this.applyNukiBei(actor, action.meta);
+          reason = this.applyNukiBei(actor, action.meta); break;
         case 'lizhi':
-          return this.applyLizhi(actor, action.opts);
+          reason = this.applyLizhi(actor, action.opts); break;
         case 'nextRound':
-          return this.applyNextRound(action);
+          reason = this.applyNextRound(action); break;
         case 'nextMatch':
-          return this.applyNextMatch(action);
+          reason = this.applyNextMatch(action); break;
         default:
-          if (POST_WIN_ACTIONS.has(action.type)) return this.validatePostWinAction(actor, action.type);
-          return `unknown action type ${action.type}`;
+          reason = POST_WIN_ACTIONS.has(action.type)
+            ? this.validatePostWinAction(actor, action.type)
+            : `unknown action type ${action.type}`;
       }
     } catch (e: any) {
       return e?.message ? `authority exception: ${e.message}` : 'authority exception';
+    }
+    if (reason) return reason;
+    try {
+      this.applyCanonicalAction(actor, action);
+      const canonical = this.canonicalState();
+      // Scoring and match-end decisions live in the same reducer clients replay.
+      // Keep the validation engine's public score/round state aligned before the
+      // next command while retaining its independently checked physical hand.
+      this.game.state = structuredClone(canonical.game.state);
+      this.game.chipLedger = structuredClone(canonical.game.chipLedger);
+      this.roundEnded = canonical.roundEnded;
+      this.lastWinner = canonical.lastWinner as PlayerId | null;
+      return null;
+    } catch (e: any) {
+      return e?.message ? `canonical reducer exception: ${e.message}` : 'canonical reducer exception';
+    }
+  }
+
+  private applyCanonicalAction(actor: PlayerId, action: any): void {
+    const store = this.canonicalStore as any;
+    switch (action.type) {
+      case 'stamp': break;
+      case 'discard': store.discard(action.pai, action.meta); break;
+      case 'lizhi': store.lizhi(action.opts ?? {}); break;
+      case 'tsumo': store.tsumo(); break;
+      case 'ron': store.ron(action.player ?? actor); break;
+      case 'pass': store.pass(action.player ?? actor); break;
+      case 'declareKan': store.declareKan(action.mianzi); break;
+      case 'nukiBei': store.nukiBei(action.meta); break;
+      case 'tsumokiri': store.tsumokiri(); break;
+      case 'drawNext': store.drawNext(); break;
+      case 'selectFuyu': store.selectFuyu(action.use); break;
+      case 'selectKinpei': store.selectKinpei(action.target); break;
+      case 'continueFever': store.continueFever(); break;
+      case 'nextRound': store.nextRound(action.preShuffledPool); break;
+      case 'nextMatch': store.nextMatch({
+        finalize: action.finalize,
+        resetChip: action.resetChip,
+        preShuffledPool: action.preShuffledPool,
+        qijia: action.qijia,
+        cpuSeats: [...this.cpuSeats],
+      }); break;
+      case 'selectSaiKoroCombo': store.selectSaiKoroCombo(action.small, action.large); break;
+      case 'rollSaiKoroDice': store.rollSaiKoroDice(action.override); break;
+      case 'advanceSaiKoro': store.advanceSaiKoro(); break;
+      case 'agariyame': store.agariyame(); break;
+      case 'pon': store.pon(action.player ?? actor, action.mianzi); break;
+      case 'damingang': store.damingang(action.player ?? actor, action.mianzi); break;
     }
   }
 
@@ -144,6 +226,7 @@ export class RoomAuthority {
     this.ronCandidates = [];
     this.ronPassedPlayers = [];
     this.ronDeclaredPlayers = [];
+    this.deferredCpuRon = [];
     this.pendingQianggang = null;
     this.game.qianggangPending = false;
   }
@@ -187,8 +270,9 @@ export class RoomAuthority {
       return `discard: ${e?.message ?? 'illegal pai'}`;
     }
     this.lastZimo = null;
-    this.lastDapai = { player: actor, pai };
-    this.rebuildDiscardReactions(actor, pai);
+    const committedPai = this.game.discardLog[actor]?.at(-1)?.pai ?? pai;
+    this.lastDapai = { player: actor, pai: committedPai };
+    this.rebuildDiscardReactions(actor, committedPai);
     return null;
   }
 
@@ -248,6 +332,14 @@ export class RoomAuthority {
       (p) => !this.ronPassedPlayers.includes(p) && !this.ronDeclaredPlayers.includes(p),
     );
     if (remaining.length > 0) return;
+    if (this.deferredCpuRon.length > 0) {
+      for (const player of this.deferredCpuRon) {
+        if (!this.ronDeclaredPlayers.includes(player)) this.ronDeclaredPlayers.push(player);
+      }
+      this.deferredCpuRon = [];
+      this.roundEnded = true;
+      this.lastWinner = chooseWinnerByOya(this.game, this.ronDeclaredPlayers);
+    }
     this.awaitingRonDecision = false;
     this.ronCandidates = [];
     this.ronPassedPlayers = [];
@@ -260,6 +352,12 @@ export class RoomAuthority {
   private applyPass(actor: PlayerId): string | null {
     let matched = false;
     if (this.awaitingRonDecision && this.ronCandidates.includes(actor)) {
+      const source = this.pendingQianggang
+        ? { player: this.pendingQianggang.player, pai: this.pendingQianggang.kakanPai }
+        : this.lastDapai;
+      if (source && this.game.shuvariActive[actor] && this.game.canRon(actor, source.pai, source.player)) {
+        return `pass: player ${actor} is in shuvari and must declare ron`;
+      }
       if (!this.ronPassedPlayers.includes(actor) && !this.ronDeclaredPlayers.includes(actor)) {
         this.ronPassedPlayers.push(actor);
       }
@@ -269,6 +367,20 @@ export class RoomAuthority {
       );
       if (remainingRon.length === 0) {
         this.awaitingRonDecision = false;
+        if (this.deferredCpuRon.length > 0) {
+          for (const player of this.deferredCpuRon) {
+            if (!this.ronDeclaredPlayers.includes(player)) this.ronDeclaredPlayers.push(player);
+          }
+          this.lastWinner = chooseWinnerByOya(this.game, this.ronDeclaredPlayers);
+          this.roundEnded = true;
+          this.deferredCpuRon = [];
+          this.ronCandidates = [];
+          this.ronPassedPlayers = [];
+          this.ponCandidates = [];
+          this.kanCandidates = [];
+          this.awaitingFulou = false;
+          return null;
+        }
         if (this.pendingQianggang) {
           const pending = this.pendingQianggang;
           this.pendingQianggang = null;
@@ -285,6 +397,8 @@ export class RoomAuthority {
           }
         } else if (this.ronDeclaredPlayers.length === 0 && (this.ponCandidates.length > 0 || this.kanCandidates.length > 0)) {
           this.awaitingFulou = true;
+        } else if (this.ronDeclaredPlayers.length === 0) {
+          this.drawAfterReactions();
         }
       }
     }
@@ -296,6 +410,7 @@ export class RoomAuthority {
       if (before !== this.ponCandidates.length + this.kanCandidates.length) matched = true;
       if (this.ponCandidates.length === 0 && this.kanCandidates.length === 0) {
         this.awaitingFulou = false;
+        this.drawAfterReactions();
       }
     }
 
@@ -400,6 +515,7 @@ export class RoomAuthority {
       if (this.duplicateNextRoundAckOpen) return null;
       return 'nextRound: round is not ended';
     }
+    if (!this.isPostWinResolved()) return 'nextRound: post-win decision is pending';
     const winner = this.lastWinner;
     this.game.nextRound({ winner, preShuffledPool: action.preShuffledPool as Pai[] });
     this.startKyoku();
@@ -411,6 +527,7 @@ export class RoomAuthority {
     if (!Array.isArray(action.preShuffledPool) || action.preShuffledPool.length === 0) {
       return 'nextMatch: missing server preShuffledPool';
     }
+    if (!this.canonicalState().game.state.finished) return 'nextMatch: match is not ended';
     this.resetMatch({
       qijia: typeof action.qijia === 'number' ? action.qijia : this.game.state.qijia,
       preShuffledPool: action.preShuffledPool,
@@ -419,27 +536,39 @@ export class RoomAuthority {
   }
 
   private validatePostWinAction(actor: PlayerId, type: string): string | null {
-    if (!this.roundEnded) return `${type}: no win is pending`;
+    const state = this.canonicalState();
     if (type === 'rollSaiKoroDice' || type === 'selectSaiKoroCombo' || type === 'advanceSaiKoro') {
-      // WS-A stopgap: authority does not yet own the per-chance winner. Until the
-      // canonical post-win state moves server-side, limit dice controls to a
-      // winner recorded for this round. WS-B/C must tighten this to
-      // chances[currentIdx].winner === actor.
-      const isRoundWinner = actor === this.lastWinner || this.ronDeclaredPlayers.includes(actor);
-      if (!isRoundWinner) return `${type}: actor ${actor} is not a round winner`;
+      const pending = state.pendingSaiKoro;
+      if (!pending) return `${type}: no dice chance is pending`;
+      const chance = pending.chances[pending.currentIdx] as any;
+      const owner = chance?.winner ?? pending.winner;
+      if (actor !== owner) return `${type}: actor ${actor} is not chance owner ${owner}`;
+      if (type === 'selectSaiKoroCombo' && pending.selectedCombo) return `${type}: combo already selected`;
+      if (type === 'rollSaiKoroDice' && (!pending.selectedCombo || pending.finalized)) {
+        return `${type}: combo is not ready for a roll`;
+      }
+      if (type === 'advanceSaiKoro' && !pending.finalized) return `${type}: roll is not finalized`;
       return null;
     }
-    if (this.lastWinner !== null && actor !== this.lastWinner) {
-      return `${type}: actor ${actor} is not last winner ${this.lastWinner}`;
-    }
+    const owner = type === 'selectFuyu' ? state.pendingFuyu?.winner
+      : type === 'selectKinpei' ? state.pendingKinpei?.winner
+      : type === 'continueFever' ? state.pendingFeverContinue?.winner
+      : state.lastWinner;
+    if (type === 'agariyame' && !state.roundEnded) return `${type}: round is not ended`;
+    if (owner === undefined || owner === null) return `${type}: no matching decision is pending`;
+    if (actor !== owner) return `${type}: actor ${actor} is not decision owner ${owner}`;
     if (type === 'agariyame') this.game.agariyame();
     return null;
   }
 
   private rebuildDiscardReactions(discarder: PlayerId, pai: Pai): void {
-    this.ronCandidates = PLAYERS.filter((p) => p !== discarder && this.game.canRon(p, pai, discarder));
+    const allRonCandidates = PLAYERS.filter((p) => p !== discarder && this.game.canRon(p, pai, discarder));
+    const cpuRonCandidates = allRonCandidates.filter((p) => this.cpuSeats.has(p));
+    const humanRonCandidates = allRonCandidates.filter((p) => !this.cpuSeats.has(p));
+    this.ronCandidates = humanRonCandidates;
     this.ronPassedPlayers = [];
     this.ronDeclaredPlayers = [];
+    this.deferredCpuRon = humanRonCandidates.length > 0 ? cpuRonCandidates : [];
     this.ponCandidates = [];
     this.kanCandidates = [];
 
@@ -451,8 +580,83 @@ export class RoomAuthority {
       if (kan.length > 0) this.kanCandidates.push({ player: p, mianzi: kan });
     }
 
-    this.awaitingRonDecision = this.ronCandidates.length > 0;
-    this.awaitingFulou = !this.awaitingRonDecision && (this.ponCandidates.length > 0 || this.kanCandidates.length > 0);
+    if (humanRonCandidates.length === 0 && cpuRonCandidates.length > 0) {
+      this.ronDeclaredPlayers = [...cpuRonCandidates];
+      this.lastWinner = chooseWinnerByOya(this.game, cpuRonCandidates);
+      this.roundEnded = true;
+      this.ronCandidates = [];
+      this.ponCandidates = [];
+      this.kanCandidates = [];
+      this.awaitingRonDecision = false;
+      this.awaitingFulou = false;
+      return;
+    }
+
+    this.awaitingRonDecision = humanRonCandidates.length > 0;
+    if (this.awaitingRonDecision) {
+      this.ponCandidates = this.ponCandidates.filter((candidate) => !this.cpuSeats.has(candidate.player));
+      this.kanCandidates = this.kanCandidates.filter((candidate) => !this.cpuSeats.has(candidate.player));
+      return;
+    }
+
+    if (this.applyAutomaticCpuFulou(discarder, pai)) return;
+    this.ponCandidates = this.ponCandidates.filter((candidate) => !this.cpuSeats.has(candidate.player));
+    this.kanCandidates = this.kanCandidates.filter((candidate) => !this.cpuSeats.has(candidate.player));
+    this.awaitingFulou = this.ponCandidates.length > 0 || this.kanCandidates.length > 0;
+    if (!this.awaitingFulou) this.drawAfterReactions();
+  }
+
+  private applyAutomaticCpuFulou(discarder: PlayerId, pai: Pai): boolean {
+    const core = toCorePai(pai);
+    const isSanyuanpai = core[0] === 'z' && (core[1] === '5' || core[1] === '6' || core[1] === '7');
+    const isFengpai = core[0] === 'z' && (core[1] === '1' || core[1] === '2' || core[1] === '3');
+    const paiN = isFengpai ? Number(core[1]) : -1;
+    const shouldCallHonor = (player: PlayerId): boolean => {
+      if (isSanyuanpai) return true;
+      return isFengpai && (paiN === this.game.changfengZ || paiN === this.game.zifengZ(player));
+    };
+
+    for (const candidate of this.ponCandidates) {
+      if (!this.cpuSeats.has(candidate.player) || candidate.mianzi.length === 0) continue;
+      let shouldPon = shouldCallHonor(candidate.player);
+      if (!isSanyuanpai && !isFengpai) {
+        const isSeven = (core[0] === 'm' || core[0] === 'p' || core[0] === 's') && core[1] === '7';
+        const fulouCount = this.game.shoupai.get(candidate.player)?._fulou?.length ?? 0;
+        if (!isSeven && fulouCount >= 1) {
+          try {
+            const estimate = this.game.estimateXiangtingWithExtra(candidate.player, core);
+            shouldPon = estimate.base <= 2 && estimate.withExtra < estimate.base;
+          } catch { /* pass */ }
+        }
+      }
+      if (shouldPon && this.game.declarePon(candidate.player, candidate.mianzi[0], discarder)) {
+        this.lastZimo = null;
+        this.clearPending();
+        return true;
+      }
+    }
+
+    for (const candidate of this.kanCandidates) {
+      if (!this.cpuSeats.has(candidate.player) || candidate.mianzi.length === 0) continue;
+      if (!shouldCallHonor(candidate.player)) continue;
+      const replacement = this.game.declareDamingang(candidate.player, candidate.mianzi[0], discarder);
+      if (replacement !== null) {
+        this.lastZimo = replacement;
+        this.clearPending();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private drawAfterReactions(): void {
+    const committedDiscard = this.lastDapai;
+    this.clearPending();
+    const zimo = this.game.zimo();
+    this.lastZimo = zimo;
+    // reaction source としては無効だが、監査・snapshot表示用に直近打牌は保持する。
+    this.lastDapai = committedDiscard;
+    if (zimo === null) this.roundEnded = true;
   }
 }
 

@@ -43,6 +43,9 @@ describe('リーチ後 北抜き 嶺上 replacement regression 2026-05-21', () =
     g.shoupai.set(player, buildShoupai([
       'p2','p2','p4','p4','s2','s2','s4','s4','s8','z6','z6','z7','z7',
     ]));
+    const noReactionHand = ['m7','m9','p1','p2','p3','p4','p5','p6','p8','p9','s1','s2','z1'];
+    g.shoupai.set(1, buildShoupai(noReactionHand));
+    g.shoupai.set(2, buildShoupai(noReactionHand));
     const sp = g.shoupai.get(player) as any;
     sp.zimo('p7');
     g.lizhi.add(player);

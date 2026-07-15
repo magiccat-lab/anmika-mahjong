@@ -24,6 +24,26 @@ function firstNonBeiDiscard(a: RoomAuthority): string {
   return candidates.find((pai) => toCorePai(pai) !== 'z4') ?? candidates[0];
 }
 
+function setDiceDecision(a: RoomAuthority, owner: 0 | 1 | 2, type: string, otherOwner?: 0 | 1 | 2): void {
+  a.roundEnded = true;
+  a.lastWinner = owner;
+  const state = a.canonicalState();
+  state.lastWinner = owner;
+  state.roundEnded = false;
+  state.pendingSaiKoro = {
+    winner: owner,
+    chances: [
+      { name: 'test', baseChip: 1, shuvariApplicable: false, count: 1, plusMinus: '+', winner: owner },
+      ...(otherOwner === undefined ? [] : [{ name: 'test2', baseChip: 1, shuvariApplicable: false, count: 1, plusMinus: '+' as const, winner: otherOwner }]),
+    ],
+    currentIdx: 0,
+    selectedCombo: type === 'selectSaiKoroCombo' ? null : [1, 6],
+    rolls: [],
+    finalized: type === 'advanceSaiKoro',
+    summary: type === 'advanceSaiKoro' ? { hits: 0, chipN: 0, zoroBonusTotal: 0 } : null,
+  };
+}
+
 describe('server RoomAuthority', () => {
   it('rejects discard from a non-current actor', () => {
     const a = authority();
@@ -54,6 +74,23 @@ describe('server RoomAuthority', () => {
     expect(reason).toContain('round is not ended');
   });
 
+  it('does not erase a shuvari player reaction by accepting pass', () => {
+    const a = authority();
+    const discarder = a.currentPlayer();
+    const actor = ((discarder + 1) % 3) as 0 | 1 | 2;
+    const pai = firstNonBeiDiscard(a);
+    a.lastDapai = { player: discarder, pai };
+    a.awaitingRonDecision = true;
+    a.ronCandidates = [actor];
+    a.game.shuvariActive[actor] = true;
+    vi.spyOn(a.game, 'canRon').mockReturnValue(true);
+
+    expect(a.validateAndApply(actor, { type: 'pass', player: actor }, members))
+      .toContain('must declare ron');
+    expect(a.awaitingRonDecision).toBe(true);
+    expect(a.ronPassedPlayers).not.toContain(actor);
+  });
+
   it('rejects host nextRound while the round is still live', () => {
     const a = authority();
     const before = { ...a.game.state };
@@ -70,8 +107,11 @@ describe('server RoomAuthority', () => {
   it('acknowledges a duplicate nextRound without advancing a second time', () => {
     const a = authority();
     const winner = a.currentPlayer();
-    vi.spyOn(a.game, 'canTsumo').mockReturnValue(true);
-    expect(a.validateAndApply(winner, { type: 'tsumo' }, members)).toBeNull();
+    a.roundEnded = true;
+    a.lastWinner = winner;
+    const canonical = a.canonicalState();
+    canonical.roundEnded = true;
+    canonical.lastWinner = winner;
 
     const action = { type: 'nextRound', from_role: 'host', preShuffledPool: pool() };
     expect(a.validateAndApply(winner, action, members)).toBeNull();
@@ -94,7 +134,7 @@ describe('server RoomAuthority', () => {
     (type) => {
       const a = authority();
       const reason = a.validateAndApply(a.currentPlayer(), { type }, members);
-      expect(reason).toContain('no win is pending');
+      expect(reason).toContain('no dice chance is pending');
     },
   );
 
@@ -104,29 +144,25 @@ describe('server RoomAuthority', () => {
       const a = authority();
       const winner = a.currentPlayer();
       const other = ((winner + 1) % 3) as 0 | 1 | 2;
-      vi.spyOn(a.game, 'canTsumo').mockReturnValue(true);
-
-      expect(a.validateAndApply(winner, { type: 'tsumo' }, members)).toBeNull();
-      expect(a.validateAndApply(other, { type }, members)).toContain('not a round winner');
-      expect(a.validateAndApply(winner, { type }, members)).toBeNull();
+      setDiceDecision(a, winner, type);
+      expect(a.validateAndApply(other, { type }, members)).toContain('not chance owner');
+      const action = type === 'selectSaiKoroCombo' ? { type, small: 1, large: 6 }
+        : type === 'rollSaiKoroDice' ? { type, override: [1, 6] }
+        : { type };
+      expect(a.validateAndApply(winner, action, members)).toBeNull();
     },
   );
 
   it('allows every declared ron winner to perform post-win dice actions', () => {
     const a = authority();
-    const discarder = a.currentPlayer();
-    const winners = ([0, 1, 2] as const).filter((p) => p !== discarder);
-    vi.spyOn(a.game, 'canRon').mockReturnValue(true);
-
-    expect(a.validateAndApply(discarder, {
-      type: 'discard',
-      pai: firstNonBeiDiscard(a),
-    }, members)).toBeNull();
-    expect(a.validateAndApply(winners[0], { type: 'ron', player: winners[0] }, members)).toBeNull();
-    expect(a.validateAndApply(winners[1], { type: 'ron', player: winners[1] }, members)).toBeNull();
-
-    expect(a.validateAndApply(winners[0], { type: 'rollSaiKoroDice' }, members)).toBeNull();
-    expect(a.validateAndApply(winners[1], { type: 'advanceSaiKoro' }, members)).toBeNull();
-    expect(a.validateAndApply(discarder, { type: 'selectSaiKoroCombo' }, members)).toContain('not a round winner');
+    const winners = [1, 2] as const;
+    setDiceDecision(a, winners[0], 'selectSaiKoroCombo', winners[1]);
+    const state = a.canonicalState();
+    expect(a.validateAndApply(winners[0], { type: 'selectSaiKoroCombo', small: 1, large: 6 }, members)).toBeNull();
+    state.pendingSaiKoro!.currentIdx = 1;
+    state.pendingSaiKoro!.selectedCombo = null;
+    state.pendingSaiKoro!.finalized = false;
+    expect(a.validateAndApply(winners[1], { type: 'selectSaiKoroCombo', small: 1, large: 6 }, members)).toBeNull();
+    expect(a.validateAndApply(0, { type: 'rollSaiKoroDice' }, members)).toContain('not chance owner');
   });
 });

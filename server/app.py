@@ -54,6 +54,9 @@ PUBLIC_BASE_URL = os.environ.get("ANMIKA_PUBLIC_BASE_URL", "https://anmika.magic
 WS_SECRET = os.environ.get("ANMIKA_WS_SECRET") or SESSION_SECRET
 INTERNAL_API_SECRET = os.environ.get("ANMIKA_INTERNAL_SECRET") or WS_SECRET
 WS_TOKEN_TTL_SEC = int(os.environ.get("ANMIKA_WS_TOKEN_TTL_SEC", "60"))
+WS_PUBLIC_URL = os.environ.get("ANMIKA_WS_PUBLIC_URL") or PUBLIC_BASE_URL.replace(
+    "https://", "wss://"
+).replace("http://", "ws://")
 DISCORD_REDIRECT_URI = f"{PUBLIC_BASE_URL}/auth/discord/callback"
 CORS_ORIGINS = [
     origin.strip()
@@ -140,6 +143,7 @@ def init_db() -> None:
 
         CREATE TABLE IF NOT EXISTS rooms (
             room_id TEXT PRIMARY KEY,                    -- 短い random id [例: ABCD]
+            instance_id TEXT NOT NULL DEFAULT '',        -- room_id 再利用時の別セッション識別子
             host_user_id TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'open',         -- open / playing / finished
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -185,6 +189,14 @@ def init_db() -> None:
         # R22 P1 #4 fix: members_json 列追加 [試合開始時 member snapshot 永続化]
         if "members_json" not in cols:
             c.execute("ALTER TABLE matches ADD COLUMN members_json TEXT NOT NULL DEFAULT '[]'")
+        room_cols = [r[1] for r in c.execute("PRAGMA table_info(rooms)").fetchall()]
+        if "instance_id" not in room_cols:
+            c.execute("ALTER TABLE rooms ADD COLUMN instance_id TEXT NOT NULL DEFAULT ''")
+        for row in c.execute("SELECT room_id FROM rooms WHERE instance_id='' OR instance_id IS NULL").fetchall():
+            c.execute(
+                "UPDATE rooms SET instance_id=? WHERE room_id=?",
+                (_secrets.token_urlsafe(18), row["room_id"]),
+            )
         c.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_room_no ON matches(room_id, match_no)"
         )
@@ -382,7 +394,7 @@ async def issue_ws_token(request: Request):
         raise HTTPException(status_code=400, detail="room_id required")
     with db_conn() as c:
         room = c.execute(
-            "SELECT host_user_id, status FROM rooms WHERE room_id=?",
+            "SELECT host_user_id, status, instance_id FROM rooms WHERE room_id=?",
             (room_id,),
         ).fetchone()
         if not room:
@@ -401,12 +413,13 @@ async def issue_ws_token(request: Request):
         "username": u["username"],
         "seat": int(member["seat"]),
         "room_id": room_id,
+        "room_instance_id": room["instance_id"],
         "is_host": room["host_user_id"] == u["user_id"],
         "iat": now,
         "exp": now + WS_TOKEN_TTL_SEC,
     }
     token = _jwt.encode(payload, WS_SECRET, algorithm="HS256")
-    return {"token": token, "expires_in": WS_TOKEN_TTL_SEC}
+    return {"token": token, "expires_in": WS_TOKEN_TTL_SEC, "ws_url": WS_PUBLIC_URL}
 
 
 @app.get("/api/rooms")
@@ -464,8 +477,8 @@ async def create_room(request: Request):
             candidate = _gen_room_id()
             try:
                 c.execute(
-                    "INSERT INTO rooms(room_id, host_user_id) VALUES(?,?)",
-                    (candidate, u["user_id"]),
+                    "INSERT INTO rooms(room_id, instance_id, host_user_id) VALUES(?,?,?)",
+                    (candidate, _secrets.token_urlsafe(18), u["user_id"]),
                 )
                 room_id = candidate
                 break
@@ -702,13 +715,14 @@ async def join_room(room_id: str, request: Request):
         room = c.execute("SELECT * FROM rooms WHERE room_id=?", (room_id,)).fetchone()
         if not room:
             raise HTTPException(status_code=404, detail="room not found")
-        if room["status"] != "open":
-            raise HTTPException(status_code=400, detail="room not open")
         members = c.execute(
             "SELECT * FROM room_members WHERE room_id=? ORDER BY seat", (room_id,)
         ).fetchall()
+        # 招待URLからの再読込・再接続は playing 中でも既存 member なら冪等成功。
         if any(m["user_id"] == u["user_id"] for m in members):
             return {"ok": True, "already_in": True}
+        if room["status"] != "open":
+            raise HTTPException(status_code=400, detail="room not open")
         if len(members) >= 3:
             raise HTTPException(status_code=400, detail="room full")
         used_seats = {m["seat"] for m in members}
@@ -965,8 +979,14 @@ class RoomHub:
 hub = RoomHub()
 
 
-@app.websocket("/ws/room/{room_id}")
+@app.websocket("/legacy/ws/room/{room_id}")
 async def room_ws(ws: WebSocket, room_id: str):
+    # C1: gameplay /ws の正本は Node authority のみ。旧 relay は移行時の
+    # 明示 opt-in に限定し、通常構成から到達不能にする。
+    if os.environ.get("ANMIKA_ENABLE_LEGACY_WS") != "1":
+        await ws.accept()
+        await ws.close(code=4404, reason="legacy websocket disabled")
+        return
     await ws.accept()
     user_id = ws.session.get("user_id") if hasattr(ws, "session") else None
     # SessionMiddleware は WebSocket では session 取れないので、 query param で fallback

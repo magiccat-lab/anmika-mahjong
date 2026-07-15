@@ -7,12 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+    "server:ws": "node --import tsx server/ws_server.ts",
+    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json && tsc -p tsconfig.server.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "pretest:e2e": "npm run build",
     "test:e2e": "ANMIKA_BASE_URL=http://127.0.0.1:8790 npx playwright test",
-    "test:e2e:online": "ANMIKA_BASE_URL=http://127.0.0.1:8790 npx playwright test tests/online.spec.ts"
+    "test:e2e:online": "node tools/run_online_e2e.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

@@ -2,10 +2,267 @@
 // store action: 牌譜 v2 JSON から StoreState を再構築
 // 純関数 [paifu → StoreState | null]、 store.ts は update() で wrap して呼ぶ
 import { Game3, buildShoupai, normalizePochiMultiplier } from '../game3';
+import { cloneCanonical } from '../canonicalJson';
 import type { StoreState } from '../store';
 import type { PlayerId } from '../types';
 
 const PLAYERS = [0, 1, 2] as const;
+export const PAIFU_SCHEMA_VERSION = 3 as const;
+
+function hasPendingDecision(state: Pick<StoreState,
+  'awaitingRonDecision' | 'awaitingFulou' | 'lizhiPending' | 'pendingKinpei' |
+  'pendingFuyu' | 'pendingFeverContinue' | 'pendingPingju' | 'pendingQianggang' |
+  'pendingSaiKoro'
+>): boolean {
+  return state.awaitingRonDecision
+    || state.awaitingFulou
+    || state.lizhiPending !== null
+    || state.pendingKinpei !== null
+    || state.pendingFuyu !== null
+    || state.pendingFeverContinue !== null
+    || state.pendingPingju
+    || state.pendingQianggang !== null
+    || state.pendingSaiKoro !== null;
+}
+
+/**
+ * Until arbitrary mid-decision restoration is supported, saves are limited to
+ * an unambiguous turn start (one player has a real drawn tile) or a completed
+ * match after every post-win decision has been resolved.
+ */
+export function isSafePaifuSavePoint(state: StoreState): boolean {
+  if (hasPendingDecision(state)) return false;
+  if (state.game.state.finished) return state.roundEnded;
+  if (state.roundEnded || state.lastDapai !== null || typeof state.lastZimo !== 'string') return false;
+  try {
+    const player = state.game.lunbanToPlayerId(state.game.state.lunban);
+    const zimo = state.game.shoupai.get(player)?._zimo;
+    return typeof zimo === 'string' && zimo.length <= 2;
+  } catch {
+    return false;
+  }
+}
+
+function serializeHand(sp: any): any {
+  if (!sp?._bingpai) return null;
+  const bp = sp._bingpai;
+  return {
+    bingpai: {
+      _: bp._,
+      m: [...(bp.m ?? [])],
+      p: [...(bp.p ?? [])],
+      s: [...(bp.s ?? [])],
+      z: [...(bp.z ?? [])],
+      anmika: bp.__anmika ? { ...bp.__anmika } : null,
+    },
+    fulou: [...(sp._fulou ?? [])],
+    zimo: sp._zimo ?? null,
+    anmikaZimo: sp._anmikaZimo ?? null,
+    anmikaFulou: cloneCanonical(sp._anmikaFulou ?? []),
+    anmikaFulouPhysical: cloneCanonical(sp._anmikaFulouPhysical ?? []),
+  };
+}
+
+/** Build the single v3 paifu representation used by export and restore. */
+export function buildCanonicalPaifuSnapshot(state: StoreState, timestamp = new Date().toISOString()): any {
+  if (!isSafePaifuSavePoint(state)) {
+    throw new Error('牌譜は安全な手番開始時か、処理完了後の半荘終了時だけ保存できます');
+  }
+  const g = state.game;
+  const shan = g.shan as any;
+  const shanSnapshot = typeof shan.snapshot === 'function' ? shan.snapshot() : {};
+  return cloneCanonical({
+    type: 'anmika-mahjong-paifu',
+    version: PAIFU_SCHEMA_VERSION,
+    schemaVersion: PAIFU_SCHEMA_VERSION,
+    timestamp,
+    safePoint: { kind: g.state.finished ? 'match-ended' : 'turn-start' },
+    game: {
+      init: {
+        shanRule: g.shanRule,
+        startingDefen: g.startingDefen,
+        changshu: g.changshu,
+      },
+      state: g.state,
+      events: g.events,
+      shan: {
+        initialPai: [...(shan._initialPai ?? [])],
+        ...shanSnapshot,
+        fuyuRevealed: [...(shan._fuyuRevealed ?? [])],
+        extraSanReduction: Number(shan.extraSanReduction ?? 0),
+        closed: !!shan._closed,
+      },
+      shoupai: PLAYERS.map((player) => serializeHand(g.shoupai.get(player))),
+      he: PLAYERS.map((player) => {
+        const he = g.he.get(player);
+        return he?._pai ? [...he._pai] : [];
+      }),
+      fields: {
+        nukidora: g.nukidora,
+        nukidoraGold: g.nukidoraGold,
+        yifaActive: g.yifaActive,
+        lizhiDeclareDapai: g.lizhiDeclareDapai,
+        lingshangActive: g.lingshangActive,
+        firstTurnState: g.firstTurnState,
+        qianggangPending: g.qianggangPending,
+        feverWinCount: g.feverWinCount,
+        goldHand: g.goldHand,
+        huapai: g.huapai,
+        pochiHand: g.pochiHand,
+        lastZimoInfo: g.lastZimoInfo,
+        pochiMultiplier: g.pochiMultiplier,
+        pochiPaymentMode: g.pochiPaymentMode,
+        pochiChipReverse: g.pochiChipReverse,
+        pochiChipDouble: g.pochiChipDouble,
+        chipLedger: g.chipLedger,
+        haruActive: g.haruActive,
+        fuyuSkip: g.fuyuSkip,
+        fuyuConsumed: g.fuyuConsumed,
+        akiUsedCount: g.akiUsedCount,
+        kinpeiTarget: g.kinpeiTarget,
+        chipBreakdown: g.chipBreakdown,
+        discardLog: g.discardLog,
+        justNukidBei: g.justNukidBei,
+        lizhi: Array.from(g.lizhi),
+        openLizhi: Array.from(g.openLizhi),
+        feverActive: g.feverActive,
+        feverDeclareTing: g.feverDeclareTing,
+        feverTier: g.feverTier,
+        feverDeclareDapaiPlayer: g.feverDeclareDapaiPlayer,
+        shuvariActive: g.shuvariActive,
+        shuvariUsed: g.shuvariUsed,
+        tobiChipPaid: g.tobiChipPaid,
+      },
+    },
+    store: {
+      lastZimo: state.lastZimo,
+      lastDapai: state.lastDapai,
+      lastWinner: state.lastWinner,
+      lastHuleResult: state.lastHuleResult,
+      roundEnded: state.roundEnded,
+      message: state.message,
+      cpu: state.cpu,
+    },
+  });
+}
+
+function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreState | null {
+  if (paifu.schemaVersion !== PAIFU_SCHEMA_VERSION || !paifu.game || !paifu.store) return null;
+  if (paifu.safePoint?.kind !== 'turn-start' && paifu.safePoint?.kind !== 'match-ended') return null;
+  const terminal = paifu.safePoint.kind === 'match-ended';
+  if (terminal !== !!paifu.game.state?.finished || terminal !== !!paifu.store.roundEnded) return null;
+  if (!terminal && (paifu.store.roundEnded || paifu.store.lastDapai !== null || typeof paifu.store.lastZimo !== 'string')) return null;
+
+  const init = paifu.game.init ?? {};
+  const shanData = paifu.game.shan ?? {};
+  const ng = new Game3({
+    shanRule: init.shanRule,
+    qijia: paifu.game.state?.qijia,
+    startingDefen: init.startingDefen,
+    changshu: init.changshu,
+    preShuffledPool: shanData.initialPai,
+  });
+  const shan = ng.shan as any;
+  shan._initialPai = [...(shanData.initialPai ?? [])];
+  shan.restore({
+    pai: [...(shanData.pai ?? [])],
+    rinshan: [...(shanData.rinshan ?? [])],
+    rinshanUsed: shanData.rinshanUsed ?? 0,
+    lastDrawnHuapai: [...(shanData.lastDrawnHuapai ?? [])],
+    lastZimoGold: !!shanData.lastZimoGold,
+    lastZimoPochi: shanData.lastZimoPochi ?? null,
+    kanDoraCount: shanData.kanDoraCount ?? 0,
+    weikaigang: !!shanData.weikaigang,
+    baopai: [...(shanData.baopai ?? [])],
+    fubaopai: shanData.fubaopai === null ? null : [...(shanData.fubaopai ?? [])],
+  });
+  shan._fuyuRevealed = [...(shanData.fuyuRevealed ?? [])];
+  shan.extraSanReduction = Number(shanData.extraSanReduction ?? 0);
+  shan._closed = !!shanData.closed;
+  ng.state = cloneCanonical(paifu.game.state);
+  ng.events = cloneCanonical(paifu.game.events ?? []);
+
+  for (const player of PLAYERS) {
+    const data = paifu.game.shoupai?.[player];
+    if (!data?.bingpai) return null;
+    const sp = buildShoupai([]);
+    sp._bingpai = {
+      _: data.bingpai._,
+      m: [...(data.bingpai.m ?? [])],
+      p: [...(data.bingpai.p ?? [])],
+      s: [...(data.bingpai.s ?? [])],
+      z: [...(data.bingpai.z ?? [])],
+    };
+    if (data.bingpai.anmika) {
+      sp._bingpai.__anmika = { ...data.bingpai.anmika };
+      for (const [pai, count] of Object.entries(data.bingpai.anmika)) sp._bingpai[pai] = count;
+    }
+    sp._fulou = [...(data.fulou ?? [])];
+    sp._zimo = data.zimo ?? null;
+    sp._anmikaZimo = data.anmikaZimo ?? null;
+    sp._anmikaFulou = cloneCanonical(data.anmikaFulou ?? []);
+    sp._anmikaFulouPhysical = cloneCanonical(data.anmikaFulouPhysical ?? []);
+    ng.shoupai.set(player, sp);
+  }
+
+  const dummy = new Game3();
+  dummy.qipai();
+  for (const player of PLAYERS) {
+    const heInst = new (dummy.he.get(0).constructor)();
+    heInst._pai = [...(paifu.game.he?.[player] ?? [])];
+    ng.he.set(player, heInst);
+  }
+
+  const fields = paifu.game.fields ?? {};
+  const recordFields = [
+    'nukidora', 'nukidoraGold', 'yifaActive', 'lizhiDeclareDapai', 'lingshangActive',
+    'feverWinCount', 'goldHand', 'huapai', 'pochiHand', 'lastZimoInfo',
+    'pochiMultiplier', 'pochiPaymentMode', 'pochiChipReverse', 'pochiChipDouble',
+    'chipLedger', 'haruActive', 'fuyuSkip', 'fuyuConsumed', 'akiUsedCount',
+    'kinpeiTarget', 'chipBreakdown', 'discardLog', 'justNukidBei', 'feverActive',
+    'feverDeclareTing', 'feverTier', 'shuvariActive', 'shuvariUsed',
+  ];
+  for (const field of recordFields) {
+    if (fields[field] !== undefined) (ng as any)[field] = cloneCanonical(fields[field]);
+  }
+  ng.restoreFirstTurnState(fields.firstTurnState);
+  ng.qianggangPending = !!fields.qianggangPending;
+  ng.lizhi = new Set(fields.lizhi ?? []);
+  ng.openLizhi = new Set(fields.openLizhi ?? []);
+  ng.feverDeclareDapaiPlayer = fields.feverDeclareDapaiPlayer ?? null;
+  ng.tobiChipPaid = !!fields.tobiChipPaid;
+
+  const cpu = paifu.store.cpu ?? preservedCpu;
+  return {
+    game: ng,
+    lastZimo: paifu.store.lastZimo ?? null,
+    lastDapai: cloneCanonical(paifu.store.lastDapai ?? null),
+    lastWinner: paifu.store.lastWinner ?? null,
+    lastHuleResult: cloneCanonical(paifu.store.lastHuleResult ?? null),
+    awaitingRonDecision: false,
+    ronPassedPlayers: [],
+    ronDeclaredPlayers: [],
+    ronResults: [],
+    awaitingFulou: false,
+    ponCandidates: [],
+    kanCandidates: [],
+    roundEnded: !!paifu.store.roundEnded,
+    message: paifu.store.message !== undefined
+      ? paifu.store.message
+      : `📂 牌譜 v${PAIFU_SCHEMA_VERSION} 復元完了 [timestamp: ${paifu.timestamp}]`,
+    cpu: { 0: !!cpu[0], 1: !!cpu[1], 2: !!cpu[2] },
+    lizhiPending: null,
+    pendingKinpei: null,
+    pendingFuyu: null,
+    pendingFeverContinue: null,
+    pendingPingju: false,
+    pendingQianggang: null,
+    pendingSaiKoro: null,
+    stamps: { 0: null, 1: null, 2: null },
+    cutin: null,
+    cutinQueue: [],
+  };
+}
 
 function restorePendingAfterDapai(ng: Game3, restoredLastZimo: string | null): Pick<StoreState, 'lastDapai' | 'awaitingRonDecision' | 'ronPassedPlayers' | 'ronDeclaredPlayers' | 'ronResults' | 'awaitingFulou' | 'ponCandidates' | 'kanCandidates' | 'message'> {
   const empty = {
@@ -69,6 +326,8 @@ function restorePendingAfterDapai(ng: Game3, restoredLastZimo: string | null): P
 /** 牌譜 v2 → StoreState を構築。 invalid なら null 返し、 store 側は message 設定のみ */
 export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false }): StoreState | null {
   if (paifu.type !== 'anmika-mahjong-paifu' || (paifu.version ?? 1) < 2) return null;
+  if (paifu.version === PAIFU_SCHEMA_VERSION) return restoreV3(paifu, preservedCpu);
+  if (paifu.version > PAIFU_SCHEMA_VERSION) return null;
   const ng = new Game3();
   const shan = ng.shan as any;
   shan._pai = [...(paifu.shan.currentPai ?? [])];

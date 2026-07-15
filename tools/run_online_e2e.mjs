@@ -6,9 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const isWin = process.platform === 'win32';
-const npmCmd = isWin ? 'npm.cmd' : 'npm';
-const npxCmd = isWin ? 'npx.cmd' : 'npx';
+const localBin = (name) => path.join(root, 'node_modules', '.bin', `${name}${isWin ? '.cmd' : ''}`);
+const viteCmd = localBin('vite');
+const playwrightCmd = localBin('playwright');
 const port = Number(process.env.ANMIKA_E2E_PORT || 8790);
+const wsPort = Number(process.env.ANMIKA_E2E_WS_PORT || (port + 1));
 const host = process.env.ANMIKA_E2E_HOST || '127.0.0.1';
 const baseUrl = `http://${host}:${port}`;
 const tmpDir = path.join(root, '.tmp');
@@ -96,11 +98,14 @@ async function main() {
   if (await isPortOpen(port)) {
     throw new Error(`Port ${port} is already in use`);
   }
+  if (await isPortOpen(wsPort)) {
+    throw new Error(`Port ${wsPort} is already in use`);
+  }
   mkdirSync(tmpDir, { recursive: true });
   rmSync(dbPath, { force: true });
 
   const python = resolvePython();
-  run(npmCmd, ['run', 'build']);
+  run(viteCmd, ['build']);
 
   const secret = process.env.ANMIKA_E2E_SECRET || 'anmika-online-e2e-secret-2026-06-13';
   const env = {
@@ -112,7 +117,15 @@ async function main() {
     ANMIKA_INTERNAL_SECRET: secret,
     ANMIKA_DB_PATH: dbPath,
     ANMIKA_PUBLIC_BASE_URL: baseUrl,
+    ANMIKA_WS_PUBLIC_URL: `ws://${host}:${wsPort}`,
+    ANMIKA_API_BASE: baseUrl,
+    ANMIKA_WS_PORT: String(wsPort),
   };
+  const wsServer = spawn(
+    process.execPath,
+    ['--import', 'tsx', 'server/ws_server.ts'],
+    { cwd: root, env, stdio: 'inherit', shell: false },
+  );
   const server = spawn(
     python.cmd,
     [...python.args, '-m', 'uvicorn', 'server.app:app', '--host', host, '--port', String(port)],
@@ -122,7 +135,7 @@ async function main() {
   let exitCode = 0;
   try {
     await waitForHttp(baseUrl);
-    run(npxCmd, ['playwright', 'test', 'tests/online.spec.ts', 'tests/lizhi_bugs.spec.ts'], {
+    run(playwrightCmd, ['test', 'tests/online.spec.ts', 'tests/lizhi_bugs.spec.ts'], {
       env: { ANMIKA_BASE_URL: baseUrl, ANMIKA_E2E_SERVER_AUTH: '1' },
     });
   } catch (e) {
@@ -130,6 +143,7 @@ async function main() {
     console.error(e?.stack || e);
   } finally {
     await stopProcess(server);
+    await stopProcess(wsServer);
   }
   process.exit(exitCode);
 }

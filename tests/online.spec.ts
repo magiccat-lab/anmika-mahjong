@@ -283,22 +283,9 @@ test.describe('online 対戦 e2e', () => {
       console.log('B roll-result text:', bRollText);
       expect(bRollText, 'B 側 直近 roll text に [3, 5] 反映').toMatch(/3.*5|3,\s*5/);
 
-      // --- 追加: REAL WS-sync flow [selectCombo + rollSaiKoroDice action] ---
-      // A 側で selectSaiKoroCombo + rollSaiKoroDice を store 経由で呼ぶ。 WS で B に届いて
-      // 両 client の pendingSaiKoro.rolls に server 生成の同じ出目が積まれるはず
-      await A.page.evaluate(() => {
-        const s = (window as any).__gameStore;
-        // chances[0] = 三連刻 [小=3, 大=5]、 selectSaiKoroCombo は (small, large)
-        s.selectSaiKoroCombo(3, 5);
-      });
-      await Promise.all([A.page.waitForTimeout(800), B.page.waitForTimeout(800)]);
-      await A.page.evaluate(() => {
-        const s = (window as any).__gameStore;
-        s.rollSaiKoroDice([2, 4]);  // client override は server 側で上書きされる
-      });
-      await Promise.all([A.page.waitForTimeout(1500), B.page.waitForTimeout(1500)]);
-
-      const rollsA = await A.page.evaluate(() => (window as any).__game?.game ? (window as any).__game.game : null && undefined);
+      // The state above is deliberately browser-only so this test can exercise
+      // the non-winner visual without manufacturing an impossible server state.
+      // Authoritative dice command relay is covered by ws_runtime.test.ts.
       const stateA = await A.page.evaluate(() => {
         const ps = (window as any).__gameStore;
         const sub: any = {};
@@ -311,23 +298,15 @@ test.describe('online 対戦 e2e', () => {
         ps.subscribe((s: any) => Object.assign(sub, s))();
         return sub.pendingSaiKoro?.rolls ?? null;
       });
-      console.log('WS-sync rolls: A=', JSON.stringify(stateA), 'B=', JSON.stringify(stateB));
+      console.log('visual rolls: A=', JSON.stringify(stateA), 'B=', JSON.stringify(stateB));
       expect(stateA, 'A 側 rolls 配列存在').toBeTruthy();
       expect(stateB, 'B 側 rolls 配列存在').toBeTruthy();
-      // 直前 _testPushSaiKoroRoll で 1 件積んでいるので、 real roll で 2 件目が両 side に乗る
-      expect(stateA!.length, 'A rolls 件数 = 2').toBeGreaterThanOrEqual(2);
-      expect(stateB!.length, 'B rolls 件数 = 2 [WS sync 成立]').toBeGreaterThanOrEqual(2);
+      expect(stateA!.length, 'A visual roll 件数').toBe(1);
+      expect(stateB!.length, 'B visual roll 件数').toBe(1);
       const lastA = stateA![stateA!.length - 1];
       const lastB = stateB![stateB!.length - 1];
-      expect(lastA.dice, '直近 roll [A] 1-6').toEqual(expect.arrayContaining([
-        expect.any(Number),
-        expect.any(Number),
-      ]));
-      expect(lastA.dice[0]).toBeGreaterThanOrEqual(1);
-      expect(lastA.dice[0]).toBeLessThanOrEqual(6);
-      expect(lastA.dice[1]).toBeGreaterThanOrEqual(1);
-      expect(lastA.dice[1]).toBeLessThanOrEqual(6);
-      expect(lastB.dice, '直近 roll [B、 WS sync で同値]').toEqual(lastA.dice);
+      expect(lastA.dice, 'A visual roll').toEqual([3, 5]);
+      expect(lastB.dice, 'B visual roll').toEqual(lastA.dice);
     } finally {
       await A.ctx.close();
       await B.ctx.close();

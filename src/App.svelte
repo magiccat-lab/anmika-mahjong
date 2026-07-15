@@ -30,6 +30,8 @@
   import type { PlayerId } from './lib/types';
   import { parseFulouList, fulouFlatTiles } from './lib/fulouDisplay';
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
+  import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint } from './lib/store/paifuIo';
+  import { serializeCanonical } from './lib/canonicalJson';
 
   // スタンプ pallet 開閉 [自家「💬」 button 押下時 true]
   let stampPalletOpen = false;
@@ -63,6 +65,7 @@
   let selfPlayer = 0;
 
   $: state = $game.game.state;
+  $: canSavePaifu = isSafePaifuSavePoint($game);
   // オンライン時 server seat rotation: display_seat 0/1/2 を 自席中心に rotate
   // rotateOffset を selfPlayer に直結 [リョー報告 2026-05-14: 「次の試合へ」 reset 後
   // selfPlayer と srv0 がズレて 自家手牌が face=down で表示される bug、 srv0=selfPlayer 一致を保証]
@@ -104,29 +107,8 @@
   $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) console.log('[seat-debug] selfPlayer=', selfPlayer, 'srv0=', srv0, 'srv1=', srv1, 'srv2=', srv2, 'rotateOffset=', rotateOffset, 'revealCheck(srv0)=', selfPlayer === srv0); }
   $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) console.log('[disabled-debug] currentPlayer=', currentPlayer, 'lunban=', state.lunban, 'srv0=', srv0, 'isCurrent(self)=', currentPlayer === srv0, 'needsZimo=', needsZimo, '_zimo(cur)=', $game.game.shoupai.get(currentPlayer)?._zimo, '_zimo(srv0)=', $game.game.shoupai.get(srv0)?._zimo, 'awaitRon=', $game.awaitingRonDecision, 'awaitFulou=', $game.awaitingFulou); }
 
-  // host が CPU 番のみ駆動 [連発防止: 同じ局・同じ lunban に対し 1 回だけ fire]
-  let lastCpuDriverKey = '';
-  $: if (onlineGameStarted && onlineRoomMeta?.isHost) {
-    const cur = $game.game.lunbanToPlayerId($game.game.state.lunban);
-    const curMember = onlineMembers.find((m) => m.seat === cur);
-    const ready = !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei;
-    // R4 P1 #19 fix: 副露後 _zimo が mianzi 固定文字列で同一 key のまま再発火しない bug。
-    // events.length + 河 count + shoupai string ハッシュ を key に混ぜて 状態変化を捕捉。
-    // ready 条件にも !$game.lizhiPending を追加
-    const eventsLen = $game.game.events?.length ?? 0;
-    const heCount = ([0,1,2] as const).map(p => ($game.game.he.get(p)?._pai?.length ?? 0)).join(',');
-    const spHash = ([0,1,2] as const).map(p => $game.game.shoupai.get(p)?.toString() ?? '').join('|');
-    const key = `${$game.game.state.jushu}-${$game.game.state.changbang}-${$game.game.state.lunban}-${cur}-${$game.game.shoupai.get(cur)?._zimo ?? ''}-${eventsLen}-${heCount}-${spHash.length}`;
-    if (ready && curMember?.is_cpu && key !== lastCpuDriverKey && !$game.lizhiPending) {
-      lastCpuDriverKey = key;
-      // R6 P2 #13: production では log 出さない
-      if ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver)) console.log('[host-cpu-driver] fire seat=', cur, 'name=', curMember.username, 'key=', key);
-      setTimeout(() => {
-        const curNow = $game.game.lunbanToPlayerId($game.game.state.lunban);
-        if (curNow === cur) game.cpuStep();
-      }, 1500);  // リョー指示 2026-05-14: 5000 → 1500ms に短縮
-    }
-  }
+  // オンライン CPU と期限切れ操作は Node authority が一度だけ発火する。
+  // client timer は再接続 replay と競合するため、オンラインでは持たない。
   $: shoupai0 = handTiles($game.game.shoupai.get(srv0), srv0);
   $: shoupai1 = handTiles($game.game.shoupai.get(srv1), srv1);
   $: shoupai2 = handTiles($game.game.shoupai.get(srv2), srv2);
@@ -470,72 +452,12 @@
   }
 
   function exportPaifu() {
-    const g = $game.game;
-    const shan = g.shan as any;
-    const data = {
-      version: 2, // v2: shan 全情報含む [完全 deterministic 復元用]
-      type: 'anmika-mahjong-paifu',
-      timestamp: new Date().toISOString(),
-      state: g.state,
-      events: g.events,
-      shan: {
-        initialPai: shan._initialPai ?? [...shan._pai],
-        currentPai: [...shan._pai],
-        rinshan: [...(shan._rinshan ?? [])],
-        baopai: [...shan.baopai],
-        fubaopai: [...(shan.fubaopai ?? [])],
-        rinshanUsed: shan.rinshanUsed,
-        fuyuRevealed: [...(shan._fuyuRevealed ?? [])],
-        weikaigang: !!shan._weikaigang,
-        lastDrawnHuapai: [...(shan.lastDrawnHuapai ?? [])],
-        lastZimoGold: !!shan.lastZimoGold,
-        lastZimoPochi: shan.lastZimoPochi ?? null,
-      },
-      shoupai: ([0, 1, 2] as const).map(p => {
-        const sp = g.shoupai.get(p);
-        if (!sp) return null;
-        return {
-          bingpai: { _: sp._bingpai._, m: [...sp._bingpai.m], p: [...sp._bingpai.p], s: [...sp._bingpai.s], z: [...sp._bingpai.z] },
-          fulou: [...(sp._fulou ?? [])],
-          zimo: sp._zimo,
-        };
-      }),
-      he: ([0, 1, 2] as const).map(p => {
-        const he = g.he.get(p);
-        return he?._pai ? [...(he._pai as string[])] : [];
-      }),
-      discardLog: { ...g.discardLog },
-      huapai: { ...g.huapai },
-      goldHand: { ...g.goldHand },
-      pochiHand: { ...g.pochiHand },
-      nukidora: { ...g.nukidora },
-      kinpeiTarget: { ...g.kinpeiTarget },
-      lizhi: Array.from(g.lizhi),
-      openLizhi: Array.from(g.openLizhi),
-      feverActive: { ...g.feverActive },
-      feverTier: { ...g.feverTier },
-      pochiMultiplier: { ...g.pochiMultiplier },
-      shuvariUsed: { ...g.shuvariUsed },
-      chipLedger: { ...g.chipLedger },
-      akiUsedCount: { ...g.akiUsedCount },
-      // 2026-05-14 codex review #3 fix: v2 完全復元 用に不足 field 追加
-      nukidoraGold: { ...g.nukidoraGold },
-      yifaActive: { ...g.yifaActive },
-      lizhiDeclareDapai: { ...g.lizhiDeclareDapai },
-      lingshangActive: { ...g.lingshangActive },
-      qianggangPending: g.qianggangPending,
-      diyizimo: g.diyizimo,
-      firstTurnState: g.firstTurnState,
-      pochiPaymentMode: { ...g.pochiPaymentMode },
-      fuyuConsumed: { ...g.fuyuConsumed },
-      fuyuSkip: { ...g.fuyuSkip },
-      lastZimoInfo: { ...g.lastZimoInfo },
-      feverDeclareTing: { ...g.feverDeclareTing },
-      feverWinCount: { ...g.feverWinCount },
-      justNukidBei: { ...g.justNukidBei },
-      shuvariActive: { ...g.shuvariActive },
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    if (!canSavePaifu) {
+      alert('牌譜は、選択待ちのない安全な手番開始時か半荘終了時に保存できます。');
+      return;
+    }
+    const data = buildCanonicalPaifuSnapshot($game);
+    const blob = new Blob([serializeCanonical(data, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -988,6 +910,11 @@
   let onlineRoomMeta: { isHost: boolean; hostUserId: string; mySeat: number } | null = null;
   let onlineWs: WebSocket | null = null;
   let onlineMembers: Array<{ seat: number; user_id: string; username: string; is_cpu: boolean }> = [];
+  let onlineSocketGeneration = 0;
+  let onlineReconnectAttempt = 0;
+  let onlineReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let onlineShouldReconnect = false;
+  let lastReadyNextRoundKey = '';
 
   function seatName(seat: number): string {
     const m = onlineMembers.find((x) => x.seat === seat);
@@ -995,135 +922,195 @@
     return `P${seat}`;
   }
 
-  // ホストが pool 生成 + 全 client に WS start broadcast
-  function generatePool(): string[] {
-    // shan3.generateTilePool は default sanma rule で 116 牌、 ここでローカル shuffle
-    // 単純化: 直接 generateTilePool 同等の生成を inline、 ベスト practice は import だが循環避け
-    const pool: string[] = [];
-    // m7 / m9 各 4 + p1-9 [p5=2,p0=1,gp=1] + s 同 + z1-3,6,7 各 4、 z4(北) 3, gN 1
-    // 4 色 ぽっち z5b/r/g/y 各 1、 華 f1-4 各 2
-    for (let n of [7, 9]) for (let k = 0; k < 4; k++) pool.push(`m${n}`);
-    for (const s of ['p', 's']) {
-      for (let n = 1; n <= 9; n++) {
-        if (n === 5) { pool.push(`${s}5`); pool.push(`${s}5`); }
-        else for (let k = 0; k < 4; k++) pool.push(`${s}${n}`);
+  function initializeOnlineFromStart(ws: WebSocket, msg: any, protocol = { revision: 0, matchId: 1, roundId: 1 }) {
+    onlineMembers = msg.members ?? [];
+    const hostMember = onlineMembers.find((m: any) => m.user_id === onlineRoomMeta?.hostUserId);
+    const hostSeat = hostMember?.seat as 0|1|2|undefined;
+    game.initOnlineGame({
+      ws,
+      preShuffledPool: msg.preShuffledPool,
+      qijia: msg.qijia ?? 0,
+      cpuSeats: onlineMembers.filter((m: any) => m.is_cpu).map((m: any) => m.seat),
+      mySeat: onlineRoomMeta?.mySeat as 0|1|2|undefined,
+      isHost: !!onlineRoomMeta?.isHost,
+      hostSeat,
+      ...protocol,
+    });
+    onlineGameStarted = true;
+    viewMode = 'single';
+    selfPlayer = onlineRoomMeta!.mySeat as 0 | 1 | 2;
+    revealAll = false;
+    if (msg.chipLedger) {
+      const currentGame = (get(game) as any).game;
+      for (const k of [0, 1, 2]) {
+        const value = msg.chipLedger[String(k)] ?? msg.chipLedger[k];
+        if (typeof value === 'number') currentGame.chipLedger[k] = value;
       }
-      pool.push(`${s}0`);                       // 赤 5
-      pool.push(s === 'p' ? 'gp' : 'gs');       // 金 5
     }
-    for (let n of [1, 2, 3, 6, 7]) for (let k = 0; k < 4; k++) pool.push(`z${n}`);
-    for (let k = 0; k < 3; k++) pool.push('z4');
-    pool.push('gN');
-    for (const c of ['z5b', 'z5r', 'z5g', 'z5y']) pool.push(c);
-    for (let f = 1; f <= 4; f++) for (let k = 0; k < 2; k++) pool.push(`f${f}`);
-    // shuffle
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-    return pool;
   }
-  async function connectOnlineWs() {
+
+  function applyRevisionedAction(ws: WebSocket, msg: any): void {
+    const current = game.getOnlineProtocolState();
+    if (!Number.isInteger(msg.revision)) return;
+    if (msg.revision <= current.revision) return;
+    if (msg.revision !== current.revision + 1) {
+      ws.send(JSON.stringify({ type: 'resync', expectedVersion: current.revision }));
+      return;
+    }
+    const fromSeat = msg.from_seat;
+    if (fromSeat !== 0 && fromSeat !== 1 && fromSeat !== 2) {
+      ws.send(JSON.stringify({ type: 'resync', expectedVersion: current.revision }));
+      return;
+    }
+    game.applyOnlineRemoteAction(fromSeat, msg.action);
+    if (msg.action?.type === 'nextMatch') {
+      const started = (get(game) as any).game;
+      matchStartChipLedger = {
+        0: started?.chipLedger?.[0] ?? 0,
+        1: started?.chipLedger?.[1] ?? 0,
+        2: started?.chipLedger?.[2] ?? 0,
+      };
+    }
+    game.setOnlineProtocolState({
+      ws,
+      revision: msg.revision,
+      matchId: msg.matchId,
+      roundId: msg.roundId,
+    });
+  }
+
+  function applyCanonicalSync(ws: WebSocket, snapshot: any): void {
+    if (!snapshot?.started || !snapshot.start) return;
+    initializeOnlineFromStart(ws, snapshot.start);
+    let baseline = {
+      0: Number(snapshot.start.chipLedger?.[0] ?? snapshot.start.chipLedger?.['0'] ?? 0),
+      1: Number(snapshot.start.chipLedger?.[1] ?? snapshot.start.chipLedger?.['1'] ?? 0),
+      2: Number(snapshot.start.chipLedger?.[2] ?? snapshot.start.chipLedger?.['2'] ?? 0),
+    };
+    for (const command of snapshot.commands ?? []) {
+      game.applyOnlineRemoteAction(command.actorSeat, command.action);
+      if (command.action?.type === 'nextMatch') {
+        const started = (get(game) as any).game;
+        baseline = {
+          0: started?.chipLedger?.[0] ?? 0,
+          1: started?.chipLedger?.[1] ?? 0,
+          2: started?.chipLedger?.[2] ?? 0,
+        };
+      }
+    }
+    game.setOnlineProtocolState({
+      ws,
+      revision: snapshot.revision,
+      matchId: snapshot.matchId,
+      roundId: snapshot.roundId,
+    });
+    matchStartChipLedger = baseline;
+  }
+
+  function scheduleOnlineReconnect(): void {
+    if (!onlineShouldReconnect || !currentRoomId || !onlineRoomMeta || !onlineMe) return;
+    if (onlineReconnectTimer) clearTimeout(onlineReconnectTimer);
+    const delay = Math.min(10_000, 500 * (2 ** Math.min(onlineReconnectAttempt, 5)));
+    onlineReconnectAttempt += 1;
+    onlineReconnectTimer = setTimeout(() => {
+      onlineReconnectTimer = null;
+      void connectOnlineWs(true);
+    }, delay);
+  }
+
+  async function connectOnlineWs(_isRetry = false) {
     if (!currentRoomId || !onlineMe || !onlineRoomMeta) return;
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // [Phase B1] WS auth: server から短期 JWT を取得して handshake に渡す。
-    // クエリの uid/seat/host は server 側で無視されるので token のみ送る。
+    onlineShouldReconnect = true;
+    const roomAtConnect = currentRoomId;
+    const generation = ++onlineSocketGeneration;
     let token = '';
+    let wsBase = '';
     try {
-      const r = await fetch('/api/ws-token', {
+      const response = await fetch('/api/ws-token', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room_id: currentRoomId }),
+        body: JSON.stringify({ room_id: roomAtConnect }),
       });
-      if (!r.ok) {
-        const detail = await r.text().catch(() => '');
-        console.error(`[anmika] ws-token ${r.status}: ${detail}`);
-        return;
-      }
-      const data = (await r.json()) as { token: string };
+      if (!response.ok) throw new Error(`ws-token ${response.status}: ${await response.text().catch(() => '')}`);
+      const data = (await response.json()) as { token: string; ws_url?: string };
       token = data.token;
-    } catch (e) {
-      console.error('[anmika] ws-token fetch failed', e);
+      wsBase = data.ws_url ?? '';
+    } catch (error) {
+      console.error('[anmika] ws-token fetch failed', error);
+      if (generation === onlineSocketGeneration) scheduleOnlineReconnect();
       return;
     }
-    const url = `${protocol}//${location.host}/ws/room/${currentRoomId}?token=${encodeURIComponent(token)}`;
+    if (generation !== onlineSocketGeneration || currentRoomId !== roomAtConnect) return;
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const endpoint = wsBase || `${protocol}//${location.host}`;
+    const url = `${endpoint.replace(/\/$/, '')}/ws/room/${roomAtConnect}?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(url);
     onlineWs = ws;
     ws.onopen = () => {
-      // ホストなら start を送る
-      if (onlineRoomMeta!.isHost) {
-        ws.send(JSON.stringify({
-          type: 'start',
-          preShuffledPool: generatePool(),
-          qijia: 0,
-        }));
-      }
+      if (generation !== onlineSocketGeneration) { ws.close(); return; }
+      onlineReconnectAttempt = 0;
+      if (onlineRoomMeta?.isHost) ws.send(JSON.stringify({ type: 'start', qijia: 0 }));
     };
-    ws.onmessage = (e) => {
-      let msg: any; try { msg = JSON.parse(e.data); } catch (_) { return; }
+    ws.onmessage = (event) => {
+      if (generation !== onlineSocketGeneration) return;
+      let msg: any; try { msg = JSON.parse(event.data); } catch { return; }
       if (msg.type === 'start') {
-        onlineMembers = msg.members ?? [];
-        // 2026-05-14 codex review P0 fix: mySeat / isHost を渡して store 側の send gate を有効化
-        // R3 P0 #1: hostSeat も渡す [cpuRelay 検証で from_seat === hostSeat 確認用]
-        const hostMember = (msg.members ?? []).find((m: any) => m.user_id === onlineRoomMeta?.hostUserId);
-        const hostSeat = (hostMember?.seat as 0|1|2|undefined);
-        game.initOnlineGame({ ws, preShuffledPool: msg.preShuffledPool, qijia: msg.qijia ?? 0, cpuSeats: (msg.members ?? []).filter((m: any) => m.is_cpu).map((m: any) => m.seat), mySeat: onlineRoomMeta?.mySeat as 0|1|2|undefined, isHost: !!onlineRoomMeta?.isHost, hostSeat });
-        onlineGameStarted = true;
-        viewMode = 'single'; // single モード UI そのまま使う
-        selfPlayer = onlineRoomMeta!.mySeat as 0 | 1 | 2;
-        revealAll = false; // 他家手牌は伏せ
-        // R19 #3 fix: synthetic start に chipLedger 同梱 → game.chipLedger に復元、
-        // 中途再接続 / nextMatch 後 でも 累積祝儀が落ちない
-        if (msg.chipLedger) {
-          const sgN = (get(game) as any).game;
-          if (sgN?.chipLedger) {
-            for (const k of [0, 1, 2]) {
-              const v = msg.chipLedger[String(k)] ?? msg.chipLedger[k];
-              if (typeof v === 'number') sgN.chipLedger[k] = v;
-            }
-          }
-        }
-        // R16 P0 #3 fix: 試合開始時 chipLedger snapshot、 nextMatch 時 chip_delta 計算用
-        const sg = (get(game) as any).game;
-        matchStartChipLedger = { 0: sg?.chipLedger?.[0] ?? 0, 1: sg?.chipLedger?.[1] ?? 0, 2: sg?.chipLedger?.[2] ?? 0 };
+        initializeOnlineFromStart(ws, msg, {
+          revision: msg.revision ?? 0,
+          matchId: msg.matchId ?? 1,
+          roundId: msg.roundId ?? 1,
+        });
+      } else if (msg.type === 'sync') {
+        applyCanonicalSync(ws, msg.snapshot);
       } else if (msg.type === 'lobby') {
         onlineMembers = msg.members ?? [];
       } else if (msg.type === 'action') {
-        // 2026-05-14 fix: server は from_user_id しか付与しないので、 onlineMembers から
-        // seat を逆引きする。 msg.from_seat が来てた古い path も互換で残す。
-        let from_seat: number | undefined = msg.from_seat;
-        if (from_seat === undefined && msg.from_user_id) {
-          const mem = onlineMembers.find((m: any) => m.user_id === msg.from_user_id);
-          if (mem) from_seat = mem.seat;
-        }
-        if (from_seat === undefined) {
-          console.warn('[online] msg.action 受信 from_seat 解決失敗', msg);
-          return;
-        }
-        game.applyOnlineRemoteAction(from_seat, msg.action);
+        applyRevisionedAction(ws, msg);
+      } else if (msg.type === 'reject') {
+        console.warn('[online] command rejected', msg.reason, msg.commandId);
       }
     };
     ws.onclose = () => {
-      // R11 codex P1 #2 + R15 P0 #7 fix: WS close で UI state を full reset。
-      // 旧 code は onlineGameStarted=false にするだけで game store の盤面が残り、
-      // 同盤面を offline single mode として続けられて 完全 desync。
-      // game.disconnectOnline() で online mode 解除 + appMode を lobby に戻す
-      game.disconnectOnline();
+      if (generation !== onlineSocketGeneration) return;
       onlineWs = null;
-      onlineGameStarted = false;
-      onlineRoomMeta = null;
-      // appMode / viewMode / currentRoomId も lobby 復帰、 直前盤面で local 続行不可に
-      appMode = 'menu';
-      viewMode = 'single';
-      currentRoomId = null;
+      scheduleOnlineReconnect();
     };
+    ws.onerror = () => { /* onclose handles retry */ };
   }
   function disconnectOnline() {
+    onlineShouldReconnect = false;
+    onlineSocketGeneration += 1;
+    if (onlineReconnectTimer) clearTimeout(onlineReconnectTimer);
+    onlineReconnectTimer = null;
     if (onlineWs) { try { onlineWs.close(); } catch (e) {} onlineWs = null; }
     game.disconnectOnline();
     onlineGameStarted = false;
     onlineRoomMeta = null;
+  }
+  // 勝利後の選択・サイコロがすべて終わった client だけが safe revision を通知する。
+  // Node authority はこの通知を受けてから次局 timeout を開始する。
+  $: {
+    const protocolState = game.getOnlineProtocolState();
+    const safeForNextRound = onlineGameStarted
+      && !!onlineWs
+      && onlineWs.readyState === WebSocket.OPEN
+      && $game.roundEnded
+      && !$game.game.state.finished
+      && !$game.awaitingRonDecision
+      && !$game.awaitingFulou
+      && !$game.pendingFuyu
+      && !$game.pendingKinpei
+      && !$game.pendingFeverContinue
+      && !$game.pendingSaiKoro
+      && !$game.pendingQianggang;
+    const authorized = !!onlineRoomMeta?.isHost
+      || ($game.lastWinner !== null && onlineRoomMeta?.mySeat === $game.lastWinner);
+    const key = `${onlineSocketGeneration}:${protocolState.revision}`;
+    if (safeForNextRound && authorized && key !== lastReadyNextRoundKey) {
+      lastReadyNextRoundKey = key;
+      onlineWs?.send(JSON.stringify({ type: 'readyNextRound', revision: protocolState.revision }));
+    }
   }
   onMount(async () => {
     // 起動時 single モードの初期化 [P1/P2 CPU on、 revealAll off、 self=0]
@@ -1142,9 +1129,15 @@
         const r = await fetch(`/api/me`, { credentials: 'include' });
         if (r.ok) {
           onlineMe = await r.json();
-          currentRoomId = rid;
-          appMode = 'started';
-          viewMode = 'online';
+          const joined = await fetch(`/api/rooms/${encodeURIComponent(rid)}/join`, {
+            method: 'POST',
+            credentials: 'include',
+          });
+          if (joined.ok) {
+            currentRoomId = rid;
+            appMode = 'started';
+            viewMode = 'online';
+          }
         }
       }
     } catch (e) {}
@@ -1429,7 +1422,9 @@
       const cur = ps.chances[ps.currentIdx] as any;
       const owner = ((cur?.winner ?? ps.winner) as 0|1|2);
       const isOwnerCpu = !!$game.cpu[owner];
-      const canDrive = !onlineGameStarted || onlineRoomMeta?.isHost === true;
+      // Online CPU post-win decisions are owned by the Node authority so one
+      // server timer, not a host browser timer, advances them.
+      const canDrive = !onlineGameStarted;
       if (isOwnerCpu && canDrive) {
         __cpuSaiKoroLatch = true;
         // 2026-05-15 [bug A] fix: CPU 駆動が 200ms × 3 で finalize → close まで走り、
@@ -1783,7 +1778,7 @@
     <div class="action-row sys">
       <span class="row-label">システム:</span>
       <button on:click={() => game.reset()}>初期化</button>
-      <button on:click={exportPaifu}>牌譜保存</button>
+      <button on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : '安全な手番開始時に保存できます'}>牌譜保存</button>
       <label class="paifu-load-btn">
         <input type="file" accept="application/json" on:change={onPaifuFile} style="display:none" />
         📂 牌譜ロード
@@ -1838,7 +1833,7 @@
           <label><input type="checkbox" checked={revealAll} on:change={toggleRevealAll}>他家手牌</label>
           <label><input type="checkbox" bind:checked={cpuSlowMode}>CPU ラグ</label>
           <button on:click={() => { viewMode = 'online'; }} style="background:#5865f2;color:#fff;border:0;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:700;font-size:12px;">🌐 オンライン対戦</button>
-          <button on:click={exportPaifu} style="background:#4060a0;color:#fff;border:0;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:700;font-size:12px;">📂 牌譜保存</button>
+          <button on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : '安全な手番開始時に保存できます'} style="background:#4060a0;color:#fff;border:0;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:700;font-size:12px;">📂 牌譜保存</button>
         {:else}
           <button on:click={() => { disconnectOnline(); viewMode = 'online'; }} style="background:#aa4040;color:#fff;border:0;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:700;font-size:12px;">× 退出</button>
         {/if}
@@ -2261,7 +2256,7 @@
           {:else if $game.pendingFeverContinue && (!onlineGameStarted || $game.pendingFeverContinue.winner === selfPlayer)}
             <button on:click={() => game.continueFever()}>▶ フィーバー継続</button>
           {:else if state.finished}
-            <button on:click={exportPaifu}>📂 牌譜保存</button>
+            <button on:click={exportPaifu} disabled={!canSavePaifu}>📂 牌譜保存</button>
             <label style="display:inline-flex; align-items:center; gap:4px; font-size:14px;">
               <input type="checkbox" bind:checked={resetChipOnNextMatch}>チップリセット
             </label>

@@ -30,7 +30,9 @@ function buildRawGame(opts: {
   const shanAny = g.shan as any;
   shanAny._pai = [...(opts.shanRemaining ?? [])].reverse();
   if (opts.baopai !== undefined) shanAny._baopai = opts.baopai;
-  if (opts.fubaopai !== undefined) shanAny._fubaopai = opts.fubaopai;
+  // Tests using this raw builder must not inherit random ura indicators merely
+  // because they mark a hand as riichi.
+  shanAny._fubaopai = opts.fubaopai === undefined ? [] : opts.fubaopai;
   return g;
 }
 

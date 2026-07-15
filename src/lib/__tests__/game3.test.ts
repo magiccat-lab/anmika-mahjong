@@ -10,11 +10,18 @@ describe('Game3 smoke', () => {
     expect(g.shan.paishu).toBeGreaterThan(0);
     let success = 0;
     for (let i = 0; i < 20 && success < 5; i++) {
-      const pai = g.zimo();
-      if (!pai) break;
       try {
+        const player = g.lunbanToPlayerId(g.state.lunban);
+        const sp = g.shoupai.get(player) as any;
+        // A north draw is routed to nuki and leaves a replacement tile already
+        // drawn. Do not call zimo again on that occupied hand.
+        const pai = (sp?._anmikaZimo ?? (typeof sp?._zimo === 'string' && sp._zimo.length <= 2 ? sp._zimo : null))
+          ?? g.zimo();
+        if (!pai) break;
+        const dapaiBefore = g.events.filter((event) => event.type === 'dapai').length;
         g.dapai(pai);
-        success++;
+        const dapaiAfter = g.events.filter((event) => event.type === 'dapai').length;
+        if (dapaiAfter > dapaiBefore) success++;
       } catch { /* sp.zimo throw 等 skip */ }
     }
     expect(success).toBeGreaterThanOrEqual(5);

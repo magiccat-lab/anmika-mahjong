@@ -56,19 +56,30 @@
   }
 
   async function start() {
-    try {
-      const r = await fetch(`${API_BASE}/api/rooms/${roomId}/start`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (!r.ok) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const r = await fetch(`${API_BASE}/api/rooms/${roomId}/start`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (r.ok) {
+          if (!startedOnce) { startedOnce = true; onStart(); }
+          return;
+        }
+        if (r.status === 409) {
+          // A retry after an accepted start is idempotent only when the room is
+          // actually playing. Archived/finished conflicts must not open a game.
+          await refresh();
+          if (room?.status !== 'playing') error = `開始できません [status=${room?.status ?? 'unknown'}]`;
+          return;
+        }
         const j = await r.json().catch(() => ({}));
         error = j.detail || 'start failed';
-        return;
+        if (r.status < 500) return;
+      } catch (e) {
+        error = String(e);
       }
-      if (!startedOnce) { startedOnce = true; onStart(); }
-    } catch (e) {
-      error = String(e);
+      await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
     }
   }
 
