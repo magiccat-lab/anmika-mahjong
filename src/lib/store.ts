@@ -836,7 +836,8 @@ export function createGameStore() {
         if (humanOthers.length > 0) {
           // R9 P1 #8 fix: humanOthers 残り時も pendingKinpei を 作って winner の金北選択権を保持。
           // 全 human が pass / ron した後 finalize 時に 既存 pendingKinpei を踏襲する
-          if (hasGoldKita(s.game, player as PlayerId) && !s.cpu[player as 0|1|2] && !isFeverPayAuto_ron && !s.pendingKinpei) {
+          if (hasGoldKita(s.game, player as PlayerId) && !s.cpu[player as 0|1|2] && !isFeverPayAuto_ron && !s.pendingKinpei
+            && s.game.kinpeiTarget[player as 0|1|2] === null) {
             const otherWinners = allRonResults.filter(r => r.player !== player).map(r => r.player);
             enterKinpeiStage(s, {
               winner: player,
@@ -872,11 +873,14 @@ export function createGameStore() {
         if (s.pendingQianggang) {
           clearQianggangStage(s);
         }
-        // 金北持ち + 自家 → アガリ計算後 modal で変更可能 [リョー指示]
+        // 金北持ち + 自家 → アガリ計算後 modal で選択 [リョー指示]
         // ただし フィーバー + 払い [reverse pochi] state なら 自動確定で modal スキップ
         // R7 P1 #6 fix: 金北手牌内 [goldHand.z > 0] も modal 対象、 nukidoraGold だけだと
         // 抜く前の金北で強化選択漏れ
-        if (hasGoldKita(s.game, player as PlayerId) && !s.cpu[player as 0|1|2] && !isFeverPayAuto_ron) {
+        // 2026-07-15 リョー裁定: 一度選択した適用先は以降変更不可 [保留のみ再選択可]。
+        // 選択済み [kinpeiTarget != null] なら modal を開かない [tsumo 側 1677 と同じガード]
+        if (hasGoldKita(s.game, player as PlayerId) && !s.cpu[player as 0|1|2] && !isFeverPayAuto_ron
+          && s.game.kinpeiTarget[player as 0|1|2] === null) {
           // R4 P1 #10 fix: ダブロン CPU 他 winner を otherWinners に持って、 selectKinpei で 再適用する
           const otherWinners = allRonResults.filter(r => r.player !== player).map(r => r.player);
           enterKinpeiStage(s, {
