@@ -1373,16 +1373,23 @@ export function createGameStore() {
           s = innerDiscard(s, s.lastZimo);
         }
         const hasPendingReaction = s.awaitingRonDecision || s.awaitingFulou;
-        if (!s.lastZimo) {
-          s.roundEnded = true;
-          s.message = (s.message ?? '') + ' [山切れで局終了]';
-        }
         // アガリ表示を clear して次の操作へ
         s.lastWinner = null;
         s.lastHuleResult = null;
         if (!hasPendingReaction) {
           s.lastDapai = null;
           finishRonDecisionStage(s);
+        }
+        if (!s.lastZimo) {
+          // 2026-07-16 リョー報告 fix [ソロのフィーバーで山掘り切り→進行不能]:
+          // 旧 code は roundEnded を立てて message を足すだけで、pendingPingju が無く
+          // 流局パネルも次局導線も出ない = 詰み。他の山切れ経路と同じく pingju transition を通す
+          if (!s.pendingPingju && !s.roundEnded) {
+            s = applyPingjuTransition(s, '🌀 フィーバー山切れ:');
+          } else {
+            s.roundEnded = true;
+          }
+          return { ...s };
         }
         // フィーバー継続で次 hule の snapshot を fresh に [2026-05-12 リョー指示: 点数移動 が累積になる bug fix]
         saveHuleSnapshot(s.game);
