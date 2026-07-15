@@ -1593,14 +1593,18 @@
   $: {
     const cur = $game.game.lunbanToPlayerId($game.game.state.lunban);
     const key = `${state.jushu}-${state.lunban}`;
+    // [2026-07-16 リョー指示: 演出同期] cutin 再生中は CPU を進めない。
+    // 再生終了で canStep が立ち直った時に同一手番でも再発火できるよう latch を解除する
+    const cutinBusy = !!$game.cutin || (($game.cutinQueue?.length ?? 0) > 0);
     const canStep = !onlineGameStarted && viewMode === 'single' && !$game.roundEnded
       && !$game.awaitingRonDecision && !$game.awaitingFulou
       && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
+      && !cutinBusy
       && cur !== 0 && $game.cpu[cur];
     if (canStep && lastCpuStepKey !== key) {
       lastCpuStepKey = key;
       setTimeout(() => game.cpuStep(), cpuDelayMs);
-    } else if (!canStep && (cur === 0 || $game.roundEnded)) {
+    } else if (!canStep && (cur === 0 || $game.roundEnded || cutinBusy)) {
       lastCpuStepKey = null;
     }
   }

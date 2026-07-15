@@ -224,6 +224,10 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     s = innerDiscard(s, pure);
     if ((s as any)._lastDapaiFailed) break;
     safety++;
+    // [2026-07-16 リョー指示: 演出同期] このループ中に cutin [リーチ/フィーバー等] が
+    // 積まれたら手番を進めず一旦止める。演出が終わると App 側 driver [cutin gate 付き]
+    // が再スケジュールするので、演出と局面が同期して見える
+    if (s.cutin || (s.cutinQueue?.length ?? 0) > 0) break;
   }
   return { ...s };
 }
@@ -234,6 +238,8 @@ export function autoAdvanceImpl(initial: StoreState): StoreState {
   let safetyCount = 0;
   while (
     !hasBlockingDecision(s) &&
+    // [2026-07-16 演出同期] cutin 再生中は自動進行しない
+    !s.cutin && (s.cutinQueue?.length ?? 0) === 0 &&
     s.lastZimo &&
     safetyCount < 100
   ) {
