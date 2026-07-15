@@ -2774,15 +2774,22 @@ function computePingjuMessage(g: Game3): string {
     }
   }
   if (feverWonAny) return '流局 [フィーバーアガリ済]';
-  // アンミカルール [2026-05-23 audit、 codex CRITICAL [5]]: ノーテン流局は存在しないため
-  // テンパイ/ノーテンによる点数移動はなし。 表示用に判定だけ残す。
+  // 2026-07-16 リョー裁定: テンパイ料あり [場4000]。
+  // [5/23 audit の「罰符ナシ」はチョンボ系罰則の話で、ノーテン料とは別]
+  // 1人聴牌: ノーテン2人が 2000 ずつ払う / 2人聴牌: ノーテン1人が 4000 払う / 3人・0人: 移動なし
+  // フィーバー絡みの流局 [feverWonAny] は上で return 済みのため対象外
   const tenpai: number[] = [];
   for (const p of [0, 1, 2] as const) {
     if (g.xiangting(p) === 0) tenpai.push(p);
   }
   if (tenpai.length === 3) return '流局 [全員テンパイ、 点数移動なし]';
   if (tenpai.length === 0) return '流局 [全員ノーテン、 点数移動なし]';
-  return `流局 [テンパイ p${tenpai.join(',')}、 点数移動なし]`;
+  const noten = ([0, 1, 2] as const).filter((p) => !tenpai.includes(p as number));
+  const receive = 4000 / tenpai.length;
+  const pay = 4000 / noten.length;
+  for (const p of tenpai) g.state.defen[p as 0 | 1 | 2] += receive;
+  for (const p of noten) g.state.defen[p] -= pay;
+  return `流局 [テンパイ料 場4000: p${tenpai.join(',')} +${receive} / p${noten.join(',')} -${pay}]`;
 }
 
 export const game = createGameStore();
