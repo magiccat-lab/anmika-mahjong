@@ -73,6 +73,7 @@ export class RoomAuthority {
   ronPassedPlayers: PlayerId[] = [];
   ronDeclaredPlayers: PlayerId[] = [];
   pendingQianggang: PendingQianggang | null = null;
+  private pendingLizhiOpts: { open: boolean; shuvari: boolean; fever: boolean } | null = null;
   roundEnded = false;
   lastWinner: PlayerId | null = null;
   private cpuSeats = new Set<PlayerId>();
@@ -247,6 +248,7 @@ export class RoomAuthority {
     this.ronDeclaredPlayers = [];
     this.deferredCpuRon = [];
     this.pendingQianggang = null;
+    this.pendingLizhiOpts = null;
     this.game.qianggangPending = false;
   }
 
@@ -292,6 +294,29 @@ export class RoomAuthority {
     if (!paiValue) return 'discard: missing pai';
 
     const pai = paiValue as Pai;
+
+    // Handle pending lizhi (2-stage): call declareLizhi at discard time with
+    // feverCheck / feverDapai computed from the current hand, matching the
+    // canonical store's processing order (store.ts lines 631-660).
+    if (this.pendingLizhiOpts) {
+      const lizhiOpts = this.pendingLizhiOpts;
+      this.pendingLizhiOpts = null;
+      if (lizhiOpts.fever) {
+        const feverMap = this.game.feverCandidatesByDapai(actor);
+        const feverCheck = feverMap.get(pai);
+        if (!feverCheck) {
+          return `discard: ${pai} does not satisfy fever condition`;
+        }
+        if (!this.game.declareLizhi({ open: lizhiOpts.open, shuvari: lizhiOpts.shuvari, fever: true, feverCheck, feverDapai: pai })) {
+          return `lizhi: declare failed for player ${actor}`;
+        }
+      } else {
+        if (!this.game.declareLizhi({ open: lizhiOpts.open, shuvari: lizhiOpts.shuvari })) {
+          return `lizhi: declare failed for player ${actor}`;
+        }
+      }
+    }
+
     if (toCorePai(pai) === 'z4' && this.game.canNukiBei(actor)) {
       const replacement = this.game.declareNukiBei(actor, resolveNukiBeiMeta({
         requestedPai: pai,
@@ -538,12 +563,24 @@ export class RoomAuthority {
     if (pendingErr) return pendingErr;
     if (!this.game.canLizhi(actor)) return `lizhi: player ${actor} cannot lizhi`;
     const opts = optsValue && typeof optsValue === 'object' ? optsValue as Record<string, unknown> : {};
-    const ok = this.game.declareLizhi({
-      open: opts.open === true,
-      shuvari: opts.shuvari === true,
-      fever: opts.fever === true,
-    });
-    return ok ? null : `lizhi: declare failed for player ${actor}`;
+    const open = opts.open === true;
+    const shuvari = opts.shuvari === true;
+    const fever = opts.fever === true;
+    // Fever pre-validation: same as canonical store — allow if canFeverLizhi
+    // is ok OR feverCandidatesByDapai has entries (conditional fever that
+    // becomes valid only after specific discards).
+    if (fever) {
+      const fv = this.game.canFeverLizhi(actor);
+      const feverByDapai = this.game.feverCandidatesByDapai(actor);
+      if (!fv.ok && feverByDapai.size === 0) {
+        return `lizhi: player ${actor} cannot declare fever`;
+      }
+    }
+    // Defer declareLizhi to discard time (2-stage processing, same as
+    // canonical store). This ensures feverCheck and feverDapai are computed
+    // from the post-discard hand, not the pre-discard hand.
+    this.pendingLizhiOpts = { open, shuvari, fever };
+    return null;
   }
 
   private applyNextRound(action: any): string | null {
