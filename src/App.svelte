@@ -3830,6 +3830,17 @@
     main.mode-single .center-board { min-height: 0; }
     main.mode-single .nuki-row { padding: 1px 4px; gap: 2px; }
     main.mode-single .seat-bottom { min-height: 42px; }
+    /* 和了パネル: 低背だと 11vh/16vh 挟みで窓が~200pxになり、役・祝儀の
+     * 計算式がスクロール下に沈んで「出ない」ように見える。ほぼ全画面化する */
+    main.mode-single .agari-unified-panel,
+    main.mode-single :global(.modal.sai) {
+      top: 8px !important;
+      bottom: 8px !important;
+      left: 8px !important;
+      right: 8px !important;
+      padding: 10px 12px !important;
+      gap: 8px !important;
+    }
     main.mode-single .score-box {
       grid-template-columns: minmax(62px, 1fr) minmax(66px, 0.9fr) minmax(62px, 1fr);
       grid-template-rows: 28px minmax(0, 1fr) minmax(68px, 0.9fr);
