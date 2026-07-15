@@ -1514,8 +1514,10 @@ export class Game3 {
     if (!sp) return false;
     const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => this.feverActive[p]);
     const feverDeclareDiscard = this.feverDeclareDapaiPlayer !== null && fromPlayer === this.feverDeclareDapaiPlayer;
-    const feverPlayerDiscard = fromPlayer !== null && this.feverActive[fromPlayer];
-    if (someoneFever && !this.feverActive[player] && !feverDeclareDiscard && !feverPlayerDiscard) return false;
+    // 2026-07-16 リョー裁定: フィーバー成立後は宣言牌ロン [P0-1] を除き、
+    // フィーバー者以外は和了不可。旧実装の「フィーバー者の捨て牌は他家ロン可」を撤廃
+    // [フィーバー宣言者がロンされて振り込み扱いになる実害の報告による]
+    if (someoneFever && !this.feverActive[player] && !feverDeclareDiscard) return false;
     try {
       const sp_clone = sp.clone();
       sp_clone.zimo(pai);

@@ -4,18 +4,31 @@ import { Game3, buildShoupai } from '../game3';
 import { game } from '../store';
 import type { PlayerId } from '../types';
 
+// 2026-07-16 リョー裁定: フィーバー成立後は宣言牌ロン [P0-1] を除き、
+// フィーバー者以外は和了できない [フィーバー者の捨て牌もロン不可]。
+// 旧仕様 [フィーバー者の捨て牌は他家ロン可] のテストを新裁定に置換。
 describe('fever continuation discard reactions', () => {
-  it('allows non-fever players to ron a discard made by the fever player', () => {
+  it('フィーバー者の捨て牌は他家がロンできない', () => {
     const g = new Game3();
     g.qipai();
     g.feverActive[0] = true;
     g.shoupai.set(1 as PlayerId, buildShoupai(['p1','p1','p1','p2','p2','p2','p3','p3','p3','s7','s7','s7','s8']));
     g.lizhi.add(1 as PlayerId);
-    expect(g.canRon(1 as PlayerId, 's8', 0 as PlayerId)).toBe(true);
+    expect(g.canRon(1 as PlayerId, 's8', 0 as PlayerId)).toBe(false);
     expect(g.canRon(1 as PlayerId, 's8', 2 as PlayerId)).toBe(false);
   });
 
-  it('continueFever preserves ron pending state after discarding the tsumo tile', () => {
+  it('宣言牌 [feverDeclareDapaiPlayer] だけは他家がロンできる [P0-1 維持]', () => {
+    const g = new Game3();
+    g.qipai();
+    g.feverActive[0] = true;
+    g.feverDeclareDapaiPlayer = 0 as PlayerId;
+    g.shoupai.set(1 as PlayerId, buildShoupai(['p1','p1','p1','p2','p2','p2','p3','p3','p3','s7','s7','s7','s8']));
+    g.lizhi.add(1 as PlayerId);
+    expect(g.canRon(1 as PlayerId, 's8', 0 as PlayerId)).toBe(true);
+  });
+
+  it('continueFever のツモ牌切りに他家のロン判定は発生しない', () => {
     game.reset();
     const s: any = get(game);
     const g = s.game;
@@ -34,8 +47,6 @@ describe('fever continuation discard reactions', () => {
     game.continueFever();
 
     const after: any = get(game);
-    expect(after.lastDapai).toEqual({ player: 0, pai: 's8' });
-    expect(after.awaitingRonDecision).toBe(true);
-    expect(after.message).toContain('ロン可能');
+    expect(after.awaitingRonDecision).toBe(false);
   });
 });

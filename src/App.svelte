@@ -966,7 +966,18 @@
   $: sideTiles2 = computeSideTiles(shoupai2, srv2, feverWaitCores, revealAll, selfPlayer);
 
   // リーチ宣言牌候補 [リーチ button 押下後に表示、 候補以外を grayout]
-  $: lizhiCandidates = $game.game.canLizhi(currentPlayer) ? $game.game.getLizhiCandidates(currentPlayer) : [];
+  // 2026-07-16 リョー裁定: フィーバー宣言中はフィーバーが成立する宣言牌だけに絞る
+  // [7 暗刻を崩す牌は候補に出さない。通常リーチへの自動降格は廃止]
+  $: lizhiCandidates = (() => {
+    if (!$game.game.canLizhi(currentPlayer)) return [];
+    const base = $game.game.getLizhiCandidates(currentPlayer);
+    if (($game as any)._lizhiFever && $game.lizhiPending === currentPlayer) {
+      const feverMap = $game.game.feverCandidatesByDapai(currentPlayer);
+      const norm = (p: string) => p.replace(/_$/, '');
+      return base.filter((c: string) => feverMap.has(norm(c)));
+    }
+    return base;
+  })();
   function isLizhiCand(pai: string): boolean {
     if (lizhiCandidates.length === 0) return false;
     // R8 fix: 表示牌 [gp/gs/gN/bu/br/bg/by] を 内部候補 [p0/s0/z4/z5] に normalize、

@@ -128,16 +128,26 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       const damaPreferred = selfPochiAbs >= 4 || remainingWall <= 4;
       if (totalRemaining > 0 && !damaPreferred) {
         // [2026-07-16 リョー指示] CPU にもフィーバーリーチの選択肢を持たせる。
-        // 7 の暗刻/暗槓 [フィーバー種] が成立していれば fever 宣言を優先し、
-        // 宣言が通らなければ通常リーチに fallback [declareLizhi 内の validation に委ねる]
-        const feverCheck = s.game.canFeverLizhi(cur);
+        // リーチ後の打牌はツモ切りなので、ツモ牌がフィーバー成立牌 [feverCandidatesByDapai]
+        // の時だけ fever 宣言 + feverDapai を渡して宣言時の待ちを正しく固定する。
+        // 成立しない形なら通常リーチに fallback
+        const spForFever = s.game.shoupai.get(cur);
+        const zimoPai = typeof spForFever?._zimo === 'string' && spForFever._zimo.length <= 2
+          ? spForFever._zimo.replace(/_$/, '')
+          : null;
         let declared = false;
-        if (feverCheck.ok) {
-          declared = s.game.declareLizhi({ fever: true, feverCheck });
+        let declaredFever = false;
+        if (zimoPai) {
+          const feverMap = s.game.feverCandidatesByDapai(cur);
+          const fc = feverMap.get(zimoPai);
+          if (fc) {
+            declared = s.game.declareLizhi({ fever: true, feverCheck: fc, feverDapai: zimoPai });
+            declaredFever = declared;
+          }
         }
         if (!declared) declared = s.game.declareLizhi({});
         if (declared) {
-          s = enqueueCutinState(s, 'reach', cur as 0 | 1 | 2);
+          s = enqueueCutinState(s, declaredFever ? 'fever' : 'reach', cur as 0 | 1 | 2);
         }
       }
     }

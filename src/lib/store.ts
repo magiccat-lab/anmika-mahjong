@@ -628,20 +628,17 @@ export function createGameStore() {
             s.message = `${pai} はリーチ宣言牌じゃない、 赤枠の牌から選んで`;
             return { ...s };
           }
-          // [2026-05-16 bug 8 wiring] フィーバー宣言時、 dapai 別 fever 可否を check。
-          //   feverCandidatesByDapai は fever OK な dapai のみ Map に含む。
-          //   選択 pai が fever 不可なら 「9s 切れば fever、 他は通常リーチ」 仕様に従い fever を落として通常リーチに自動降格。
-          let isFeverDecl = !!(s as any)._lizhiFever;
+          // [2026-07-16 リョー裁定] フィーバー宣言時は fever が成立する牌しか切れない。
+          // 旧仕様 [不可牌なら通常リーチへ自動降格] を廃止し、打牌自体を reject する
+          // [UI 側も候補をフィーバー成立牌に絞る]
+          const isFeverDecl = !!(s as any)._lizhiFever;
           let feverCheckForDeclare: { ok: boolean; tiles: string[]; tier: 1 | 2 | 3 } | undefined;
           if (isFeverDecl) {
             const feverMap = s.game.feverCandidatesByDapai(player);
             feverCheckForDeclare = feverMap.get(pai);
             if (!feverCheckForDeclare) {
-              isFeverDecl = false;
-              (s as any)._lizhiFever = false;
-              const lpf = (s as any).lizhiPendingFlags;
-              if (lpf) (s as any).lizhiPendingFlags = { ...lpf, fever: false };
-              s.message = `${pai} は フィーバー成立条件 [7 暗刻] を満たさない、 通常リーチで宣言`;
+              s.message = `${pai} ではフィーバーが成立しない [7 暗刻を崩さない宣言牌を選んで]`;
+              return { ...s };
             }
           }
           // リーチ確定 [defen -1000、 供託 +1、 lizhi.add]
