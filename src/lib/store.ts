@@ -1894,6 +1894,23 @@ export function createGameStore() {
           return;
         }
       }
+      // 2026-07-16 リョー指示: 親がアガリ止め可能な局面で親が CPU なら、CPU 自身に判断させる。
+      // トップ確定で半荘を締められる局面は常に「やめる」が合理なので無条件でアガリ止め。
+      // オフライン進行のみ [オンラインは authority 側の進行判断に委ねる]
+      if (!onlineMode) {
+        const s0 = get(store) as StoreState;
+        const w = s0.lastWinner;
+        if (w !== null && w !== undefined && s0.cpu[w as 0 | 1 | 2] && s0.game.canAgariyame(w as any)) {
+          update((s) => {
+            s.game.agariyame();
+            const ranking = s.game.getRanking();
+            s.message = '🏁 半荘終了 [CPU 親のアガリ止め判断] ' + ranking.map(r => `${r.rank}位 p${r.player} ${r.defen}点`).join(' / ');
+            s.roundEnded = true;
+            return { ...s };
+          });
+          return;
+        }
+      }
       if (onlineMode && !isApplyingRemote) {
         // 2026-05-14 Round 2 codex fix P0 #1: deadlock 解消
         //   旧: host 限定 send だが UI は winner、 non-host winner が click すると詰む

@@ -109,9 +109,9 @@
 
   // オンライン CPU と期限切れ操作は Node authority が一度だけ発火する。
   // client timer は再接続 replay と競合するため、オンラインでは持たない。
-  $: shoupai0 = handTiles($game.game.shoupai.get(srv0), srv0);
-  $: shoupai1 = handTiles($game.game.shoupai.get(srv1), srv1);
-  $: shoupai2 = handTiles($game.game.shoupai.get(srv2), srv2);
+  $: shoupai0 = handTiles($game.game.shoupai.get(srv0), srv0, pochiReveal?.player === srv0);
+  $: shoupai1 = handTiles($game.game.shoupai.get(srv1), srv1, pochiReveal?.player === srv1);
+  $: shoupai2 = handTiles($game.game.shoupai.get(srv2), srv2, pochiReveal?.player === srv2);
   // 2026-05-14 ゆーま 自走 bug fix: fulou0/1/2 が hardcoded 0/1/2 で、 オンライン
   // selfPlayer != 0 だと shoupai0 [srv0=自家] と player ID がズレて 他人の副露が表示される
   $: fulou0 = fulouMianzi($game.game.shoupai.get(srv0), srv0);
@@ -543,7 +543,19 @@
     URL.revokeObjectURL(url);
   }
 
-  function handTiles(sp: any, player?: number): string[] {
+  // ポッチ開封演出中は自家手牌のツモ牌 [末尾] の色を伏せる [2026-07-16 リョー報告:
+  // 「ポッチ何かな」演出中に手牌側で色が即バレしてた]
+  const POCHI_COLORED_KEYS = new Set(['z5b', 'z5r', 'z5g', 'z5y', 'bu', 'br', 'bg', 'by']);
+  function maskZimoPochi(tiles: string[]): string[] {
+    if (tiles.length === 0) return tiles;
+    const last = tiles[tiles.length - 1];
+    if (!POCHI_COLORED_KEYS.has(last)) return tiles;
+    const out = [...tiles];
+    out[out.length - 1] = 'z5';
+    return out;
+  }
+
+  function handTiles(sp: any, player?: number, maskPochiZimo = false): string[] {
     if (!sp) return [];
     if (sp._bingpai?.__anmika) {
       const bp = sp._bingpai;
@@ -583,7 +595,7 @@
           out.push(rawZimo);
         }
       }
-      return out;
+      return maskPochiZimo ? maskZimoPochi(out) : out;
     }
     const bingpaiStr: string = sp.toString().split(',')[0] ?? '';
     let tiles: string[] = parseTilesFromStr(bingpaiStr);
@@ -619,7 +631,7 @@
       tiles = remapGoldTiles(tiles, gh);
       tiles = remapPochiTiles(tiles, ph);
     }
-    return tiles;
+    return maskPochiZimo ? maskZimoPochi(tiles) : tiles;
   }
 
   function remapGoldTiles(tiles: string[], gh: { p: number; s: number; z: number }): string[] {
@@ -2138,8 +2150,8 @@
           {/each}
           {#each fulou1 as m}
             <span class="vfulou-group">
-              {#each m.tiles as t}<span class="vtile rot-l"><Tile pai={t} size="md" /></span>{/each}
-              {#if m.kakanTile}<span class="vtile rot-l"><Tile pai={m.kakanTile} size="md" /></span>{/if}
+              {#each m.tiles as t, ti}<span class="vtile rot-l" class:vclaimed={ti === m.rotateIdx}><Tile pai={t} size="md" /></span>{/each}
+              {#if m.kakanTile}<span class="vtile rot-l vclaimed"><Tile pai={m.kakanTile} size="md" /></span>{/if}
             </span>
           {/each}
         </div>
@@ -2183,8 +2195,8 @@
           {/each}
           {#each fulou2 as m}
             <span class="vfulou-group">
-              {#each m.tiles as t}<span class="vtile rot-r"><Tile pai={t} size="md" /></span>{/each}
-              {#if m.kakanTile}<span class="vtile rot-r"><Tile pai={m.kakanTile} size="md" /></span>{/if}
+              {#each m.tiles as t, ti}<span class="vtile rot-r" class:vclaimed={ti === m.rotateIdx}><Tile pai={t} size="md" /></span>{/each}
+              {#if m.kakanTile}<span class="vtile rot-r vclaimed"><Tile pai={m.kakanTile} size="md" /></span>{/if}
             </span>
           {/each}
         </div>
@@ -3328,6 +3340,11 @@
   }
   main.mode-single .vtile.rot-r :global(.tile) {
     transform: translate(-50%, -50%) rotate(-90deg);
+  }
+  /* 鳴いた牌 [どこから取ったか] は横の家でも直立させて区別する [2026-07-16 リョー指示] */
+  main.mode-single .vtile.rot-l.vclaimed :global(.tile),
+  main.mode-single .vtile.rot-r.vclaimed :global(.tile) {
+    transform: translate(-50%, -50%) rotate(0deg);
   }
   /* スタンプ slot bar [画面下、 手牌のすぐ上、 左から P1 / P0 / P2 固定 3 slot] */
   .stamp-slot-bar {

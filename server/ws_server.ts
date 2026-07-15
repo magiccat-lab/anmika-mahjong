@@ -441,7 +441,16 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     }
     if (postWinOwner !== null && postWinAction) {
       const owner = Array.from(room.members.values()).find((item) => item.seat === postWinOwner);
-      const delay = owner?.is_cpu ? 750 : nextRoundTimeoutMs;
+      // 2026-07-16 リョー報告: CPU owner の 750ms 刻みだと client の演出 [サイコロ spin 等] が
+      // 追いつかず「押す前に済んでチップが動いた」体験になる。solo の App 側 driver と同じ
+      // 「見える」ペースに合わせる。人間 owner の deadline 代行 [勝手に出目宣言→roll] は
+      // 実質チート級の介入なので、離席救済としてだけ長めに残す [env で調整可]。
+      const cpuStepDelay = postWinAction.type === 'selectSaiKoroCombo' ? 1500
+        : postWinAction.type === 'rollSaiKoroDice' ? 2500
+        : postWinAction.type === 'advanceSaiKoro' ? 2000
+        : 1500;
+      const humanPostWinTimeoutMs = Number(process.env.ANMIKA_POST_WIN_TIMEOUT_MS || 180_000);
+      const delay = owner?.is_cpu ? cpuStepDelay : humanPostWinTimeoutMs;
       room.deadlineTimer = setTimeout(() => {
         room.queue = room.queue.then(async () => {
           const live = room.authority;
