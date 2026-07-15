@@ -649,8 +649,12 @@ export class RoomAuthority {
     this.ponCandidates = [];
     this.kanCandidates = [];
 
+    // Fever gate: during fever, only the fever-active player may call
+    // pon/damingang (same as canonical store, store.ts lines 2473-2484).
+    const someoneFever = PLAYERS.some((p) => this.game.feverActive[p]);
     for (const p of PLAYERS) {
       if (p === discarder) continue;
+      if (someoneFever && !this.game.feverActive[p]) continue;
       const pon = this.game.getPonCandidates(p, discarder, pai);
       if (pon.length > 0) this.ponCandidates.push({ player: p, mianzi: pon });
       const kan = this.game.getDamingangCandidates(p, discarder, pai);
@@ -693,8 +697,12 @@ export class RoomAuthority {
       return isFengpai && (paiN === this.game.changfengZ || paiN === this.game.zifengZ(player));
     };
 
+    // Fever gate: non-fever CPU players must not call during fever.
+    const someoneFever = PLAYERS.some((p) => this.game.feverActive[p]);
+
     for (const candidate of this.ponCandidates) {
       if (!this.cpuSeats.has(candidate.player) || candidate.mianzi.length === 0) continue;
+      if (someoneFever && !this.game.feverActive[candidate.player]) continue;
       let shouldPon = shouldCallHonor(candidate.player);
       if (!isSanyuanpai && !isFengpai) {
         const isSeven = (core[0] === 'm' || core[0] === 'p' || core[0] === 's') && core[1] === '7';
@@ -715,6 +723,7 @@ export class RoomAuthority {
 
     for (const candidate of this.kanCandidates) {
       if (!this.cpuSeats.has(candidate.player) || candidate.mianzi.length === 0) continue;
+      if (someoneFever && !this.game.feverActive[candidate.player]) continue;
       if (!shouldCallHonor(candidate.player)) continue;
       const replacement = this.game.declareDamingang(candidate.player, candidate.mianzi[0], discarder);
       if (replacement !== null) {
