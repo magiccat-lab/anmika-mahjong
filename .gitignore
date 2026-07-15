@@ -34,3 +34,9 @@ tools/out/
 test-results/
 playwright-report/
 playwright/.cache/
+
+# anmika runtime [yuma 2026-07-15]
+server/.secrets.env
+server/run/
+server/data/
+server/.venv/
