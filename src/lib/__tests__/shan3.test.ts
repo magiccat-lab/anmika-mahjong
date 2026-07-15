@@ -82,10 +82,15 @@ describe('Shan3 構築 / paishu', () => {
     expect(s._baopai).toHaveLength(2);
     expect(s._fubaopai).toHaveLength(2);
   });
-  it('baopai は華牌 [f*] を skip', () => {
-    const s = new Shan3(baseRule) as any;
-    for (const b of s._baopai) expect((b as string).startsWith('f')).toBe(false);
-    for (const b of s._fubaopai ?? []) expect((b as string).startsWith('f')).toBe(false);
+  it('flower indicators remain physically separated from the live wall', () => {
+    const pool = Array.from({ length: 116 }, () => 'p1');
+    pool[4] = 'f1';
+    pool[6] = 'f4';
+    const s = new Shan3(baseRule, pool as any) as any;
+    expect(s._baopai).toContain('f1');
+    expect(s._fubaopai).toContain('f4');
+    expect(s._pai).not.toContain('f1');
+    expect(s._pai).not.toContain('f4');
   });
   it('fudora=false なら fubaopai は null', () => {
     const s = new Shan3({ ...baseRule, fudora: false }) as any;

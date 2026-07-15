@@ -37,6 +37,20 @@ const POST_WIN_ACTIONS = new Set([
   'agariyame',
 ]);
 
+const LIVE_GAMEPLAY_ACTIONS = new Set([
+  'discard',
+  'tsumokiri',
+  'drawNext',
+  'tsumo',
+  'ron',
+  'pass',
+  'pon',
+  'damingang',
+  'declareKan',
+  'nukiBei',
+  'lizhi',
+]);
+
 function asPlayerId(value: number): PlayerId | null {
   return value === 0 || value === 1 || value === 2 ? value : null;
 }
@@ -120,6 +134,11 @@ export class RoomAuthority {
       return 'missing action.type';
     }
     if (action.type !== 'nextRound') this.duplicateNextRoundAckOpen = false;
+
+    if (LIVE_GAMEPLAY_ACTIONS.has(action.type)) {
+      const phaseError = this.requireCanonicalLivePhase(action.type);
+      if (phaseError) return phaseError;
+    }
 
     let reason: string | null;
     try {
@@ -242,6 +261,27 @@ export class RoomAuthority {
 
   private requireNoReactionPending(type: string): string | null {
     return this.hasReactionPending() ? `${type}: reaction decision is pending` : null;
+  }
+
+  /**
+   * The validation Game3 intentionally tracks the physical hand separately from
+   * the canonical reducer. Post-win choices only exist in the canonical reducer,
+   * so every live command must be stopped here until that choice is resolved.
+   * Otherwise a delayed/malicious command can discard or draw through a modal and
+   * leave all clients in a state that no legal action can recover from.
+   */
+  private requireCanonicalLivePhase(type: string): string | null {
+    const state = this.canonicalState();
+    if (state.pendingFuyu || state.pendingKinpei || state.pendingSaiKoro || state.pendingFeverContinue) {
+      return `${type}: post-win decision is pending`;
+    }
+    if (state.roundEnded || state.pendingPingju) {
+      return `${type}: round is ended`;
+    }
+    if (state.lizhiPending !== null && type !== 'discard') {
+      return `${type}: riichi discard is pending`;
+    }
+    return null;
   }
 
   private applyDiscard(actor: PlayerId, paiValue: string, meta?: { gold?: boolean; pochi?: any }): string | null {

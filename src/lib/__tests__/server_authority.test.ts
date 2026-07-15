@@ -68,6 +68,54 @@ describe('server RoomAuthority', () => {
     expect(reason).toContain('no ron decision pending');
   });
 
+  it('rejects every live command while a post-win decision is pending', () => {
+    const a = authority();
+    const current = a.currentPlayer();
+    const state = a.canonicalState();
+    state.pendingKinpei = {
+      winner: current,
+      isRon: false,
+      ronfrom: null,
+      availableHuapai: ['f1'],
+    };
+    const before = a.game.discardLog[current].length;
+
+    expect(a.validateAndApply(current, {
+      type: 'discard',
+      pai: firstNonBeiDiscard(a),
+    }, members)).toContain('post-win decision is pending');
+    expect(a.validateAndApply(current, { type: 'drawNext' }, members))
+      .toContain('post-win decision is pending');
+    expect(a.game.discardLog[current]).toHaveLength(before);
+  });
+
+  it('serializes a double-ron reaction behind the first winner post-win decision', () => {
+    const a = authority();
+    const discarder = a.currentPlayer();
+    const actor = ((discarder + 1) % 3) as 0 | 1 | 2;
+    const state = a.canonicalState();
+    state.pendingFuyu = { winner: actor, isRon: true, ronfrom: discarder };
+    a.lastDapai = { player: discarder, pai: firstNonBeiDiscard(a) as any };
+    a.awaitingRonDecision = true;
+    a.ronCandidates = [actor];
+
+    expect(a.validateAndApply(actor, { type: 'pass', player: actor }, members))
+      .toContain('post-win decision is pending');
+    expect(a.awaitingRonDecision).toBe(true);
+    expect(a.ronPassedPlayers).not.toContain(actor);
+  });
+
+  it('allows only the declaration discard while a riichi discard is pending', () => {
+    const a = authority();
+    const current = a.currentPlayer();
+    a.canonicalState().lizhiPending = current;
+
+    expect(a.validateAndApply(current, { type: 'tsumokiri' }, members))
+      .toContain('riichi discard is pending');
+    expect(a.validateAndApply(current, { type: 'drawNext' }, members))
+      .toContain('riichi discard is pending');
+  });
+
   it('rejects non-host nextRound before a round has ended', () => {
     const a = authority();
     const reason = a.validateAndApply(a.currentPlayer(), { type: 'nextRound', preShuffledPool: pool() }, members);

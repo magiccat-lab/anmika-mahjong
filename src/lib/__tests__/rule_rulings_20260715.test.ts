@@ -153,6 +153,39 @@ describe('2026-07-15確定裁定', () => {
     expect(after.lastWinner).toBe(player);
   });
 
+  it('CPU also chooses a flower first revealed by Autumn for Gold North', () => {
+    game.reset();
+    const s0: any = get(game);
+    const player = 0 as PlayerId;
+    s0.game.state.lunban = 0;
+    s0.game.diyizimo = false;
+    s0.game.shoupai.set(player, buildShoupai([
+      'p1', 'p1', 'p1',
+      'p2', 'p2', 'p2',
+      'p3', 'p3', 'p3',
+      's7', 's7', 's7',
+      's8',
+    ]));
+    (s0.game.shoupai.get(player) as any).zimo('s8');
+    s0.game.huapai[player] = ['f3'];
+    s0.game.goldHand[player].z = 1;
+    s0.game.lizhi.add(player);
+    (s0.game.shan as any)._pai = ['p9', 'f4'];
+    s0.lastZimo = 's8';
+    s0.lastDapai = null;
+    s0.lastWinner = null;
+    s0.roundEnded = false;
+    s0.cpu[player] = true;
+
+    expect(s0.game.canTsumo(player)).toBe(true);
+    game.cpuStep();
+
+    const after: any = get(game);
+    expect(after.game.kinpeiTarget[player]).toBe('fuyu');
+    expect(after.lastWinner).toBe(player);
+    expect(after.roundEnded).toBe(true);
+  });
+
   it('リーチ後の待ち不変暗槓を候補に残し、カン前の打牌を拒否する', () => {
     const g = new Game3();
     g.qipai();

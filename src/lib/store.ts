@@ -157,6 +157,20 @@ function saveHuleSnapshot(game: Game3): void {
   game.saveSnapshot();
 }
 
+function hasPostWinDecision(s: StoreState): boolean {
+  return !!(s.pendingFuyu || s.pendingKinpei || s.pendingSaiKoro || s.pendingFeverContinue);
+}
+
+function isLiveTurnActionBlocked(s: StoreState, allowLizhiDiscard = false): boolean {
+  return s.roundEnded
+    || s.pendingPingju
+    || s.awaitingRonDecision
+    || s.awaitingFulou
+    || s.pendingQianggang !== null
+    || hasPostWinDecision(s)
+    || (!allowLizhiDiscard && s.lizhiPending !== null);
+}
+
 export function enqueueCutinState(s: StoreState, id: CutinId, seat?: PlayerId): StoreState {
   const payload: CutinPayload = { id, ts: Date.now() + Math.random(), seat };
   s.cutinQueue = [...(s.cutinQueue ?? []), payload];
@@ -596,6 +610,7 @@ export function createGameStore() {
       if (!checkOnlineGate({ type: 'discard' }, 'currentPlayer')) return;
       if (sendOnlineAction({ type: 'discard', pai, meta })) return;
       update((s) => {
+        if (isLiveTurnActionBlocked(s, true)) return { ...s };
         // リーチ pending 中なら 宣言牌候補チェック + リーチ確定
         if (s.lizhiPending !== null) {
           const player = s.game.lunbanToPlayerId(s.game.state.lunban);
@@ -662,7 +677,7 @@ export function createGameStore() {
         // 同 player 重複は ronDeclaredPlayers で弾く
         // R7 P0 #2 fix: 局面妥当性 [awaitingRonDecision + canRon] 必須、
         // 不正 client が pending を作る攻撃を防ぐ
-        if (s.roundEnded) return { ...s };
+        if (s.roundEnded || hasPostWinDecision(s)) return { ...s };
         if ((s.ronDeclaredPlayers ?? []).includes(player)) return { ...s };
         // R14 P0 #4 fix: ronPassedPlayers chk 漏れ。 ダブロン候補中に一度 pass した
         // player が、 他人の判断待ち中に後からロン宣言できる bug。 ronPassedPlayers に
@@ -674,13 +689,6 @@ export function createGameStore() {
         if (s.lastWinner !== null && !s.awaitingRonDecision) return { ...s };
         if (!s.lastDapai) return { ...s };
         if (!s.awaitingRonDecision) return { ...s };
-        // R12 P2 #10 fix + R13 P0 #3 緩和: pending modal 中の ron 割り込み 拒否、 但し
-        // ダブロン awaitingRonDecision 中は除外。 1 人目 ron で立った modal は finalize 時に
-        // 適用されるべきで、 2 人目 ron 判断段階では block しちゃダメ
-        if (!s.awaitingRonDecision && (s.pendingKinpei || s.pendingFuyu || s.pendingFeverContinue || s.pendingSaiKoro)) {
-          dlog('[ron] reject: pending modal 中');
-          return { ...s };
-        }
         if (!s.game.canRon(player as any, s.lastDapai.pai, s.lastDapai.player as any)) return { ...s };
         // P0-1: 宣言牌 ron → フィーバー不正立 [リョー指示 2026-05-11]
         //   宣言牌の discarder が feverDeclareDapaiPlayer なら、 fever を undo してから ron 処理
@@ -1383,12 +1391,11 @@ export function createGameStore() {
       // 複数候補 [P1+P2 両方ロン候補等] で 片方の見送りが他方を消す問題 fix。
       // online 中は myOnlineSeat 必須、 single 中は passingPlayer 引数なしなら 旧 behavior [全クリア]
       if (!checkOnlineGate({ type: 'pass' }, 'me')) return;
-      // R12 P2 #10 fix + R13 P0 #3 緩和: pending modal 中の pass 割り込み拒否、 但し
-      // ダブロン awaitingRonDecision 中は除外。 1 人目 ron で立った modal は finalize 時に
-      // 適用されるべきで、 2 人目 ron 判断段階では block しちゃダメ
+      // 和了者の冬・金北・サイコロ・フィーバー判断を先に確定してから、
+      // pending 側に保持したダブロン候補の判断へ戻す。modal の上書きを防ぐ。
       {
         const s = get(store) as StoreState;
-        if (!s.awaitingRonDecision && (s.pendingKinpei || s.pendingFuyu || s.pendingFeverContinue || s.pendingSaiKoro)) {
+        if (hasPostWinDecision(s)) {
           dlog('[pass] reject: pending modal 中');
           return;
         }
@@ -1618,7 +1625,7 @@ export function createGameStore() {
       if (!checkOnlineGate({ type: 'tsumo' }, 'currentPlayer')) return;
       if (sendOnlineAction({ type: 'tsumo' })) return;
       update((s) => {
-        if (s.roundEnded || s.lastWinner !== null) return { ...s }; // 連打防止
+        if (isLiveTurnActionBlocked(s) || s.lastWinner !== null) return { ...s }; // 連打防止
         const player = s.game.lunbanToPlayerId(s.game.state.lunban);
         // R7 P0 #2 fix: canTsumo 妥当性検証必須、 不正 client が pending modal を作る攻撃防止
         if (!s.game.canTsumo(player)) return { ...s };
@@ -1716,6 +1723,7 @@ export function createGameStore() {
       if (!checkOnlineGate({ type: 'nukiBei', meta }, 'currentPlayer')) return;
       if (sendOnlineAction({ type: 'nukiBei', meta })) return;
       update((s) => {
+        if (isLiveTurnActionBlocked(s)) return { ...s };
         const player = s.game.lunbanToPlayerId(s.game.state.lunban);
         const replacement = s.game.declareNukiBei(player, meta);
         if (!replacement) {
@@ -1748,6 +1756,7 @@ export function createGameStore() {
       if (!checkOnlineGate({ type: 'declareKan' }, 'currentPlayer')) return;
       if (sendOnlineAction({ type: 'declareKan', mianzi })) return;
       update((s) => {
+        if (isLiveTurnActionBlocked(s)) return { ...s };
         // R9 P1 #7 fix: 加槓 [mianzi が ^[mpsz]\d{3}[\+\=\-]\d$ pattern] は 他家ロン window を挟む。
         // ron 可能な player いれば pendingQianggang に保存 + awaitingRonDecision、 全 pass で 後段実行
         const isKakan = !!mianzi.match(/^[mpsz]\d{3}[\+\=\-]\d$/);
@@ -1813,6 +1822,7 @@ export function createGameStore() {
       if (!checkOnlineGate({ type: 'lizhi' }, 'currentPlayer')) return;
       if (sendOnlineAction({ type: 'lizhi', opts })) return;
       update((s) => {
+        if (isLiveTurnActionBlocked(s)) return { ...s };
         const player = s.game.lunbanToPlayerId(s.game.state.lunban);
         if (!s.game.canLizhi(player)) {
           s.message = `player ${player} リーチ不可 [聴牌じゃない / 副露あり / ツモ前]`;
@@ -1968,6 +1978,7 @@ export function createGameStore() {
       if (!checkOnlineGate({ type: 'drawNext' }, 'currentPlayer')) return;
       if (sendOnlineAction({ type: 'drawNext' })) return;
       update((s) => {
+        if (isLiveTurnActionBlocked(s)) return { ...s };
         const player = s.game.lunbanToPlayerId(s.game.state.lunban);
         const sp = s.game.shoupai.get(player);
         if (sp?._zimo != null) return { ...s }; // 既にツモ済、 no-op
@@ -2008,7 +2019,7 @@ export function createGameStore() {
       update((s) => {
         const player = s.game.lunbanToPlayerId(s.game.state.lunban);
         if (!s.game.lizhi.has(player)) return { ...s };
-        if (s.roundEnded || s.awaitingRonDecision || s.awaitingFulou) return { ...s };
+        if (isLiveTurnActionBlocked(s)) return { ...s };
         // ツモ和了可ならユーザー判断待ち
         if (s.game.canTsumo(player)) return { ...s };
         // 待ち不変の暗槓候補があれば自動カン [majiang-core の rule.リーチ後暗槓許可レベル=2 で filter]
@@ -2051,7 +2062,7 @@ export function createGameStore() {
         // 旧 code は pickBestDiscard だけ relay してて canTsumo の局面でも打牌してた
         const s = get(store) as StoreState;
         const cur = s.game.lunbanToPlayerId(s.game.state.lunban);
-        if (s.roundEnded || s.awaitingRonDecision || s.awaitingFulou) return;
+        if (isLiveTurnActionBlocked(s)) return;
         const sp = s.game.shoupai.get(cur);
         if (!sp?._zimo) return;
         // ツモ和了 [CPU]: tsumo action を cpuRelay で送る
@@ -2260,7 +2271,15 @@ export function createGameStore() {
         if (!s.ponCandidates.some((c: any) => c.player === player)) { dlog('[gate-block]', { type: 'pon', reason: 'not in candidates', player }); return; }
       }
       if (sendOnlineAction({ type: 'pon', player, mianzi })) return;
-      update((s) => ponImpl(s, player, mianzi));
+      update((s) => {
+        const legal = s.awaitingFulou
+          && !s.awaitingRonDecision
+          && !hasPostWinDecision(s)
+          && !s.roundEnded
+          && !s.pendingPingju
+          && s.ponCandidates.some((candidate) => candidate.player === player && candidate.mianzi.includes(mianzi));
+        return legal ? ponImpl(s, player, mianzi) : { ...s };
+      });
     },
     /** 大明槓宣言 [store/fulouActions.ts 委譲]
      *  2026-05-14 codex review P0: 自席 limited + 候補リスト確認 */
@@ -2271,7 +2290,15 @@ export function createGameStore() {
         if (!s.kanCandidates.some((c: any) => c.player === player)) { dlog('[gate-block]', { type: 'damingang', reason: 'not in candidates', player }); return; }
       }
       if (sendOnlineAction({ type: 'damingang', player, mianzi })) return;
-      update((s) => damingangImpl(s, player, mianzi));
+      update((s) => {
+        const legal = s.awaitingFulou
+          && !s.awaitingRonDecision
+          && !hasPostWinDecision(s)
+          && !s.roundEnded
+          && !s.pendingPingju
+          && s.kanCandidates.some((candidate) => candidate.player === player && candidate.mianzi.includes(mianzi));
+        return legal ? damingangImpl(s, player, mianzi) : { ...s };
+      });
     },
   };
 }
@@ -2286,7 +2313,7 @@ export function createGameStore() {
  *  auto 投入済)。 online 時は client desync 防止のため skip。
  *  全 zimo path から呼び出して 漏れない設計に統一。 */
 export function applyFeverAutoTsumokiri(s: StoreState): StoreState {
-  if (!s.lastZimo || s.roundEnded || s.awaitingRonDecision || s.awaitingFulou) return s;
+  if (!s.lastZimo || isLiveTurnActionBlocked(s)) return s;
   if (typeof window !== 'undefined' && (window as any).__anmikaOnline) return s;
   const cur = s.game.lunbanToPlayerId(s.game.state.lunban);
   const someoneFever = ([0, 1, 2] as const).some((p) => s.game.feverActive[p]);
@@ -2315,8 +2342,9 @@ export function triggerSaiKoroIfAny(s: StoreState, result: any, winner: number):
 }
 
 export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean; pochi?: 'blue' | 'red' | 'green' | 'yellow' }): StoreState {
-  // 既に局終了してる場合は no-op [連打防止]
-  if (s.roundEnded) return { ...s };
+  // 局終了・反応待ち・和了後 modal 中は no-op。自動進行ボタンや遅延 action が
+  // 勝利局面を打牌で上書きすると復帰不能になるため、最下層でも必ず止める。
+  if (isLiveTurnActionBlocked(s)) return { ...s };
   const player = s.game.lunbanToPlayerId(s.game.state.lunban);
   // 北 [z4/gN] は河に切れない → 北抜きに変換 [アンミカ独自、 リョー指示 2026-05-11]
   if (toCorePai(pai) === 'z4' && s.game.canNukiBei(player as any)) {
@@ -2591,7 +2619,7 @@ export function autoLizhiInline(s: StoreState, safetyMax = 12): StoreState {
   if (typeof window !== 'undefined' && (window as any).__anmikaOnline) return s;
   let safety = 0;
   while (safety < safetyMax) {
-    if (s.roundEnded || s.awaitingRonDecision || s.awaitingFulou) break;
+    if (isLiveTurnActionBlocked(s)) break;
     const player = s.game.lunbanToPlayerId(s.game.state.lunban);
     if (!s.game.lizhi.has(player)) break;
     if (s.game.canTsumo(player)) break;

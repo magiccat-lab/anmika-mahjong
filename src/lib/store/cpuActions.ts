@@ -8,23 +8,41 @@ import { innerDiscard, formatHuleResult, triggerSaiKoroIfAny, applyPingjuTransit
 import { toCorePai } from '../helpers';
 import { enterFeverContinueStage } from './winPipeline';
 
+function hasBlockingDecision(s: StoreState): boolean {
+  return s.roundEnded
+    || s.pendingPingju
+    || s.awaitingRonDecision
+    || s.awaitingFulou
+    || s.pendingQianggang !== null
+    || s.pendingFuyu !== null
+    || s.pendingKinpei !== null
+    || s.pendingSaiKoro !== null
+    || s.pendingFeverContinue !== null
+    || s.lizhiPending !== null;
+}
+
 /** CPU 自動進行: 現家が CPU なら ツモ切り、 ループ */
 export function cpuStepImpl(initial: StoreState): StoreState {
   let s = initial;
   let safety = 0;
   while (safety < 100) {
-    if (s.roundEnded) break;
-    if (s.awaitingRonDecision || s.awaitingFulou) break;
+    if (hasBlockingDecision(s)) break;
     const cur = s.game.lunbanToPlayerId(s.game.state.lunban);
     if (!s.cpu[cur as 0 | 1 | 2]) break;
     if (s.game.canTsumo(cur)) {
       // R4 P1 #12 fix: saveSnapshot は hule() より 先
       s.game.saveSnapshot();
-      // R4 P1 #11 fix: CPU 金北 auto-resolve + 通常 hule path 同等の post-process
-      if ((s.game.goldHand[cur].z > 0 || (s.game.nukidoraGold[cur] ?? 0) > 0) && s.game.kinpeiTarget[cur] === null) {
-        s.game.autoResolveKinpei(cur as any);
+      let result = s.game.hule(cur);
+      // 秋で今回初めて表示された華も、CPU の金北自動選択候補に含める。
+      const resolvedHuapai = s.game.effectiveHuapaiAtHule(cur);
+      if (result
+        && (s.game.goldHand[cur].z > 0 || (s.game.nukidoraGold[cur] ?? 0) > 0)
+        && s.game.kinpeiTarget[cur] === null
+        && resolvedHuapai.length > 0) {
+        s.game.restoreSnapshot();
+        s.game.autoResolveKinpei(cur as any, resolvedHuapai);
+        result = s.game.hule(cur);
       }
-      const result = s.game.hule(cur);
       // R8 P1 #9 fix: hule() が null [canTsumo の false positive] なら和了確定させない、
       // 通常進行へ fallback。 旧 code は null result で lastWinner / roundEnded を進めて局破壊
       if (!result) {
@@ -180,9 +198,7 @@ export function autoAdvanceImpl(initial: StoreState): StoreState {
   let s = initial;
   let safetyCount = 0;
   while (
-    !s.roundEnded &&
-    !s.awaitingRonDecision &&
-    !s.awaitingFulou &&
+    !hasBlockingDecision(s) &&
     s.lastZimo &&
     safetyCount < 100
   ) {

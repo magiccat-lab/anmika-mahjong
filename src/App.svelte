@@ -169,6 +169,16 @@
     && !$game.pendingFuyu
     && !$game.pendingKinpei
     && $game.game.shoupai.get(currentPlayer)?._zimo == null;
+  $: progressControlsBlocked = $game.roundEnded
+    || $game.pendingPingju
+    || $game.awaitingRonDecision
+    || $game.awaitingFulou
+    || $game.pendingQianggang !== null
+    || $game.pendingFeverContinue !== null
+    || $game.pendingFuyu !== null
+    || $game.pendingKinpei !== null
+    || $game.pendingSaiKoro !== null
+    || $game.lizhiPending !== null;
 
   // 各 player のシャンテン
   $: xt0 = $game.game.xiangting(srvSeat(0));
@@ -1606,9 +1616,9 @@
     {#if !onlineGameStarted}
       <div class="action-row">
         <span class="row-label">進行:</span>
-        <button on:click={() => game.tsumokiri()}>ツモ切り</button>
-        <button on:click={() => game.autoAdvance()}>⏩ 自動</button>
-        <button on:click={() => game.cpuStep()}>🤖 CPU</button>
+        <button on:click={() => game.tsumokiri()} disabled={progressControlsBlocked}>ツモ切り</button>
+        <button on:click={() => game.autoAdvance()} disabled={progressControlsBlocked}>⏩ 自動</button>
+        <button on:click={() => game.cpuStep()} disabled={progressControlsBlocked}>🤖 CPU</button>
         <span class="cpu-toggles">
           CPU:
           {#each PLAYERS as p}

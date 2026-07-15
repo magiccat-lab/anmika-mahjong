@@ -186,3 +186,44 @@ describe('V37-10 selectFuyu / selectKinpei: 待機外の呼出は no-op', () => 
     expect(() => game.selectKinpei(null)).not.toThrow();
   });
 });
+
+describe('post-win phase guards', () => {
+  it('does not let discard, auto advance, or CPU overwrite a Kinpei decision', () => {
+    const s: any = get(game);
+    const player = s.game.lunbanToPlayerId(s.game.state.lunban);
+    const sp = s.game.shoupai.get(player);
+    const candidate = (sp.get_dapai(false) as string[])[0]?.replace(/_$/, '');
+    expect(candidate).toBeTruthy();
+    const beforeLog = s.game.discardLog[player].length;
+    const beforeZimo = s.lastZimo;
+    s.cpu[player] = true;
+    s.pendingKinpei = {
+      winner: player,
+      isRon: false,
+      ronfrom: null,
+      availableHuapai: ['f1'],
+    };
+
+    game.discard(candidate);
+    game.autoAdvance();
+    game.cpuStep();
+
+    const after: any = get(game);
+    expect(after.pendingKinpei?.winner).toBe(player);
+    expect(after.game.discardLog[player]).toHaveLength(beforeLog);
+    expect(after.lastZimo).toBe(beforeZimo);
+  });
+
+  it('keeps innerDiscard as a final no-op guard during a post-win decision', () => {
+    const s: any = get(game);
+    const player = s.game.lunbanToPlayerId(s.game.state.lunban);
+    const candidate = (s.game.shoupai.get(player).get_dapai(false) as string[])[0]?.replace(/_$/, '');
+    const beforeLog = s.game.discardLog[player].length;
+    s.pendingFuyu = { winner: player, isRon: false, ronfrom: null };
+
+    const after = innerDiscard(s, candidate);
+
+    expect(after.pendingFuyu?.winner).toBe(player);
+    expect(after.game.discardLog[player]).toHaveLength(beforeLog);
+  });
+});
