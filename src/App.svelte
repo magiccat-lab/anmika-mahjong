@@ -961,9 +961,18 @@
     if (waitCores.size === 0) return tiles.map(() => 'back');
     return tiles.map((t) => (waitCores.has(displayTileWaitCore(t)) ? t : 'back'));
   }
+  // feverWaitCores: UI テキスト表示用 (online privacy filter 適用済み)
   $: feverWaitCores = new Set(feverWaits.flatMap((fw) => fw.waits.map((w) => w.tile)));
-  $: sideTiles1 = computeSideTiles(shoupai1, srv1, feverWaitCores, revealAll, selfPlayer);
-  $: sideTiles2 = computeSideTiles(shoupai2, srv2, feverWaitCores, revealAll, selfPlayer);
+  // feverRevealCores: 牌の表向き表示用 — feverDeclareTing から直接取得
+  // online mode でも他家フィーバー待ち牌はゲーム機構として表向き表示する
+  $: feverRevealCores = new Set(
+    ([0, 1, 2] as const).flatMap((p) => {
+      if (!$game.game.feverActive[p]) return [];
+      return ($game.game.feverDeclareTing?.[p] ?? []).filter((t: string) => t !== 'z5');
+    })
+  );
+  $: sideTiles1 = computeSideTiles(shoupai1, srv1, feverRevealCores, revealAll, selfPlayer);
+  $: sideTiles2 = computeSideTiles(shoupai2, srv2, feverRevealCores, revealAll, selfPlayer);
 
   // リーチ宣言牌候補 [リーチ button 押下後に表示、 候補以外を grayout]
   // 2026-07-16 リョー裁定: フィーバー宣言中はフィーバーが成立する宣言牌だけに絞る
