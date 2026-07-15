@@ -3820,9 +3820,23 @@
 
   /* 高さの低いスマホ横画面でも、中央得点と自家手牌を画面内へ収める。 */
   @media (max-height: 500px) and (orientation: landscape) {
+    /* 手牌最優先 [2026-07-15 Galaxy S24 実機報告]: 実効高 ~340px では
+     * score-box の min 200px が場を食い潰し、自家手牌の行が viewport 外へ
+     * 押し出されて全く見えなくなる。中央行を minmax(0,1fr) で圧縮可能にし、
+     * 中央スコアの正方形は 34vmin まで縮める。 */
+    main.mode-single {
+      grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    }
+    main.mode-single .center-board { min-height: 0; }
+    main.mode-single .nuki-row { padding: 1px 4px; gap: 2px; }
+    main.mode-single .seat-bottom { min-height: 42px; }
     main.mode-single .score-box {
       grid-template-columns: minmax(62px, 1fr) minmax(66px, 0.9fr) minmax(62px, 1fr);
       grid-template-rows: 28px minmax(0, 1fr) minmax(68px, 0.9fr);
+      width: max(34vmin, 118px);
+      height: max(34vmin, 118px);
+      min-width: 0;
+      min-height: 0;
     }
     main.mode-single .score-box .score-side.score-top {
       padding: 3px 0;
