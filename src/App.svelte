@@ -944,6 +944,27 @@
     return { player: p, waits: feverWaitInfo(p) };
   }).filter((x): x is NonNullable<typeof x> => x !== null);
 
+  // フィーバー時: 他家手牌にあるアガリ牌 [フィーバー待ち] を強制表示 [2026-07-16 リョー指示]
+  // ぽっちは白 [z5] 待ちの時だけ見せる [z5 待ちならぽっち含め表示、それ以外の待ちでぽっちは伏せたまま]
+  function displayTileWaitCore(t: string): string {
+    if (t === 'gp' || t === 'p0') return 'p5';
+    if (t === 'gs' || t === 's0') return 's5';
+    if (t === 'gN') return 'z4';
+    if (t === 'bu' || t === 'br' || t === 'bg' || t === 'by' || t.startsWith('z5')) return 'z5';
+    if (t.length >= 2 && t[1] === '0') return t[0] + '5';
+    return t.slice(0, 2);
+  }
+  function computeSideTiles(
+    tiles: string[], seat: number, waitCores: Set<string>, reveal: boolean, self: number,
+  ): string[] {
+    if (reveal || self === seat) return tiles;
+    if (waitCores.size === 0) return tiles.map(() => 'back');
+    return tiles.map((t) => (waitCores.has(displayTileWaitCore(t)) ? t : 'back'));
+  }
+  $: feverWaitCores = new Set(feverWaits.flatMap((fw) => fw.waits.map((w) => w.tile)));
+  $: sideTiles1 = computeSideTiles(shoupai1, srv1, feverWaitCores, revealAll, selfPlayer);
+  $: sideTiles2 = computeSideTiles(shoupai2, srv2, feverWaitCores, revealAll, selfPlayer);
+
   // リーチ宣言牌候補 [リーチ button 押下後に表示、 候補以外を grayout]
   $: lizhiCandidates = $game.game.canLizhi(currentPlayer) ? $game.game.getLizhiCandidates(currentPlayer) : [];
   function isLizhiCand(pai: string): boolean {
@@ -1514,7 +1535,9 @@
       // Online CPU post-win decisions are owned by the Node authority so one
       // server timer, not a host browser timer, advances them.
       const canDrive = !onlineGameStarted;
-      if (isOwnerCpu && canDrive) {
+      // 2026-07-16 リョー指示: CPU 和了のサイコロは人間の確認 [ackCpuWin] まで開始しない。
+      // cutin 再生中も待つ [遷移を視認してから動く]
+      if (isOwnerCpu && canDrive && $game.cpuWinAck && !$game.cutin) {
         __cpuSaiKoroLatch = true;
         // 2026-05-15 [bug A] fix: CPU 駆動が 200ms × 3 で finalize → close まで走り、
         //   ユーザーが modal を視認できないまま 「サイコロが skip された」 と誤解する。
@@ -1827,9 +1850,17 @@
     {#if $game.pendingKinpei && viewMode !== 'single' && (!onlineGameStarted || $game.pendingKinpei.winner === selfPlayer)}
       <KinpeiModal winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
     {/if}
+    <!-- 2026-07-16 リョー指示: solo の CPU 和了サイコロは人間の確認までモーダルも進行も止める -->
+    {#if viewMode === 'single' && $game.pendingSaiKoro && !$game.cpuWinAck}
+      <div class="cpu-sai-ack">
+        <button class="cpu-sai-ack-btn" on:click={() => { saiKoroOpened = true; game.ackCpuWin(); }}>
+          🎲 CPU のサイコロチャンスを見る
+        </button>
+      </div>
+    {/if}
     <!-- 2026-05-14: 非 winner client にも modal は見せる [dice 物理動画 WS sync を視認可能に]、
          操作は canOperate prop で完全遮断、 store 側 send-gate でも二重防御 -->
-    {#if $game.pendingSaiKoro && (saiKoroOpened || viewMode !== 'single')}
+    {#if $game.pendingSaiKoro && (viewMode !== 'single' || (saiKoroOpened && $game.cpuWinAck))}
       {@const _curChance = $game.pendingSaiKoro.chances[$game.pendingSaiKoro.currentIdx]}
       {@const _chanceOwner = (((_curChance as any)?.winner) ?? $game.pendingSaiKoro.winner) as PlayerId}
       <!-- R5 P1 #2 fix: canOperate / chipMultiplier も current chance owner 基準に [ダブロン 2 人目 winner 操作権] -->
@@ -2139,7 +2170,7 @@
           {#if $game.game.shuvariActive[srv1]}<span class="vshuvari-badge">シュバ</span>{/if}
         </div>
         <div class="vhand vleft-hand">
-          {#each (revealAll || selfPlayer === srv1 ? shoupai1 : Array(shoupai1.length).fill('back')) as t}
+          {#each sideTiles1 as t}
             <span class="vtile rot-l back-{state.jushu % 2 === 0 ? 'blue' : 'orange'}">
               {#if t === 'back'}
                 <Tile pai="m1" face="down" size="md" />
@@ -2184,7 +2215,7 @@
           {#if $game.game.shuvariActive[srv2]}<span class="vshuvari-badge">シュバ</span>{/if}
         </div>
         <div class="vhand vright-hand">
-          {#each (revealAll || selfPlayer === srv2 ? shoupai2 : Array(shoupai2.length).fill('back')) as t}
+          {#each sideTiles2 as t}
             <span class="vtile rot-r back-{state.jushu % 2 === 0 ? 'blue' : 'orange'}">
               {#if t === 'back'}
                 <Tile pai="m1" face="down" size="md" />
@@ -3346,6 +3377,26 @@
   main.mode-single .vtile.rot-r.vclaimed :global(.tile) {
     transform: translate(-50%, -50%) rotate(0deg);
   }
+  /* solo: CPU 和了サイコロの人間確認ボタン [2026-07-16 リョー指示] */
+  .cpu-sai-ack {
+    position: fixed;
+    left: 50%;
+    bottom: 18vh;
+    transform: translateX(-50%);
+    z-index: 1200;
+  }
+  .cpu-sai-ack-btn {
+    padding: 12px 22px;
+    border: 2px solid #ffe89b;
+    border-radius: 999px;
+    background: #d4af37;
+    color: #1a1820;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+  .cpu-sai-ack-btn:hover { background: #f0c850; }
   /* スタンプ slot bar [画面下、 手牌のすぐ上、 左から P1 / P0 / P2 固定 3 slot] */
   .stamp-slot-bar {
     position: fixed;

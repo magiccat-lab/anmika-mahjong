@@ -150,6 +150,7 @@ export function buildDebugState(
     pendingPingju: false,
     pendingQianggang: null,
     pendingSaiKoro: null,
+    cpuWinAck: true,
     stamps: { 0: null, 1: null, 2: null },
     cutin: null,
     cutinQueue: [],

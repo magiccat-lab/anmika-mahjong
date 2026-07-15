@@ -67,4 +67,14 @@ describe('流局テンパイ料 [場4000]', () => {
     s = applyPingjuTransition(s, 'test:');
     for (const p of [0, 1, 2]) expect(s.game.state.defen[p]).toBe(35000);
   });
+
+  it('フィーバーリーチ中 [未アガリ] の流局は宣言者だけ強制テンパイ [+4000/-2000/-2000]', () => {
+    // 2026-07-16 リョー裁定: 他家が実テンパイでも数えない
+    let s = setHands([NOTEN, TENPAI, TENPAI]);
+    s.game.feverActive[0] = true;
+    s = applyPingjuTransition(s, 'test:');
+    expect(s.game.state.defen[0]).toBe(39000);
+    expect(s.game.state.defen[1]).toBe(33000);
+    expect(s.game.state.defen[2]).toBe(33000);
+  });
 });

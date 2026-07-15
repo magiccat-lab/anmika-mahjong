@@ -346,11 +346,10 @@ export function applyChipsOnHule(
     // [2026-05-15 audit fix] 春効果はロン時もオール徴収だが、 ぽっち倍率はツモ和了時のみ。
     // ロン経由で trigger された 春は mode='ron' で applyChipOall 呼び、 ぽっち倍率を 1 強制。
     const haruMode: 'tsumo' | 'ron' | undefined = loser !== null ? 'ron' : 'tsumo';
-    // [2026-05-23 audit CRITICAL [12]] シュバ後春倍ルール 廃止、 春はシュバ非適用。
+    // [2026-07-16 リョー裁定] 春もシュバ適用 [5/23 audit CRITICAL [12] の「シュバ非適用」を撤回]
     ctx.applyChipOall(winner, totalHua * multiplier, {
       label: `春${haruKinpei ? '金北' : ''} [${totalHua}枚×${multiplier}]`,
       mode: haruMode,
-      bypassShuvari: true,
     });
     result.hupai = result.hupai ?? [];
     const baseLabel = haruCount === 1 ? '春' : '春春';

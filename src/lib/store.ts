@@ -103,6 +103,8 @@ export interface StoreState {
    *  chances: result.saiKoroChances [push 順]、 currentIdx: 現在処理中 index、
    *  selectedCombo: 宣言した出目 [小さい方 / 大きい方]、 rolls: 4 回ぶんの結果 */
   pendingSaiKoro: PendingSaiKoro | null;
+  /** solo: CPU 和了のサイコロ進行を人間の確認まで止める [2026-07-16 リョー指示] */
+  cpuWinAck: boolean;
   /** スタンプ popup [seat ごと最新 1 つ、 ts で fade 判定]
    *  game state 副作用なし、 reload で復元しない [_action_log にも入らない] */
   stamps: Record<PlayerId, { id: StampId; ts: number } | null>;
@@ -211,6 +213,7 @@ export function createGameStore() {
     pendingPingju: false,
       pendingQianggang: null,
     pendingSaiKoro: null,
+    cpuWinAck: true,
     stamps: { 0: null, 1: null, 2: null },
     cutin: null,
     cutinQueue: [],
@@ -335,6 +338,7 @@ export function createGameStore() {
         pendingPingju: false,
       pendingQianggang: null,
         pendingSaiKoro: null,
+    cpuWinAck: true,
         stamps: { 0: null, 1: null, 2: null },
         cutin: null,
         cutinQueue: [],
@@ -1334,6 +1338,10 @@ export function createGameStore() {
         return { ...s };
       });
     },
+    /** solo: CPU 和了のサイコロ進行を人間が確認して開始する [2026-07-16 リョー指示] */
+    ackCpuWin() {
+      update((s) => ({ ...s, cpuWinAck: true }));
+    },
     continueFever() {
       // R6 P2 #11 fix: lastWinner ではなく pendingFeverContinue.winner で gate
       // R10 P0 #2 fix: pendingSaiKoro 残中は reject、 サイコロ未処理のまま 局面進行を防ぐ
@@ -2285,6 +2293,7 @@ export function createGameStore() {
     pendingPingju: false,
       pendingQianggang: null,
     pendingSaiKoro: null,
+    cpuWinAck: true,
     stamps: { 0: null, 1: null, 2: null },
     cutin: null,
     cutinQueue: [],
@@ -2777,10 +2786,17 @@ function computePingjuMessage(g: Game3): string {
   // 2026-07-16 リョー裁定: テンパイ料あり [場4000]。
   // [5/23 audit の「罰符ナシ」はチョンボ系罰則の話で、ノーテン料とは別]
   // 1人聴牌: ノーテン2人が 2000 ずつ払う / 2人聴牌: ノーテン1人が 4000 払う / 3人・0人: 移動なし
-  // フィーバー絡みの流局 [feverWonAny] は上で return 済みのため対象外
+  // アガリ済みフィーバーの流局 [feverWonAny] は上で return 済みのため対象外
+  // 2026-07-16 リョー裁定 [追]: フィーバーリーチ中 [未アガリ] の流局は
+  // 宣言者だけの「強制一人テンパイ」扱い。他家の実テンパイは数えない
+  const feverDeclarers = ([0, 1, 2] as const).filter((p) => g.feverActive[p]);
   const tenpai: number[] = [];
-  for (const p of [0, 1, 2] as const) {
-    if (g.xiangting(p) === 0) tenpai.push(p);
+  if (feverDeclarers.length > 0) {
+    tenpai.push(...feverDeclarers);
+  } else {
+    for (const p of [0, 1, 2] as const) {
+      if (g.xiangting(p) === 0) tenpai.push(p);
+    }
   }
   if (tenpai.length === 3) return '流局 [全員テンパイ、 点数移動なし]';
   if (tenpai.length === 0) return '流局 [全員ノーテン、 点数移動なし]';

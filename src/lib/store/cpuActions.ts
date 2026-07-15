@@ -56,6 +56,8 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         s.lastWinner = cur;
         s = enqueueCutinState(s, 'tsumo', cur as 0 | 1 | 2);
         s = triggerSaiKoroIfAny(s, result, cur);
+        // [2026-07-16 リョー指示] CPU 和了のサイコロは人間の確認 [ackCpuWin] まで自動進行しない
+        if (s.pendingSaiKoro) s.cpuWinAck = false;
         const isFever = s.game.feverActive[cur];
         if (isFever) {
           s.game.feverWinCount[cur] += 1;
@@ -125,7 +127,16 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       const remainingWall = s.game.shan?.paishu ?? 0;
       const damaPreferred = selfPochiAbs >= 4 || remainingWall <= 4;
       if (totalRemaining > 0 && !damaPreferred) {
-        if (s.game.declareLizhi()) {
+        // [2026-07-16 リョー指示] CPU にもフィーバーリーチの選択肢を持たせる。
+        // 7 の暗刻/暗槓 [フィーバー種] が成立していれば fever 宣言を優先し、
+        // 宣言が通らなければ通常リーチに fallback [declareLizhi 内の validation に委ねる]
+        const feverCheck = s.game.canFeverLizhi(cur);
+        let declared = false;
+        if (feverCheck.ok) {
+          declared = s.game.declareLizhi({ fever: true, feverCheck });
+        }
+        if (!declared) declared = s.game.declareLizhi({});
+        if (declared) {
           s = enqueueCutinState(s, 'reach', cur as 0 | 1 | 2);
         }
       }
@@ -146,6 +157,20 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       // 他の流局 path と統一
       s = applyPingjuTransition(s, '🌀 流局 [zimo 不可、 強制終了]:');
       break;
+    }
+    // [2026-07-16 リョー指示] 配牌由来で手牌に滞留した北 [z4] も抜く。
+    // ツモ直後の北は loop 先頭の lastZimo 分岐が処理する。フィーバー中の
+    // 「ツモ牌のみ可」等の制限は canNukiBei が内部で見る
+    if (s.game.canNukiBei(cur)) {
+      const replacement = s.game.declareNukiBei(cur);
+      if (replacement == null) {
+        s = applyPingjuTransition(s, `🌀 流局 [CPU 北抜きで王牌枯渇]`);
+        break;
+      }
+      s.lastZimo = replacement;
+      s.message = `[CPU 北抜き] player ${cur}、 代替ツモ`;
+      safety++;
+      continue;
     }
     // CPU 暗槓 / 加槓 [ゆーま 2026-05-14 自走]:
     //   - 三元牌 [z5-z7] の 4 枚揃いのみ auto-ankan、 yakuhai 1 役 + 新ドラ確定で正収益
