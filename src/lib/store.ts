@@ -949,6 +949,8 @@ export function createGameStore() {
               p !== winner && p !== ld.player && s.cpu[p as 0|1|2] && s.game.canRon(p as any, ld.pai, ld.player as any)
             );
           }
+          s.lastHuleResult = result;
+          s.lastWinner = winner;
           enterKinpeiStage(s, {
             winner,
             isRon,
@@ -1694,6 +1696,8 @@ export function createGameStore() {
           && resolvedHuapai.length > 0
           && !s.cpu[player]
           && !isFeverPayAuto_tsumo) {
+          s.lastHuleResult = result;
+          s.lastWinner = player;
           enterKinpeiStage(s, {
             winner: player,
             isRon: false,
