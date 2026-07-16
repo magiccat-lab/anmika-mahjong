@@ -103,7 +103,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       for (const t of ting) {
         // 単純化: 山 paishu の中に対象牌が含まれる可能性、 厳密 count は重いので
         // 全 player 手牌 + 河 で見えた枚数を差し引いて推定
-        const base = t.replace(/[\+=\-_*]/g, '').slice(0, 2);
+        const base = toCorePai(t.replace(/[\+=\-_*]/g, ''));
         const s_ = base[0]; const n_ = base[1] === '0' ? 5 : parseInt(base[1]);
         if (!s_ || !Number.isFinite(n_)) continue;
         let visible = 0;
@@ -113,7 +113,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
           visible += (sp._bingpai?.[s_]?.[n_] ?? 0);
           const he = s.game.he.get(p);
           for (const d of (he?._pai ?? [])) {
-            const dStripped = (d as string).replace(/[\+=\-_*]/g, '').slice(0, 2);
+            const dStripped = toCorePai((d as string).replace(/[\+=\-_*]/g, ''));
             if (dStripped === base) visible++;
           }
         }
@@ -133,7 +133,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         // 成立しない形なら通常リーチに fallback
         const spForFever = s.game.shoupai.get(cur);
         const rawZimo = typeof spForFever?._zimo === 'string' ? spForFever._zimo.replace(/_$/, '') : null;
-        const zimoPai = rawZimo && rawZimo.length >= 2 ? rawZimo : null;
+        const zimoPai = rawZimo && rawZimo.length <= 3 ? rawZimo : null;
         let declared = false;
         let declaredFever = false;
         if (zimoPai) {
@@ -185,7 +185,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     //   - 三元牌 [z5-z7] の 4 枚揃いのみ auto-ankan、 yakuhai 1 役 + 新ドラ確定で正収益
     //   - 風牌 / 数牌 はスルー [新ドラ で他家への 与ドラ リスクを許容しない 保守設計]
     //   - majiang-core 側で 形崩れ filter は通る前提 [getKanCandidates の get_gang_mianzi]
-    //   - 副露直後 [_zimo が mianzi 文字列、 length>2] は kan 不可 [実 tile 無いため skip]
+    //   - 副露直後 [_zimo が mianzi 文字列、 length>3] は kan 不可 [実 tile 無いため skip]
     let didKan = false;
     const _zimoLen = typeof curSp?._zimo === 'string' ? curSp._zimo.length : 0;
     if (_zimoLen > 0 && _zimoLen <= 3) {
@@ -209,12 +209,12 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     const best = s.game.pickBestDiscard(cur);
     let dapai: string | null = null;
     if (best) dapai = best;
-    else if (typeof curSp._zimo === 'string' && curSp._zimo.length <= 3 && curSp._zimo !== 'z4') {
+    else if (typeof curSp._zimo === 'string' && curSp._zimo.length <= 3 && toCorePai(curSp._zimo) !== 'z4') {
       dapai = curSp._zimo;
     } else {
       try {
         const cands: string[] = (curSp as any).get_dapai?.(false) ?? [];
-        const legal = cands.find((c: string) => !c.startsWith('z4'));
+        const legal = cands.find((c: string) => toCorePai(c.replace(/_$/, '')) !== 'z4');
         if (legal) dapai = legal.replace(/_$/, '');
       } catch { /* ignore */ }
     }

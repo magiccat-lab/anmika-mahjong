@@ -39,5 +39,5 @@
   .wait-chip { display: inline-flex; align-items: center; gap: 2px; background: #fff; border: 1px solid #d0a0c0; padding: 2px 6px; border-radius: 12px; }
   .red-mark { color: #c04040; font-weight: bold; font-size: 10px; }
   .gold-mark { color: #b08020; font-weight: bold; font-size: 10px; }
-  .niji-mark { background: linear-gradient(90deg, #ff3333, #ffaa00, #33cc33, #3399ff, #cc33ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: bold; font-size: 10px; }
+  .niji-mark { background: linear-gradient(90deg, #ff3333, #ffaa00, #33cc33, #3399ff, #cc33ff); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: bold; font-size: 10px; }
 </style>

@@ -45,6 +45,18 @@ describe('V33 inventory invariant fuzz [116 tiles, z5* leak detector]', () => {
           continue;
         }
 
+        if (s.cutin || (s.cutinQueue?.length ?? 0) > 0) {
+          game.finishCutin(s.cutin?.ts ?? 0);
+          game.playNextCutin();
+          continue;
+        }
+        if (!s.cpuWinAck) { game.ackCpuWin(); continue; }
+        if (s.pendingSaiKoro) {
+          if (!s.pendingSaiKoro.selectedCombo) game.selectSaiKoroCombo(1, 6);
+          else if (!s.pendingSaiKoro.finalized) game.rollSaiKoroDice([1, 2]);
+          else game.advanceSaiKoro();
+          continue;
+        }
         if (s.pendingFeverContinue) { (game as any).continueFever?.(); continue; }
         if (s.pendingFuyu) { (game as any).resolveFuyu?.('pass'); continue; }
         if (s.pendingKinpei) { (game as any).cancelKinpei?.(); continue; }

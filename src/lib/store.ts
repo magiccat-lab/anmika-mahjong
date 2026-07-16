@@ -2693,7 +2693,7 @@ export function autoLizhiInline(s: StoreState, safetyMax = 12): StoreState {
     // shoupai._zimo を真の判定基準に [P0-6b fix、 lastZimo は state ずれ する可能性]
     const sp = s.game.shoupai.get(player);
     if (!sp?._zimo) break;
-    // _zimo が mianzi [length>2、 副露後] の場合は そのままは切れない、 break
+    // _zimo が mianzi [length>3、 副露後] の場合は そのままは切れない、 break
     if (typeof sp._zimo !== 'string' || sp._zimo.length > 3) break;
     s = innerDiscard(s, sp._zimo);
     if ((s as any)._lastDapaiFailed) break;
@@ -2744,10 +2744,10 @@ function computePingjuMessage(g: Game3): string {
   const feverWonAny = ([0, 1, 2] as const).some((p) => g.feverWinCount[p] > 0);
   // 流し役満 check: 各 player の河が全ヤオ牌 [1/9/字] + 副露されてない + 立直してない + フィーバー成立中じゃない
   const isYao = (pai: string) => {
-    const stripped = pai.replace(/[\+=\-_*]/g, '');
-    if (stripped[0] === 'z') return true;
-    const n = parseInt(stripped[1] === '0' ? '5' : stripped[1]);
-    return n === 1 || n === 9;
+    const core = toCorePai(pai.replace(/[\+=\-_*]/g, ''));
+    if (core[0] === 'z') return true;
+    const n = parseInt(core[1] === '0' ? '5' : core[1]);
+    return n === 1 || n === 9 || core === 'm7';
   };
   for (const p of [0, 1, 2] as const) {
     const heDbg = g.he.get(p);

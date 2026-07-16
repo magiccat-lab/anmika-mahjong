@@ -337,7 +337,7 @@ export function generateTilePool(rule: ShanRule): Pai[] {
           if (i === 0) pai.push((s === 'p' ? 'gp' : 'gs') as any); // 金 5p / 金 5s
           else if (i < 1 + hongpai[s]) pai.push(s + '0'); // 赤
           else pai.push(s + n); // 通常
-        } else if (n === 3 && i < 3 && rule.tileSet === 'jansoul') {
+        } else if (n === 3 && i === 0 && rule.tileSet === 'jansoul') {
           pai.push((s === 'p' ? 'np3' : 'ns3') as any); // 虹 3p / 虹 3s
         } else {
           pai.push(s + n);

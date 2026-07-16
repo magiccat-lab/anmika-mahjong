@@ -87,8 +87,9 @@ export function applyFuyuChip(
     if (c > 0) genbutsuCount[`z${n}`] = (genbutsuCount[`z${n}`] ?? 0) + c;
   }
   if (ctx.ronpai) {
-    const strippedRon = String(ctx.ronpai).replace(/[\+=\-_*]/g, '').slice(0, 2);
-    const ronTile = baseTile(strippedRon[0], strippedRon[1]);
+    const strippedRon = String(ctx.ronpai).replace(/[\+=\-_*]/g, '');
+    const coreRon = toCorePai(strippedRon);
+    const ronTile = baseTile(coreRon[0], coreRon[1]);
     if (ronTile) genbutsuCount[ronTile] = (genbutsuCount[ronTile] ?? 0) + 1;
   }
   const nuki = ctx.nukidora[winner] ?? 0;
@@ -137,13 +138,8 @@ export function applyFuyuChip(
       if (opts.kamiPochiHua) count += 1;
       return count;
     }
-    // R19 #5 fix: gp/gs/gN は length 2 でも特例 normalize 必須 [旧 length>2 内で 不発]
-    let norm: string;
-    if (pai === 'gp' || pai === 'p0') norm = 'p5';
-    else if (pai === 'gs' || pai === 's0') norm = 's5';
-    else if (pai === 'gN') norm = 'z4';
-    else if (pai.length > 2 && pai.startsWith('z5')) norm = 'z5';
-    else norm = pai;
+    const core = toCorePai(pai);
+    const norm = core === 'p0' ? 'p5' : core === 's0' ? 's5' : core;
     const matches = new Set<string>();
     matches.add(norm);
     if (isTulip) {
@@ -332,7 +328,7 @@ export function applyChipsOnHule(
   if (redCount > 0) payByMode(2 * redCount, '赤 5 ×' + redCount);
   if (winnerGoldCount > 0) payByMode(4 * winnerGoldCount, '金 5 ×' + winnerGoldCount);
   // 虹牌: 0翻・7 chips each
-  const nijiCount = countNiji(sp, loser !== null ? ctx.ronpai : null);
+  const nijiCount = countNiji(sp, loser !== null ? (ctx.ronpai ?? null) : null);
   if (nijiCount > 0) payByMode(7 * nijiCount, '虹 ×' + nijiCount);
   // 通常北 + 金北 両方とも 1 chip ずつ [リョー指示 2026-05-12、 金北も北の chip 含む]
   const nukiRegular = ctx.nukidora[winner];

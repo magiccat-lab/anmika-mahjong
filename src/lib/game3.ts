@@ -139,7 +139,8 @@ function anmikaTry7mYakuman(sp: any, ronpai: string | null): any {
   let ronpaiBase: string | null = null;
   if (ronpai) {
     const stripped = ronpai.replace(/[\+\=\-_*]/g, '');
-    if (stripped.length >= 2) ronpaiBase = stripped.slice(0, 2);
+    const core = toCorePai(stripped);
+    if (core.length >= 2) ronpaiBase = core;
   }
   const count: Record<string, number> = {};
   let total = 0;
@@ -181,7 +182,7 @@ function handUsesBeiMaterial(sp: any, ronpai: Pai | null = null): boolean {
   const inHand = (sp?._bingpai?.z?.[4] ?? 0) > 0;
   if (inHand) return true;
   if (!ronpai) return false;
-  const stripped = String(ronpai).replace(/[\+\=\-_*]/g, '').slice(0, 2);
+  const stripped = String(ronpai).replace(/[\+\=\-_*]/g, '');
   return toCorePai(stripped) === 'z4';
 }
 
@@ -1167,7 +1168,7 @@ export class Game3 {
       return null;
     }
     if (!candidates || candidates.length === 0) return null;
-    candidates = candidates.filter((c: string) => !c.startsWith('z4'));
+    candidates = candidates.filter((c: string) => toCorePai(c.replace(/[_*]$/, '')) !== 'z4');
     if (candidates.length === 0) return null;
     // フィーバー立直中: フィーバー player 以外は ツモ切り強制 [AI も従う]
     //   ただし z4 [北] は dapai 不可 [抜き北 path に任せる]、 ここでは候補から除外済の
@@ -1175,14 +1176,16 @@ export class Game3 {
     const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => this.feverActive[p]);
     if (someoneFever && !this.feverActive[player] && sp._zimo) {
       const z = sp._zimo;
-      if (typeof z === 'string' && z.length <= 2 && z !== 'z4') {
+      if (typeof z === 'string' && z.length <= 3 && toCorePai(z) !== 'z4') {
         return z;
       }
     }
     const lizhiOpponents = [0, 1, 2].filter((p) => p !== player && this.lizhi.has(p as PlayerId)) as PlayerId[];
     const baseTile = (p: string) => {
       const stripped = p.replace(/[\+\=\-_*]/g, '');
-      return stripped[0] + (stripped[1] === '0' ? '5' : stripped[1]);
+      const core = toCorePai(stripped);
+      if (core.length < 2) return '';
+      return core[0] + (core[1] === '0' ? '5' : core[1]);
     };
     // ukeire 計算 [リョー指示 2026-05-13 「CPU 打牌品質上げ」]:
     // dapai 後の手で 各 tile を draw して xt が下がる枚数 を 残枚数 weighted で count
@@ -1196,9 +1199,9 @@ export class Game3 {
         }
         const he = this.he.get(p);
         for (const d of (he?._pai ?? []) as string[]) {
-          const stripped = d.replace(/[\+=\-_*]/g, '');
-          const dn = stripped[1] === '0' ? 5 : parseInt(stripped[1]);
-          if (stripped[0] === s_ && dn === n_) v++;
+          const visibleBase = baseTile(d);
+          const dn = parseInt(visibleBase[1]);
+          if (visibleBase[0] === s_ && dn === n_) v++;
         }
       }
       return v;
@@ -1244,9 +1247,9 @@ export class Game3 {
       if (!he) return false;
       const heNums = new Set<number>();
       for (const d of (he._pai ?? []) as string[]) {
-        const stripped = d.replace(/[\+=\-_*]/g, '');
-        if (stripped[0] === baseP[0]) {
-          heNums.add(stripped[1] === '0' ? 5 : parseInt(stripped[1]));
+        const discardedBase = baseTile(d);
+        if (discardedBase[0] === baseP[0]) {
+          heNums.add(parseInt(discardedBase[1]));
         }
       }
       if (num === 1 && heNums.has(4)) return true;
@@ -1551,7 +1554,7 @@ export class Game3 {
     // + meta 未指定 + lastZimoInfo 不一致] な 別 case [既存 dapai 851-872 行 fallback でも 救えない]。
     // 注: ポン後 _zimo に mianzi が入る [majiang-core 慣習、 ツモ済 state を擬似化]
     //     dapai が `if (! this._zimo) throw` で門前打牌不可になるのを回避するため必須
-    //     toString は _zimo.length>2 を判別して手牌に混入させない [Shoupai.toString line 115]
+    //     toString は core 側で _zimo の mianzi を判別して手牌に混入させない [Shoupai.toString line 115]
     // lunban を player に [反時計周り 2026-05-13 fix: 逆変換も反時計]
     this.state.lunban = (((this.currentOya - player) % 3 + 3) % 3) as Lunban;
     // 副露介入で他家の一発消失、 自分も一発消失 [副露ありはリーチ後の対象外]
@@ -1667,7 +1670,9 @@ export class Game3 {
       if (ting.length === 0 && !isSwapOnly && !isM7SwapOnly) return false;
       const baseTile = (p: string) => {
         const stripped = p.replace(/[\+\=\-_*]/g, '');
-        return stripped[0] + (stripped[1] === '0' ? '5' : stripped[1]);
+        const core = toCorePai(stripped);
+        if (core.length < 2) return '';
+        return core[0] + (core[1] === '0' ? '5' : core[1]);
       };
       const tingNorm = new Set(ting.map(baseTile));
       const myHe = this.he.get(player);
@@ -1744,7 +1749,7 @@ export class Game3 {
       // 反時計 [2026-05-13 fix]: from が player の上家=diff 1、下家=diff 2
       const diff = (fromPlayer - player + 3) % 3;
       const dir = diff === 1 ? '+' : (diff === 2 ? '-' : '');
-      if (dir) ronpaiWithDir = toCorePai(ronpai).slice(0, 2) + dir;
+      if (dir) ronpaiWithDir = toCorePai(ronpai) + dir;
     }
     const isLizhi = this.lizhi.has(player) ? 1 : 0;
     const isYifa = this.yifaActive[player];
@@ -2166,7 +2171,7 @@ export class Game3 {
     (result as any)._chipLedgerBeforeThis = {
       0: this.chipLedger[0], 1: this.chipLedger[1], 2: this.chipLedger[2],
     };
-    this.applyAnmikaYakuPostProcess(result, player, ronpai !== null, agariPaiForPost, fromPlayer, ronpai);
+    this.applyAnmikaYakuPostProcess(result, player, ronpai !== null, agariPaiForPost, fromPlayer, ronpai, param);
     (result as any)._anmikaPostProcessApplied = true;
     if (handUsesBeiMaterial(sp, ronpai) && !resultHasYakuman(result)) {
       dlog('[hule reject] 北を手牌構成に使用した非役満和了', { player, ronpai, hupai: result.hupai, fanshu: result.fanshu, damanguan: result.damanguan });
@@ -2215,11 +2220,7 @@ export class Game3 {
     if (result.fanshu !== undefined) {
       const isLizhiAgari = this.lizhi.has(player);
       const computeNext = (ind: string): string => {
-        let i = ind;
-        if (i === 'gp') i = 'p5';
-        else if (i === 'gs') i = 's5';
-        else if (i === 'gN') i = 'z4';
-        else if (i.length > 2 && i[0] === 'z' && i[1] === '5') i = 'z5';
+        const i = toCorePai(ind);
         const sx = i[0];
         const nRaw = i[1] === '0' ? 5 : parseInt(i[1]);
         if (!Number.isFinite(nRaw)) return '';
@@ -2278,7 +2279,7 @@ export class Game3 {
     // アンミカ独自役 post-process [リーのみ / 三風 / アメリカ七対子 / 小車輪 / 大車輪 / 八連荘]
     // R9 P1 #2: 役満 reject 前に既に走らせてる場合 skip [重複呼出防止]
     if (!(result as any)._anmikaPostProcessApplied) {
-      this.applyAnmikaYakuPostProcess(result, player, ronpai !== null, ronpai ?? sp._zimo ?? null, fromPlayer, ronpai);
+      this.applyAnmikaYakuPostProcess(result, player, ronpai !== null, ronpai ?? sp._zimo ?? null, fromPlayer, ronpai, param);
     }
     // アンミカ華牌 [春夏秋冬] の打点効果
     this.applyHuapaiEffect(result, player);
@@ -2351,7 +2352,7 @@ export class Game3 {
 
   /** アンミカ独自役の post-process [3-1 高ハン役 + 3-2 役満]
    *  majiang-core 標準にない役を hupai に追加 / damanguan 上書き */
-  applyAnmikaYakuPostProcess(result: any, player: PlayerId, isRon: boolean, agariPai: string | null = null, fromPlayer: PlayerId | null = null, ronpaiOrig: string | null = null): void {
+  applyAnmikaYakuPostProcess(result: any, player: PlayerId, isRon: boolean, agariPai: string | null = null, fromPlayer: PlayerId | null = null, ronpaiOrig: string | null = null, huleParam: any = null): void {
     if (!result || !result.hupai) return;
     const sp = this.shoupai.get(player);
     const isMenzen = !sp._fulou || sp._fulou.length === 0 || sp._fulou.every((m: string) => m.match(/^[mpsz]\d{4}$/));
@@ -2418,10 +2419,10 @@ export class Game3 {
       // 間八萬 + チャンタ: m7→m1 置換では z5 が壊れるため z5→m8 swap で再判定
       const hasChantaAlready = result.hupai.some((h: any) =>
         h.name?.includes('全帯') || h.name?.includes('純全'));
-      if (!hasChantaAlready && typeof result.fanshu === 'number') {
+      if (!hasChantaAlready && typeof result.fanshu === 'number' && huleParam) {
         try {
           const spKP = sp.clone();
-          const isTsumoKP = !ronpaiWithDir;
+          const isTsumoKP = !isRon;
           if (isTsumoKP && (spKP._bingpai.z[5] ?? 0) > 0) {
             spKP._bingpai.z[5] -= 1;
           }
@@ -2432,8 +2433,10 @@ export class Game3 {
             spKP._bingpai.m[7] = 1;
           }
           if (isTsumoKP) spKP._zimo = 'm8';
-          const ronKP = isTsumoKP ? null : ('m8' + ronpaiWithDir!.slice(2));
-          const rKP = Majiang.Util.hule(spKP, ronKP, param);
+          const diff = fromPlayer === null ? 0 : (fromPlayer - player + 3) % 3;
+          const dir = diff === 1 ? '+' : diff === 2 ? '-' : '';
+          const ronKP = isTsumoKP ? null : `m8${dir}`;
+          const rKP = Majiang.Util.hule(spKP, ronKP, huleParam);
           if (rKP?.hupai) {
             for (const h of rKP.hupai) {
               if (h.name?.includes('全帯') || h.name?.includes('純全')) {
@@ -2706,7 +2709,8 @@ export class Game3 {
         for (let n = 1; n <= 7; n++) counts[`z${n}`] = sp._bingpai.z?.[n] ?? 0;
         // R9 P1 #4 fix: ロン時 sp._bingpai は pre-ron 13 枚で agariPai を含まない、
         // counts -= 1 すると 13 面判定が ほぼ常に false。 ツモのみ -1、 ロンは 13 枚 そのまま
-        const normalizedAgari = agariPai === 'm7' ? 'm1' : agariPai;
+        const agariCore = toCorePai(agariPai);
+        const normalizedAgari = agariCore === 'm7' ? 'm1' : agariCore;
         if (!isRon && counts[normalizedAgari] !== undefined && counts[normalizedAgari] > 0) {
           counts[normalizedAgari] -= 1;
         }
@@ -2724,7 +2728,8 @@ export class Game3 {
         for (const dp of ownHe._pai as string[]) {
           const stripped = dp.replace(/[\+=\-_*]/g, '');
           // 7m はアンミカで 1m 換算なので set には m1 として追加
-          const normalized = stripped === 'm7' ? 'm1' : stripped.startsWith('z5') ? 'z5' : stripped;
+          const core = toCorePai(stripped);
+          const normalized = core === 'm7' ? 'm1' : core;
           ownDiscardSet.add(normalized);
         }
       }
@@ -2923,15 +2928,10 @@ export class Game3 {
   }
 
   /** ドラ表示牌から 「次の牌」 を決定し、 sp の手牌中 該当牌の数を返す
-   *  金牌 [gp/gs/gN] / 白 [z5*] は normalize してから次の牌を計算 */
+   *  expanded tile は core 牌へ normalize してから次の牌を計算 */
   countDoraFromIndicator(sp: any, indicator: string): number {
     if (!sp || !indicator) return 0;
-    // 金 / 白 特殊 key を 通常牌 key に正規化 [normalizePai と同等]
-    let ind = indicator;
-    if (ind === 'gp') ind = 'p5';
-    else if (ind === 'gs') ind = 's5';
-    else if (ind === 'gN') ind = 'z4';
-    else if (ind.length > 2 && ind[0] === 'z' && ind[1] === '5') ind = 'z5';
+    const ind = toCorePai(indicator);
     const s = ind[0];
     const n = ind[1] === '0' ? 5 : parseInt(ind[1]);
     if (!Number.isFinite(n)) return 0;

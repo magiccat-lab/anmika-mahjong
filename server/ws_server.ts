@@ -127,7 +127,7 @@ function captureBlindStart(authority: RoomAuthority): Record<string, unknown> {
   const pochiHand: Record<number, Record<string, number>> = {};
   for (const p of [0, 1, 2] as const) {
     const qipaiEvent = g.events.findLast((e: any) => e.type === 'qipai' && e.player === p);
-    hands[p] = qipaiEvent?.tiles ? [...qipaiEvent.tiles] : [];
+    hands[p] = qipaiEvent?.type === 'qipai' ? [...qipaiEvent.tiles] : [];
     huapai[p] = [...(g.huapai?.[p] ?? [])];
     goldHand[p] = { ...(g.goldHand?.[p] ?? { p: 0, s: 0, z: 0 }) };
     pochiHand[p] = { ...(g.pochiHand?.[p] ?? { blue: 0, red: 0, green: 0, yellow: 0 }) };
@@ -579,7 +579,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         else {
           const sp = live.game.shoupai.get(current);
           const pai = live.game.pickBestDiscard(current)
-            ?? (typeof sp?._zimo === 'string' && sp._zimo.length <= 2 ? sp._zimo : null)
+            ?? (typeof sp?._zimo === 'string' && sp._zimo.length <= 3 ? sp._zimo : null)
             ?? ((sp?.get_dapai?.(false) ?? []) as string[]).find((candidate) => toCorePai(candidate.replace(/_$/, '')) !== 'z4')?.replace(/_$/, '');
           if (!pai) return;
           action = { type: 'discard', pai };

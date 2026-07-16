@@ -15,7 +15,7 @@ describe('Game3 smoke', () => {
         const sp = g.shoupai.get(player) as any;
         // A north draw is routed to nuki and leaves a replacement tile already
         // drawn. Do not call zimo again on that occupied hand.
-        const pai = (sp?._anmikaZimo ?? (typeof sp?._zimo === 'string' && sp._zimo.length <= 2 ? sp._zimo : null))
+        const pai = (sp?._anmikaZimo ?? (typeof sp?._zimo === 'string' && sp._zimo.length <= 3 ? sp._zimo : null))
           ?? g.zimo();
         if (!pai) break;
         const dapaiBefore = g.events.filter((event) => event.type === 'dapai').length;

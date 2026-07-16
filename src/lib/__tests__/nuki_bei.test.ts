@@ -117,7 +117,7 @@ describe('Game3 nuki bei', () => {
     expect(g.justNukidBei[player]).toBe(true);
     // 嶺上ツモ後、 すぐに dapai しても justNukidBei は維持される
     const dapai = sp._zimo;
-    if (typeof dapai === 'string' && dapai.length <= 2) {
+    if (typeof dapai === 'string' && dapai.length <= 3) {
       try { g.dapai(dapai); } catch { /* dapai 失敗時は test skip */ }
       // dapai 後も flag は true [store 側で pon check 終了後に clear する仕様]
       expect(g.justNukidBei[player]).toBe(true);

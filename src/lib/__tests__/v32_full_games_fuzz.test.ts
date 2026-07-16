@@ -43,7 +43,12 @@ describe('V32 100 試合 fuzz [全 CPU 完走 throw 検出]', () => {
             continue;
           }
           if (s.cutin || (s.cutinQueue?.length ?? 0) > 0) { game.finishCutin(s.cutin?.ts ?? 0); game.playNextCutin(); continue; }
-          if (s.pendingSaiKoro) { game.advanceSaiKoro(); continue; }
+          if (s.pendingSaiKoro) {
+            if (!s.pendingSaiKoro.selectedCombo) game.selectSaiKoroCombo(1, 6);
+            else if (!s.pendingSaiKoro.finalized) game.rollSaiKoroDice([1, 2]);
+            else game.advanceSaiKoro();
+            continue;
+          }
           if (!s.cpuWinAck) { game.ackCpuWin(); continue; }
           if (s.pendingFeverContinue) { (game as any).continueFever?.(); continue; }
           if (s.pendingFuyu) { (game as any).resolveFuyu?.('pass'); continue; }
@@ -81,6 +86,7 @@ describe('V32 100 試合 fuzz [全 CPU 完走 throw 検出]', () => {
           ron_cands: ss.ponCandidates?.length,
           kan_cands: ss.kanCandidates?.length,
           pendF: ss.pendingFeverContinue, pendFu: ss.pendingFuyu, pendK: ss.pendingKinpei,
+          pendSai: ss.pendingSaiKoro,
           msg: ss.message,
         };
         errors.push(`[hang] game ${gi}: 0 round, state=${JSON.stringify(stateInfo)}`);

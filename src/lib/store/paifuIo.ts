@@ -37,7 +37,7 @@ export function isSafePaifuSavePoint(state: StoreState): boolean {
   try {
     const player = state.game.lunbanToPlayerId(state.game.state.lunban);
     const zimo = state.game.shoupai.get(player)?._zimo;
-    return typeof zimo === 'string' && zimo.length <= 2;
+    return typeof zimo === 'string' && zimo.length <= 3;
   } catch {
     return false;
   }
@@ -435,7 +435,7 @@ export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, b
     const curPlayer = (ng as any).lunbanToPlayerId(ng.state.lunban);
     const curSp = ng.shoupai.get(curPlayer);
     const z = curSp?._zimo;
-    if (typeof z === 'string' && z.length === 2) {
+    if (typeof z === 'string' && z.length <= 3) {
       restoredLastZimo = z;
     }
   } catch (_e) { /* lunban 破損等は no-op */ }

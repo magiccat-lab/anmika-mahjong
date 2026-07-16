@@ -32,6 +32,7 @@
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
   import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint } from './lib/store/paifuIo';
   import { serializeCanonical } from './lib/canonicalJson';
+  import { toCorePai } from './lib/helpers';
 
   // スタンプ pallet 開閉 [自家「💬」 button 押下時 true]
   let stampPalletOpen = false;
@@ -402,14 +403,10 @@
   // ドラ [表示牌の次] を計算
   function doraFrom(indicator: string): string {
     if (!indicator) return '';
-    // 金 / z5* / 華牌 の特殊 key を normalize、 doraIndicatorOf 系と整合
-    if (indicator === 'gp') return 'p6'; // 5p indicator → 6p
-    if (indicator === 'gs') return 's6'; // 5s indicator → 6s
-    if (indicator === 'gN') return 'z1'; // 4z 北 indicator → 1z 東
-    if (indicator === 'z5b' || indicator === 'z5r' || indicator === 'z5g' || indicator === 'z5y') return 'z6';
-    const s = indicator[0];
+    const core = toCorePai(indicator);
+    const s = core[0];
     if (s === 'f') return indicator; // 華牌はドラ対象外、 そのまま華牌を表示
-    const n = indicator[1] === '0' ? 5 : parseInt(indicator[1]);
+    const n = core[1] === '0' ? 5 : parseInt(core[1]);
     if (!Number.isFinite(n)) return indicator;
     if (s === 'z') {
       if (n <= 4) return 'z' + (n % 4 + 1);
@@ -608,7 +605,7 @@
     let tiles: string[] = parseTilesFromStr(bingpaiStr);
     tiles.sort(compareTiles);
     // ツモ牌があれば末尾に分離 [視覚的に区別]、 _zimo が mianzi の場合は副露後の擬似 zimo なのでスキップ
-    if (sp._zimo && sp._zimo.length <= 2) {
+    if (sp._zimo && sp._zimo.length <= 3) {
       const idx = tiles.lastIndexOf(sp._zimo);
       if (idx >= 0) {
         tiles.splice(idx, 1);
@@ -669,8 +666,8 @@
 
   function lastZimoIndex(sp: any, tiles: string[]): number {
     if (!sp || !sp._zimo) return -1;
-    // _zimo が mianzi 文字列 [length > 2] の場合は副露後の擬似 zimo、 マーク不要
-    if (sp._zimo.length > 2) return -1;
+    // _zimo が mianzi 文字列 [length > 3] の場合は副露後の擬似 zimo、 マーク不要
+    if (sp._zimo.length > 3) return -1;
     return tiles.length - 1;
   }
 
@@ -957,12 +954,10 @@
   // フィーバー時: 他家手牌にあるアガリ牌 [フィーバー待ち] を強制表示 [2026-07-16 リョー指示]
   // ぽっちは白 [z5] 待ちの時だけ見せる [z5 待ちならぽっち含め表示、それ以外の待ちでぽっちは伏せたまま]
   function displayTileWaitCore(t: string): string {
-    if (t === 'gp' || t === 'p0') return 'p5';
-    if (t === 'gs' || t === 's0') return 's5';
-    if (t === 'gN') return 'z4';
-    if (t === 'bu' || t === 'br' || t === 'bg' || t === 'by' || t.startsWith('z5')) return 'z5';
-    if (t.length >= 2 && t[1] === '0') return t[0] + '5';
-    return t.slice(0, 2);
+    if (t === 'bu' || t === 'br' || t === 'bg' || t === 'by') return 'z5';
+    const core = toCorePai(t);
+    if (core.length >= 2 && core[1] === '0') return core[0] + '5';
+    return core;
   }
   function computeSideTiles(
     tiles: string[], seat: number, waitCores: Set<string>, reveal: boolean, self: number,

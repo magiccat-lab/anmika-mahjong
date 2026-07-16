@@ -17,7 +17,9 @@
  * NOTE: majiang-core 本来は 4麻 convention で `+ = -` を 別人別位置 に
  * 振るが、 game3.ts 1188 行で 3麻反時計回り用に `+`=上家 / `-`=下家 を
  * 割り当てている。 表示も この semantics に合わせる。
- */
+*/
+
+import { isAnmikaExpandedPai, toCorePai } from './helpers';
 
 export type FulouMianzi = {
   /** 縦表示 tile 列 [3 枚 or ankan 4 枚] */
@@ -94,16 +96,11 @@ export function parseFulouList(fulou: string[] | undefined | null): FulouMianzi[
 }
 
 function toCoreDisplayPai(p: string): string {
-  if (typeof p === 'string' && p.length > 2 && p[0] === 'z' && p[1] === '5') return 'z5';
-  if (p === 'gp') return 'p0';
-  if (p === 'gs') return 's0';
-  if (p === 'gN') return 'z4';
-  return p;
+  return toCorePai(p);
 }
 
 function isPhysicalDisplayPai(p: string | null | undefined): p is string {
-  return p === 'gp' || p === 'gs' || p === 'gN'
-    || p === 'z5b' || p === 'z5r' || p === 'z5g' || p === 'z5y';
+  return typeof p === 'string' && isAnmikaExpandedPai(p);
 }
 
 function matchesMianzi(entry: { mianzi?: string } | null | undefined, current: string): boolean {
@@ -115,7 +112,7 @@ function isKakanMianzi(mianzi: string | undefined): boolean {
 }
 
 /**
- * アンミカ拡張牌 [金 / 白ぽっち] の物理 identity を副露表示へ戻す。
+ * アンミカ拡張牌 [金 / 白ぽっち / 虹] の物理 identity を副露表示へ戻す。
  *
  * majiang-core の _fulou は `z555+` のような core 表記だけを保持するため、
  * 呼ばれた牌は _anmikaFulou.taken、手から晒した牌は _anmikaFulouPhysical.consumed
