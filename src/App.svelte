@@ -28,7 +28,7 @@
   import CutinOverlay from './lib/CutinOverlay.svelte';
   import { CUTIN_DURATION_MS, game, type StampId } from './lib/store';
   import type { PlayerId } from './lib/types';
-  import { parseFulouList, fulouFlatTiles } from './lib/fulouDisplay';
+  import { parseFulouList, fulouFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
   import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint } from './lib/store/paifuIo';
   import { serializeCanonical } from './lib/canonicalJson';
@@ -686,23 +686,16 @@
   function fulouMianzi(sp: any, player: number): import('./lib/fulouDisplay').FulouMianzi[] {
     if (!sp || !sp._fulou) return [];
     const parsed = parseFulouList(sp._fulou as string[]);
-    const meta = sp._anmikaFulou ?? [];
+    const openMeta = sp._anmikaFulou ?? [];
+    const physicalMeta = sp._anmikaFulouPhysical ?? [];
     return parsed.map((m, i) => {
-      const entry = meta[i] ?? {};
-      // viewer-relative に rotateIdx 上書き [fromPlayer 不明時は parseMianzi の値を維持]
+      const entry = openMeta[i] ?? {};
       const adjustedRotate = entry.from != null
         ? viewerRotateIdx(player, entry.from, m.rotateIdx)
         : m.rotateIdx;
-      const taken = entry.taken;
-      let tiles = m.tiles;
-      if (taken && (taken === 'gp' || taken === 'gs' || taken === 'gN'
-          || taken === 'z5b' || taken === 'z5r' || taken === 'z5g' || taken === 'z5y')) {
-        tiles = [...m.tiles];
-        if (adjustedRotate !== null && adjustedRotate >= 0 && adjustedRotate < tiles.length) {
-          tiles[adjustedRotate] = taken;
-        }
-      }
-      return { ...m, tiles, rotateIdx: adjustedRotate };
+      const mianzi = (sp._fulou as string[])[i] ?? '';
+      const applied = applyAnmikaFulouIdentity(mianzi, { ...m, rotateIdx: adjustedRotate }, openMeta, physicalMeta, adjustedRotate);
+      return applied;
     });
   }
 
