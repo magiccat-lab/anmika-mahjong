@@ -6,7 +6,7 @@
 import Majiang from '@kobalab/majiang-core';
 import { toCorePai } from '../helpers';
 
-export type FeverCheck = { ok: boolean; tiles: string[]; tier: 1 | 2 | 3 };
+export type FeverCheck = { ok: boolean; tiles: string[]; tier: 1 | 2 | 3; rainbow?: boolean };
 
 function countTileInMianzi(mianzi: string, target: string): number {
   if (!mianzi || !target) return 0;
@@ -33,11 +33,12 @@ function isAlwaysAnkanByHule(shoupai: any, s: string): boolean | null {
     const sp_for_ting = shoupai.clone();
     // tingpai は _zimo を消して 13 牌で呼ぶ [ツモ前テンパイ check]
     // _zimo が ある [14 牌] 場合は 1 牌減らして tingpai 取得
-    if (sp_for_ting._zimo && sp_for_ting._zimo.length === 2) {
-      const ss = sp_for_ting._zimo[0];
-      const nn = parseInt(sp_for_ting._zimo[1] === '0' ? '5' : sp_for_ting._zimo[1]);
+    if (sp_for_ting._zimo && sp_for_ting._zimo.length <= 3) {
+      const core = toCorePai(sp_for_ting._zimo);
+      const ss = core[0];
+      const nn = parseInt(core[1] === '0' ? '5' : core[1]);
       sp_for_ting._bingpai[ss][nn] -= 1;
-      if (sp_for_ting._zimo[1] === '0' && ss !== 'z') sp_for_ting._bingpai[ss][0] -= 1;
+      if (core[1] === '0' && ss !== 'z') sp_for_ting._bingpai[ss][0] -= 1;
       sp_for_ting._zimo = null;
     }
     waits = Majiang.Util.tingpai(sp_for_ting) ?? [];
@@ -57,11 +58,12 @@ function isAlwaysAnkanByHule(shoupai: any, s: string): boolean | null {
       // hule_mianzi(shoupai, rongpai) 内部で clone+zimo されるので そのまま渡せる
       // ただし現 shoupai が 14 牌 [_zimo あり] だと再 zimo で 15 牌になる、
       // よって 13 牌に戻してから rongpai 引数で渡す
-      if (sp_clone._zimo && sp_clone._zimo.length === 2) {
-        const ss = sp_clone._zimo[0];
-        const nn = parseInt(sp_clone._zimo[1] === '0' ? '5' : sp_clone._zimo[1]);
+      if (sp_clone._zimo && sp_clone._zimo.length <= 3) {
+        const core = toCorePai(sp_clone._zimo);
+        const ss = core[0];
+        const nn = parseInt(core[1] === '0' ? '5' : core[1]);
         sp_clone._bingpai[ss][nn] -= 1;
-        if (sp_clone._zimo[1] === '0' && ss !== 'z') sp_clone._bingpai[ss][0] -= 1;
+        if (core[1] === '0' && ss !== 'z') sp_clone._bingpai[ss][0] -= 1;
         sp_clone._zimo = null;
       }
       solutions = Majiang.Util.hule_mianzi(sp_clone, t + '_') ?? [];
@@ -145,9 +147,19 @@ export function canFeverLizhi(shoupai: any): FeverCheck {
     }
     if (ok) tiles.push(s + '7');
   }
-  if (tiles.length === 0) return { ok: false, tiles: [], tier: 1 };
-  const tier: 1 | 2 | 3 = tiles.length >= 3 ? 3 : tiles.length >= 2 ? 2 : 1;
-  return { ok: true, tiles, tier };
+  // レインボーフィーバー: 虹3p + 虹3s + 虹西 が全て手牌にあればフィーバー成立
+  const anmikaCounts = shoupai._bingpai?.__anmika;
+  const hasAllNiji = anmikaCounts
+    && (anmikaCounts.np3 ?? 0) >= 1
+    && (anmikaCounts.ns3 ?? 0) >= 1
+    && (anmikaCounts.nz3 ?? 0) >= 1;
+  if (tiles.length === 0 && !hasAllNiji) return { ok: false, tiles: [], tier: 1 };
+  // 7暗刻の数 + 虹による tier 計算
+  let tierCount = tiles.length;
+  const rainbow = !!hasAllNiji;
+  if (rainbow) tierCount += 1;
+  const tier: 1 | 2 | 3 = tierCount >= 3 ? 3 : tierCount >= 2 ? 2 : 1;
+  return { ok: true, tiles, tier, rainbow };
 }
 
 /** [2026-05-15 bug 8] 打牌候補ごとに fever 可否を返す API。

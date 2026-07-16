@@ -16,11 +16,11 @@ function tileKinds(): Array<[Suit, number]> {
 }
 
 function stripMarker(p: string): string {
-  const base = String(p).replace(/[\+\=\-_*]/g, '').slice(0, 2);
-  if (base === 'm1') return 'm7';
-  if (base === 'p0') return 'p5';
-  if (base === 's0') return 's5';
-  return base;
+  const raw = String(p).replace(/[\+\=\-_*]/g, '');
+  const core = toCorePai(raw);
+  if (core === 'm1') return 'm7';
+  if (core[1] === '0') return core[0] + '5';
+  return core;
 }
 
 function cloneCounts(shoupai: any): Record<Suit, number[]> | null {
@@ -95,11 +95,12 @@ export function getTingpaiListBeforeZimo(shoupai: any): string[] {
   if (!shoupai) return [];
   try {
     const sp_clone = shoupai.clone();
-    if (sp_clone._zimo && sp_clone._zimo.length === 2) {
-      const ss = sp_clone._zimo[0];
-      const nn = parseInt(sp_clone._zimo[1] === '0' ? '5' : sp_clone._zimo[1]);
+    if (sp_clone._zimo) {
+      const core = toCorePai(sp_clone._zimo);
+      const ss = core[0];
+      const nn = parseInt(core[1] === '0' ? '5' : core[1]);
       sp_clone._bingpai[ss][nn] -= 1;
-      if (sp_clone._zimo[1] === '0' && ss !== 'z') sp_clone._bingpai[ss][0] -= 1;
+      if (core[1] === '0' && ss !== 'z') sp_clone._bingpai[ss][0] -= 1;
       sp_clone._zimo = null;
     }
     const base = Majiang.Util.tingpai(sp_clone) ?? [];
@@ -162,12 +163,13 @@ export function countAmericanChitoiQuads(shoupai: any, ronpai: string | null = n
 }
 
 /** ぽっちオールマイティ: 手牌の z5 [白] を任意の牌で置換して和了可能か */
-export function canTsumoWithPochiSwap(shoupai: any): boolean {
+export function canTsumoWithPochiSwap(shoupai: any, fromCore: string = 'z5'): boolean {
+  const fromSuit = fromCore[0];
+  const fromNum = parseInt(fromCore[1]);
   const candidates: string[] = [];
   for (const s of ['m', 'p', 's', 'z']) {
     const len = s === 'z' ? 8 : 10;
     for (let n = 1; n < len; n++) {
-      // ANMIKA_VALID_MANZU: m は m7/m9 のみ有効、 m2-m6/m8 は牌として存在せず swap target 不可
       if (s === 'm' && n !== 7 && n !== 9) continue;
       candidates.push(`${s}${n}`);
     }
@@ -175,13 +177,12 @@ export function canTsumoWithPochiSwap(shoupai: any): boolean {
   for (const swap of candidates) {
     const sp_clone = shoupai.clone();
     try {
-      if (sp_clone._bingpai.z[5] >= 1) {
-        sp_clone._bingpai.z[5] -= 1;
+      if ((sp_clone._bingpai[fromSuit]?.[fromNum] ?? 0) >= 1) {
+        sp_clone._bingpai[fromSuit][fromNum] -= 1;
         const ss = swap[0]; const nn = parseInt(swap[1]);
         if (sp_clone._bingpai[ss][nn] >= 4) continue;
         sp_clone._bingpai[ss][nn] += 1;
-        // [2026-05-21 fix] _zimo は z5b/r/g/y 等 raw colored pochi 可、 toCorePai 比較
-        if (sp_clone._zimo && toCorePai(sp_clone._zimo) === 'z5') sp_clone._zimo = swap;
+        if (sp_clone._zimo && toCorePai(sp_clone._zimo) === fromCore) sp_clone._zimo = swap;
         const r = Majiang.Util.hule_mianzi(sp_clone);
         if (r && r.length > 0) return true;
         if (americanChitoiComplete(sp_clone)) return true;

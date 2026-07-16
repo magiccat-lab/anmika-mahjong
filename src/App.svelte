@@ -126,39 +126,40 @@
   $: currentPlayer = $game.game.lunbanToPlayerId(state.lunban);
 
   // 白ぽっち ツモ演出 [リョー指示 2026-05-13]
-  // shan.lastZimoPochi が non-null になった瞬間を latch、 modal 表示用
+  // cpuStepImpl が複数ターンを1 update で回すため shan.lastZimoPochi は上書きされる。
+  // events 配列から z5 の色を直接取り、キューで複数回分を順番に表示する
   let pochiReveal: { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean } | null = null;
+  let pochiRevealQueue: Array<{ player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean }> = [];
   let lastSeenZimoEventCount = 0;
   let lastSeenGameRef: any = null;
+  const POCHI_COLOR_MAP: Record<string, 'blue'|'red'|'green'|'yellow'> = { z5b: 'blue', z5r: 'red', z5g: 'green', z5y: 'yellow' };
   $: {
-    // game instance 切替 [resetDebug / reset] 検出で latch reset
     if ($game.game !== lastSeenGameRef) {
       lastSeenGameRef = $game.game;
       lastSeenZimoEventCount = 0;
-      // pochiReveal は 自動 close 待ち、 強制クリアしない
+      pochiRevealQueue = [];
     }
     const zimoEvents = $game.game.events.filter((e: any) => e.type === 'zimo') as Array<{ type: 'zimo'; player: 0|1|2; pai: string }>;
-    const lastPochi = ($game.game.shan as any)?.lastZimoPochi as ('blue'|'red'|'green'|'yellow'|null);
     if (zimoEvents.length > lastSeenZimoEventCount) {
-      const lastZ = zimoEvents[zimoEvents.length - 1];
-      // eslint-disable-next-line no-console
-      if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] check', { lastZ, lastPochi, pochiReveal, lizhi: lastZ ? $game.game.lizhi.has(lastZ.player) : null });
-      // [2026-05-21 fix] lastZ.pai は raw colored (z5b/r/g/y) の場合もあるので startsWith 比較
-      if (lastZ && typeof lastZ.pai === 'string' && lastZ.pai.startsWith('z5') && lastPochi && pochiReveal === null) {
-        const isLizhi = $game.game.lizhi.has(lastZ.player);
-        if (isLizhi) {
-          // eslint-disable-next-line no-console
-          if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] LATCH', { player: lastZ.player, color: lastPochi });
-          pochiReveal = { player: lastZ.player, color: lastPochi, isCpu: $game.cpu[lastZ.player] === true };
-        } else {
-          // eslint-disable-next-line no-console
-          if ((import.meta as any).env?.DEV) console.log('[pochi-cutin] skip (not lizhi)');
+      for (let i = lastSeenZimoEventCount; i < zimoEvents.length; i++) {
+        const ev = zimoEvents[i];
+        const color = ev?.pai ? POCHI_COLOR_MAP[ev.pai] : undefined;
+        if (color && $game.game.lizhi.has(ev.player)) {
+          pochiRevealQueue.push({ player: ev.player, color, isCpu: $game.cpu[ev.player] === true });
         }
       }
       lastSeenZimoEventCount = zimoEvents.length;
+      if (pochiReveal === null && pochiRevealQueue.length > 0) {
+        pochiReveal = pochiRevealQueue.shift()!;
+      }
     }
   }
-  function closePochiReveal() { pochiReveal = null; }
+  function closePochiReveal() {
+    pochiReveal = null;
+    if (pochiRevealQueue.length > 0) {
+      pochiReveal = pochiRevealQueue.shift()!;
+    }
+  }
   // load 直後の中間 state [dapai 後 / 次 zimo 前] では shoupai._zimo===null。
   // この状態で 打牌させると majiang-core 内の Shoupai.dapai が throw する [ダハイ不可]。
   // 対策: 打牌 button disable + 「次へ」 button で zimo() 実行を促す。
@@ -569,6 +570,9 @@
           let cnt = bp[s]?.[n] ?? 0;
           if ((s === 'p' || s === 's') && n === 5) cnt -= bp[s]?.[0] ?? 0;
           if (s === 'z' && n === 4) cnt -= x.gN ?? 0;
+          if (s === 'p' && n === 3) cnt -= x.np3 ?? 0;
+          if (s === 's' && n === 3) cnt -= x.ns3 ?? 0;
+          if (s === 'z' && n === 3) cnt -= x.nz3 ?? 0;
           pushN(`${s}${n}`, cnt);
         }
         if (s === 'p') {
@@ -579,7 +583,10 @@
           pushN('gs', x.gs ?? 0);
         }
       }
+      pushN('np3', x.np3 ?? 0);
+      pushN('ns3', x.ns3 ?? 0);
       pushN('gN', x.gN ?? 0);
+      pushN('nz3', x.nz3 ?? 0);
       pushN('z5b', x.z5b ?? 0);
       pushN('z5r', x.z5r ?? 0);
       pushN('z5g', x.z5g ?? 0);
@@ -728,6 +735,10 @@
       if (t === 'gp') return { suit: 1, num: 5, sub: 2 };
       if (t === 'gs') return { suit: 2, num: 5, sub: 2 };
       if (t === 'gN') return { suit: 3, num: 4, sub: 1 };
+      // 虹牌
+      if (t === 'np3') return { suit: 1, num: 3, sub: 1 };
+      if (t === 'ns3') return { suit: 2, num: 3, sub: 1 };
+      if (t === 'nz3') return { suit: 3, num: 3, sub: 1 };
       // 白ポッチ
       if (t === 'z5b') return { suit: 3, num: 5, sub: 1 };
       if (t === 'z5r') return { suit: 3, num: 5, sub: 2 };
@@ -782,7 +793,8 @@
       const remap = (b: string): string => {
         if (!entry) return b;
         if (entry.pai === 'gp' || entry.pai === 'gs' || entry.pai === 'gN'
-            || entry.pai === 'z5b' || entry.pai === 'z5r' || entry.pai === 'z5g' || entry.pai === 'z5y') {
+            || entry.pai === 'z5b' || entry.pai === 'z5r' || entry.pai === 'z5g' || entry.pai === 'z5y'
+            || entry.pai === 'np3' || entry.pai === 'ns3' || entry.pai === 'nz3') {
           return entry.pai;
         }
         if (entry.gold) {
@@ -889,6 +901,8 @@
         const psp = $game.game.shoupai.get(p);
         if (psp) {
           n += (psp._bingpai?.[ss]?.[nn] ?? 0);
+          // 赤五/金牌は _bingpai[ss][0] に格納 (p0=赤五pin/gp, s0=赤五sou/gs)
+          if (nn === 5) n += (psp._bingpai?.[ss]?.[0] ?? 0);
           // 副露の中身も探す
           // R10 P2 #10 fix: mianzi 実フォーマットは suite + digits [例: 'p333', 'z5555', 'p333+']、
           // 各 digit を suite と組み合わせて pai に展開
@@ -926,6 +940,9 @@
           info.hasRed = remain > 0;
           info.hasGold = remain > 1;
         }
+        if ((ss === 'p' || ss === 's' || ss === 'z') && nn === 3) {
+          info.hasNiji = remain > 0;
+        }
         return info;
       });
   }
@@ -951,6 +968,8 @@
     tiles: string[], seat: number, waitCores: Set<string>, reveal: boolean, self: number,
   ): string[] {
     if (reveal || self === seat) return tiles;
+    // フィーバー宣言者は手牌全部公開
+    if ($game.game.feverActive[seat as 0|1|2]) return tiles;
     if (waitCores.size === 0) return tiles.map(() => 'back');
     return tiles.map((t) => (waitCores.has(displayTileWaitCore(t)) ? t : 'back'));
   }
@@ -988,7 +1007,11 @@
       if (p === 'gp') return 'p0';
       if (p === 'gs') return 's0';
       if (p === 'gN') return 'z4';
-      if (p === 'bu' || p === 'br' || p === 'bg' || p === 'by') return 'z5';
+      if (p === 'bu' || p === 'br' || p === 'bg' || p === 'by'
+          || p === 'z5b' || p === 'z5r' || p === 'z5g' || p === 'z5y') return 'z5';
+      if (p === 'np3') return 'p3';
+      if (p === 'ns3') return 's3';
+      if (p === 'nz3') return 'z3';
       return p;
     };
     const target = normalize(pai);
@@ -1049,16 +1072,25 @@
     onlineMembers = msg.members ?? [];
     const hostMember = onlineMembers.find((m: any) => m.user_id === onlineRoomMeta?.hostUserId);
     const hostSeat = hostMember?.seat as 0|1|2|undefined;
-    game.initOnlineGame({
+    const initOpts: any = {
       ws,
-      preShuffledPool: msg.preShuffledPool,
       qijia: msg.qijia ?? 0,
       cpuSeats: onlineMembers.filter((m: any) => m.is_cpu).map((m: any) => m.seat),
       mySeat: onlineRoomMeta?.mySeat as 0|1|2|undefined,
       isHost: !!onlineRoomMeta?.isHost,
       hostSeat,
       ...protocol,
-    });
+    };
+    if (msg.blindStart) {
+      initOpts.blindStart = {
+        hands: msg.hands, firstZimo: msg.firstZimo, paishu: msg.paishu,
+        baopai: msg.baopai, fubaopai: msg.fubaopai,
+        huapai: msg.huapai, goldHand: msg.goldHand, pochiHand: msg.pochiHand,
+      };
+    } else {
+      initOpts.preShuffledPool = msg.preShuffledPool;
+    }
+    game.initOnlineGame(initOpts);
     onlineGameStarted = true;
     viewMode = 'single';
     selfPlayer = onlineRoomMeta!.mySeat as 0 | 1 | 2;
@@ -1532,7 +1564,9 @@
       if (_owner === selfPlayer) saiKoroOpened = true;
     }
   }
-  $: cpuDelayMs = cpuSlowMode ? 2500 : 0;
+  $: feverInProgress = ([0, 1, 2] as const).some((p) => $game.game.feverActive[p]);
+  // フィーバー中は最低800msの間を空けて1巡ずつ見せる
+  $: cpuDelayMs = cpuSlowMode ? 2500 : feverInProgress ? 800 : 0;
 
   // R15 P1 #30 + R16 P0 #8 fix: CPU が saiKoro chance owner なら 駆動側 [single mode 誰でも、
   // online は host のみ] が 自動 advance、 chain 詰まりで online 卓停止を防ぐ。
@@ -2173,6 +2207,7 @@
       revealHand={revealAll || selfPlayer === srv0}
       lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv0), shoupai0)}
       isLizhiCand={isLizhiCand}
+      lizhiPending={$game.lizhiPending === currentPlayer}
       onTileClick={onTileClick}
       disabled={needsZimo}
       shuvariActive={$game.game.shuvariActive[srv0]}
@@ -2217,6 +2252,7 @@
         revealHand={revealAll || selfPlayer === srv1}
         lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv1), shoupai1)}
         isLizhiCand={isLizhiCand}
+      lizhiPending={$game.lizhiPending === currentPlayer}
         onTileClick={onTileClick}
         disabled={needsZimo}
         shuvariActive={$game.game.shuvariActive[srv1]}
@@ -2262,6 +2298,7 @@
         revealHand={revealAll || selfPlayer === srv2}
         lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv2), shoupai2)}
         isLizhiCand={isLizhiCand}
+      lizhiPending={$game.lizhiPending === currentPlayer}
         onTileClick={onTileClick}
         disabled={needsZimo}
         shuvariActive={$game.game.shuvariActive[srv2]}
@@ -2521,7 +2558,7 @@
   .row-label { font-size: 11px; color: #888; min-width: 56px; font-weight: bold; }
   .row-label.alert { color: #c04040; min-width: auto; }
   .lizhi-btn { background: #d4b070; color: #fff; border-color: #b08040; }
-  .lizhi-btn.active { box-shadow: 0 0 0 3px #ffd060 inset, 0 0 12px 2px #ffd060; outline: 3px solid #ffd060; font-weight: 800; }
+  .lizhi-btn.active { background: #e8e020; color: #333; box-shadow: 0 0 0 3px #ffd060 inset, 0 0 14px 4px rgba(255,208,96,0.7); outline: 3px solid #ffd060; font-weight: 800; transform: scale(1.1); }
   .lizhi-btn.shuvari { background: #a08020; }
   .lizhi-btn.fever { background: #a04020; }
   .fever-cond-hint { color: #ffb070; font-size: 11px; margin-left: 4px; align-self: center; }

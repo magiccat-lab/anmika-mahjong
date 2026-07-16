@@ -37,7 +37,7 @@ function makeStoreState(g: Game3, lastZimo: string): StoreState {
 }
 
 describe('fever lizhi multi-tsumo regression 2026-05-21', () => {
-  it('fever 本人の canTsumo=true zimo でも自動ツモ切りして次 zimo に進む', () => {
+  it('applyFeverAutoTsumokiri は no-op — フィーバー中も自動スキップしない', () => {
     const g = new Game3();
     g.qipai();
     const player = 0 as const;
@@ -53,28 +53,14 @@ describe('fever lizhi multi-tsumo regression 2026-05-21', () => {
     g.lizhi.add(player);
     g.feverActive[player] = true;
     g.feverTier[player] = 1;
-    (g.shan as any)._pai = ['m2', 'm3', 'm4', 'm5'].reverse();
 
-    const origCanRon = g.canRon.bind(g);
-    const origGetPonCandidates = g.getPonCandidates.bind(g);
-    const origGetDamingangCandidates = g.getDamingangCandidates.bind(g);
-    try {
-      g.canRon = () => false;
-      g.getPonCandidates = () => [];
-      g.getDamingangCandidates = () => [];
+    const s = makeStoreState(g, 'z6');
+    expect(g.canTsumo(player)).toBe(true);
 
-      const s = makeStoreState(g, 'z6');
-      expect(g.canTsumo(player)).toBe(true);
+    const after = applyFeverAutoTsumokiri(s);
 
-      const after = applyFeverAutoTsumokiri(s);
-
-      expect(after.game.he.get(player)?._pai.some((p: string) => p.startsWith('z6'))).toBe(true);
-      expect(after.game.shoupai.get(player)?._zimo).not.toBe('z6');
-      expect(after.lastZimo).not.toBe('z6');
-    } finally {
-      g.canRon = origCanRon;
-      g.getPonCandidates = origGetPonCandidates;
-      g.getDamingangCandidates = origGetDamingangCandidates;
-    }
+    expect(after).toBe(s);
+    expect(after.lastZimo).toBe('z6');
+    expect(after.game.shoupai.get(player)?._zimo).toBe('z6');
   });
 });

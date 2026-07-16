@@ -147,4 +147,46 @@ describe('Game3 nextRound', () => {
     g.nextRound({ winner: 2 as PlayerId });
     expect(g.state.changbang).toBe(1); // 巻き戻しナシ
   });
+
+  it('返り東: tongaeshi フラグが立つ', () => {
+    const g = new Game3({ qijia: 0, changshu: 1 });
+    g.qipai();
+    g.state.changbang = 0;
+    g.state.jushu = 2;
+    g.state.defen = { 0: 30000, 1: 35000, 2: 35000 };
+    expect(g.state.tongaeshi).toBeFalsy();
+    g.nextRound({ winner: 2 as PlayerId });
+    expect(g.state.tongaeshi).toBe(true);
+    expect(g.state.changbang).toBe(0);
+  });
+});
+
+describe('Game3 isGameEnd — 返り東中の 40000 チェック', () => {
+  it('返り東中に 40000 到達で終了', () => {
+    const g = new Game3({ qijia: 0, changshu: 1 });
+    g.qipai();
+    g.state.tongaeshi = true;
+    g.state.changbang = 0;
+    g.state.jushu = 0;
+    g.state.defen = { 0: 42000, 1: 30000, 2: 28000 };
+    expect(g.isGameEnd()).toBe(true);
+  });
+
+  it('返り東中でも全員 40000 未満なら継続', () => {
+    const g = new Game3({ qijia: 0, changshu: 1 });
+    g.qipai();
+    g.state.tongaeshi = true;
+    g.state.changbang = 0;
+    g.state.jushu = 0;
+    g.state.defen = { 0: 38000, 1: 32000, 2: 30000 };
+    expect(g.isGameEnd()).toBe(false);
+  });
+
+  it('返り東中のトビは終了', () => {
+    const g = new Game3({ qijia: 0, changshu: 1 });
+    g.qipai();
+    g.state.tongaeshi = true;
+    g.state.defen = { 0: 50000, 1: -1000, 2: 51000 };
+    expect(g.isGameEnd()).toBe(true);
+  });
 });

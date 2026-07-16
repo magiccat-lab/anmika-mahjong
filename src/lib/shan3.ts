@@ -14,6 +14,13 @@ export interface ShanRule {
   fudora: boolean;
 }
 
+export type BlindDrawEntry = {
+  tile: Pai;
+  huapai: Pai[];
+  gold: boolean;
+  pochi: 'blue' | 'red' | 'green' | 'yellow' | null;
+};
+
 export class Shan3 {
   private _rule: ShanRule;
   private _pai: Pai[];          // 山 [後ろから zimo されていく、 live wall のみ]
@@ -32,6 +39,38 @@ export class Shan3 {
   lastZimoGold: boolean = false;
   /** カンによって追加したドラの回数。秋ドラ等の追加表示とは別枠で最大4回。 */
   kanDoraCount: number = 0;
+
+  private _blind = false;
+  private _blindQueue: BlindDrawEntry[] = [];
+  private _blindDoraQueue: Pai[] = [];
+  private _blindPaishu = 0;
+
+  get isBlind(): boolean { return this._blind; }
+
+  static createBlind(opts: { rule: ShanRule; baopai: Pai[]; fubaopai: Pai[] | null; paishu: number; kanDoraCount?: number }): Shan3 {
+    const shan = new Shan3(opts.rule);
+    shan._pai = [];
+    shan._rinshan = [];
+    shan._baopai = [...opts.baopai];
+    shan._fubaopai = opts.fubaopai ? [...opts.fubaopai] : null;
+    shan._initialPai = [];
+    shan._blind = true;
+    shan._blindPaishu = opts.paishu;
+    shan.kanDoraCount = opts.kanDoraCount ?? 0;
+    return shan;
+  }
+
+  feedDraw(draw: BlindDrawEntry & { paishu?: number }): void {
+    this._blindQueue.push({ tile: draw.tile, huapai: draw.huapai, gold: draw.gold, pochi: draw.pochi });
+    if (draw.paishu !== undefined) this._blindPaishu = draw.paishu;
+  }
+
+  feedDora(tile: Pai): void { this._blindDoraQueue.push(tile); }
+
+  setBaopai(baopai: Pai[], fubaopai: Pai[] | null): void {
+    this._baopai = [...baopai];
+    this._fubaopai = fubaopai ? [...fubaopai] : null;
+  }
 
   get canOpenKanDora(): boolean { return this.kanDoraCount < 4; }
 
@@ -125,6 +164,7 @@ export class Shan3 {
    *  R24 P2 #5/#12 fix: 物理分離後 _pai 自体が live wall 専用、 paishu = _pai.length
    *  drawNewDora は _pai.pop() で自然に減る、 嶺上は _rinshan から取るので _pai 影響なし */
   get paishu(): number {
+    if (this._blind) return this._blindPaishu;
     return this._pai.length;
   }
 
@@ -135,6 +175,13 @@ export class Shan3 {
   }
   /** ドラ追加 [秋・カン]: _pai 末尾から 1 枚 pop して baopai/fubaopai に push、 残山 -1 ずつ */
   drawNewDora(isFu: boolean): string | null {
+    if (this._blind) {
+      const tile = this._blindDoraQueue.shift();
+      if (!tile) return null;
+      if (isFu) (this._fubaopai ??= []).push(tile);
+      else this._baopai.push(tile);
+      return tile;
+    }
     if (this._pai.length === 0) return null;
     const newPai = this._pai.pop()!;
     // _gold 撤去済
@@ -162,6 +209,14 @@ export class Shan3 {
   lastZimoPochi: 'blue' | 'red' | 'green' | 'yellow' | null = null;
 
   zimo(): Pai {
+    if (this._blind) {
+      const draw = this._blindQueue.shift();
+      if (!draw) throw new Error('blind shan: zimo queue empty');
+      this.lastDrawnHuapai = draw.huapai;
+      this.lastZimoGold = draw.gold;
+      this.lastZimoPochi = draw.pochi;
+      return draw.tile;
+    }
     if (this._closed) throw new Error('shan closed');
     if (this.paishu === 0) throw new Error('shan exhausted');
     if (this._weikaigang) throw new Error('kaigang pending');
@@ -197,6 +252,15 @@ export class Shan3 {
   }
 
   gangzimo(): Pai {
+    if (this._blind) {
+      const draw = this._blindQueue.shift();
+      if (!draw) throw new Error('blind shan: gangzimo queue empty');
+      this._weikaigang = true;
+      this.lastDrawnHuapai = draw.huapai;
+      this.lastZimoGold = draw.gold;
+      this.lastZimoPochi = draw.pochi;
+      return draw.tile;
+    }
     if (this._closed) throw new Error('shan closed');
     if (this.paishu === 0) throw new Error('shan exhausted');
     if (this._weikaigang) throw new Error('kaigang pending');
@@ -265,6 +329,7 @@ export function generateTilePool(rule: ShanRule): Pai[] {
 
   // 筒子・索子は 1-9 各 4 枚
   // アンミカ: 5p/5s 4 枚のうち 赤 1 + 金 1 + 通常 2 [金は別 key で識別]
+  // アンミカ: 3p/3s 4 枚のうち 虹 1 + 通常 3
   for (const s of ['p', 's'] as const) {
     for (let n = 1; n <= 9; n++) {
       for (let i = 0; i < 4; i++) {
@@ -272,6 +337,8 @@ export function generateTilePool(rule: ShanRule): Pai[] {
           if (i === 0) pai.push((s === 'p' ? 'gp' : 'gs') as any); // 金 5p / 金 5s
           else if (i < 1 + hongpai[s]) pai.push(s + '0'); // 赤
           else pai.push(s + n); // 通常
+        } else if (n === 3 && i < 3 && rule.tileSet === 'jansoul') {
+          pai.push((s === 'p' ? 'np3' : 'ns3') as any); // 虹 3p / 虹 3s
         } else {
           pai.push(s + n);
         }
@@ -292,6 +359,9 @@ export function generateTilePool(rule: ShanRule): Pai[] {
     } else if (n === 4) {
       pai.push('gN' as any); // 金北 1 枚
       for (let i = 0; i < 3; i++) pai.push('z4');
+    } else if (n === 3 && rule.tileSet === 'jansoul') {
+      pai.push('nz3' as any); // 虹西 1 枚
+      for (let i = 0; i < 3; i++) pai.push('z3');
     } else {
       for (let i = 0; i < 4; i++) pai.push('z' + n);
     }

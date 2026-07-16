@@ -21,7 +21,7 @@ function fourKanGoldenPool(): string[] {
   const dealerHand = [
     'p1', 'p1', 'p1', 'p1',
     'p2', 'p2', 'p2', 'p2',
-    'p3', 'p3', 'p3', 'p3',
+    'p4', 'p4', 'p4', 'p4',
     'p5',
   ].map(take);
   const dealerDraw = take('p0');
@@ -90,7 +90,7 @@ describe('WSA-A2 kan-derived dora limit', () => {
     game.qipai();
     expect(game.zimo()).toBe('p0');
 
-    for (const expected of ['p1111', 'p2222', 'p3333']) {
+    for (const expected of ['p1111', 'p2222', 'p4444']) {
       expect(game.getKanCandidates(0)).toContain(expected);
       expect(game.declareKan(0, expected)).not.toBeNull();
     }

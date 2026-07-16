@@ -54,6 +54,9 @@
     if (p === 'bg') return 'Haku-green.svg';
     if (p === 'by') return 'Haku-yellow.svg';
     if (p === 'bu') return 'Haku-Blue.svg';
+    if (p === 'np3') return 'Pin3-Rainbow.svg';
+    if (p === 'ns3') return 'Sou3-Rainbow.svg';
+    if (p === 'nz3') return 'Shaa-Rainbow.svg';
     return null;
   }
 
@@ -67,6 +70,9 @@
     if (p === 'z5r') return '白[赤]';
     if (p === 'z5g') return '白[緑]';
     if (p === 'z5y') return '白[黄]';
+    if (p === 'np3') return '虹3p';
+    if (p === 'ns3') return '虹3s';
+    if (p === 'nz3') return '虹西';
     const s = p[0];
     const n = p[1];
     if (s === 'm') return n === '0' ? '赤5m' : `${n}m`;
@@ -84,9 +90,10 @@
 
   $: svg = paiSvg(pai);
   $: isRed = pai && pai[1] === '0';
+  $: isRainbow = pai === 'np3' || pai === 'ns3' || pai === 'nz3';
 </script>
 
-<span class="tile {face} size-{size}" class:red={isRed}>
+<span class="tile {face} size-{size}" class:red={isRed} class:rainbow={isRainbow}>
   {#if face === 'down'}
     <img class="tile-img" src="/tiles/Back.svg" alt="伏せ" />
   {:else if svg}
@@ -117,6 +124,12 @@
   .tile.red {
     background: #fff0e8;
     border-color: #c04040;
+  }
+  .tile.rainbow {
+    background: linear-gradient(135deg, #ffe8e8, #fff8e0, #e8ffe8, #e8f0ff, #f0e8ff);
+    border-image: linear-gradient(135deg, #ff3333, #ffaa00, #33cc33, #3399ff, #cc33ff) 1;
+    border-width: 2px;
+    border-style: solid;
   }
   .tile-img {
     width: 100%;

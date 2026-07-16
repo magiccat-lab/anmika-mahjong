@@ -8,7 +8,7 @@
 //
 // 関数自体は this 依存ナシの pure 形、 class 側は wrap method で互換維持。
 
-import { dlog } from '../helpers';
+import { dlog, isNijiPai, toCorePai } from '../helpers';
 import type { PlayerId } from './chip';
 import { hasGoldKita as hasGoldKitaTile, type GoldHand } from './gold';
 import type { PochiHand } from './pochi';
@@ -259,6 +259,18 @@ export function applyFuyuChip(
  *  - 金北効果 [haru/natsu/aki/fuyu の打点 ×4 / chip 追加]
  *  result.hupai / result.defen / result.fanshu を mutate する
  */
+
+function countNiji(sp: any, ronpai: string | null): number {
+  let n = 0;
+  if (sp?._bingpai?.__anmika) {
+    n += sp._bingpai.__anmika.np3 ?? 0;
+    n += sp._bingpai.__anmika.ns3 ?? 0;
+    n += sp._bingpai.__anmika.nz3 ?? 0;
+  }
+  if (ronpai && isNijiPai(ronpai)) n += 1;
+  return n;
+}
+
 export function applyChipsOnHule(
   ctx: HuleChipCtx,
   result: any,
@@ -267,6 +279,12 @@ export function applyChipsOnHule(
 ): void {
   // 祝儀 panel 表示用: shuvari 使用状況を result に記録 [リョー指示 2026-05-12]
   result.shuvariUsedThisRound = !!ctx.shuvariActive?.[winner];
+  // 面前満貫3枚→29枚: base chip (倍率前) を追跡
+  let rawBaseTotal = 0;
+  const origOall = ctx.applyChipOall;
+  const origFromLoser = ctx.applyChipFromLoser;
+  ctx.applyChipOall = (t, n, o) => { rawBaseTotal += n; origOall(t, n, o); };
+  ctx.applyChipFromLoser = (w, l, n, o) => { rawBaseTotal += n; origFromLoser(w, l, n, o); };
   // The result carries the physical claim tile. River display metadata is not
   // authoritative and may be absent after reconnect or snapshot restoration.
   const claim = loser !== null ? claimTileIdentity(ctx.ronpai) : claimTileIdentity(null);
@@ -313,6 +331,9 @@ export function applyChipsOnHule(
   };
   if (redCount > 0) payByMode(2 * redCount, '赤 5 ×' + redCount);
   if (winnerGoldCount > 0) payByMode(4 * winnerGoldCount, '金 5 ×' + winnerGoldCount);
+  // 虹牌: 0翻・7 chips each
+  const nijiCount = countNiji(sp, loser !== null ? ctx.ronpai : null);
+  if (nijiCount > 0) payByMode(7 * nijiCount, '虹 ×' + nijiCount);
   // 通常北 + 金北 両方とも 1 chip ずつ [リョー指示 2026-05-12、 金北も北の chip 含む]
   const nukiRegular = ctx.nukidora[winner];
   const nukiGold = ctx.nukidoraGold?.[winner] ?? 0;
@@ -491,4 +512,18 @@ export function applyChipsOnHule(
       result.hupai.push({ name: '金北 [強化保留中]', fanshu: 0 });
     }
   }
+  // 面前満貫3枚→29枚: 面前マンガン以上で base chip が 3 なら 29 に引き上げ
+  const sp3 = ctx.shoupai.get(winner);
+  const isMenzen3 = !sp3._fulou || sp3._fulou.length === 0 || sp3._fulou.every((m: string) => m.match(/^[mpsz]\d{4}$/));
+  const isMangan = (typeof result.fanshu === 'number' && result.fanshu >= 5) || (result.damanguan ?? 0) > 0;
+  if (isMenzen3 && isMangan && rawBaseTotal === 3) {
+    const boost = 26;
+    if (loser !== null) origFromLoser(winner, loser, boost, { label: '面前満貫 3枚→29枚' });
+    else origOall(winner, boost, { label: '面前満貫 3枚→29枚' });
+    rawBaseTotal += boost;
+    result.hupai = result.hupai ?? [];
+    result.hupai.push({ name: '面前満貫 [3枚→29枚]', fanshu: 0 });
+  }
+  ctx.applyChipOall = origOall;
+  ctx.applyChipFromLoser = origFromLoser;
 }

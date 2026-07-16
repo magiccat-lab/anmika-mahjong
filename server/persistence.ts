@@ -95,6 +95,25 @@ export class RoomPersistence {
     }
   }
 
+  loadCommands(roomId: string): AcceptedRoomCommand[] {
+    const rows = this.db.prepare(
+      'SELECT command_id, revision, actor_seat, action_json, ack_json, accepted_at FROM room_accepted_commands WHERE room_id=? ORDER BY revision ASC',
+    ).all(roomId) as Array<{
+      command_id: string; revision: number; actor_seat: number;
+      action_json: string; ack_json: string; accepted_at: string;
+    }>;
+    return rows.map((row) => ({
+      commandId: row.command_id,
+      revision: row.revision,
+      actorSeat: row.actor_seat,
+      fromUserId: '',
+      action: JSON.parse(row.action_json),
+      matchId: 0,
+      roundId: 0,
+      acceptedAt: row.accepted_at,
+    }));
+  }
+
   saveAcceptedCommand(
     snapshot: CanonicalRoomSnapshot,
     command: AcceptedRoomCommand,

@@ -21,7 +21,7 @@ function basePaifu(overrides: Record<string, any>) {
     type: 'anmika-mahjong-paifu',
     version: 2,
     timestamp: 'pending-test',
-    shan: { currentPai: [], initialPai: [], baopai: [], fubaopai: [], rinshan: [], rinshanUsed: 0 },
+    shan: { currentPai: [], initialPai: [], baopai: [], fubaopai: [], rinshan: ['m1','m2','m3','m4'], rinshanUsed: 0, kanDoraCount: 0 },
     state: {
       qijia: 0,
       lunban: 0,

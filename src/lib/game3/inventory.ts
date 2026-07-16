@@ -21,6 +21,7 @@ export function computeTileInventory(g: any): Record<string, number> {
     const logged = meta?.pai;
     if ((logged === 'gp' || logged === 'gs' || logged === 'gN') && meta?.gold !== false) return logged;
     if (logged === 'z5b' || logged === 'z5r' || logged === 'z5g' || logged === 'z5y') return logged;
+    if (logged === 'np3' || logged === 'ns3' || logged === 'nz3') return logged;
     if (meta?.gold) {
       const goldPai = goldPaiFromCorePai(stripped);
       if (goldPai) return goldPai;
@@ -69,6 +70,14 @@ export function computeTileInventory(g: any): Record<string, number> {
         for (let k = 0; k < (x.z5r ?? 0); k++) inc('z5r');
         for (let k = 0; k < (x.z5g ?? 0); k++) inc('z5g');
         for (let k = 0; k < (x.z5y ?? 0); k++) inc('z5y');
+        for (const nk of ['np3', 'ns3', 'nz3'] as const) {
+          const nc = x[nk] ?? 0;
+          if (nc > 0) {
+            for (let k = 0; k < nc; k++) inc(nk);
+            const coreKey = nk[1] + nk[2];
+            counts[coreKey] = (counts[coreKey] ?? 0) - nc;
+          }
+        }
       } else {
         for (let k = 0; k < (g.goldHand[pl]?.p ?? 0); k++) inc('gp');
         for (let k = 0; k < (g.goldHand[pl]?.s ?? 0); k++) inc('gs');
@@ -158,16 +167,20 @@ export function expectedInventory(): Record<string, number> {
   for (const n of [7, 9]) exp[`m${n}`] = 4;
   for (const s of ['p', 's']) for (let n = 1; n <= 9; n++) {
     if (n === 5) exp[`${s}${n}`] = 2;
+    else if (n === 3) exp[`${s}${n}`] = 3;
     else exp[`${s}${n}`] = 4;
   }
+  exp['np3'] = 1; exp['ns3'] = 1;
   exp['p0'] = 1; exp['gp'] = 1;
   exp['s0'] = 1; exp['gs'] = 1;
   for (let n = 1; n <= 7; n++) {
     if (n === 5) exp[`z${n}`] = 0;
     else if (n === 4) exp[`z${n}`] = 3;
+    else if (n === 3) exp[`z${n}`] = 3;
     else exp[`z${n}`] = 4;
   }
   exp['gN'] = 1;
+  exp['nz3'] = 1;
   for (const c of ['z5b', 'z5r', 'z5g', 'z5y']) exp[c] = 1;
   for (let n = 1; n <= 4; n++) exp[`f${n}`] = 2;
   return exp;

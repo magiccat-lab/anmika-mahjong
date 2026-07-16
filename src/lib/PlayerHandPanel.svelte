@@ -17,6 +17,7 @@
   export let revealHand: boolean;
   export let lastZimoIdx: number;
   export let isLizhiCand: (t: string) => boolean = () => false;
+  export let lizhiPending: boolean = false;
   export let onTileClick: (p: number, t: string) => void = () => {};
   export let disabled: boolean = false;
   export let shuvariActive: boolean = false;
@@ -33,6 +34,7 @@
         class="tile-btn"
         class:tsumo-tile={i === lastZimoIdx && isCurrent}
         class:lizhi-cand={isCurrent && isLizhiCand(t)}
+        class:lizhi-dim={isCurrent && lizhiPending && !isLizhiCand(t)}
         on:click={() => onTileClick(player, t)}
         disabled={disabled || !isCurrent}
       >
@@ -132,6 +134,7 @@
   .tile-btn:disabled { cursor: default; opacity: 0.6; }
   .tile-btn.tsumo-tile { box-shadow: 0 0 0 2px #f0c040 inset; border-radius: 4px; margin-left: 16px; }
   .tile-btn.lizhi-cand { box-shadow: 0 0 0 2px #c04040 inset; border-radius: 4px; }
+  .tile-btn.lizhi-dim { opacity: 0.35; filter: grayscale(0.5); pointer-events: none; }
   .fulou-group { display: inline-flex; gap: 1px; padding: 0 3px; border-left: 1px dashed #ccc; margin-left: 16px; align-items: flex-end; }
   /* F2 [2026-05-15]: 鳴き先方向で 横倒し 表示 */
   .fulou-group .rot-tile { display: inline-block; transform: rotate(90deg); transform-origin: center; margin: 0 6px; }

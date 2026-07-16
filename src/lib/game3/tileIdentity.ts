@@ -71,6 +71,13 @@ export function resolvePhysicalDiscardPai(opts: {
     return requested;
   }
 
+  const nijiByCore: Record<string, string> = { p3: 'np3', s3: 'ns3', z3: 'nz3' };
+  const nijiKey = nijiByCore[core];
+  if (nijiKey && available(nijiKey) > 0) {
+    const coreCount = Number(opts.bingpai?.[core[0]]?.[parseInt(core[1])] ?? 0);
+    if (coreCount <= available(nijiKey)) return nijiKey;
+  }
+
   const goldByCore = core === 'p0' ? 'gp' : core === 's0' ? 'gs' : core === 'z4' ? 'gN' : null;
   if (!goldByCore) return requested;
 

@@ -8,7 +8,7 @@ import { resolveNukiBeiMeta } from './game3/bei';
 import { buildStateFromPaifu } from './store/paifuIo';
 import { buildDebugState } from './store/debug';
 import { cpuStepImpl, autoAdvanceImpl } from './store/cpuActions';
-import { generateTilePool, defaultSanmaRule } from './shan3';
+import { Shan3, generateTilePool, defaultSanmaRule } from './shan3';
 import { declareKanImpl, ponImpl, damingangImpl } from './store/fulouActions';
 import { hasGoldKita } from './game3/gold';
 import {
@@ -111,6 +111,8 @@ export interface StoreState {
   /** カットイン演出 [全画面 1 枚、 queue で順次再生] */
   cutin: CutinPayload | null;
   cutinQueue: CutinPayload[];
+  /** WSA: online replay mode — canonical store uses this instead of window.__anmikaOnline */
+  _onlineMode?: boolean;
 }
 
 function formatFanshu(f: any): string {
@@ -295,8 +297,12 @@ export function createGameStore() {
 
   return {
     subscribe,
-    /** オンライン対戦 接続 & game init: preShuffledPool 受信時に呼ぶ */
-    initOnlineGame(opts: { ws: WebSocket; preShuffledPool: string[]; qijia: 0|1|2; cpuSeats?: number[]; mySeat?: 0|1|2; isHost?: boolean; hostSeat?: 0|1|2; revision?: number; matchId?: number; roundId?: number }) {
+    /** オンライン対戦 接続 & game init */
+    initOnlineGame(opts: {
+      ws: WebSocket; qijia: 0|1|2; cpuSeats?: number[]; mySeat?: 0|1|2; isHost?: boolean; hostSeat?: 0|1|2; revision?: number; matchId?: number; roundId?: number;
+      preShuffledPool?: string[];
+      blindStart?: { hands: Record<0|1|2, string[]>; firstZimo: string; paishu: number; baopai: string[]; fubaopai: string[] | null; huapai?: Record<0|1|2, string[]>; goldHand?: Record<0|1|2, {p:number;s:number;z:number}>; pochiHand?: Record<0|1|2, Record<string, number>> };
+    }) {
       onlineWs = opts.ws;
       onlineMode = true;
       myOnlineSeat = opts.mySeat ?? null;
@@ -306,9 +312,19 @@ export function createGameStore() {
       onlineMatchId = opts.matchId ?? 1;
       onlineRoundId = opts.roundId ?? 1;
       if (typeof window !== 'undefined') (window as any).__anmikaOnline = true;
-      const ng = new Game3({ qijia: opts.qijia, preShuffledPool: opts.preShuffledPool });
-      ng.qipai();
-      const fp = ng.zimo();
+      let ng: Game3;
+      let fp: any;
+      if (opts.blindStart) {
+        const bs = opts.blindStart;
+        ng = new Game3({ qijia: opts.qijia });
+        ng.shan = Shan3.createBlind({ rule: ng.shanRule, baopai: bs.baopai as any[], fubaopai: bs.fubaopai as any[] | null, paishu: bs.paishu });
+        ng.initFromDeal({ hands: bs.hands as any, huapai: bs.huapai as any, goldHand: bs.goldHand as any, pochiHand: bs.pochiHand as any });
+        fp = bs.firstZimo;
+      } else {
+        ng = new Game3({ qijia: opts.qijia, preShuffledPool: opts.preShuffledPool });
+        ng.qipai();
+        fp = ng.zimo();
+      }
       // CPU member は ロン / ポン / カン 等を自動判断させる、 そうしないと CPU 番で awaitFulou 待機して loop
       // [リョー指摘 2026-05-13: 「CPU の 2s ロン止まる」 = CPU が human 扱いで wait してた]
       const cpuFlags: Record<0|1|2, boolean> = { 0: false, 1: false, 2: false };
@@ -342,6 +358,7 @@ export function createGameStore() {
         stamps: { 0: null, 1: null, 2: null },
         cutin: null,
         cutinQueue: [],
+        _onlineMode: true,
       });
     },
     setOnlineProtocolState(opts: { ws?: WebSocket; revision: number; matchId: number; roundId: number }) {
@@ -352,6 +369,9 @@ export function createGameStore() {
     },
     getOnlineProtocolState() {
       return { revision: onlineRevision, matchId: onlineMatchId, roundId: onlineRoundId };
+    },
+    setOnlineReplayMode(enabled: boolean) {
+      update((st) => ({ ...st, _onlineMode: enabled }));
     },
     /** Server-side canonical replay can update CPU ownership without rebuilding the game. */
     setCpuSeats(cpuSeats: number[]) {
@@ -396,6 +416,13 @@ export function createGameStore() {
         dlog('[remote-reject]', { from_seat, type: action?.type, reason });
         return;
       };
+      if (action._draw && s.game.shan.isBlind) {
+        const d = action._draw;
+        if (d.lastZimo) s.game.shan.feedDraw({ tile: d.lastZimo, huapai: d.huapai ?? [], gold: d.gold ?? false, pochi: d.pochi ?? null, paishu: d.paishu });
+        for (const t of d.newBaopai ?? []) s.game.shan.feedDora(t);
+        for (const t of d.newFubaopai ?? []) s.game.shan.feedDora(t);
+        if (d.paishu !== undefined && !d.lastZimo) (s.game.shan as any)._blindPaishu = d.paishu;
+      }
       isApplyingRemote = true;
       try {
         switch (action.type) {
@@ -569,6 +596,7 @@ export function createGameStore() {
         (window as any).__anmikaOnline = false;
         (window as any).__anmikaIsHost = false;
       }
+      update((st) => ({ ...st, _onlineMode: false }));
     },
     /** オンライン flag 確認 */
     isOnline(): boolean { return onlineMode; },
@@ -606,7 +634,7 @@ export function createGameStore() {
       }, STAMP_DURATION_MS);
       // online は server に送る [server で from_seat 上書き]、 offline は local 表示のみ
       if (onlineMode && onlineWs && onlineWs.readyState === WebSocket.OPEN) {
-        try { onlineWs.send(JSON.stringify({ type: 'action', action: { type: 'stamp', stampId } })); } catch (_) { /* noop */ }
+        try { onlineWs.send(JSON.stringify({ type: 'stamp', stampId })); } catch (_) { /* noop */ }
       }
     },
     /** 打牌 → ロン / ポン候補判定 [CPU 自動応答込み]、 meta で河の色記録 */
@@ -624,7 +652,8 @@ export function createGameStore() {
           }
           const cands = s.game.getLizhiCandidates(player);
           const norm = (p: string) => p.replace(/_$/, '');
-          if (!cands.some((c) => norm(c) === pai)) {
+          const corePai = toCorePai(pai);
+          if (!cands.some((c) => norm(c) === corePai)) {
             s.message = `${pai} はリーチ宣言牌じゃない、 赤枠の牌から選んで`;
             return { ...s };
           }
@@ -635,7 +664,7 @@ export function createGameStore() {
           let feverCheckForDeclare: { ok: boolean; tiles: string[]; tier: 1 | 2 | 3 } | undefined;
           if (isFeverDecl) {
             const feverMap = s.game.feverCandidatesByDapai(player);
-            feverCheckForDeclare = feverMap.get(pai);
+            feverCheckForDeclare = feverMap.get(corePai);
             if (!feverCheckForDeclare) {
               s.message = `${pai} ではフィーバーが成立しない [7 暗刻を崩さない宣言牌を選んで]`;
               return { ...s };
@@ -792,7 +821,8 @@ export function createGameStore() {
         const humanOthers: number[] = [];
         for (const p of otherCands) {
           if (s.cpu[p as 0|1|2]) {
-            // CPU auto-ron [従来通り、 CPU は即決]
+            // WSA: 秋ダブロン対策 — 全 winner を同一 pre-ron snapshot から評価
+            s.game.restoreSnapshot();
             if (hasGoldKita(s.game, p as PlayerId)) s.game.autoResolveKinpei(p as any);
             const r2 = s.game.hule(p as any, ld.pai, ld.player as any);
             if (r2) {
@@ -1928,33 +1958,20 @@ export function createGameStore() {
         }
       }
       if (onlineMode && !isApplyingRemote) {
-        // 2026-05-14 Round 2 codex fix P0 #1: deadlock 解消
-        //   旧: host 限定 send だが UI は winner、 non-host winner が click すると詰む
-        //   新: winner [lastWinner] or host が send 可能、 流局時は host が send [lastWinner=null]
-        // R8 P0 #2 fix: CPU 和了 [winner=CPU] の場合は host が代理で send 可能、
-        // 旧 code は winner 一致 or 流局 host のみ許可で CPU winner 時 詰むので、
-        // 「lastWinner が CPU member」 なら host も canSend に追加
         const s = get(store) as StoreState;
         const isWinner = s.lastWinner !== null && myOnlineSeat === s.lastWinner;
         const isHostLocal = iAmHost || !!(window as any).__anmikaIsHost;
         const winnerIsCpu = s.lastWinner !== null && s.cpu[s.lastWinner as 0|1|2] === true;
         const canSend = isWinner || (s.lastWinner === null && isHostLocal) || (winnerIsCpu && isHostLocal);
         if (!canSend) return;
-        const pool = generateTilePool(defaultSanmaRule());
-        const shuffled: string[] = [];
-        while (pool.length) shuffled.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0] as string);
-        // R21 P0 fix: from_role を 同梱、 server 側 nextRound gate で host or winner or oya 判定
         const fromRole: 'host' | 'winner' | 'oya' = isWinner ? 'winner' : 'host';
-        sendOnlineAction({ type: 'nextRound', preShuffledPool: shuffled, from_role: fromRole });
+        sendOnlineAction({ type: 'nextRound', from_role: fromRole });
         return;
       }
       update((s) => {
-        // 受信側で preShuffledPool 渡す [host が relay で送ってきた山]
         const remotePool = preShuffledPool;
-        // 判定フェーズ: pingju は既に applyPingjuTransition で defen 動かしてるので apply 再実行不要
         if (s.pendingPingju) {
           s.pendingPingju = false;
-          // トビ check → 半荘終了
           if (s.game.isGameEnd()) {
             s.game.state.finished = true;
             const ranking = s.game.getRanking();
@@ -1962,14 +1979,12 @@ export function createGameStore() {
             s.roundEnded = true;
             return { ...s };
           }
-          // そのまま次局進行 [break せず流す]
         }
         const winner = s.lastWinner;
-        // tsumo 経路 [lastDapai null] かつ winner === 現親 なら 親ツモ → tobi 無視で連荘継続
         const isTsumoOyaSelfRenchan = winner !== null && s.lastDapai === null
           && winner === (((s.game.state.qijia - s.game.state.jushu) % 3 + 3) % 3);
-        s.game.nextRound({ winner: winner as any, preShuffledPool: remotePool as any });
-        // 半荘終了判定 [親ツモ自家のみ tobi 例外]
+        const blindState = (remotePool as any)?._blindState;
+        s.game.nextRound({ winner: winner as any, preShuffledPool: blindState ? undefined : remotePool as any });
         if (s.game.isGameEnd(isTsumoOyaSelfRenchan ? { ignoreTobiFor: winner as any } : {})) {
           s.game.state.finished = true;
           const ranking = s.game.getRanking();
@@ -1977,8 +1992,14 @@ export function createGameStore() {
           s.roundEnded = true;
           return { ...s };
         }
-        s.game.qipai();
-        s.lastZimo = s.game.zimo();
+        if (blindState) {
+          s.game.shan = Shan3.createBlind({ rule: s.game.shanRule, baopai: blindState.baopai, fubaopai: blindState.fubaopai, paishu: blindState.paishu });
+          s.game.initFromDeal({ hands: blindState.hands, huapai: blindState.huapai, goldHand: blindState.goldHand, pochiHand: blindState.pochiHand });
+          s.lastZimo = blindState.firstZimo;
+        } else {
+          s.game.qipai();
+          s.lastZimo = s.game.zimo();
+        }
         s.lastDapai = null;
         s.lastWinner = null;
         s.lastHuleResult = null;
@@ -1986,9 +2007,7 @@ export function createGameStore() {
         s.roundEnded = false;
         s.message = null;
         s.lizhiPending = null;
-        // [2026-05-21] 局頭 zimo でも 既に fever 残ってる時は強制ツモ切り (まれだが対応)
         s = applyFeverAutoTsumokiri(s);
-        // Svelte の reactive を確実に trigger するため shallow copy
         return { ...s };
       });
     },
@@ -2186,27 +2205,16 @@ export function createGameStore() {
         }
       }
       if (onlineMode && !isApplyingRemote) {
-        // R15 P0 #4 fix: nextMatch は host 限定。 旧 code は任意 client が山生成して送れて、
-        // ゲストが先に押すと 別山で次試合へ進めて host の試合結果 POST も飛ばせる
         if (!iAmHost) {
           dlog('[nextMatch] reject: online 中は host のみ');
           return;
         }
-        const pool = generateTilePool(defaultSanmaRule());
-        const shuffled: string[] = [];
-        while (pool.length) shuffled.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0] as string);
         const curState = get(store) as StoreState;
         const cpuSeats = ([0, 1, 2] as const).filter((p) => curState.cpu[p]);
-        // qijia は次半荘で 同じ qijia [連続 半荘で qijia 引き継ぎ] / または rotate。 リョー仕様未明な
-        // ので 現 game の qijia を維持
         const qijia = (curState.game.state?.qijia ?? 0) as 0|1|2;
-        // R19 #3 fix: 次試合 chipLedger を nextMatch action に同梱、 server で synthetic start に
-        // 載せ、 中途再接続 player の累積祝儀 復元を可能に。 finalize 直前の最新 chipLedger を 送る
-        // [resetChip 時は 0 へ、 既に game.nextMatch 内で計算される]
         let nextChipLedger: { 0: number; 1: number; 2: number } = { 0: 0, 1: 0, 2: 0 };
         try {
           if (finalize && !resetChip) {
-            // getFinalScore で finalize 後の値を計算 [chipBase + uma + topN + tontonbu]
             const fs: Array<{ player: number; total: number }> = (curState.game as any).getFinalScore?.() ?? [];
             for (const r of fs) {
               if (r.player === 0 || r.player === 1 || r.player === 2) {
@@ -2217,7 +2225,7 @@ export function createGameStore() {
             nextChipLedger = { 0: curState.game.chipLedger[0], 1: curState.game.chipLedger[1], 2: curState.game.chipLedger[2] };
           }
         } catch {}
-        sendOnlineAction({ type: 'nextMatch', finalize, resetChip, preShuffledPool: shuffled, qijia, cpuSeats, chipLedger: nextChipLedger });
+        sendOnlineAction({ type: 'nextMatch', finalize, resetChip, qijia, cpuSeats, chipLedger: nextChipLedger });
         return;
       }
       if (finalize && !resetChip) {
@@ -2351,15 +2359,10 @@ export function createGameStore() {
  *  auto 投入済)。 online 時は client desync 防止のため skip。
  *  全 zimo path から呼び出して 漏れない設計に統一。 */
 export function applyFeverAutoTsumokiri(s: StoreState): StoreState {
-  if (!s.lastZimo || isLiveTurnActionBlocked(s)) return s;
-  if (typeof window !== 'undefined' && (window as any).__anmikaOnline) return s;
-  const cur = s.game.lunbanToPlayerId(s.game.state.lunban);
-  const someoneFever = ([0, 1, 2] as const).some((p) => s.game.feverActive[p]);
-  if (!someoneFever) return s;
-  const curIsFever = s.game.feverActive[cur as 0 | 1 | 2];
-  if (curIsFever && !s.game.lizhi.has(cur as 0 | 1 | 2)) return s;
-  const tile = s.lastZimo;
-  return innerDiscard(s, tile);
+  // [2026-07-16 リョー指示] フィーバー中の自動スキップ廃止。
+  // 1巡ずつ表示して何が起きてるか見えるようにする。
+  // CPU の進行は cpuStepImpl が 1 ターンずつ処理する
+  return s;
 }
 
 export function triggerSaiKoroIfAny(s: StoreState, result: any, winner: number): StoreState {
@@ -2654,9 +2657,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
 
 /** リーチ済 player の自動ターン: ツモ和了可なら止める、 z4 / 春夏秋冬は抜く、 待ち不変の暗槓は自動、 そうでなければツモ切り */
 export function autoLizhiInline(s: StoreState, safetyMax = 12): StoreState {
-  // オンライン時は autoLizhi を skip [各 client が独立に local 進行して desync する、 リョー報告 2026-05-13]
-  // リーチ後のツモ切りは host CPU driver か手動 ツモ切り button [後で実装] に任せる
-  if (typeof window !== 'undefined' && (window as any).__anmikaOnline) return s;
+  if (s._onlineMode) return s;
   let safety = 0;
   while (safety < safetyMax) {
     if (isLiveTurnActionBlocked(s)) break;
@@ -2693,7 +2694,7 @@ export function autoLizhiInline(s: StoreState, safetyMax = 12): StoreState {
     const sp = s.game.shoupai.get(player);
     if (!sp?._zimo) break;
     // _zimo が mianzi [length>2、 副露後] の場合は そのままは切れない、 break
-    if (typeof sp._zimo !== 'string' || sp._zimo.length > 2) break;
+    if (typeof sp._zimo !== 'string' || sp._zimo.length > 3) break;
     s = innerDiscard(s, sp._zimo);
     if ((s as any)._lastDapaiFailed) break;
     safety++;
@@ -2716,13 +2717,16 @@ export function applyPingjuTransition(s: StoreState, msgPrefix: string = ''): St
   // R9 P1 #10 fix: 流し役満は本役満ツモ扱い、 lastWinner を set [親流れ / 連荘 / 局結果表示 に反映]
   if (nagashiWinner !== null) {
     s.lastWinner = nagashiWinner;
+    // WSA: 実際の点数移動を反映 [旧: 固定 8000]
+    const isOya = nagashiWinner === s.game.currentOya;
+    const nagashiDefen = isOya ? 32000 : 24000;
     s.lastHuleResult = {
       hupai: [{ name: '流し役満', fanshu: '*' }],
       damanguan: 1,
       fanshu: undefined,
-      defen: 8000,
+      defen: nagashiDefen,
       chipBreakdown: [],
-      chipTotal: 0,
+      chipTotal: 10,
     } as any;
   }
   return s;

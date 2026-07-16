@@ -3,7 +3,7 @@
   import Tile from './Tile.svelte';
   export let feverWaits: Array<{
     player: number;
-    waits: Array<{ tile: string; remain: number; hasRed?: boolean; hasGold?: boolean }>;
+    waits: Array<{ tile: string; remain: number; hasRed?: boolean; hasGold?: boolean; hasNiji?: boolean }>;
   }>;
 </script>
 
@@ -18,6 +18,7 @@
             <Tile pai={w.tile} /> 残{w.remain}
             {#if w.hasRed}<span class="red-mark">赤</span>{/if}
             {#if w.hasGold}<span class="gold-mark">金</span>{/if}
+            {#if w.hasNiji}<span class="niji-mark">虹</span>{/if}
           </span>
         {/each}
       </div>
@@ -38,4 +39,5 @@
   .wait-chip { display: inline-flex; align-items: center; gap: 2px; background: #fff; border: 1px solid #d0a0c0; padding: 2px 6px; border-radius: 12px; }
   .red-mark { color: #c04040; font-weight: bold; font-size: 10px; }
   .gold-mark { color: #b08020; font-weight: bold; font-size: 10px; }
+  .niji-mark { background: linear-gradient(90deg, #ff3333, #ffaa00, #33cc33, #3399ff, #cc33ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: bold; font-size: 10px; }
 </style>

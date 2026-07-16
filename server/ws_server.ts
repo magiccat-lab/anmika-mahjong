@@ -2,6 +2,7 @@
 // lobby/auth HTTP APIs; every gameplay command is accepted only here.
 
 import { randomInt as cryptoRandomInt, randomUUID } from 'node:crypto';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import jwt from 'jsonwebtoken';
@@ -65,6 +66,7 @@ type Room = {
 
 export type WsRuntimeOptions = {
   port?: number;
+  internalPort?: number;
   apiBase?: string;
   wsSecret?: string;
   internalApiSecret?: string;
@@ -96,14 +98,18 @@ function membersForAuthority(room: Room): AuthorityMember[] {
   }));
 }
 
-export function restoreAuthority(snapshot: CanonicalRoomSnapshot): RoomAuthority | null {
+export function restoreAuthority(
+  snapshot: CanonicalRoomSnapshot,
+  commands?: AcceptedRoomCommand[],
+): RoomAuthority | null {
   if (!snapshot.started || !snapshot.start) return null;
   const authority = createRoomAuthority({
     preShuffledPool: snapshot.start.preShuffledPool,
     qijia: snapshot.start.qijia,
   });
   const members = snapshot.start.members.map((member) => ({ seat: member.seat, is_cpu: member.is_cpu }));
-  for (const command of snapshot.commands) {
+  const cmds = commands ?? snapshot.commands;
+  for (const command of cmds) {
     if (command.action.type === 'stamp') continue;
     const reason = authority.validateAndApply(command.actorSeat, command.action, members);
     if (reason) {
@@ -111,6 +117,46 @@ export function restoreAuthority(snapshot: CanonicalRoomSnapshot): RoomAuthority
     }
   }
   return authority;
+}
+
+function captureBlindStart(authority: RoomAuthority): Record<string, unknown> {
+  const g = authority.game;
+  const hands: Record<number, string[]> = {};
+  const huapai: Record<number, string[]> = {};
+  const goldHand: Record<number, { p: number; s: number; z: number }> = {};
+  const pochiHand: Record<number, Record<string, number>> = {};
+  for (const p of [0, 1, 2] as const) {
+    const qipaiEvent = g.events.findLast((e: any) => e.type === 'qipai' && e.player === p);
+    hands[p] = qipaiEvent?.tiles ? [...qipaiEvent.tiles] : [];
+    huapai[p] = [...(g.huapai?.[p] ?? [])];
+    goldHand[p] = { ...(g.goldHand?.[p] ?? { p: 0, s: 0, z: 0 }) };
+    pochiHand[p] = { ...(g.pochiHand?.[p] ?? { blue: 0, red: 0, green: 0, yellow: 0 }) };
+  }
+  return {
+    hands, huapai, goldHand, pochiHand,
+    firstZimo: authority.lastZimo,
+    paishu: g.shan.paishu,
+    baopai: [...g.shan.baopai],
+    fubaopai: g.shan.fubaopai ? [...g.shan.fubaopai] : null,
+  };
+}
+
+function captureDraw(authority: RoomAuthority, preBaopai: string[], preFubaopai: string[] | null): Record<string, unknown> | null {
+  const g = authority.game;
+  const postBaopai = [...g.shan.baopai];
+  const postFubaopai = g.shan.fubaopai ? [...g.shan.fubaopai] : null;
+  const newBaopai = postBaopai.slice(preBaopai.length);
+  const newFubaopai = preFubaopai && postFubaopai ? postFubaopai.slice(preFubaopai.length) : [];
+  if (authority.lastZimo == null && newBaopai.length === 0 && newFubaopai.length === 0) return null;
+  return {
+    lastZimo: authority.lastZimo,
+    paishu: g.shan.paishu,
+    huapai: [...g.shan.lastDrawnHuapai],
+    gold: g.shan.lastZimoGold,
+    pochi: g.shan.lastZimoPochi,
+    newBaopai: newBaopai.length > 0 ? newBaopai : undefined,
+    newFubaopai: newFubaopai.length > 0 ? newFubaopai : undefined,
+  };
 }
 
 function actionRelay(command: AcceptedRoomCommand, snapshot: CanonicalRoomSnapshot, duplicate = false) {
@@ -136,8 +182,15 @@ function broadcast(room: Room, payload: unknown): void {
   for (const member of room.members.values()) sendJson(member.ws, payload);
 }
 
-function sendSync(ws: WebSocket | null, snapshot: CanonicalRoomSnapshot): void {
-  sendJson(ws, { type: 'sync', snapshot });
+function sendSync(ws: WebSocket | null, snapshot: CanonicalRoomSnapshot, fullCommands?: AcceptedRoomCommand[]): void {
+  const payload = fullCommands ? { ...snapshot, commands: fullCommands } : snapshot;
+  let sanitizedStart = payload.start;
+  if (sanitizedStart && sanitizedStart.preShuffledPool?.length > 0) {
+    const tempAuth = createRoomAuthority({ preShuffledPool: sanitizedStart.preShuffledPool, qijia: sanitizedStart.qijia });
+    const blindData = captureBlindStart(tempAuth);
+    sanitizedStart = { ...sanitizedStart, preShuffledPool: [], ...blindData, blindStart: true } as any;
+  }
+  sendJson(ws, { type: 'sync', snapshot: { ...payload, start: sanitizedStart } });
 }
 
 function lobbyPayload(room: Room) {
@@ -265,12 +318,13 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       snapshot = createEmptyRoomSnapshot(roomId, roomInstanceId);
       persistence.resetRoom(snapshot);
     }
+    const dbCommands = snapshot.started ? persistence.loadCommands(roomId) : [];
     const room: Room = {
       roomId,
       hostUserId,
       members: new Map(),
-      authority: restoreAuthority(snapshot),
-      snapshot,
+      authority: restoreAuthority(snapshot, dbCommands),
+      snapshot: { ...snapshot, commands: [] },
       pendingStart: null,
       generation: 0,
       queue: Promise.resolve(),
@@ -293,6 +347,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         generation: previous?.generation ?? 0,
         connected: previous?.connected ?? false,
       });
+    }
+    // WSA: 復元した started room に deadline を再設定 [Node再起動後の自動進行停止を防ぐ]
+    if (room.authority && room.snapshot.started) {
+      scheduleRoomDeadline(room);
     }
     return room;
   };
@@ -326,6 +384,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       if (typeof action.stampId !== 'string' || !STAMP_IDS.has(action.stampId)) {
         return { reason: 'invalid stampId' };
       }
+      // WSA: stamp は revision を進めない。broadcast だけして早期 return
+      broadcast(room, { type: 'stamp', seat: actorSeat, stampId: action.stampId });
+      return { reason: null };
     } else {
       if (!room.authority) return { reason: 'authority not initialized' };
       if (action.type === 'rollSaiKoroDice') {
@@ -334,12 +395,18 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       if (action.type === 'nextRound' || action.type === 'nextMatch') {
         action.preShuffledPool = serverShuffledPool();
       }
+      const preBaopai = [...room.authority.game.shan.baopai];
+      const preFubaopai = room.authority.game.shan.fubaopai ? [...room.authority.game.shan.fubaopai] : null;
       const reason = room.authority.validateAndApply(actorSeat, action, membersForAuthority(room));
       if (reason) {
-        // Validation should be side-effect free on rejection, but rebuilding
-        // from the accepted log also contains unexpected reducer exceptions.
-        room.authority = restoreAuthority(previous);
+        room.authority = restoreAuthority(previous, persistence.loadCommands(room.roomId));
         return { reason };
+      }
+      const drawData = captureDraw(room.authority, preBaopai, preFubaopai);
+      if (drawData) action._draw = drawData;
+      if (action.type === 'nextRound' || action.type === 'nextMatch') {
+        action._blindState = captureBlindStart(room.authority!);
+        delete action.preShuffledPool;
       }
     }
 
@@ -367,7 +434,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         room.nextRoundReadyRevision = null;
       }
     } catch (error) {
-      room.authority = restoreAuthority(previous);
+      room.authority = restoreAuthority(previous, persistence.loadCommands(room.roomId));
       warn(`[anmika-ws] persistence rollback room=${room.roomId}`, error);
       return { reason: 'persistence failure' };
     }
@@ -552,9 +619,13 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     };
     persistence.resetRoom(room.snapshot);
     room.pendingStart = null;
+    const blindStart = captureBlindStart(room.authority!);
     broadcast(room, {
       type: 'start',
-      ...start,
+      blindStart: true,
+      ...blindStart,
+      qijia: start.qijia,
+      members: start.members,
       revision: room.snapshot.revision,
       matchId: room.snapshot.matchId,
       roundId: room.snapshot.roundId,
@@ -615,7 +686,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         let msg: unknown;
         try { msg = JSON.parse(data.toString()); } catch { return; }
         if ((msg as Record<string, unknown>)?.type === 'resync') {
-          sendSync(ws, room.snapshot);
+          sendSync(ws, room.snapshot, persistence.loadCommands(room.roomId));
           return;
         }
         if ((msg as Record<string, unknown>)?.type === 'start') {
@@ -628,6 +699,13 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           const reason = markReadyForNextRound(room, payload.seat, Number(value.revision));
           if (reason) reject(ws, room, null, reason);
           else sendJson(ws, { type: 'readyNextRoundAck', revision: room.snapshot.revision });
+          return;
+        }
+        if ((msg as Record<string, unknown>)?.type === 'stamp') {
+          const value = msg as Record<string, unknown>;
+          if (!room.snapshot.started) return;
+          if (typeof value.stampId !== 'string' || !STAMP_IDS.has(value.stampId as string)) return;
+          broadcast(room, { type: 'stamp', seat: payload.seat, stampId: value.stampId });
           return;
         }
 
@@ -643,14 +721,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           // The retrying client may have missed commands accepted after its
           // original one. A full canonical sync is safe and avoids relaying an
           // old revision with today's match/round identifiers.
-          sendSync(ws, room.snapshot);
+          sendSync(ws, room.snapshot, persistence.loadCommands(room.roomId));
           return;
         }
         if (envelope.expectedVersion !== room.snapshot.revision
           || envelope.matchId !== room.snapshot.matchId
           || envelope.roundId !== room.snapshot.roundId) {
           reject(ws, room, envelope.commandId, 'version conflict');
-          sendSync(ws, room.snapshot);
+          sendSync(ws, room.snapshot, persistence.loadCommands(room.roomId));
           return;
         }
         const validated = validateAction(room, payload.uid, payload.seat, envelope.action);
@@ -683,10 +761,13 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       current.ws = null;
       current.connected = false;
       broadcast(room, lobbyPayload(room));
-      if (Array.from(room.members.values()).every((item) => !item.connected && !item.is_cpu)) {
+      // WSA: CPU席を除いた human だけで無接続判定 [CPU入り部屋が永久に残る問題を修正]
+      const humanMembers = Array.from(room.members.values()).filter((item) => !item.is_cpu);
+      if (humanMembers.length === 0 || humanMembers.every((item) => !item.connected)) {
         room.cleanupTimer = setTimeout(() => {
           const latest = rooms.get(room.roomId);
-          if (latest === room && Array.from(room.members.values()).every((item) => !item.connected && !item.is_cpu)) {
+          const latestHumans = latest === room ? Array.from(room.members.values()).filter((item) => !item.is_cpu) : [];
+          if (latest === room && (latestHumans.length === 0 || latestHumans.every((item) => !item.connected))) {
             if (room.deadlineTimer) clearTimeout(room.deadlineTimer);
             if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
             rooms.delete(room.roomId);
@@ -696,16 +777,96 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     });
 
     broadcast(room, lobbyPayload(room));
-    if (room.snapshot.started) sendSync(ws, room.snapshot);
+    if (room.snapshot.started) sendSync(ws, room.snapshot, persistence.loadCommands(room.roomId));
     if (!room.snapshot.started && room.pendingStart && room.members.size >= 3) {
       startRoom(room, room.pendingStart.qijia);
     }
+  });
+
+  // Internal HTTP API for cross-process notifications (Python → Node)
+  const internalPort = options.internalPort ?? Number(process.env.ANMIKA_WS_INTERNAL_PORT || (port === 0 ? 0 : port + 1));
+  const internalHttp = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    if (req.headers['x-anmika-internal-secret'] !== internalApiSecret) {
+      res.writeHead(403); res.end('forbidden'); return;
+    }
+    if (req.method === 'POST' && req.url === '/internal/evict-member') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        const { room_id, user_id } = body;
+        if (typeof room_id !== 'string' || typeof user_id !== 'string') {
+          res.writeHead(400); res.end('bad request'); return;
+        }
+        const room = rooms.get(room_id);
+        if (room) {
+          const member = room.members.get(user_id);
+          if (member?.ws) {
+            try { member.ws.close(4410, 'evicted'); } catch (_) { /* noop */ }
+          }
+          room.members.delete(user_id);
+          broadcast(room, lobbyPayload(room));
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}');
+      } catch (_) { res.writeHead(400); res.end('bad request'); }
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/internal/chip-ledger') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        const { room_id } = body;
+        if (typeof room_id !== 'string') { res.writeHead(400); res.end('bad request'); return; }
+        const room = rooms.get(room_id);
+        if (!room?.authority) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, ledger: null }));
+          return;
+        }
+        const state = room.authority.canonicalState();
+        const ledger: Record<string, number> = {};
+        for (const [seat, chips] of Object.entries(state.game.chipLedger ?? {})) {
+          const member = Array.from(room.members.values()).find((m) => m.seat === Number(seat));
+          if (member) ledger[member.user_id] = chips as number;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ledger, finished: state.game.state.finished }));
+      } catch (_) { res.writeHead(400); res.end('bad request'); }
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/internal/purge-room') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        const { room_id } = body;
+        if (typeof room_id !== 'string') { res.writeHead(400); res.end('bad request'); return; }
+        const room = rooms.get(room_id);
+        if (room) {
+          for (const member of room.members.values()) {
+            if (member.ws) try { member.ws.close(4404, 'room purged'); } catch (_) { /* noop */ }
+          }
+          if (room.deadlineTimer) clearTimeout(room.deadlineTimer);
+          if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+          if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
+          rooms.delete(room_id);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}');
+      } catch (_) { res.writeHead(400); res.end('bad request'); }
+      return;
+    }
+    res.writeHead(404); res.end('not found');
+  });
+  internalHttp.listen(internalPort, '127.0.0.1', () => {
+    log(`[anmika-ws] internal API listening on 127.0.0.1:${internalPort}`);
   });
 
   return {
     wss,
     rooms,
     persistence,
+    internalHttp,
     close: async () => {
       for (const room of rooms.values()) {
         if (room.deadlineTimer) clearTimeout(room.deadlineTimer);
@@ -713,6 +874,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
       }
       await new Promise<void>((resolve) => wss.close(() => resolve()));
+      await new Promise<void>((resolve) => internalHttp.close(() => resolve()));
       persistence.close();
     },
   };

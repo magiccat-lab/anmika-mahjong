@@ -259,7 +259,7 @@ describe('authoritative websocket runtime', () => {
       (message) => message.type === 'action' && String(message.commandId).startsWith(`srv:${roomId}:`),
     ));
     expect(fallback.action.type).toMatch(/^(discard|tsumo|nukiBei)$/);
-    expect(persistence.loadSnapshot(roomId)?.commands.some(
+    expect(persistence.loadCommands(roomId).some(
       (command) => command.commandId === fallback.commandId,
     )).toBe(true);
   });

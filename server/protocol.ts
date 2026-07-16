@@ -140,7 +140,7 @@ export function appendAcceptedCommand(
       matchId: nextMatchId,
       roundId: nextRoundId,
       revision: accepted.revision,
-      commands: [...snapshot.commands, accepted],
+      commands: [],
       updatedAt: now.toISOString(),
     },
   };

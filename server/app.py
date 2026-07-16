@@ -53,6 +53,10 @@ PUBLIC_BASE_URL = os.environ.get("ANMIKA_PUBLIC_BASE_URL", "https://anmika.magic
 # Node 側 ws_server.ts と共有して JWT verify する。 default は SESSION_SECRET と同値。
 WS_SECRET = os.environ.get("ANMIKA_WS_SECRET") or SESSION_SECRET
 INTERNAL_API_SECRET = os.environ.get("ANMIKA_INTERNAL_SECRET") or WS_SECRET
+WS_INTERNAL_BASE = os.environ.get(
+    "ANMIKA_WS_INTERNAL_BASE",
+    f"http://127.0.0.1:{int(os.environ.get('ANMIKA_WS_PORT', '8791')) + 1}",
+)
 WS_TOKEN_TTL_SEC = int(os.environ.get("ANMIKA_WS_TOKEN_TTL_SEC", "60"))
 WS_PUBLIC_URL = os.environ.get("ANMIKA_WS_PUBLIC_URL") or PUBLIC_BASE_URL.replace(
     "https://", "wss://"
@@ -602,6 +606,32 @@ async def _hub_purge_room(room_id: str) -> None:
 _hub_tombstones: set[str] = set()
 
 
+async def _notify_ws_evict(room_id: str, user_id: str) -> None:
+    """Notify the Node WS server to evict a member (best-effort)."""
+    try:
+        async with httpx.AsyncClient(timeout=3) as cli:
+            await cli.post(
+                f"{WS_INTERNAL_BASE}/internal/evict-member",
+                json={"room_id": room_id, "user_id": user_id},
+                headers={"x-anmika-internal-secret": INTERNAL_API_SECRET},
+            )
+    except Exception:
+        log.warning("ws evict notify failed room=%s user=%s", room_id, user_id)
+
+
+async def _notify_ws_purge(room_id: str) -> None:
+    """Notify the Node WS server to purge a room (best-effort)."""
+    try:
+        async with httpx.AsyncClient(timeout=3) as cli:
+            await cli.post(
+                f"{WS_INTERNAL_BASE}/internal/purge-room",
+                json={"room_id": room_id},
+                headers={"x-anmika-internal-secret": INTERNAL_API_SECRET},
+            )
+    except Exception:
+        log.warning("ws purge notify failed room=%s", room_id)
+
+
 @app.post("/api/rooms/{room_id}/delete")
 async def delete_room(room_id: str, request: Request):
     """R11 user 報告: 部屋を消すボタン用、 host のみ削除可"""
@@ -617,6 +647,7 @@ async def delete_room(room_id: str, request: Request):
         deleted = _archive_or_delete_room(c, room_id)
         c.commit()
     await _hub_purge_room(room_id)
+    await _notify_ws_purge(room_id)
     return {"ok": True, "deleted": deleted, "archived": not deleted}
 
 
@@ -670,6 +701,7 @@ async def leave_room(room_id: str, request: Request):
             deleted = _archive_or_delete_room(c, room_id)
             c.commit()
             await _hub_purge_room(room_id)
+            await _notify_ws_purge(room_id)
             return {"ok": True, "deleted": deleted, "archived": not deleted}
         # ゲスト抜けは自分の seat 削除のみ
         c.execute(
@@ -677,6 +709,7 @@ async def leave_room(room_id: str, request: Request):
             (room_id, u["user_id"]),
         )
         c.commit()
+    await _notify_ws_evict(room_id, u["user_id"])
     return {"ok": True, "deleted": False}
 
 
@@ -1359,6 +1392,29 @@ async def finish_match(request: Request):
             total += d
         if total != 0:
             raise HTTPException(status_code=400, detail=f"chip_delta sum != 0 (got {total})")
+        # WSA: Node authority の chipLedger と照合（best-effort、Node 停止時はスキップ）
+        try:
+            async with httpx.AsyncClient(timeout=3) as cli:
+                resp = await cli.post(
+                    f"{WS_INTERNAL_BASE}/internal/chip-ledger",
+                    json={"room_id": room_id},
+                    headers={"x-anmika-internal-secret": INTERNAL_API_SECRET},
+                )
+                if resp.status_code == 200:
+                    ledger_data = resp.json()
+                    auth_ledger = ledger_data.get("ledger")
+                    if auth_ledger is not None:
+                        for uid, delta in chip_delta.items():
+                            auth_val = auth_ledger.get(uid)
+                            if auth_val is not None and int(delta) != int(auth_val):
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail=f"chip_delta mismatch for {uid}: client={delta} authority={auth_val}",
+                                )
+        except HTTPException:
+            raise
+        except Exception:
+            log.warning("authority ledger check skipped [node unreachable]")
         # R20 #1 fix: match_uuid 必須 [client が deterministic 生成]、 既存 row check して
         # 同 uuid なら chip_total 二重加算せず 409 ack [冪等]
         if not match_uuid:

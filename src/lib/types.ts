@@ -9,7 +9,8 @@ export type CorePai = string;
 // アンミカ拡張牌。局開始時から別牌として扱い、majiang-core 境界でだけ CorePai に変換する。
 export type PochiPai = 'z5b' | 'z5r' | 'z5g' | 'z5y';
 export type GoldPai = 'gp' | 'gs' | 'gN';
-export type Pai = CorePai | PochiPai | GoldPai;
+export type NijiPai = 'np3' | 'ns3' | 'nz3';
+export type Pai = CorePai | PochiPai | GoldPai | NijiPai;
 
 // プレイヤー位置 [3 麻なので 0,1,2 のみ。 0=東家, 1=南家, 2=西家]
 export type Lunban = 0 | 1 | 2;
@@ -35,6 +36,8 @@ export interface GameState {
   lunban: Lunban;
   /** 終了 flag */
   finished: boolean;
+  /** 返り東 flag — 全員 40000 未達で延長中 */
+  tongaeshi?: boolean;
 }
 
 // 局の進行イベント [牌譜出力にも使う]

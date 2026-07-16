@@ -9,7 +9,7 @@ export function canNukiBeiFromState(
 ): boolean {
   if (!sp) return false;
   if (!sp._zimo) return false;
-  if (sp._zimo.length > 2) return false;
+  if (sp._zimo.length > 3) return false;
   const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => feverActive[p]);
   if (someoneFever && !feverActive[player]) {
     return toCorePai(sp._zimo) === 'z4';

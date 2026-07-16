@@ -36,17 +36,21 @@ export function isValidAnmikaTile(s: string, n: number): boolean {
 
 import type { PochiPai } from './types';
 
-/** z5 4 色 / 金牌 [gp/gs/gN] を majiang-core 用に変換
+/** z5 4 色 / 金牌 [gp/gs/gN] / 虹牌 [np3/ns3/nz3] を majiang-core 用に変換
  *  - z5b/r/g/y → z5
  *  - gp → p0 [金は赤の一種として majiang-core 渡し]
  *  - gs → s0
  *  - gN → z4
+ *  - np3 → p3, ns3 → s3, nz3 → z3
  */
 export function toCorePai(p: string): string {
   if (typeof p === 'string' && p.length > 2 && p[0] === 'z' && p[1] === '5') return 'z5';
   if (p === 'gp') return 'p0';
   if (p === 'gs') return 's0';
   if (p === 'gN') return 'z4';
+  if (p === 'np3') return 'p3';
+  if (p === 'ns3') return 's3';
+  if (p === 'nz3') return 'z3';
   return p;
 }
 
@@ -56,8 +60,9 @@ export const normalizePai = toCorePai;
 /** 金牌 key 判定 */
 export function isGoldPai(p: string): boolean { return p === 'gp' || p === 'gs' || p === 'gN'; }
 export function isPochiPai(p: string): p is PochiPai { return p === 'z5b' || p === 'z5r' || p === 'z5g' || p === 'z5y'; }
+export function isNijiPai(p: string): boolean { return p === 'np3' || p === 'ns3' || p === 'nz3'; }
 
-export const ANMIKA_EXPANDED_PAI = ['z5b', 'z5r', 'z5g', 'z5y', 'gp', 'gs', 'gN'] as const;
+export const ANMIKA_EXPANDED_PAI = ['z5b', 'z5r', 'z5g', 'z5y', 'gp', 'gs', 'gN', 'np3', 'ns3', 'nz3'] as const;
 export type AnmikaExpandedPai = typeof ANMIKA_EXPANDED_PAI[number];
 
 export function isAnmikaExpandedPai(p: string): p is AnmikaExpandedPai {
@@ -67,7 +72,7 @@ export function isAnmikaExpandedPai(p: string): p is AnmikaExpandedPai {
 export type AnmikaCounts = Record<AnmikaExpandedPai, number>;
 
 export function emptyAnmikaCounts(): AnmikaCounts {
-  return { z5b: 0, z5r: 0, z5g: 0, z5y: 0, gp: 0, gs: 0, gN: 0 };
+  return { z5b: 0, z5r: 0, z5g: 0, z5y: 0, gp: 0, gs: 0, gN: 0, np3: 0, ns3: 0, nz3: 0 };
 }
 
 function ensureAnmikaCounts(sp: any): AnmikaCounts {
@@ -107,6 +112,12 @@ export function countGoldInHand(sp: any): { p: number; s: number; z: number } {
   return { p: counts.gp, s: counts.gs, z: counts.gN };
 }
 
+export function countNijiInHand(sp: any): { p: number; s: number; z: number; total: number } {
+  const counts = ensureAnmikaCounts(sp);
+  const p = counts.np3, s = counts.ns3, z = counts.nz3;
+  return { p, s, z, total: p + s + z };
+}
+
 export function countColoredZ5(sp: any): number {
   const counts = ensureAnmikaCounts(sp);
   return counts.z5b + counts.z5r + counts.z5g + counts.z5y;
@@ -140,6 +151,16 @@ export function patchAnmikaShoupai(sp: any, tiles: string[] = []): any {
     if (core === 'z4' && (counts.gN ?? 0) > 0) {
       addAnmikaPai(sp, 'gN', -1);
       return 'gN';
+    }
+    // 虹牌: 通常牌を先に消費し、虹を残す
+    const nijiMap: Record<string, AnmikaExpandedPai> = { p3: 'np3', s3: 'ns3', z3: 'nz3' };
+    const nijiKey = nijiMap[core];
+    if (nijiKey && (counts[nijiKey] ?? 0) > 0) {
+      const totalCore = sp._bingpai?.[core[0]]?.[parseInt(core[1])] ?? 0;
+      if (totalCore < (counts[nijiKey] ?? 0)) {
+        addAnmikaPai(sp, nijiKey, -1);
+        return nijiKey;
+      }
     }
     return null;
   };

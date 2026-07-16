@@ -9,7 +9,18 @@ import type { GameEvent, GameState, Lunban, Pai, PlayerId } from './types';
 import { Shan3, defaultSanmaRule, type ShanRule } from './shan3';
 
 // 共通 helper は helpers.ts に分離 [code clean-up 2026-05-10]
-import { DEBUG_LOG, dlog, normalizePai, toCorePai, isGoldPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, addAnmikaPai, patchAnmikaShoupai, countGoldInHand, countPochiInHand, isPositiveZ5, isNegativeZ5, fanshuLevel, LEVEL_TO_FANSHU, isValidAnmikaTile } from './helpers';
+import { DEBUG_LOG, dlog, normalizePai, toCorePai, isGoldPai, isNijiPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, addAnmikaPai, patchAnmikaShoupai, countGoldInHand, countPochiInHand, countNijiInHand, isPositiveZ5, isNegativeZ5, fanshuLevel, LEVEL_TO_FANSHU, isValidAnmikaTile } from './helpers';
+
+/** 門前判定: 副露なし or 暗槓のみ [/^[mpsz]\d{4}$/] を門前扱い */
+function isMenzenHand(sp: any): boolean {
+  return !sp._fulou || sp._fulou.length === 0
+    || sp._fulou.every((m: string) => /^[mpsz]\d{4}$/.test(m));
+}
+
+/** 明副露(非暗槓)の数 */
+function openMeldCount(sp: any): number {
+  return (sp._fulou ?? []).filter((m: string) => !/^[mpsz]\d{4}$/.test(m)).length;
+}
 
 /** debug helper [P0-6b 調査用、 2026-05-12]: 指定牌が fulou に何枚あるか集計、
  *  赤 5 [s0/p0] と 通常 5 [s5/p5] は同視 */
@@ -200,6 +211,7 @@ export class Game3 {
       defen: { 0: this.startingDefen, 1: this.startingDefen, 2: this.startingDefen },
       lunban: 0,
       finished: false,
+      tongaeshi: false,
     };
     this.changshu = init.changshu ?? 1;  // 東風戦 デフォルト
     this.shan = new Shan3(this.shanRule, init.preShuffledPool);
@@ -492,7 +504,7 @@ export class Game3 {
     const sp = this.shoupai.get(player);
     if (!sp) return false;
     if (!sp._zimo) return false;
-    if (sp._zimo.length > 2) return false; // 副露直後の擬似 zimo は除外
+    if (sp._zimo.length > 3) return false; // 副露直後の擬似 zimo は除外
     // リーチ宣言牌の確定前は他 action 不可。成立後に待ち不変の暗槓があればカンを優先する。
     if (this.lizhiDeclareDapai[player]) return false;
     if (this.lizhi.has(player) && this.getForcedLizhiKanCandidates(player).length > 0) return false;
@@ -630,12 +642,17 @@ export class Game3 {
       if (opts.ignoreTobiFor !== undefined && p === opts.ignoreTobiFor) continue;
       if (this.state.defen[p] < 0) return true;
     }
+    // 返り東中: 毎局誰か 40000 以上で終了
+    if (this.state.tongaeshi) {
+      const top = Math.max(...[0, 1, 2].map((p) => this.state.defen[p as PlayerId]));
+      if (top >= 40000) return true;
+      return false;
+    }
     const requiredChang = this.changshu;
     if (this.state.changbang > requiredChang - 1) {
       // オーラス終了時、 誰か 40000 以上ならゲーム終了、 なければ返り東 [継続]
       const top = Math.max(...[0, 1, 2].map((p) => this.state.defen[p as PlayerId]));
       if (top >= 40000) return true;
-      // 返り東: changbang を 1 つ巻き戻して継続 [次の nextRound で再度 changbang 0 から]
       return false;
     }
     return false;
@@ -723,6 +740,25 @@ export class Game3 {
       const total = chipBase[r.player] + uma + bd.topN + bd.tontonbu;
       return { ...r, chipBase: chipBase[r.player], uma, topNBonus: bd.topN, tobiBonus: bd.tobi, tontonbuBonus: bd.tontonbu, chip, total };
     });
+  }
+
+  initFromDeal(deal: {
+    hands: Record<PlayerId, Pai[]>;
+    huapai?: Record<PlayerId, Pai[]>;
+    goldHand?: Record<PlayerId, { p: number; s: number; z: number }>;
+    pochiHand?: any;
+  }): void {
+    this.firstTurnState = createFirstTurnState();
+    const dg = { p: 0, s: 0, z: 0 };
+    const dp = { blue: 0, red: 0, green: 0, yellow: 0 };
+    this.goldHand = deal.goldHand ?? { 0: { ...dg }, 1: { ...dg }, 2: { ...dg } };
+    this.huapai = deal.huapai ?? { 0: [], 1: [], 2: [] };
+    this.pochiHand = deal.pochiHand ?? { 0: { ...dp }, 1: { ...dp }, 2: { ...dp } };
+    for (const p of [0, 1, 2] as PlayerId[]) {
+      this.shoupai.set(p, buildShoupai(deal.hands[p]));
+      this.he.set(p, new Majiang.He());
+      this.events.push({ type: 'qipai', player: p, tiles: deal.hands[p] });
+    }
   }
 
   /** 配牌 [13 枚 × 3 人]、 同時に金牌 / 華牌の player 別カウント */
@@ -860,11 +896,24 @@ export class Game3 {
         }
       }
     }
+    // でかぽっち: リーチ一発で p1/p2 ツモ → ぽっちカットイン + 色倍率
+    if (this.lizhi.has(player) && this.yifaActive[player] && !this.shan.lastZimoPochi) {
+      if (corePai === 'p1') {
+        this.shan.lastZimoPochi = 'green';
+      } else if (corePai === 'p2') {
+        this.shan.lastZimoPochi = 'yellow';
+        this.applyPochiColorMultiplier(player, 'yellow');
+        if (this.kinpeiTarget[player] === null) this.autoResolveKinpei(player);
+      }
+    }
     // 直前ツモ情報を保存 [ツモ切り時の色判定用]
+    const isDekapochi = this.lizhi.has(player) && this.yifaActive[player] && (corePai === 'p1' || corePai === 'p2');
     this.lastZimoInfo = {
       player,
       pai,
-      pochi: corePai === 'z5' ? (this.shan.lastZimoPochi ?? null) : null,
+      pochi: corePai === 'z5' ? (this.shan.lastZimoPochi ?? null)
+        : isDekapochi ? (this.shan.lastZimoPochi ?? null)
+        : null,
       gold: this.shan.lastZimoGold && (pai === 'gp' || pai === 'gs' || pai === 'gN'),
     };
     this.events.push({ type: 'zimo', player, pai });
@@ -1387,7 +1436,8 @@ export class Game3 {
         // ダマ禁止 check: 役満なら OK、 副露なし + リーチなしなら役満以外 NG
         // 2026-05-14 Round 2 codex fix P1 #7: 役満限定 accept、 通常役なら reject
         // R9 P2 #11 fix: 副露手も hule() で 役なし check、 UI に出てから失敗する bug 解消
-        const hasFulou = sp._fulou && sp._fulou.length > 0;
+        // WSA: 暗槓のみは門前扱い [isMenzenHand] — hasFulou 直比較だと暗槓手がダマ禁止をバイパス
+        const hasFulou = !isMenzenHand(sp);
         if (hasFulou) {
           const _prevSnapshot = this.preHuleSnapshot;
           this.saveSnapshot();
@@ -1420,6 +1470,15 @@ export class Game3 {
       const r = this.canTsumoWithPochiSwap(sp);
       dlog('[canTsumo z5 swap]', { ...dbg, swapResult: r });
       return r;
+    }
+    // でかぽっち: リーチ一発ツモで p1→緑ぽっち、p2→黄ぽっち扱い
+    if (this.lizhi.has(player) && this.yifaActive[player] && sp._zimo) {
+      const core = toCorePai(sp._zimo);
+      if (core === 'p1' || core === 'p2') {
+        const r = canTsumoWithPochiSwapHelper(sp, core);
+        dlog('[canTsumo dekapochi swap]', { ...dbg, core, swapResult: r });
+        return r;
+      }
     }
     return false;
   }
@@ -1640,7 +1699,8 @@ export class Game3 {
       // ダマ禁止 check: 副露なし + リーチなし → 役満以外ならロン不可
       // 2026-05-14 Round 2 codex fix P1 #7: 旧版は fakeRes truthy なら通してた、
       // 実際 役満限定 [damanguan>=1 / hupai に '*' / '**' / fanshu===undefined] のみ accept
-      const hasFulou = sp._fulou && sp._fulou.length > 0;
+      // WSA: 暗槓のみは門前扱い [isMenzenHand]
+      const hasFulou = !isMenzenHand(sp);
       // R9 P2 #11 fix: 副露手も fake hule() で 役なし check
       if (hasFulou) {
         const _prevSnapshot = this.preHuleSnapshot;
@@ -1814,9 +1874,30 @@ export class Game3 {
         result.hupai.push({ name: ronpai ? '河底撈魚' : '海底摸月', fanshu: 1 });
         result.fanshu += 1;
       }
-      if (isTianhu) {
+      if (isTianhu === 1) {
         result.hupai.push({ name: '天和', fanshu: '*' });
         result.damanguan = (result.damanguan ?? 0) + 1;
+      } else if (isTianhu === 2) {
+        result.hupai.push({ name: '地和', fanshu: '*' });
+        result.damanguan = (result.damanguan ?? 0) + 1;
+      }
+      // WSA: 槍槓
+      if (this.qianggangPending && ronpai) {
+        result.hupai.push({ name: '槍槓', fanshu: 1 });
+        result.fanshu += 1;
+      }
+      // WSA: 通常ドラ・裏ドラ [majiang-core bypass のため手動カウント]
+      const acBaopai = (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
+      for (const indicator of acBaopai) {
+        const cnt = this.countDoraFromIndicator(sp, indicator);
+        if (cnt > 0) { result.hupai.push({ name: 'ドラ', fanshu: cnt }); result.fanshu += cnt; }
+      }
+      if (isLizhi) {
+        const acFubaopai = (this.shan.fubaopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
+        for (const indicator of acFubaopai) {
+          const cnt = this.countDoraFromIndicator(sp, indicator);
+          if (cnt > 0) { result.hupai.push({ name: '裏ドラ', fanshu: cnt }); result.fanshu += cnt; }
+        }
       }
     }
     // 神ぽっち: 正ぽ [z5] がドラ表 / 裏ドラ表に出てる場合、 任意の牌をドラ表示扱い
@@ -1947,6 +2028,62 @@ export class Game3 {
         result.hupai.push({ name: `白ぽっち オールマイティ [${best._allmightyPochi}]${ronpai ? ' [ロン]' : ''}`, fanshu: 0 });
       }
     }
+    // でかぽっち オールマイティ: リーチ一発 + ツモ牌 p1/p2 → swap 試行 [高め取り]
+    const zimoCore = sp._zimo ? toCorePai(sp._zimo) : null;
+    const isDekapochiEligible = !ronpai && this.lizhi.has(player) && this.yifaActive[player]
+      && (zimoCore === 'p1' || zimoCore === 'p2');
+    if (isDekapochiEligible && zimoCore) {
+      const fromSuit = zimoCore[0];
+      const fromNum = parseInt(zimoCore[1]);
+      const swapTargets: string[] = [];
+      for (const s of ['m', 'p', 's', 'z']) {
+        const len = s === 'z' ? 8 : 10;
+        for (let n = 1; n < len; n++) {
+          if (!isValidAnmikaTile(s, n)) continue;
+          swapTargets.push(`${s}${n}`);
+        }
+      }
+      let best: any = null;
+      const baseScore: [number, number, number, number] = result
+        ? [result.damanguan ?? 0, typeof result.fanshu === 'number' ? result.fanshu : 99, result.fu ?? 0,
+           Array.isArray(result.defen) ? Math.max(...result.defen.map((d: any) => +d || 0)) : (+result.defen || 0)]
+        : [-1, -1, -1, -1];
+      const cmpScore = (a: [number, number, number, number], b: [number, number, number, number]) => {
+        for (let i = 0; i < 4; i++) if (a[i] !== b[i]) return a[i] - b[i];
+        return 0;
+      };
+      for (const swap of swapTargets) {
+        try {
+          const spClone = sp.clone();
+          const ss = swap[0]; const nn = parseInt(swap[1]);
+          if ((spClone._bingpai[fromSuit]?.[fromNum] ?? 0) < 1) continue;
+          spClone._bingpai[fromSuit][fromNum] -= 1;
+          if (spClone._bingpai[ss][nn] >= 4) continue;
+          spClone._bingpai[ss][nn] += 1;
+          spClone._zimo = swap;
+          let r = Majiang.Util.hule(spClone, null, param);
+          if ((!r || !((r.fanshu !== undefined) || ((r.damanguan ?? 0) > 0)))
+            && americanChitoiComplete(spClone)) {
+            r = { hupai: [{ name: '七対子', fanshu: 2 }], fu: 25, fanshu: 2, damanguan: 0, defen: 0, fenpei: [0, 0, 0, 0] };
+          }
+          if (r && (r.fanshu !== undefined || (r.damanguan ?? 0) > 0)) {
+            const newScore: [number, number, number, number] = [
+              r.damanguan ?? 0, typeof r.fanshu === 'number' ? r.fanshu : 99, r.fu ?? 0,
+              Array.isArray(r.defen) ? Math.max(...r.defen.map((d: any) => +d || 0)) : (+r.defen || 0)];
+            if (cmpScore(newScore, baseScore) > 0 && (!best || cmpScore(newScore, [best.damanguan ?? 0, typeof best.fanshu === 'number' ? best.fanshu : 99, best.fu ?? 0, 0]) > 0)) {
+              best = r;
+              best._dekapochiSwap = swap;
+            }
+          }
+        } catch { /* skip */ }
+      }
+      if (best) {
+        result = best;
+        result.hupai = result.hupai ?? [];
+        const color = zimoCore === 'p1' ? '緑' : '黄';
+        result.hupai.push({ name: `でかぽっち オールマイティ [${best._dekapochiSwap}] (${color})`, fanshu: 0 });
+      }
+    }
     // アンミカ独自: 7m を ヤオチュー牌として扱う再判定
     // majiang-core の判定で役無し or 通常役のみ → 「7m を 1m として扱う」 国士 / 清老頭等を後付け
     const anmikaYakuman = anmikaTry7mYakuman(sp, ronpaiWithDir);
@@ -1957,23 +2094,27 @@ export class Game3 {
       }
     }
     // 2026-05-14 codex review fix [Group Q]: 清老頭 / チャンタ / 純チャンタ の m7→m1 substitution
-    //   m7 を m1 に置換した sp clone で 再 hule、 majiang-core が認識する 全帯么 / 純全帯么 を pick up、
+    //   m7 を m1 に置換した sp clone で 再 hule、 majiang-core が認識する 全帯幺 / 純全帯幺 を pick up、
     //   既存 result が同名役なし or fanshu が低いなら上書き
     try {
       // R3 P2 #15 fix: m7 ロン牌も m1 扱いに、 ronpaiWithDir が m7 の case で
       // チャンタ / 純チャンタ / 清老頭 が拾われない bug を修正
       const ronpaiIsM7 = ronpaiWithDir !== null && ronpaiWithDir.startsWith('m7');
       const m7Count = sp._bingpai.m?.[7] ?? 0;
-      if (m7Count > 0 || ronpaiIsM7) {
+      const fulouHasM7 = (sp._fulou ?? []).some((m: string) => m.startsWith('m') && m.includes('7'));
+      if (m7Count > 0 || ronpaiIsM7 || fulouHasM7) {
         const spClone7 = sp.clone();
         spClone7._bingpai.m[1] = (spClone7._bingpai.m[1] ?? 0) + m7Count;
         spClone7._bingpai.m[7] = 0;
-        // 副露内 m7 は そのまま [簡略、 完全対応は後続版]
-        // ronpai が m7 なら m1 に置換 [方向 marker 維持]
+        if (spClone7._fulou) {
+          spClone7._fulou = spClone7._fulou.map((m: string) =>
+            m.startsWith('m') && m.includes('7') ? m.replace(/7/g, '1') : m
+          );
+        }
         const ronpaiSub = ronpaiIsM7 ? ('m1' + ronpaiWithDir!.slice(2)) : ronpaiWithDir;
         const r7 = Majiang.Util.hule(spClone7, ronpaiSub, param);
         if (r7 && r7.hupai) {
-          const upgradeNames = ['全帯么', '純全帯么', '清老頭'];
+          const upgradeNames = ['全帯幺', '純全帯幺', '清老頭'];
           const hasUpgrade = r7.hupai.some((h: any) => upgradeNames.some(n => h.name?.includes(n)));
           if (hasUpgrade) {
             const baseFan = result ? (typeof result.fanshu === 'number' ? result.fanshu : 99) : -1;
@@ -2033,7 +2174,8 @@ export class Game3 {
     }
     // アンミカ独自: 面前ダマアガリ禁止 [役満を除く]
     // ルール 1.1 「面前時のダマアガリ不可、 副露後のダマは可、 国士・天和・地和・人和はダマOK」
-    const hasFulou = sp._fulou && sp._fulou.length > 0;
+    // WSA: 暗槓のみは門前扱い [isMenzenHand]
+    const hasFulou = !isMenzenHand(sp);
     const isYakuman = result.damanguan && result.damanguan > 0;
     if (!hasFulou && !this.lizhi.has(player) && !isYakuman) {
       return null;
@@ -2273,6 +2415,36 @@ export class Game3 {
         result.hupai.push({ name: '789 三色 [間八萬複合]', fanshu: 4 });
         if (result.fanshu !== undefined) result.fanshu += 4;
       }
+      // 間八萬 + チャンタ: m7→m1 置換では z5 が壊れるため z5→m8 swap で再判定
+      const hasChantaAlready = result.hupai.some((h: any) =>
+        h.name?.includes('全帯') || h.name?.includes('純全'));
+      if (!hasChantaAlready && typeof result.fanshu === 'number') {
+        try {
+          const spKP = sp.clone();
+          const isTsumoKP = !ronpaiWithDir;
+          if (isTsumoKP && (spKP._bingpai.z[5] ?? 0) > 0) {
+            spKP._bingpai.z[5] -= 1;
+          }
+          spKP._bingpai.m[8] = (spKP._bingpai.m[8] ?? 0) + 1;
+          const m7left = spKP._bingpai.m[7] ?? 0;
+          if (m7left > 1) {
+            spKP._bingpai.m[1] = (spKP._bingpai.m[1] ?? 0) + (m7left - 1);
+            spKP._bingpai.m[7] = 1;
+          }
+          if (isTsumoKP) spKP._zimo = 'm8';
+          const ronKP = isTsumoKP ? null : ('m8' + ronpaiWithDir!.slice(2));
+          const rKP = Majiang.Util.hule(spKP, ronKP, param);
+          if (rKP?.hupai) {
+            for (const h of rKP.hupai) {
+              if (h.name?.includes('全帯') || h.name?.includes('純全')) {
+                result.hupai.push({ ...h, name: h.name + ' [間八萬複合]' });
+                if (typeof h.fanshu === 'number') result.fanshu += h.fanshu;
+                break;
+              }
+            }
+          }
+        } catch { /* skip */ }
+      }
     }
 
     // オープン立直: +1 翻、 ただし出アガリ [isRon] + 放銃者が非リーチ なら 押し出し本役満 [役満化]
@@ -2386,7 +2558,7 @@ export class Game3 {
       } catch { /* skip */ }
     }
 
-    // チャンタ [全帯么] 4/2 + 純チャンタ [純全帯么] 6/4 [アンミカ独自翻数]
+    // チャンタ [全帯幺] 4/2 + 純チャンタ [純全帯幺] 6/4 [アンミカ独自翻数]
     const fixYakuFan = (oldName: string, newName: string, menzenFan: number, fuluFan: number) => {
       const idx = result.hupai.findIndex((h: any) => h.name.startsWith(oldName));
       if (idx >= 0) {
@@ -2396,8 +2568,9 @@ export class Game3 {
         if (typeof oldFan === 'number' && result.fanshu !== undefined) result.fanshu += (newFan - oldFan);
       }
     };
-    fixYakuFan('全帯么', 'チャンタ', 4, 2);
-    fixYakuFan('純全帯么', '純チャンタ', 6, 4);
+    fixYakuFan('混全帯幺', 'チャンタ', 4, 2);
+    fixYakuFan('純全帯幺', '純チャンタ', 6, 4);
+    fixYakuFan('両立直', 'ダブリー', 4, 4);
 
     // サイコロチャンス記録 [リョー指示: 画面実装は後回し、 記録のみ]
     result.saiKoroChances = result.saiKoroChances ?? [];
@@ -2458,8 +2631,24 @@ export class Game3 {
     const hasGold5p = (goldP + ronGoldP) >= 1;
     const hasGold5s = (goldS + ronGoldS) >= 1;
     if (hasRed5p && hasRed5s && hasGold5p && hasGold5s) {
-      addSai('オールスター', 'オールスター', 70, true);
-      result.hupai.push({ name: 'オールスター [赤金 4 枚揃い]', fanshu: 0 });
+      // 虹牌の枚数でサイコロ回数を増やす (4→5→6→7回)
+      const nijiInHand = countNijiInHand(sp);
+      const ronNiji = isRon && isNijiPai(claimIdentity.raw ?? '') ? 1 : 0;
+      const totalNiji = nijiInHand.total + ronNiji;
+      const saiRollCount = 4 + totalNiji;
+      addSai('オールスター', 'オールスター', 70, true, 1);
+      if (totalNiji === 3) {
+        // オールオールスター: 赤2+金2+虹3 → 77枚オール追加 (全倍率適用)
+        result.hupai.push({ name: 'オールオールスター [赤金虹 全揃い]', fanshu: 0 });
+        this.applyChipOall(player, 77, { label: 'オールオールスター 77枚' });
+      } else {
+        result.hupai.push({ name: `オールスター [赤金 4 枚揃い${totalNiji > 0 ? ` + 虹${totalNiji}` : ''}]`, fanshu: 0 });
+      }
+      if (saiRollCount > 4) {
+        result.saiKoroChances = result.saiKoroChances ?? [];
+        const existing = result.saiKoroChances.find((c: any) => c.awardKey === 'オールスター');
+        if (existing) existing.rollCount = saiRollCount;
+      }
     }
 
     // 北の役満特殊化 [ルール 2-4]: 字一色 / 四喜和 / 国士無双 のみ抜き北を手牌使用可
@@ -2615,8 +2804,8 @@ export class Game3 {
       }
     }
 
-    // 裸単騎
-    if (sp._fulou && sp._fulou.length === 4) {
+    // 裸単騎: 4面子すべてが明副露(非暗槓)の場合のみ [WSA: 暗槓4つに裸単騎を付けない]
+    if (openMeldCount(sp) === 4) {
       result.hupai.push({ name: '裸単騎 [役満]', fanshu: '*' });
       result.damanguan = (result.damanguan ?? 0) + 1;
       result.fanshu = undefined;
@@ -2864,6 +3053,18 @@ export class Game3 {
       result.saiKoroChances = result.saiKoroChances ?? [];
       result.saiKoroChances.push({ name: '白ぽっち即ツモ祝儀 0 枚', baseChip: 70, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
     }
+    // でかぽっち即ツモ → サイコロ base 35
+    const zimoCoreDeka = sp_w?._zimo ? toCorePai(sp_w._zimo) : null;
+    const isDekapochiTsumo =
+      loser === null
+      && this.yifaActive[winner]
+      && this.lizhi.has(winner)
+      && (zimoCoreDeka === 'p1' || zimoCoreDeka === 'p2')
+      && (result.hupai ?? []).some((h: any) => h.name?.includes('でかぽっち'));
+    if (isDekapochiTsumo) {
+      result.saiKoroChances = result.saiKoroChances ?? [];
+      result.saiKoroChances.push({ name: 'でかぽっち', baseChip: 35, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
+    }
     // 3 麻実点を defen / defen3 両方に書き戻し [古い majiang-core の 4 麻 defen を上書き]
     // winnerGain は 逆ぽっち反転時に既に -値 になってる
     result.defen3 = winnerGain;
@@ -3032,7 +3233,7 @@ export class Game3 {
       if (top < 40000) {
         this.state.changbang = 0;
         this.state.jushu = 0;
-        // 返り東 message を残しておく [game.events に]
+        this.state.tongaeshi = true;
         this.events.push({ type: 'pingju', reason: '返り東 [全員 40000 未達]' });
       }
     }
@@ -3082,6 +3283,8 @@ export class Game3 {
     this.fuyuConsumed = { 0: false, 1: false, 2: false };
     this.kinpeiTarget = { 0: null, 1: null, 2: null };
     this.akiUsedCount = { 0: 0, 1: 0, 2: 0 };
+    // WSA: justNukidBei を次局で持ち越さない [北抜き→ツモ和了で flag 残留する path]
+    this.justNukidBei = { 0: false, 1: false, 2: false };
     // chipLedger は半荘累積、 reset しない
   }
 
@@ -3097,6 +3300,10 @@ export class Game3 {
     // フィーバー中は非フィーバー player の副露禁止
     const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => this.feverActive[p]);
     if (someoneFever && !this.feverActive[player]) return [];
+    // WSA: 嶺上残量・カンドラ上限を getKanCandidates と同じ基準で check
+    const rinshanLen = (this.shan as any)._rinshan?.length ?? 0;
+    if (rinshanLen < 1) return [];
+    if (!this.shan.canOpenKanDora) return [];
     // 反時計 2026-05-13 fix
     const diff = (from - player + 3) % 3;
     let dir: string;

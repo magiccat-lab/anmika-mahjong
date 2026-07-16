@@ -132,9 +132,8 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         // の時だけ fever 宣言 + feverDapai を渡して宣言時の待ちを正しく固定する。
         // 成立しない形なら通常リーチに fallback
         const spForFever = s.game.shoupai.get(cur);
-        const zimoPai = typeof spForFever?._zimo === 'string' && spForFever._zimo.length <= 2
-          ? spForFever._zimo.replace(/_$/, '')
-          : null;
+        const rawZimo = typeof spForFever?._zimo === 'string' ? spForFever._zimo.replace(/_$/, '') : null;
+        const zimoPai = rawZimo && rawZimo.length >= 2 ? rawZimo : null;
         let declared = false;
         let declaredFever = false;
         if (zimoPai) {
@@ -189,7 +188,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     //   - 副露直後 [_zimo が mianzi 文字列、 length>2] は kan 不可 [実 tile 無いため skip]
     let didKan = false;
     const _zimoLen = typeof curSp?._zimo === 'string' ? curSp._zimo.length : 0;
-    if (_zimoLen > 0 && _zimoLen <= 2) {
+    if (_zimoLen > 0 && _zimoLen <= 3) {
       try {
         const kanMianzis = s.game.getKanCandidates(cur);
         for (const m of kanMianzis) {
@@ -210,7 +209,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     const best = s.game.pickBestDiscard(cur);
     let dapai: string | null = null;
     if (best) dapai = best;
-    else if (typeof curSp._zimo === 'string' && curSp._zimo.length <= 2 && curSp._zimo !== 'z4') {
+    else if (typeof curSp._zimo === 'string' && curSp._zimo.length <= 3 && curSp._zimo !== 'z4') {
       dapai = curSp._zimo;
     } else {
       try {
@@ -228,6 +227,9 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     // 積まれたら手番を進めず一旦止める。演出が終わると App 側 driver [cutin gate 付き]
     // が再スケジュールするので、演出と局面が同期して見える
     if (s.cutin || (s.cutinQueue?.length ?? 0) > 0) break;
+    // フィーバー中は1ターンずつ止めて UI に見せる
+    const anyFever = ([0, 1, 2] as const).some((p) => s.game.feverActive[p]);
+    if (anyFever) break;
   }
   return { ...s };
 }
@@ -259,6 +261,8 @@ export function autoAdvanceImpl(initial: StoreState): StoreState {
     }
     s = innerDiscard(s, s.lastZimo);
     if ((s as any)._lastDapaiFailed) break;
+    // フィーバー中は1ターンずつ止める
+    if (someoneFever) break;
     safetyCount++;
   }
   return { ...s };

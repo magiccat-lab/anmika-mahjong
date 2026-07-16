@@ -91,6 +91,7 @@ export class RoomAuthority {
       preShuffledPool: init.preShuffledPool,
       qijia: asPlayerId(init.qijia) ?? 0,
     });
+    this.canonicalStore.setOnlineReplayMode(true);
   }
 
   resetMatch(init: RoomAuthorityInit): void {
@@ -157,9 +158,9 @@ export class RoomAuthority {
         case 'pass':
           reason = this.applyPass(actor); break;
         case 'pon':
-          reason = this.applyPon(actor, action.player, action.mianzi); break;
+          reason = this.applyPon(actor, action.player, action.mianzi, action); break;
         case 'damingang':
-          reason = this.applyDamingang(actor, action.player, action.mianzi); break;
+          reason = this.applyDamingang(actor, action.player, action.mianzi, action); break;
         case 'declareKan':
           reason = this.applyDeclareKan(actor, action.mianzi); break;
         case 'nukiBei':
@@ -182,11 +183,9 @@ export class RoomAuthority {
     try {
       this.applyCanonicalAction(actor, action);
       const canonical = this.canonicalState();
-      // Scoring and match-end decisions live in the same reducer clients replay.
-      // Keep the validation engine's public score/round state aligned before the
-      // next command while retaining its independently checked physical hand.
-      this.game.state = structuredClone(canonical.game.state);
-      this.game.chipLedger = structuredClone(canonical.game.chipLedger);
+      // WSA: canonical store の reducer は副作用を伴う (continueFever→draw→discard 等)。
+      // state/chipLedger だけでなく、検証に必要な全フィールドを同期する。
+      this.syncFromCanonical(canonical);
       this.roundEnded = canonical.roundEnded;
       this.lastWinner = canonical.lastWinner as PlayerId | null;
       return null;
@@ -226,6 +225,32 @@ export class RoomAuthority {
       case 'pon': store.pon(action.player ?? actor, action.mianzi); break;
       case 'damingang': store.damingang(action.player ?? actor, action.mianzi); break;
     }
+  }
+
+  private syncFromCanonical(canonical: StoreState): void {
+    const cg = canonical.game;
+    this.game.state = structuredClone(cg.state);
+    this.game.chipLedger = structuredClone(cg.chipLedger);
+    // 山・手牌・河は canonical reducer の副作用で変わりうる
+    this.game.shan = cg.shan;
+    for (const p of PLAYERS) {
+      const sp = cg.shoupai.get(p);
+      if (sp) this.game.shoupai.set(p, sp);
+      const he = cg.he.get(p);
+      if (he) this.game.he.set(p, he);
+    }
+    this.game.lizhi = new Set(cg.lizhi);
+    this.game.openLizhi = new Set(cg.openLizhi);
+    this.game.feverActive = { ...cg.feverActive };
+    this.game.feverTier = { ...cg.feverTier };
+    this.game.justNukidBei = { ...cg.justNukidBei };
+    this.game.nukidora = { ...cg.nukidora };
+    this.game.nukidoraGold = { ...cg.nukidoraGold };
+    this.game.yifaActive = { ...cg.yifaActive };
+    this.game.lingshangActive = { ...cg.lingshangActive };
+    this.game.qianggangPending = cg.qianggangPending;
+    this.game.lastZimoInfo = { ...cg.lastZimoInfo };
+    this.lastZimo = canonical.lastZimo;
   }
 
   private startKyoku(): void {
@@ -311,6 +336,11 @@ export class RoomAuthority {
           return `lizhi: declare failed for player ${actor}`;
         }
       } else {
+        // WSA: 通常リーチの宣言牌が正規候補内か検証 [聴牌を崩す牌で進行不能を防ぐ]
+        const lizhiCandidates = this.game.getLizhiCandidates(actor);
+        if (lizhiCandidates.length > 0 && !lizhiCandidates.includes(toCorePai(pai))) {
+          return `discard: ${pai} is not a valid lizhi candidate`;
+        }
         if (!this.game.declareLizhi({ open: lizhiOpts.open, shuvari: lizhiOpts.shuvari })) {
           return `lizhi: declare failed for player ${actor}`;
         }
@@ -482,7 +512,7 @@ export class RoomAuthority {
     return matched ? null : `pass: player ${actor} has no pending decision`;
   }
 
-  private applyPon(actor: PlayerId, actionPlayer: unknown, mianziValue: unknown): string | null {
+  private applyPon(actor: PlayerId, actionPlayer: unknown, mianziValue: unknown, action: any): string | null {
     if (typeof actionPlayer === 'number' && actionPlayer !== actor) {
       return `pon: action.player ${actionPlayer} != actor ${actor}`;
     }
@@ -491,13 +521,15 @@ export class RoomAuthority {
     const candidates = this.ponCandidates.find((c) => c.player === actor)?.mianzi ?? [];
     const mianzi = typeof mianziValue === 'string' ? mianziValue : candidates[0];
     if (!mianzi || !candidates.includes(mianzi)) return `pon: mianzi ${String(mianziValue)} not in candidates`;
+    // WSA: 正規化した mianzi を action に書き戻し、canonical/relay で undefined にならないようにする
+    action.mianzi = mianzi;
     if (!this.game.declarePon(actor, mianzi, this.lastDapai.player)) return `pon: declare ${mianzi} failed`;
     this.lastZimo = null;
     this.clearPending();
     return null;
   }
 
-  private applyDamingang(actor: PlayerId, actionPlayer: unknown, mianziValue: unknown): string | null {
+  private applyDamingang(actor: PlayerId, actionPlayer: unknown, mianziValue: unknown, action: any): string | null {
     if (typeof actionPlayer === 'number' && actionPlayer !== actor) {
       return `damingang: action.player ${actionPlayer} != actor ${actor}`;
     }
@@ -506,6 +538,8 @@ export class RoomAuthority {
     const candidates = this.kanCandidates.find((c) => c.player === actor)?.mianzi ?? [];
     const mianzi = typeof mianziValue === 'string' ? mianziValue : candidates[0];
     if (!mianzi || !candidates.includes(mianzi)) return `damingang: mianzi ${String(mianziValue)} not in candidates`;
+    // WSA: 正規化した mianzi を action に書き戻す
+    action.mianzi = mianzi;
     const replacement = this.game.declareDamingang(actor, mianzi, this.lastDapai.player);
     if (replacement === null) return `damingang: declare ${mianzi} failed`;
     this.lastZimo = replacement;
@@ -528,9 +562,20 @@ export class RoomAuthority {
       this.game.qianggangPending = true;
       const ronCandidates = PLAYERS.filter((p) => p !== actor && this.game.canRon(p, kakanPai, actor));
       if (ronCandidates.length > 0) {
+        // WSA: CPU-only の槍槓候補は通常ロンと同様に即時確定 [human 反応待ちに残さない]
+        const humanRon = ronCandidates.filter((p) => !this.cpuSeats.has(p));
+        const cpuRon = ronCandidates.filter((p) => this.cpuSeats.has(p));
+        if (humanRon.length === 0 && cpuRon.length > 0) {
+          this.ronDeclaredPlayers = [...cpuRon];
+          this.lastWinner = chooseWinnerByOya(this.game, cpuRon);
+          this.roundEnded = true;
+          this.game.qianggangPending = false;
+          return null;
+        }
         this.pendingQianggang = { player: actor, mianzi, kakanPai };
         this.awaitingRonDecision = true;
-        this.ronCandidates = ronCandidates;
+        this.ronCandidates = humanRon;
+        this.deferredCpuRon = humanRon.length > 0 ? cpuRon : [];
         this.ronPassedPlayers = [];
         this.ronDeclaredPlayers = [];
         return null;

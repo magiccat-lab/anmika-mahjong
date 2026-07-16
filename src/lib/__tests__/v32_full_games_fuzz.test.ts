@@ -23,7 +23,7 @@ describe('V32 100 試合 fuzz [全 CPU 完走 throw 検出]', () => {
 
     for (let gi = 0; gi < N_GAMES; gi++) {
       game.reset();
-      game.toggleCpu(0); game.toggleCpu(1); game.toggleCpu(2);
+      game.setCpuSeats([0, 1, 2]);
       let steps = 0;
       let rounds = 0;
       try {
@@ -42,6 +42,9 @@ describe('V32 100 試合 fuzz [全 CPU 完走 throw 検出]', () => {
             totalRounds++;
             continue;
           }
+          if (s.cutin || (s.cutinQueue?.length ?? 0) > 0) { game.finishCutin(s.cutin?.ts ?? 0); game.playNextCutin(); continue; }
+          if (s.pendingSaiKoro) { game.advanceSaiKoro(); continue; }
+          if (!s.cpuWinAck) { game.ackCpuWin(); continue; }
           if (s.pendingFeverContinue) { (game as any).continueFever?.(); continue; }
           if (s.pendingFuyu) { (game as any).resolveFuyu?.('pass'); continue; }
           if (s.pendingKinpei) { (game as any).cancelKinpei?.(); continue; }
@@ -96,6 +99,7 @@ describe('V32 100 試合 fuzz [全 CPU 完走 throw 検出]', () => {
 
     expect(throws).toBe(0);
     expect(errors.filter((e) => e.startsWith('[bad-msg]'))).toEqual([]);
+    expect(errors.filter((e) => e.startsWith('[hang]'))).toEqual([]);
     expect(gamesDone).toBe(N_GAMES);
   }, 600_000);
 });
