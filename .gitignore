@@ -40,3 +40,4 @@ server/.secrets.env
 server/run/
 server/data/
 server/.venv/
+.venv/
