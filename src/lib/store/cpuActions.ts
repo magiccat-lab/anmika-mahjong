@@ -4,7 +4,17 @@
 // closure を切るため innerDiscard / formatHuleResult を store.ts から import
 
 import type { StoreState } from '../store';
-import { innerDiscard, formatHuleResult, triggerSaiKoroIfAny, applyPingjuTransition, enqueueCutinState } from '../store';
+import {
+  innerDiscard,
+  formatHuleResult,
+  triggerSaiKoroIfAny,
+  applyPingjuTransition,
+  enqueueCutinState,
+  beginNukiBei,
+  confirmPendingFeverBeforeDraw,
+  enterFuyuKamiPochiStage,
+  resolvePreSettlementPochiChoices,
+} from '../store';
 import { toCorePai } from '../helpers';
 import { enterFeverContinueStage } from './winPipeline';
 
@@ -15,9 +25,12 @@ function hasBlockingDecision(s: StoreState): boolean {
     || s.awaitingFulou
     || s.pendingQianggang !== null
     || s.pendingFuyu !== null
+    || s.pendingKamiPochi !== null
+    || s.pendingPochiSwap !== null
     || s.pendingKinpei !== null
     || s.pendingSaiKoro !== null
     || s.pendingFeverContinue !== null
+    || s.pendingNukiBei != null
     || s.lizhiPending !== null;
 }
 
@@ -41,6 +54,8 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         && resolvedHuapai.length > 0) {
         s.game.restoreSnapshot();
         s.game.autoResolveKinpei(cur as any, resolvedHuapai);
+        // Subsequent pochi-choice rewinds must retain the chosen Kinpei target.
+        s.game.saveSnapshot();
         result = s.game.hule(cur);
       }
       // R8 P1 #9 fix: hule() が null [canTsumo の false positive] なら和了確定させない、
@@ -50,10 +65,24 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         s.game.restoreSnapshot();
         // 続行 = ループ脱出せず 通常 cpuStep へ進む [break しない]
       } else {
+        const choice = resolvePreSettlementPochiChoices(
+          s,
+          result,
+          { winner: cur, isRon: false, ronfrom: null },
+          () => s.game.hule(cur),
+        );
+        if (choice.pending) break;
+        result = choice.result;
+        if (!result) {
+          s.message = `[CPU] player ${cur} 神ぽっち選択後の再計算失敗`;
+          break;
+        }
         s.game.applyHule(result, cur, null);
         s.message = `🎉 [CPU] player ${cur} ツモ和了！ ${formatHuleResult(result)}`;
         s.lastHuleResult = result;
         s.lastWinner = cur;
+        s.ronResults = [];
+        if (enterFuyuKamiPochiStage(s, { winner: cur, isRon: false, ronfrom: null })) break;
         s = enqueueCutinState(s, 'tsumo', cur as 0 | 1 | 2);
         s = triggerSaiKoroIfAny(s, result, cur);
         // [2026-07-16 リョー指示] CPU 和了のサイコロは人間の確認 [ackCpuWin] まで自動進行しない
@@ -72,9 +101,12 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       }
     }
     if (s.lastZimo && toCorePai(s.lastZimo) === 'z4' && s.game.canNukiBei(cur)) {
-      const replacement = s.game.declareNukiBei(cur);
-      s.lastZimo = replacement ?? null;
-      if (replacement == null) {
+      const drawnNorth = s.lastZimo;
+      s = beginNukiBei(s, cur, {
+        gold: drawnNorth === 'gN' || s.game.shan.lastZimoGold,
+      });
+      if (s.awaitingRonDecision) break;
+      if (s.lastZimo == null) {
         // R5 P1 #5 fix: applyPingjuTransition で 罰符 / 流し役満 / snapshot を 通常流局と揃える
         s = applyPingjuTransition(s, `🌀 流局 [CPU 北抜きで王牌枯渇]`);
         break;
@@ -95,63 +127,32 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       continue;
     }
     if (s.game.canLizhi(cur)) {
-      // CPU リーチ 戦略性 [リョー指示 2026-05-14 CPU 打牌精度向上]:
-      //   - 待ち牌が 山 + 他家手 で 0 枚 [枯渇] なら 見送り [リーチ供託の無駄打ち回避]
-      //   - 待ち 1 枚以上 残ってる時のみ宣言
-      const ting = s.game.getTingpaiList(cur);
-      let totalRemaining = 0;
-      for (const t of ting) {
-        // 単純化: 山 paishu の中に対象牌が含まれる可能性、 厳密 count は重いので
-        // 全 player 手牌 + 河 で見えた枚数を差し引いて推定
-        const base = toCorePai(t.replace(/[\+=\-_*]/g, ''));
-        const s_ = base[0]; const n_ = base[1] === '0' ? 5 : parseInt(base[1]);
-        if (!s_ || !Number.isFinite(n_)) continue;
-        let visible = 0;
-        for (const p of [0, 1, 2] as const) {
-          const sp = s.game.shoupai.get(p);
-          if (!sp) continue;
-          visible += (sp._bingpai?.[s_]?.[n_] ?? 0);
-          const he = s.game.he.get(p);
-          for (const d of (he?._pai ?? [])) {
-            const dStripped = toCorePai((d as string).replace(/[\+=\-_*]/g, ''));
-            if (dStripped === base) visible++;
-          }
+      // この卓では通常の面前ダマ和了は禁止。残り山やぽっち倍率を理由に
+      // リーチを見送ると、CPUだけが自ら和了不能な状態を選んでしまう。
+      // また、他家の伏せ牌を数えて待ち残数を判断するのはオンラインの
+      // 公平性にも反するため、リーチ可能なら公開情報に依存せず宣言する。
+      const spForFever = s.game.shoupai.get(cur);
+      const rawZimo = typeof spForFever?._zimo === 'string' ? spForFever._zimo.replace(/_$/, '') : null;
+      const zimoPai = rawZimo && rawZimo.length <= 3 ? rawZimo : null;
+      let declared = false;
+      let declaredFever = false;
+      if (zimoPai) {
+        const feverMap = s.game.feverCandidatesByDapai(cur);
+        const fc = feverMap.get(zimoPai);
+        if (fc) {
+          declared = s.game.declareLizhi({ fever: true, feverCheck: fc, feverDapai: zimoPai });
+          declaredFever = declared;
         }
-        // 各牌 4 枚 [z5 は 4 色合計 4 枚]、 max は常に 4 で同じ
-        totalRemaining += Math.max(0, 4 - visible);
       }
-      // ダマ判断 [2026-05-21 ゆーま 自走 CPU 教育]:
-      //   - 自家 pochiMultiplier abs >= 4 [既に高倍率]: ダマで リーチ棒 1000 損失避ける
-      //   - 残山 <=4 [終盤]: 流局リスク高、 リーチ棒投入 negative EV
-      const selfPochiAbs = Math.abs(s.game.pochiMultiplier?.[cur]?.chip ?? 1);
-      const remainingWall = s.game.shan?.paishu ?? 0;
-      const damaPreferred = selfPochiAbs >= 4 || remainingWall <= 4;
-      if (totalRemaining > 0 && !damaPreferred) {
-        // [2026-07-16 リョー指示] CPU にもフィーバーリーチの選択肢を持たせる。
-        // リーチ後の打牌はツモ切りなので、ツモ牌がフィーバー成立牌 [feverCandidatesByDapai]
-        // の時だけ fever 宣言 + feverDapai を渡して宣言時の待ちを正しく固定する。
-        // 成立しない形なら通常リーチに fallback
-        const spForFever = s.game.shoupai.get(cur);
-        const rawZimo = typeof spForFever?._zimo === 'string' ? spForFever._zimo.replace(/_$/, '') : null;
-        const zimoPai = rawZimo && rawZimo.length <= 3 ? rawZimo : null;
-        let declared = false;
-        let declaredFever = false;
-        if (zimoPai) {
-          const feverMap = s.game.feverCandidatesByDapai(cur);
-          const fc = feverMap.get(zimoPai);
-          if (fc) {
-            declared = s.game.declareLizhi({ fever: true, feverCheck: fc, feverDapai: zimoPai });
-            declaredFever = declared;
-          }
-        }
-        if (!declared) declared = s.game.declareLizhi({});
-        if (declared) {
-          s = enqueueCutinState(s, declaredFever ? 'fever' : 'reach', cur as 0 | 1 | 2);
-        }
+      if (!declared) declared = s.game.declareLizhi({});
+      if (declared) {
+        s = enqueueCutinState(s, declaredFever ? 'fever' : 'reach', cur as 0 | 1 | 2);
       }
     }
     const curSp = s.game.shoupai.get(cur);
     if (curSp?._zimo == null) {
+      s = confirmPendingFeverBeforeDraw(s);
+      if (s.pendingPingju || s.roundEnded) break;
       if (s.game.shan.paishu > 0) {
         try {
           const z = s.game.zimo();
@@ -171,12 +172,12 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     // ツモ直後の北は loop 先頭の lastZimo 分岐が処理する。フィーバー中の
     // 「ツモ牌のみ可」等の制限は canNukiBei が内部で見る
     if (s.game.canNukiBei(cur)) {
-      const replacement = s.game.declareNukiBei(cur);
-      if (replacement == null) {
+      s = beginNukiBei(s, cur);
+      if (s.awaitingRonDecision) break;
+      if (s.lastZimo == null) {
         s = applyPingjuTransition(s, `🌀 流局 [CPU 北抜きで王牌枯渇]`);
         break;
       }
-      s.lastZimo = replacement;
       s.message = `[CPU 北抜き] player ${cur}、 代替ツモ`;
       safety++;
       continue;
@@ -192,7 +193,8 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       try {
         const kanMianzis = s.game.getKanCandidates(cur);
         for (const m of kanMianzis) {
-          const head = m.slice(0, 2);
+          // m is a core mianzi string, not an expanded physical tile name.
+          const head = `${m[0]}${m[1]}`;
           if (head === 'z5' || head === 'z6' || head === 'z7') {
             const repl = s.game.declareKan(cur, m);
             if (repl) {
@@ -249,9 +251,12 @@ export function autoAdvanceImpl(initial: StoreState): StoreState {
     if (s.game.canTsumo(cur)) break;
     const someoneFever = ([0, 1, 2] as const).some((p) => s.game.feverActive[p]);
     if ((someoneFever || s.game.lizhi.has(cur)) && s.lastZimo && toCorePai(s.lastZimo) === 'z4' && s.game.canNukiBei(cur)) {
-      const replacement = s.game.declareNukiBei(cur);
-      s.lastZimo = replacement ?? null;
-      if (replacement == null) {
+      const drawnNorth = s.lastZimo;
+      s = beginNukiBei(s, cur, {
+        gold: drawnNorth === 'gN' || s.game.shan.lastZimoGold,
+      });
+      if (s.awaitingRonDecision) break;
+      if (s.lastZimo == null) {
         // R5 P1 #5 fix: applyPingjuTransition で 通常流局と揃える
         s = applyPingjuTransition(s, `🌀 流局 [自動進行で王牌枯渇]`);
         break;

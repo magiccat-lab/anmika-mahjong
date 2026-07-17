@@ -4,7 +4,7 @@
   // 仕様: 出目宣言 [順序なし 15 通り] → サイコロ 2 個振り 4 回 [ゾロ目はリプレイ] → 結果確認 → 次へ
   export let winner: number;
   export let canOperate: boolean = true;  // false なら read-only [オンラインで上がり者以外、 2026-05-13]
-  export let chances: Array<{ name: string; baseChip: number; shuvariApplicable: boolean; count: number; plusMinus: '+' | '-' }>;
+  export let chances: Array<{ name: string; baseChip: number; shuvariApplicable: boolean; alwaysShuvari?: boolean; rollCount?: number; count: number; plusMinus: '+' | '-' }>;
   /** chip 倍率 [pochi / shuvari / fever 合成]、 表示に反映 */
   export let chipMultiplier: number = 1;
   export let currentIdx: number;
@@ -22,7 +22,7 @@
   $: chance = chances[currentIdx];
   $: nonZoroCount = rolls.filter((r) => !r.zoro).length;
   $: hits = rolls.filter((r) => r.hit).length;
-  $: rollsLeft = 4 - nonZoroCount;
+  $: rollsLeft = Math.max(0, (chance?.rollCount ?? 4) - nonZoroCount);
 
   // 順序なし 15 通り [(1,2), (1,3), ... (5,6)] 生成
   const allCombos: Array<[number, number]> = [];
@@ -115,7 +115,7 @@
     <div class="title">🎲 サイコロチャンス [player {winner}] - {chance.name}</div>
     <div class="info">
       {currentIdx + 1} / {chances.length} 件目 | base {chance.baseChip} × {chance.count} 回 × 倍率 {chipMultiplier} = {chance.baseChip * chance.count * chipMultiplier} オール / hit
-      {#if !chance.shuvariApplicable} <span class="non-shuvari">[シュバ非適用]</span>{/if}
+      {#if chance.alwaysShuvari}<span>[常時シュバサイ]</span>{:else if !chance.shuvariApplicable}<span class="non-shuvari">[シュバ非適用]</span>{/if}
     </div>
 
     {#if !selectedCombo}
@@ -156,7 +156,7 @@
           {#if (summary?.zoroBonusTotal ?? 0) > 0}
             <div class="result-row">🎲 シュバゾロ連続特典: <strong>+{summary?.zoroBonusTotal ?? 0} オール</strong></div>
           {/if}
-          {#if !chance.shuvariApplicable}
+          {#if !chance.shuvariApplicable && !chance.alwaysShuvari}
             <div class="result-row note">[シュバ非適用]</div>
           {/if}
         </div>

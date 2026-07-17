@@ -3,15 +3,77 @@
 // 純関数 [paifu → StoreState | null]、 store.ts は update() で wrap して呼ぶ
 import { Game3, buildShoupai, normalizePochiMultiplier } from '../game3';
 import { cloneCanonical } from '../canonicalJson';
+import { diffInventory, expectedInventory } from '../game3/inventory';
+import { ANMIKA_EXPANDED_PAI, isAnmikaExpandedPai, toCorePai } from '../helpers';
 import type { StoreState } from '../store';
 import type { PlayerId } from '../types';
 
 const PLAYERS = [0, 1, 2] as const;
 export const PAIFU_SCHEMA_VERSION = 3 as const;
 
+const PHYSICAL_TILE_NAMES = new Set(Object.keys(expectedInventory()));
+const isRecord = (value: unknown): value is Record<string, any> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+const isNonNegativeInt = (value: unknown): value is number =>
+  Number.isInteger(value) && Number(value) >= 0;
+const isPhysicalTile = (value: unknown): value is string =>
+  typeof value === 'string' && PHYSICAL_TILE_NAMES.has(value);
+const isPhysicalTileArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every(isPhysicalTile);
+
+function validateSerializedHand(data: any): boolean {
+  if (!isRecord(data) || !isRecord(data.bingpai)) return false;
+  const bp = data.bingpai;
+  if (!isNonNegativeInt(bp._)) return false;
+  for (const [suit, minLength] of [['m', 10], ['p', 10], ['s', 10], ['z', 8]] as const) {
+    if (!Array.isArray(bp[suit]) || bp[suit].length < minLength) return false;
+    if (!bp[suit].every(isNonNegativeInt)) return false;
+  }
+  if (bp.anmika !== null && bp.anmika !== undefined) {
+    if (!isRecord(bp.anmika)) return false;
+    for (const key of ANMIKA_EXPANDED_PAI) {
+      const count = bp.anmika[key] ?? 0;
+      // Every expanded face is a unique physical tile in the catalog.
+      if (!isNonNegativeInt(count) || count > 1) return false;
+    }
+    if (Object.keys(bp.anmika).some((key) => !isAnmikaExpandedPai(key))) return false;
+  }
+  if (!Array.isArray(data.fulou) || !data.fulou.every((m: unknown) =>
+    typeof m === 'string' && /^[mpsz][0-9]{3,4}[+\-=]?[*_]*$/.test(m))) return false;
+  if (data.zimo !== null && data.zimo !== undefined && typeof data.zimo !== 'string') return false;
+  if (data.anmikaZimo !== null && data.anmikaZimo !== undefined && !isAnmikaExpandedPai(data.anmikaZimo)) return false;
+  if (data.anmikaZimo && (!data.zimo || toCorePai(data.anmikaZimo) !== String(data.zimo).replace(/[_*]$/, ''))) return false;
+  if (!Array.isArray(data.anmikaFulou ?? []) || !Array.isArray(data.anmikaFulouPhysical ?? [])) return false;
+  for (const entry of data.anmikaFulouPhysical ?? []) {
+    if (!isRecord(entry) || !Array.isArray(entry.consumed) || !entry.consumed.every(isAnmikaExpandedPai)) return false;
+  }
+  return true;
+}
+
+function validateV3Envelope(paifu: any): boolean {
+  if (!isRecord(paifu) || !isRecord(paifu.game) || !isRecord(paifu.store)) return false;
+  const shan = paifu.game.shan;
+  if (!isRecord(shan)) return false;
+  for (const key of ['initialPai', 'pai', 'rinshan', 'baopai', 'fuyuRevealed'] as const) {
+    if (!isPhysicalTileArray(shan[key] ?? [])) return false;
+  }
+  if (shan.fubaopai !== null && !isPhysicalTileArray(shan.fubaopai ?? [])) return false;
+  if (!Array.isArray(paifu.game.shoupai) || paifu.game.shoupai.length !== 3
+    || !paifu.game.shoupai.every(validateSerializedHand)) return false;
+  if (!Array.isArray(paifu.game.he) || paifu.game.he.length !== 3
+    || !paifu.game.he.every((river: unknown) => Array.isArray(river)
+      && river.every((p: unknown) => typeof p === 'string' && /^[mpsz][0-9][+\-=*_]*$/.test(p)))) return false;
+  const state = paifu.game.state;
+  if (!isRecord(state) || ![0, 1, 2].includes(state.qijia) || ![0, 1, 2].includes(state.lunban)) return false;
+  if (!isRecord(state.defen)
+    || !PLAYERS.every((player) => Number.isFinite(state.defen[player]))) return false;
+  if (paifu.store.lastZimo !== null && paifu.store.lastZimo !== undefined && !isPhysicalTile(paifu.store.lastZimo)) return false;
+  return true;
+}
+
 function hasPendingDecision(state: Pick<StoreState,
   'awaitingRonDecision' | 'awaitingFulou' | 'lizhiPending' | 'pendingKinpei' |
-  'pendingFuyu' | 'pendingFeverContinue' | 'pendingPingju' | 'pendingQianggang' |
+  'pendingFuyu' | 'pendingKamiPochi' | 'pendingPochiSwap' | 'pendingFeverContinue' | 'pendingPingju' | 'pendingQianggang' |
   'pendingSaiKoro'
 >): boolean {
   return state.awaitingRonDecision
@@ -19,6 +81,8 @@ function hasPendingDecision(state: Pick<StoreState,
     || state.lizhiPending !== null
     || state.pendingKinpei !== null
     || state.pendingFuyu !== null
+    || state.pendingKamiPochi !== null
+    || state.pendingPochiSwap !== null
     || state.pendingFeverContinue !== null
     || state.pendingPingju
     || state.pendingQianggang !== null
@@ -124,13 +188,17 @@ export function buildCanonicalPaifuSnapshot(state: StoreState, timestamp = new D
         discardLog: g.discardLog,
         justNukidBei: g.justNukidBei,
         lizhi: Array.from(g.lizhi),
+        doubleLizhi: Array.from(g.doubleLizhi),
         openLizhi: Array.from(g.openLizhi),
         feverActive: g.feverActive,
         feverDeclareTing: g.feverDeclareTing,
         feverTier: g.feverTier,
         feverDeclareDapaiPlayer: g.feverDeclareDapaiPlayer,
+        feverPendingShuvari: g.feverPendingShuvari,
+        feverSaiAwarded: g.feverSaiAwarded,
         shuvariActive: g.shuvariActive,
         shuvariUsed: g.shuvariUsed,
+        lateShuvariWindow: g.lateShuvariWindow,
         tobiChipPaid: g.tobiChipPaid,
       },
     },
@@ -148,6 +216,7 @@ export function buildCanonicalPaifuSnapshot(state: StoreState, timestamp = new D
 
 function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreState | null {
   if (paifu.schemaVersion !== PAIFU_SCHEMA_VERSION || !paifu.game || !paifu.store) return null;
+  if (!validateV3Envelope(paifu)) return null;
   if (paifu.safePoint?.kind !== 'turn-start' && paifu.safePoint?.kind !== 'match-ended') return null;
   const terminal = paifu.safePoint.kind === 'match-ended';
   if (terminal !== !!paifu.game.state?.finished || terminal !== !!paifu.store.roundEnded) return null;
@@ -220,7 +289,9 @@ function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreSt
     'pochiMultiplier', 'pochiPaymentMode', 'pochiChipReverse', 'pochiChipDouble',
     'chipLedger', 'haruActive', 'fuyuSkip', 'fuyuConsumed', 'akiUsedCount',
     'kinpeiTarget', 'chipBreakdown', 'discardLog', 'justNukidBei', 'feverActive',
-    'feverDeclareTing', 'feverTier', 'shuvariActive', 'shuvariUsed',
+    'feverDeclareTing', 'feverTier', 'feverPendingShuvari', 'feverSaiAwarded',
+    'shuvariActive', 'shuvariUsed',
+    'lateShuvariWindow',
   ];
   for (const field of recordFields) {
     if (fields[field] !== undefined) (ng as any)[field] = cloneCanonical(fields[field]);
@@ -228,9 +299,22 @@ function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreSt
   ng.restoreFirstTurnState(fields.firstTurnState);
   ng.qianggangPending = !!fields.qianggangPending;
   ng.lizhi = new Set(fields.lizhi ?? []);
+  ng.doubleLizhi = new Set(fields.doubleLizhi ?? []);
   ng.openLizhi = new Set(fields.openLizhi ?? []);
   ng.feverDeclareDapaiPlayer = fields.feverDeclareDapaiPlayer ?? null;
   ng.tobiChipPaid = !!fields.tobiChipPaid;
+
+  // A portable paifu must describe exactly one physical copy of every tile.
+  // This catches duplicated wall/hand tiles, negative or inflated counters,
+  // and expanded/core metadata mismatches before the state becomes playable.
+  if (diffInventory(ng).length > 0) return null;
+
+  if (!terminal) {
+    const current = ng.lunbanToPlayerId(ng.state.lunban);
+    const sp = ng.shoupai.get(current);
+    const rawZimo = sp?._anmikaZimo ?? sp?._zimo?.replace(/[_*]$/, '') ?? null;
+    if (!rawZimo || toCorePai(rawZimo) !== toCorePai(paifu.store.lastZimo)) return null;
+  }
 
   const cpu = paifu.store.cpu ?? preservedCpu;
   return {
@@ -254,9 +338,12 @@ function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreSt
     lizhiPending: null,
     pendingKinpei: null,
     pendingFuyu: null,
+    pendingKamiPochi: null,
+    pendingPochiSwap: null,
     pendingFeverContinue: null,
     pendingPingju: false,
     pendingQianggang: null,
+    pendingNukiBei: null,
     pendingSaiKoro: null,
     cpuWinAck: true,
     stamps: { 0: null, 1: null, 2: null },
@@ -335,7 +422,9 @@ export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, b
   shan._initialPai = [...(paifu.shan.initialPai ?? [])];
   shan._gold = new Array(shan._pai.length).fill(false);
   shan._baopai = [...(paifu.shan.baopai ?? [])];
-  shan._fubaopai = [...(paifu.shan.fubaopai ?? [])];
+  shan._fubaopai = paifu.shan.fubaopai === null
+    ? null
+    : [...(paifu.shan.fubaopai ?? [])];
   // 古い v2 牌譜には rinshan が無い。Game3 初期化時のランダム _rinshan を残すと
   // 復元後のカンで別山を引くので、未保存時も空で上書きする。
   shan._rinshan = [...(paifu.shan.rinshan ?? [])];
@@ -345,6 +434,9 @@ export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, b
   shan.lastZimoGold = !!paifu.shan.lastZimoGold;
   shan.lastZimoPochi = paifu.shan.lastZimoPochi ?? null;
   shan.rinshanUsed = paifu.shan.rinshanUsed ?? 0;
+  // v2 牌譜でも既に開けた槓ドラ枚数を引き継ぐ。落とすと復元後だけ
+  // 5回目以降のカンを許したり、残り槓回数の表示が巻き戻ったりする。
+  shan.kanDoraCount = paifu.shan.kanDoraCount ?? 0;
   ng.state = { ...paifu.state };
   for (const pl of [0, 1, 2] as const) {
     const sd = paifu.shoupai?.[pl];
@@ -459,9 +551,12 @@ export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, b
     lizhiPending: null,
     pendingKinpei: null,
     pendingFuyu: null,
+    pendingKamiPochi: null,
+    pendingPochiSwap: null,
     pendingFeverContinue: null,
     pendingPingju: false,
     pendingQianggang: null,
+    pendingNukiBei: null,
     pendingSaiKoro: null,
     cpuWinAck: true,
     stamps: { 0: null, 1: null, 2: null },

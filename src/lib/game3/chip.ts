@@ -19,7 +19,7 @@ export type ChipBreakdownEntry = {
 export type ChipState = {
   shuvariActive: Record<PlayerId, boolean>;
   feverActive: Record<PlayerId, boolean>;
-  feverTier: Record<PlayerId, 1 | 2 | 3>;
+  feverTier: Record<PlayerId, 1 | 2 | 3 | 4>;
   pochiMultiplier: Record<PlayerId, PochiMultiplier | number>;
   chipLedger: Record<PlayerId, number>;
   chipBreakdown: ChipBreakdownEntry[];
@@ -41,7 +41,7 @@ function pochiChipMultiplier(v: unknown): number {
   return 1;
 }
 
-/** 倍率合成 [シュバ ×2 × フィーバー [1/2/4] × ぽっち pochiMultiplier]
+/** 倍率合成 [シュバ ×2 × フィーバー [1/2/4/8] × ぽっち pochiMultiplier]
  *  bypass* で個別 skip 可 */
 export function computeChipMultiplier(
   st: ChipState,
@@ -62,7 +62,7 @@ export function computeChipMultiplierDetail(
   if (st.shuvariActive[target] && !opts.bypassShuvari) { m *= 2; parts.push('シュバ×2'); }
   if (st.feverActive[target] && !opts.bypassFever) {
     const tier = st.feverTier[target] ?? 1;
-    const fm = tier === 3 ? 4 : tier === 2 ? 2 : 1;
+    const fm = tier === 4 ? 8 : tier === 3 ? 4 : tier === 2 ? 2 : 1;
     m *= fm; parts.push(`フィーバー tier${tier}×${fm}`);
   }
   // [2026-05-21 リョー仕様] 通常 ron は ぽっち倍率 bypass、 ただし target が

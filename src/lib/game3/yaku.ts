@@ -8,21 +8,27 @@ import { toCorePai } from '../helpers';
  *  2. アガリ牌が z5 [白ぽ swap で m8 化、 山には m8 ナシ]
  *  3. 手牌に m7 / m9 が各 1 枚以上
  *  4. m8 swap で m789 順子を含むアガリ形になる解があれば確定 */
-export function isKanpaman(shoupai: any, agariPai: string | null): boolean {
+export function isKanpaman(shoupai: any, agariPai: string | null, substituteFrom: string = 'z5'): boolean {
   if (!shoupai) return false;
   if (shoupai._fulou && shoupai._fulou.length > 0) return false;
-  if (!agariPai || toCorePai(agariPai) !== 'z5') return false;
+  const singleTileCore = (pai: string): string => toCorePai(String(pai).replace(/[\+=\-_*]/g, ''));
+  const fromCore = singleTileCore(substituteFrom);
+  if (!agariPai || singleTileCore(agariPai) !== fromCore) return false;
   if ((shoupai._bingpai.m[7] ?? 0) < 1) return false;
   if ((shoupai._bingpai.m[9] ?? 0) < 1) return false;
   try {
     const spClone = shoupai.clone();
-    const agariAlreadyInHand = spClone._zimo && toCorePai(spClone._zimo) === 'z5';
+    const agariAlreadyInHand = typeof spClone._zimo === 'string'
+      && spClone._zimo.length <= 3
+      && singleTileCore(spClone._zimo) === fromCore;
     if (agariAlreadyInHand) {
-      // ツモ時は z5 がすでに手牌へ加算済みなので、その実牌だけを m8 に置換する。
-      spClone._bingpai.z[5] -= 1;
+      // ツモ時は元のぽっち牌が手牌へ加算済みなので、その実牌だけを m8 に置換する。
+      const fromSuit = fromCore[0];
+      const fromNum = Number(fromCore[1] === '0' ? 5 : fromCore[1]);
+      if (!spClone._bingpai[fromSuit] || (spClone._bingpai[fromSuit][fromNum] ?? 0) < 1) return false;
+      spClone._bingpai[fromSuit][fromNum] -= 1;
     }
-    // ロン時の shoupai は和了牌を含まない13枚。手牌内の別の z5 は残したまま、
-    // 今回の物理ロン牌 z5 を m8 として1枚加える。
+    // ロン時の shoupai は和了牌を含まない13枚。今回の正ぽっちを m8 として1枚加える。
     spClone._bingpai.m[8] = (spClone._bingpai.m[8] ?? 0) + 1;
     spClone._zimo = 'm8';
     const decompositions = Majiang.Util.hule_mianzi(spClone);

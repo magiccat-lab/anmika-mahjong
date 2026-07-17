@@ -13,7 +13,7 @@ describe('fuyu kami-pochi target selection', () => {
     return g;
   }
 
-  it('counts huapai as the positive z5 target during fuyu reveal', () => {
+  it('pauses for a positive pochi and accepts any legal tile including hua', () => {
     const g = new Game3();
     g.qipai();
     const winner = 0 as PlayerId;
@@ -21,8 +21,17 @@ describe('fuyu kami-pochi target selection', () => {
     g.huapai[winner] = ['f2', 'f2'];
     (g.shan as any)._pai = ['z5b'];
 
-    g.applyFuyuChip(winner, null, 1, false);
+    const first = g.applyFuyuChip(winner, null, 1, false);
+    const pending = g.getPendingFuyuKamiPochi(winner);
 
+    expect(first.status).toBe('pending');
+    expect(pending?.candidates).toContain('f2');
+    expect(pending?.candidates).toContain('m7');
+    expect(pending?.candidates).not.toContain('m1');
+    expect(g.chipLedger[winner]).toBe(0);
+
+    const completed = g.resumeFuyuKamiPochi(winner, pending!.occurrenceKey!, 'f2');
+    expect(completed?.status).toBe('complete');
     expect((g.shan as any)._fuyuRevealed).toEqual(['z5b']);
     expect(g.chipLedger[winner]).toBe(12);
     expect(g.chipLedger[1]).toBe(-6);
@@ -34,7 +43,9 @@ describe('fuyu kami-pochi target selection', () => {
       const g = buildFuyuGame([hua], ['z5b']);
       const winner = 0 as PlayerId;
 
-      g.applyFuyuChip(winner, null, 1, false);
+      expect(g.applyFuyuChip(winner, null, 1, false).status).toBe('pending');
+      const pending = g.getPendingFuyuKamiPochi(winner)!;
+      expect(g.resumeFuyuKamiPochi(winner, pending.occurrenceKey!, hua)?.status).toBe('complete');
 
       const fuyuEntry = g.chipBreakdown.find((e) => e.label?.startsWith('冬'));
       expect(fuyuEntry?.base).toBe(4);
@@ -44,16 +55,21 @@ describe('fuyu kami-pochi target selection', () => {
     });
   }
 
-  it('counts two natural hua plus two kami-pochi swap-produced hua as four total hua chips', () => {
+  it('pauses independently for consecutive positive pochi reveals', () => {
     const g = buildFuyuGame(['f1', 'f2'], ['z5g', 'z5b']);
     const winner = 0 as PlayerId;
 
-    g.applyFuyuChip(winner, null, 1, false);
+    expect(g.applyFuyuChip(winner, null, 1, false).status).toBe('pending');
+    const first = g.getPendingFuyuKamiPochi(winner)!;
+    expect(g.resumeFuyuKamiPochi(winner, first.occurrenceKey!, 'f1')?.status).toBe('pending');
+    const second = g.getPendingFuyuKamiPochi(winner)!;
+    expect(second.occurrenceKey).not.toBe(first.occurrenceKey);
+    expect(g.resumeFuyuKamiPochi(winner, second.occurrenceKey!, 'f2')?.status).toBe('complete');
 
     const fuyuEntry = g.chipBreakdown.find((e) => e.label?.startsWith('冬'));
-    expect(fuyuEntry?.base).toBe(8);
-    expect(g.chipLedger[winner]).toBe(16);
-    expect(g.chipLedger[1]).toBe(-8);
-    expect(g.chipLedger[2]).toBe(-8);
+    expect(fuyuEntry?.base).toBe(12);
+    expect(g.chipLedger[winner]).toBe(24);
+    expect(g.chipLedger[1]).toBe(-12);
+    expect(g.chipLedger[2]).toBe(-12);
   });
 });

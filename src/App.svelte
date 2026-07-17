@@ -141,6 +141,11 @@
       pochiRevealQueue = [];
     }
     const zimoEvents = $game.game.events.filter((e: any) => e.type === 'zimo') as Array<{ type: 'zimo'; player: 0|1|2; pai: string }>;
+    if (zimoEvents.length < lastSeenZimoEventCount) {
+      lastSeenZimoEventCount = 0;
+      pochiRevealQueue = [];
+      pochiReveal = null;
+    }
     if (zimoEvents.length > lastSeenZimoEventCount) {
       for (let i = lastSeenZimoEventCount; i < zimoEvents.length; i++) {
         const ev = zimoEvents[i];
@@ -170,6 +175,8 @@
     && !$game.pendingFeverContinue
     && !$game.pendingFuyu
     && !$game.pendingKinpei
+    && !$game.pendingKamiPochi
+    && !$game.pendingPochiSwap
     && $game.game.shoupai.get(currentPlayer)?._zimo == null;
   $: progressControlsBlocked = $game.roundEnded
     || $game.pendingPingju
@@ -179,6 +186,8 @@
     || $game.pendingFeverContinue !== null
     || $game.pendingFuyu !== null
     || $game.pendingKinpei !== null
+    || $game.pendingKamiPochi !== null
+    || $game.pendingPochiSwap !== null
     || $game.pendingSaiKoro !== null
     || $game.lizhiPending !== null;
 
@@ -220,14 +229,24 @@
         : { text: `P${owner} のサイコロ待ち`, tone: 'waiting' };
     }
     if (snapshot.pendingFuyu) {
-      return snapshot.pendingFuyu.winner === myself
+      return (snapshot.pendingFuyu.decisionOwners ?? [snapshot.pendingFuyu.winner]).includes(myself)
         ? { text: '冬の効果を選択', tone: 'action' }
         : { text: `P${snapshot.pendingFuyu.winner} の冬選択待ち`, tone: 'waiting' };
     }
     if (snapshot.pendingKinpei) {
-      return snapshot.pendingKinpei.winner === myself
+      return (snapshot.pendingKinpei.decisionOwners ?? [snapshot.pendingKinpei.winner]).includes(myself)
         ? { text: '金北の強化先を選択', tone: 'action' }
         : { text: `P${snapshot.pendingKinpei.winner} の金北選択待ち`, tone: 'waiting' };
+    }
+    if (snapshot.pendingKamiPochi) {
+      return snapshot.pendingKamiPochi.decisionOwners.includes(myself)
+        ? { text: '神ぽっちの牌を選択', tone: 'action' }
+        : { text: `P${snapshot.pendingKamiPochi.winner} の神ぽっち選択待ち`, tone: 'waiting' };
+    }
+    if (snapshot.pendingPochiSwap) {
+      return snapshot.pendingPochiSwap.decisionOwners.includes(myself)
+        ? { text: 'ぽっちの高目を選択', tone: 'action' }
+        : { text: `P${snapshot.pendingPochiSwap.winner} の高目選択待ち`, tone: 'waiting' };
     }
     if (snapshot.pendingFeverContinue) {
       return snapshot.pendingFeverContinue.winner === myself
@@ -590,6 +609,10 @@
       pushN('z5y', x.z5y ?? 0);
       const coloredZ5 = (x.z5b ?? 0) + (x.z5r ?? 0) + (x.z5g ?? 0) + (x.z5y ?? 0);
       pushN('z5', (bp.z?.[5] ?? 0) - coloredZ5);
+      // Online seat projections represent undisclosed physical faces only as
+      // an anonymous count.  They must render as backs and never be invented
+      // as ordinary core tiles.
+      pushN('back', bp._ ?? 0);
       out.sort(compareTiles);
       const rawZimo = sp._anmikaZimo ?? sp._zimo;
       if (rawZimo && String(rawZimo).length <= 3) {
@@ -728,6 +751,7 @@
     // 飛ばされてた bug 修正。 同一数字グループ内 の subtype 順は 通常→赤→金→白色 順。
     function tileKey(t: string): { suit: number; num: number; sub: number } {
       const order = { m: 0, p: 1, s: 2, z: 3 };
+      if (t === 'back') return { suit: 99, num: 99, sub: 99 };
       // 金牌
       if (t === 'gp') return { suit: 1, num: 5, sub: 2 };
       if (t === 'gs') return { suit: 2, num: 5, sub: 2 };
@@ -820,7 +844,7 @@
     // R4 P1 #17 fix: lizhiPending 中も リーチ宣言牌 [isLizhiCand] のみ許可、 全 block ではない。
     // store.discard 側に lizhiPending 宣言牌判定 path がある [line 561-594] ので、 候補なら通す
     if ($game.roundEnded || $game.awaitingRonDecision || $game.awaitingFulou
-        || $game.pendingFuyu || $game.pendingKinpei || $game.pendingSaiKoro
+        || $game.pendingFuyu || $game.pendingKinpei || $game.pendingKamiPochi || $game.pendingPochiSwap || $game.pendingSaiKoro
         || $game.pendingFeverContinue) return;
     if ($game.lizhiPending !== null && !isLizhiCand(pai)) return;
     // online 中は自席のみ
@@ -864,23 +888,44 @@
       }
       return;
     }
-    // リーチ中はツモ切り強制 [比較は元 pai と lastZimo で]
-    if ($game.game.lizhi.has(player as any) && $game.lastZimo && actualPai !== $game.lastZimo) {
+    // リーチ中は物理的なツモ牌そのものだけを切れる。core 化後に比較すると
+    // gp→p0 等で正しい金牌ツモ切りを拒否し、逆に別物の赤牌を許してしまう。
+    const selectedPhysicalPai = pai.replace(/[_*]$/, '');
+    const drawnPhysicalPai = $game.lastZimo?.replace(/[_*]$/, '') ?? null;
+    if ($game.game.lizhi.has(player as any) && drawnPhysicalPai && selectedPhysicalPai !== drawnPhysicalPai) {
       return;
     }
     // フィーバー立直中は フィーバー宣言者以外は ツモ切り強制 [抜き牌は別動線で OK]
     const someoneFever = ([0, 1, 2] as const).some((p) => $game.game.feverActive[p]);
     if (someoneFever && !$game.game.feverActive[player as 0|1|2]) {
-      if ($game.lastZimo && actualPai !== $game.lastZimo) {
+      if (drawnPhysicalPai && selectedPhysicalPai !== drawnPhysicalPai) {
         return;
       }
     }
     game.discard(actualPai, meta);
   }
 
-  // フィーバー中 待ち牌の残り枚数 + 赤金有無 [白ぽっち除外、 z5 含まない]
+  type FeverWaitRow = {
+    tile: string;
+    remain: number;
+    hasRed?: boolean;
+    hasGold?: boolean;
+    hasNiji?: boolean;
+  };
+
+  // フィーバー中 待ち牌の残り枚数 + 赤金虹有無。
   // 残り = 4 - 全 player の手牌 + 全 player の河 + 全 副露 + 表ドラ表示牌
-  function feverWaitInfo(player: number): { tile: string; remain: number; hasRed?: boolean; hasGold?: boolean }[] {
+  function feverWaitInfo(player: number): FeverWaitRow[] {
+    // 対戦中の他家の山・手牌はクライアントに存在しない。成立後にサーバーが
+    // 公開した裁定済み情報だけを表示し、伏せ牌から推測し直さない。
+    if (onlineGameStarted) {
+      const published = (($game.game as any).feverWaitPublicInfo ?? []) as Array<{
+        player: number;
+        waits: FeverWaitRow[];
+      }>;
+      const row = published.find((entry) => entry.player === player);
+      return row ? row.waits.map((wait) => ({ ...wait })) : [];
+    }
     const sp = $game.game.shoupai.get(player as 0|1|2);
     if (!sp) return [];
     // フィーバー中は declare 時の固定 wait を使う [リョー指示 2026-05-12: tsumo で変動しないように]
@@ -889,7 +934,8 @@
       : (($game.game as any).getTingpaiList?.(player) ?? []);
     const baseTile = (p: string) => {
       const stripped = p.replace(/[\+=\-_*]/g, '');
-      return stripped[0] + (stripped[1] === '0' ? '5' : stripped[1]);
+      const core = toCorePai(stripped);
+      return core[0] + (core[1] === '0' ? '5' : core[1]);
     };
     const countVisible = (ss: string, nn: number): number => {
       const target = ss + nn;
@@ -898,8 +944,7 @@
         const psp = $game.game.shoupai.get(p);
         if (psp) {
           n += (psp._bingpai?.[ss]?.[nn] ?? 0);
-          // 赤五/金牌は _bingpai[ss][0] に格納 (p0=赤五pin/gp, s0=赤五sou/gs)
-          if (nn === 5) n += (psp._bingpai?.[ss]?.[0] ?? 0);
+          // _bingpai[ss][nn] already includes red/gold physical copies.
           // 副露の中身も探す
           // R10 P2 #10 fix: mianzi 実フォーマットは suite + digits [例: 'p333', 'z5555', 'p333+']、
           // 各 digit を suite と組み合わせて pai に展開
@@ -927,12 +972,13 @@
       return n;
     };
     return tings
-      .filter((t) => t !== 'z5')
       .map((t) => {
-        const ss = t[0]; const nn = parseInt(t[1] === '0' ? '5' : t[1]);
+        const normalized = baseTile(t);
+        const ss = normalized[0]; const nn = parseInt(normalized[1]);
         const visible = countVisible(ss, nn);
-        const remain = Math.max(0, 4 - visible);
-        const info: any = { tile: t, remain };
+        // 白ぽっちだけが山に残っていても FEVER の生存待ちには数えない。
+        const remain = normalized === 'z5' ? 0 : Math.max(0, 4 - visible);
+        const info: any = { tile: normalized, remain };
         if ((ss === 'p' && nn === 5) || (ss === 's' && nn === 5)) {
           info.hasRed = remain > 0;
           info.hasGold = remain > 1;
@@ -943,11 +989,25 @@
         return info;
       });
   }
-  // 2026-05-14 codex review #3 fix: online 中は 他家の fever 待ち情報を 表示しない [情報漏洩防止]、
-  // 単体 / 自家のみ表示。 ただし revealAll [debug] 時は 全公開
+
+  function fuyuWaitRemain(player: PlayerId, tings: string[]): number {
+    if (onlineGameStarted) {
+      const published = (($game.game as any).feverWaitPublicInfo ?? []) as Array<{
+        player: number; waits: Array<{ tile: string; remain: number }>;
+      }>;
+      const row = published.find((entry) => entry.player === player);
+      return row?.waits
+        .filter((wait) => displayTileWaitCore(wait.tile) !== 'z5')
+        .reduce((sum, wait) => sum + wait.remain, 0) ?? 0;
+    }
+    const waits = new Set(tings.map(displayTileWaitCore).filter((tile) => tile !== 'z5'));
+    return (((($game.game.shan as any)._pai ?? []) as string[])
+      .filter((pai) => waits.has(displayTileWaitCore(pai))).length);
+  }
+  // フィーバー成立後の待ちは、ルール手順で他家が当たり牌を晒すため公開情報。
+  // 宣言牌へのロン窓が閉じる前はまだ手牌・待ちとも公開しない。
   $: feverWaits = ([0, 1, 2] as const).map((p) => {
-    if (!$game.game.feverActive[p]) return null;
-    if (onlineGameStarted && !revealAll && p !== selfPlayer) return null;
+    if (!$game.game.isFeverConfirmed(p)) return null;
     return { player: p, waits: feverWaitInfo(p) };
   }).filter((x): x is NonNullable<typeof x> => x !== null);
 
@@ -963,8 +1023,8 @@
     tiles: string[], seat: number, waitCores: Set<string>, reveal: boolean, self: number,
   ): string[] {
     if (reveal || self === seat) return tiles;
-    // フィーバー宣言者は手牌全部公開
-    if ($game.game.feverActive[seat as 0|1|2]) return tiles;
+    // 宣言牌がロンされず、フィーバーが成立してから宣言者の手牌を公開する。
+    if ($game.game.isFeverConfirmed(seat as 0|1|2)) return tiles;
     if (waitCores.size === 0) return tiles.map(() => 'back');
     return tiles.map((t) => (waitCores.has(displayTileWaitCore(t)) ? t : 'back'));
   }
@@ -974,8 +1034,8 @@
   // online mode でも他家フィーバー待ち牌はゲーム機構として表向き表示する
   $: feverRevealCores = new Set(
     ([0, 1, 2] as const).flatMap((p) => {
-      if (!$game.game.feverActive[p]) return [];
-      return ($game.game.feverDeclareTing?.[p] ?? []).filter((t: string) => t !== 'z5');
+      if (!$game.game.isFeverConfirmed(p)) return [];
+      return ($game.game.feverDeclareTing?.[p] ?? []);
     })
   );
   $: sideTiles1 = computeSideTiles(shoupai1, srv1, feverRevealCores, revealAll, selfPlayer);
@@ -1063,7 +1123,7 @@
     return `P${seat}`;
   }
 
-  function initializeOnlineFromStart(ws: WebSocket, msg: any, protocol = { revision: 0, matchId: 1, roundId: 1 }) {
+  function initializeOnlineFromStart(ws: WebSocket, msg: any, protocol = { revision: 0, matchId: 1, roundId: 1 }): boolean {
     onlineMembers = msg.members ?? [];
     const hostMember = onlineMembers.find((m: any) => m.user_id === onlineRoomMeta?.hostUserId);
     const hostSeat = hostMember?.seat as 0|1|2|undefined;
@@ -1086,6 +1146,9 @@
       initOpts.preShuffledPool = msg.preShuffledPool;
     }
     game.initOnlineGame(initOpts);
+    if (msg.state && !game.hydrateOnlineProjection(msg.state)) {
+      return false;
+    }
     onlineGameStarted = true;
     viewMode = 'single';
     selfPlayer = onlineRoomMeta!.mySeat as 0 | 1 | 2;
@@ -1097,6 +1160,15 @@
         if (typeof value === 'number') currentGame.chipLedger[k] = value;
       }
     }
+    const projectedBaseline = msg.state?.store?.matchStartChipLedger;
+    if (projectedBaseline) {
+      matchStartChipLedger = {
+        0: Number(projectedBaseline[0] ?? projectedBaseline['0'] ?? 0),
+        1: Number(projectedBaseline[1] ?? projectedBaseline['1'] ?? 0),
+        2: Number(projectedBaseline[2] ?? projectedBaseline['2'] ?? 0),
+      };
+    }
+    return true;
   }
 
   function applyRevisionedAction(ws: WebSocket, msg: any): void {
@@ -1112,7 +1184,11 @@
       ws.send(JSON.stringify({ type: 'resync', expectedVersion: current.revision }));
       return;
     }
-    game.applyOnlineRemoteAction(fromSeat, msg.action);
+    const applied = game.applyOnlineRemoteAction(fromSeat, msg.action);
+    if (msg.action?._state && applied !== true) {
+      ws.send(JSON.stringify({ type: 'resync', expectedVersion: current.revision }));
+      return;
+    }
     if (msg.action?.type === 'nextMatch') {
       const started = (get(game) as any).game;
       matchStartChipLedger = {
@@ -1131,23 +1207,24 @@
 
   function applyCanonicalSync(ws: WebSocket, snapshot: any): void {
     if (!snapshot?.started || !snapshot.start) return;
-    initializeOnlineFromStart(ws, snapshot.start);
-    let baseline = {
+    if (!initializeOnlineFromStart(ws, snapshot.start)) {
+      ws.send(JSON.stringify({ type: 'resync', expectedVersion: 0 }));
+      return;
+    }
+    if (!snapshot.state || !game.hydrateOnlineProjection(snapshot.state)) {
+      ws.send(JSON.stringify({ type: 'resync', expectedVersion: 0 }));
+      return;
+    }
+    const projectedBaseline = snapshot.state?.store?.matchStartChipLedger;
+    const baseline = projectedBaseline ? {
+      0: Number(projectedBaseline[0] ?? projectedBaseline['0'] ?? 0),
+      1: Number(projectedBaseline[1] ?? projectedBaseline['1'] ?? 0),
+      2: Number(projectedBaseline[2] ?? projectedBaseline['2'] ?? 0),
+    } : {
       0: Number(snapshot.start.chipLedger?.[0] ?? snapshot.start.chipLedger?.['0'] ?? 0),
       1: Number(snapshot.start.chipLedger?.[1] ?? snapshot.start.chipLedger?.['1'] ?? 0),
       2: Number(snapshot.start.chipLedger?.[2] ?? snapshot.start.chipLedger?.['2'] ?? 0),
     };
-    for (const command of snapshot.commands ?? []) {
-      game.applyOnlineRemoteAction(command.actorSeat, command.action);
-      if (command.action?.type === 'nextMatch') {
-        const started = (get(game) as any).game;
-        baseline = {
-          0: started?.chipLedger?.[0] ?? 0,
-          1: started?.chipLedger?.[1] ?? 0,
-          2: started?.chipLedger?.[2] ?? 0,
-        };
-      }
-    }
     game.setOnlineProtocolState({
       ws,
       revision: snapshot.revision,
@@ -1206,11 +1283,12 @@
       if (generation !== onlineSocketGeneration) return;
       let msg: any; try { msg = JSON.parse(event.data); } catch { return; }
       if (msg.type === 'start') {
-        initializeOnlineFromStart(ws, msg, {
+        const initialized = initializeOnlineFromStart(ws, msg, {
           revision: msg.revision ?? 0,
           matchId: msg.matchId ?? 1,
           roundId: msg.roundId ?? 1,
         });
+        if (!initialized) ws.send(JSON.stringify({ type: 'resync', expectedVersion: 0 }));
       } else if (msg.type === 'sync') {
         applyCanonicalSync(ws, msg.snapshot);
       } else if (msg.type === 'lobby') {
@@ -1251,6 +1329,8 @@
       && !$game.awaitingFulou
       && !$game.pendingFuyu
       && !$game.pendingKinpei
+      && !$game.pendingKamiPochi
+      && !$game.pendingPochiSwap
       && !$game.pendingFeverContinue
       && !$game.pendingSaiKoro
       && !$game.pendingQianggang;
@@ -1371,6 +1451,8 @@
       && !snap.awaitingFulou
       && !snap.pendingFuyu
       && !snap.pendingKinpei
+      && !snap.pendingKamiPochi
+      && !snap.pendingPochiSwap
       && !snap.pendingSaiKoro
       && !snap.pendingFeverContinue
       && !snap.lizhiPending
@@ -1629,7 +1711,7 @@
     const cutinBusy = !!$game.cutin || (($game.cutinQueue?.length ?? 0) > 0);
     const canStep = !onlineGameStarted && viewMode === 'single' && !$game.roundEnded
       && !$game.awaitingRonDecision && !$game.awaitingFulou
-      && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingSaiKoro && !$game.pendingFeverContinue
+      && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingKamiPochi && !$game.pendingPochiSwap && !$game.pendingSaiKoro && !$game.pendingFeverContinue
       && !cutinBusy
       && cur !== 0 && $game.cpu[cur];
     if (canStep && lastCpuStepKey !== key) {
@@ -1646,7 +1728,7 @@
   let cpuAutoAdvanceFired = false;
   $: if (viewMode === 'single' && !onlineGameStarted && $game.roundEnded && $game.lastWinner !== null
         && $game.cpu[$game.lastWinner as PlayerId] && !state.finished
-        && !$game.pendingKinpei && !$game.pendingFuyu && !$game.pendingSaiKoro
+        && !$game.pendingKinpei && !$game.pendingFuyu && !$game.pendingKamiPochi && !$game.pendingPochiSwap && !$game.pendingSaiKoro
         && !$game.lastDapai  // ron 時は lastDapai が残ってる、 tsumo のみ
         && !cpuAutoAdvanceFired) {
     cpuAutoAdvanceFired = true;
@@ -1666,7 +1748,7 @@
     void viewMode; void onlineGameStarted; void autoTsumoKiri; void selfPlayer;
     void state.lunban; void state.jushu; void state.changbang; void state.benbang;
     void $game.roundEnded; void $game.awaitingRonDecision; void $game.awaitingFulou;
-    void $game.pendingFuyu; void $game.pendingKinpei; void $game.pendingSaiKoro;
+    void $game.pendingFuyu; void $game.pendingKinpei; void $game.pendingKamiPochi; void $game.pendingPochiSwap; void $game.pendingSaiKoro;
     void $game.pendingFeverContinue; void $game.lizhiPending; void $game.lastZimo;
     void $game.game.events.length; void canTsumo;
     const token = readAutoTsumokiriToken();
@@ -1716,14 +1798,16 @@
     <span>対局画面は横向きで全体を確認できます</span>
   </div>
   <header>
-    <h1>アンミカ三麻 [{viewMode === 'online' && onlineGameStarted ? `オンライン [部屋 ${currentRoomId}]` : (viewMode === 'single' ? '一人回しモード' : 'phase 1 dev')}]
+    <h1>アンミカ三麻 [{onlineGameStarted ? `オンライン [部屋 ${currentRoomId}]` : (viewMode === 'single' ? '一人回しモード' : 'phase 1 dev')}]
       <button class="mode-toggle" on:click={() => { appMode = 'menu'; viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>
         🏠 メニューに戻る
       </button>
-      <button class="mode-toggle online-btn" on:click={() => { viewMode = 'online'; }}>
-        🌐 オンライン対戦
-      </button>
-      {#if viewMode === 'single'}
+      {#if !onlineGameStarted}
+        <button class="mode-toggle online-btn" on:click={() => { viewMode = 'online'; }}>
+          🌐 オンライン対戦
+        </button>
+      {/if}
+      {#if viewMode === 'single' && !onlineGameStarted}
         <button class="mode-toggle" on:click={toggleRevealAll}>
           {revealAll ? '🙈 他家手牌を隠す' : '👁️ 他家手牌を開く'}
         </button>
@@ -1780,6 +1864,9 @@
       </div>
     {/if}
     <!-- 2026-05-14 codex review #3 fix: フィーバー継続 button は winner client のみ表示 -->
+    {#if $game.game.canDeclareLateShuvari(selfPlayer as 0 | 1 | 2) && (!onlineGameStarted || selfPlayer === onlineRoomMeta?.mySeat)}
+      <button class="lizhi-btn shuvari" on:click={() => game.shuvari(selfPlayer)}>シュバ追加宣言</button>
+    {/if}
     {#if $game.pendingFeverContinue && !$game.pendingSaiKoro && (!onlineGameStarted || $game.pendingFeverContinue.winner === selfPlayer)}
       <div class="action-row hot">
         <span class="row-label">🔥 フィーバー継続:</span>
@@ -1881,9 +1968,9 @@
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: FuyuModal も winner client のみ表示、
          非 winner が誤クリックで selectFuyu broadcast するのを防ぐ -->
-    {#if $game.pendingFuyu && (!onlineGameStarted || $game.pendingFuyu.winner === selfPlayer)}
+    {#if $game.pendingFuyu && (!onlineGameStarted || ($game.pendingFuyu.decisionOwners ?? [$game.pendingFuyu.winner]).includes(selfPlayer))}
       {@const tingW = $game.game.feverDeclareTing?.[$game.pendingFuyu.winner as 0|1|2] ?? $game.game.getTingpaiList($game.pendingFuyu.winner as 0|1|2)}
-      {@const remainW = tingW.reduce((acc: number, t: string) => acc + (((($game.game.shan as any)._pai ?? []) as string[]).filter((p: string) => p.replace(/[_-]$/, '').replace(/^0/, '5') === t).length ?? 0), 0)}
+      {@const remainW = fuyuWaitRemain($game.pendingFuyu.winner as PlayerId, tingW)}
       <FuyuModal
         winner={$game.pendingFuyu.winner}
         waitRemain={remainW}
@@ -1893,8 +1980,42 @@
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: online で winner != selfPlayer の client にも
          modal が出てて 誤クリックで他人の金北選択を送れた、 winner のみ表示に gate -->
-    {#if $game.pendingKinpei && viewMode !== 'single' && (!onlineGameStarted || $game.pendingKinpei.winner === selfPlayer)}
+    {#if $game.pendingKinpei && viewMode !== 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(selfPlayer))}
       <KinpeiModal winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
+    {/if}
+    {#if $game.pendingKamiPochi && (!onlineGameStarted || $game.pendingKamiPochi.decisionOwners.includes(selfPlayer))}
+      <div class="pochi-choice-backdrop" role="presentation">
+        <dialog open class="pochi-choice-modal" aria-label="神ぽっちの牌選択">
+          <h2>神ぽっち</h2>
+          <p>
+            P{$game.pendingKamiPochi.winner}・{$game.pendingKamiPochi.context === 'fuyu' ? `冬 ${$game.pendingKamiPochi.tier === 'lower' ? '下段' : '上段'}` : 'ドラ表示'}
+            の正ぽっちを取る牌を選択
+          </p>
+          <div class="pochi-choice-grid">
+            {#each $game.pendingKamiPochi.candidates as pai}
+              <button type="button" class="pochi-choice-tile" aria-label={`${pai} に取る`} on:click={() => game.selectKamiPochi(pai, $game.pendingKamiPochi?.occurrenceKey)}>
+                <Tile {pai} size="md" />
+              </button>
+            {/each}
+          </div>
+        </dialog>
+      </div>
+    {/if}
+    {#if $game.pendingPochiSwap && (!onlineGameStarted || $game.pendingPochiSwap.decisionOwners.includes(selfPlayer))}
+      <div class="pochi-choice-backdrop" role="presentation">
+        <dialog open class="pochi-choice-modal" aria-label="ぽっちの高目選択">
+          <h2>{$game.pendingPochiSwap.kind === 'deka' ? 'でかぽっち' : '白ぽっち'} 高目選択</h2>
+          <p>祝儀期待値が同率の候補から選択</p>
+          <div class="pochi-choice-grid">
+            {#each $game.pendingPochiSwap.candidates as candidate}
+              <button type="button" class="pochi-choice-tile" aria-label={`${candidate.target} に取る`} on:click={() => game.selectPochiSwap(candidate.target)}>
+                <Tile pai={candidate.target} size="md" />
+                <small>{candidate.expectedChip}枚期待</small>
+              </button>
+            {/each}
+          </div>
+        </dialog>
+      </div>
     {/if}
     <!-- 2026-07-16 リョー指示: solo の CPU 和了サイコロは人間の確認までモーダルも進行も止める -->
     {#if viewMode === 'single' && $game.pendingSaiKoro && !$game.cpuWinAck}
@@ -2199,7 +2320,7 @@
       nukidoraGold={$game.game.nukidoraGold[srv0] ?? 0}
       goldHandZ={$game.game.goldHand[srv0].z}
       he={he0}
-      revealHand={revealAll || selfPlayer === srv0}
+      revealHand={selfPlayer === srv0 || (!onlineGameStarted && revealAll) || $game.game.openLizhi.has(srv0) || $game.game.isFeverConfirmed(srv0)}
       lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv0), shoupai0)}
       isLizhiCand={isLizhiCand}
       lizhiPending={$game.lizhiPending === currentPlayer}
@@ -2244,7 +2365,7 @@
         nukidoraGold={$game.game.nukidoraGold[srv1] ?? 0}
         goldHandZ={$game.game.goldHand[srv1].z}
         he={he1}
-        revealHand={revealAll || selfPlayer === srv1}
+        revealHand={selfPlayer === srv1 || (!onlineGameStarted && revealAll) || $game.game.openLizhi.has(srv1) || $game.game.isFeverConfirmed(srv1)}
         lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv1), shoupai1)}
         isLizhiCand={isLizhiCand}
       lizhiPending={$game.lizhiPending === currentPlayer}
@@ -2290,7 +2411,7 @@
         nukidoraGold={$game.game.nukidoraGold[srv2] ?? 0}
         goldHandZ={$game.game.goldHand[srv2].z}
         he={he2}
-        revealHand={revealAll || selfPlayer === srv2}
+        revealHand={selfPlayer === srv2 || (!onlineGameStarted && revealAll) || $game.game.openLizhi.has(srv2) || $game.game.isFeverConfirmed(srv2)}
         lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv2), shoupai2)}
         isLizhiCand={isLizhiCand}
       lizhiPending={$game.lizhiPending === currentPlayer}
@@ -2384,7 +2505,7 @@
         {/if}
       </div>
       <!-- 2026-05-14 codex review #3 fix: inline Kinpei は winner 限定 -->
-      {#if $game.pendingKinpei && viewMode === 'single' && (!onlineGameStarted || $game.pendingKinpei.winner === selfPlayer)}
+      {#if $game.pendingKinpei && viewMode === 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(selfPlayer))}
         {@const effectiveKinpeiHua = $game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)}
         <div class="kinpei-inline">
           <div class="kinpei-title">金北 強化対象 [P{$game.pendingKinpei.winner} 選択]</div>
@@ -4034,5 +4155,59 @@
     font-size: 11px;
     cursor: pointer;
     margin-left: 4px;
+  }
+
+  .pochi-choice-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 9400;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background: rgba(5, 17, 12, 0.72);
+  }
+  .pochi-choice-modal {
+    width: min(720px, calc(100vw - 32px));
+    max-height: min(82vh, 760px);
+    overflow: auto;
+    box-sizing: border-box;
+    padding: 18px;
+    border: 2px solid #e9c95c;
+    border-radius: 14px;
+    background: #f8f4e7;
+    color: #173126;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+    text-align: center;
+  }
+  .pochi-choice-modal h2,
+  .pochi-choice-modal p {
+    margin: 0 0 10px;
+  }
+  .pochi-choice-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
+    gap: 8px;
+  }
+  .pochi-choice-tile {
+    min-height: 74px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 5px;
+    border: 1px solid #a88b32;
+    border-radius: 8px;
+    background: #fffdf5;
+    cursor: pointer;
+  }
+  .pochi-choice-tile:hover,
+  .pochi-choice-tile:focus-visible {
+    outline: 3px solid #e0b928;
+    background: #fff5c6;
+  }
+  .pochi-choice-tile small {
+    color: #584b20;
+    font-size: 10px;
   }
 </style>

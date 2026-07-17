@@ -8,6 +8,8 @@ export type WinPipelineStage =
   | 'qianggang'
   | 'fuyu'
   | 'kinpei'
+  | 'kami-pochi'
+  | 'pochi-swap'
   | 'saikoro'
   | 'fever'
   | 'round-ended'
@@ -20,6 +22,9 @@ export type WinPipelineState = {
 
 export type PendingKinpei = {
   winner: number;
+  /** Positive pochi: winner. Reverse pochi: every other player may submit the table's decision. */
+  decisionOwners?: number[];
+  decisionOwnerIndex?: number;
   isRon: boolean;
   ronfrom: number | null;
   /** 和了計算で新たに表示された華を、snapshot 復元後も選択肢として保持する。 */
@@ -33,6 +38,9 @@ export type PendingKinpei = {
 
 export type PendingFuyu = {
   winner: number;
+  /** Positive pochi: winner. Reverse pochi: every other player may submit the table's decision. */
+  decisionOwners?: number[];
+  decisionOwnerIndex?: number;
   isRon: boolean;
   ronfrom: number | null;
   /** 秋効果で表示された冬を、snapshot 復元後の冬・金北選択へ引き継ぐ。 */
@@ -40,6 +48,29 @@ export type PendingFuyu = {
   otherWinners?: number[];
   humanOthers?: number[];
   cutinQueued?: boolean;
+};
+
+export type PendingKamiPochi = {
+  winner: number;
+  context: 'dora' | 'fuyu';
+  occurrenceKey: string;
+  rawPai?: string;
+  tier?: 'upper' | 'lower';
+  candidates: string[];
+  decisionOwners: number[];
+  decisionOwnerIndex: number;
+  isRon: boolean;
+  ronfrom: number | null;
+};
+
+export type PendingPochiSwap = {
+  winner: number;
+  kind: 'white' | 'deka';
+  candidates: Array<{ target: string; expectedChip: number; fanshu: number | null; damanguan: number }>;
+  decisionOwners: number[];
+  decisionOwnerIndex: number;
+  isRon: boolean;
+  ronfrom: number | null;
 };
 
 export type PendingFeverContinue = {
@@ -59,9 +90,14 @@ export type PendingQianggang = {
 };
 
 export type PendingSaiKoroChance = {
+  awardKey?: string;
   name: string;
   baseChip: number;
   shuvariApplicable: boolean;
+  /** The role itself is always played as Shuba dice, even without declaration. */
+  alwaysShuvari?: boolean;
+  /** Number of non-double rolls in this independent dice session. */
+  rollCount?: number;
   count: number;
   plusMinus: '+' | '-';
   winner?: number;
@@ -117,6 +153,8 @@ type WinPipelineLike = {
   pendingQianggang: PendingQianggang | null;
   pendingFuyu: PendingFuyu | null;
   pendingKinpei: PendingKinpei | null;
+  pendingKamiPochi: PendingKamiPochi | null;
+  pendingPochiSwap: PendingPochiSwap | null;
   pendingSaiKoro: PendingSaiKoro | null;
   pendingFeverContinue: PendingFeverContinue | null;
   pendingPingju: boolean;
@@ -125,10 +163,19 @@ type WinPipelineLike = {
 
 export function getWinPipelineState(s: WinPipelineLike): WinPipelineState {
   if (s.pendingQianggang) return { stage: 'qianggang', owner: s.pendingQianggang.player };
+  // A claimant can enter one of these decisions while the remaining
+  // double-ron candidates are still open.  Resolve the modal first, then
+  // expose the reaction window again.
+  if (s.pendingFuyu) return { stage: 'fuyu', owner: s.pendingFuyu.decisionOwners?.[0] ?? s.pendingFuyu.winner };
+  if (s.pendingKinpei) return { stage: 'kinpei', owner: s.pendingKinpei.decisionOwners?.[0] ?? s.pendingKinpei.winner };
+  if (s.pendingKamiPochi) {
+    return { stage: 'kami-pochi', owner: s.pendingKamiPochi.decisionOwners[s.pendingKamiPochi.decisionOwnerIndex] ?? null };
+  }
+  if (s.pendingPochiSwap) {
+    return { stage: 'pochi-swap', owner: s.pendingPochiSwap.decisionOwners[s.pendingPochiSwap.decisionOwnerIndex] ?? null };
+  }
   if (s.awaitingRonDecision) return { stage: 'ron-decision', owner: null };
   if (s.awaitingFulou) return { stage: 'fulou', owner: null };
-  if (s.pendingFuyu) return { stage: 'fuyu', owner: s.pendingFuyu.winner };
-  if (s.pendingKinpei) return { stage: 'kinpei', owner: s.pendingKinpei.winner };
   if (s.pendingSaiKoro) {
     const chance = s.pendingSaiKoro.chances?.[s.pendingSaiKoro.currentIdx ?? 0];
     return { stage: 'saikoro', owner: chance?.winner ?? s.pendingSaiKoro.winner };
@@ -225,6 +272,11 @@ export function clearQianggangStage(s: WinPipelineLike): PendingQianggang | null
 }
 
 export function enterFuyuStage(s: WinPipelineLike, pending: PendingFuyu): void {
+  pending.decisionOwners = pending.decisionOwners?.length
+    ? [...pending.decisionOwners]
+    : (s.game.pochiPaymentMode[pending.winner as PlayerId]
+      ? ([0, 1, 2] as PlayerId[]).filter((p) => p !== pending.winner)
+      : [pending.winner]);
   s.pendingFuyu = pending;
   s.roundEnded = false;
 }
@@ -234,6 +286,11 @@ export function clearFuyuStage(s: WinPipelineLike): void {
 }
 
 export function enterKinpeiStage(s: WinPipelineLike, pending: PendingKinpei): void {
+  pending.decisionOwners = pending.decisionOwners?.length
+    ? [...pending.decisionOwners]
+    : (s.game.pochiPaymentMode[pending.winner as PlayerId]
+      ? ([0, 1, 2] as PlayerId[]).filter((p) => p !== pending.winner)
+      : [pending.winner]);
   s.pendingKinpei = pending;
   s.roundEnded = false;
 }
@@ -286,6 +343,9 @@ export function advanceSaiKoroStage(s: WinPipelineLike): void {
   const nextIdx = ps.currentIdx + 1;
   if (nextIdx >= ps.chances.length) {
     clearSaiKoroStage(s);
+    // 流し役満は流局結果にサイコロが付随する。全セッション終了後は
+    // pendingPingju を保ったまま局終了画面へ戻す。
+    if (s.pendingPingju) s.roundEnded = true;
     return;
   }
   s.pendingSaiKoro = {
@@ -319,11 +379,17 @@ export function settleAfterWin(
   s: WinPipelineLike,
   opts: { winner: PlayerId; isRon: boolean },
 ): void {
-  if (s.pendingKinpei) {
+  if (s.pendingFuyu || s.pendingKinpei || s.pendingKamiPochi || s.pendingPochiSwap) {
     s.roundEnded = false;
     return;
   }
   if (s.game.feverActive[opts.winner]) {
+    // 最後に生存していた待ち牌で和了した場合、FEVERはその和了で終了する。
+    if (s.game.isFeverWaitExhausted(opts.winner)) {
+      s.game.endFever(opts.winner);
+      s.roundEnded = true;
+      return;
+    }
     if (!s.pendingFeverContinue) {
       s.game.feverWinCount[opts.winner] += 1;
       enterFeverContinueStage(s, { winner: opts.winner, isRon: opts.isRon });

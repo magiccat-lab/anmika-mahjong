@@ -72,7 +72,13 @@ export class Shan3 {
     this._fubaopai = fubaopai ? [...fubaopai] : null;
   }
 
-  get canOpenKanDora(): boolean { return this.kanDoraCount < 4; }
+  /** A kan needs one new front indicator and, when ura-dora is enabled, its
+   * paired back indicator. With only the lower tile left the rules require
+   * play to continue without declaring the otherwise-forced kan. */
+  get canOpenKanDora(): boolean {
+    const requiredIndicators = this._fubaopai ? 2 : 1;
+    return this.kanDoraCount < 4 && this.paishu >= requiredIndicators;
+  }
 
   /** 初期 shuffle 後の _pai snapshot [牌譜再現用、 split 前の full pool] */
   _initialPai: Pai[] = [];
@@ -130,6 +136,9 @@ export class Shan3 {
     weikaigang: boolean;
     baopai: Pai[];
     fubaopai: Pai[] | null;
+    blindQueue: BlindDrawEntry[];
+    blindDoraQueue: Pai[];
+    blindPaishu: number;
   } {
     return {
       pai: [...this._pai],
@@ -142,6 +151,9 @@ export class Shan3 {
       weikaigang: this._weikaigang,
       baopai: [...this._baopai],
       fubaopai: this._fubaopai ? [...this._fubaopai] : null,
+      blindQueue: this._blindQueue.map((d) => ({ ...d, huapai: [...d.huapai] })),
+      blindDoraQueue: [...this._blindDoraQueue],
+      blindPaishu: this._blindPaishu,
     };
   }
   restore(snap: ReturnType<Shan3['snapshot']>): void {
@@ -155,6 +167,9 @@ export class Shan3 {
     this._weikaigang = snap.weikaigang;
     this._baopai = [...snap.baopai];
     this._fubaopai = snap.fubaopai ? [...snap.fubaopai] : null;
+    this._blindQueue = (snap.blindQueue ?? []).map((d) => ({ ...d, huapai: [...d.huapai] }));
+    this._blindDoraQueue = [...(snap.blindDoraQueue ?? [])];
+    this._blindPaishu = snap.blindPaishu ?? this._blindPaishu;
   }
 
   /** カン / 秋ドラめくりで 残山を 2 つ消費 [ドラ表示牌 + リンシャン代用]、 paishu 計算で別途 引く */
@@ -264,7 +279,8 @@ export class Shan3 {
     if (this._closed) throw new Error('shan closed');
     if (this.paishu === 0) throw new Error('shan exhausted');
     if (this._weikaigang) throw new Error('kaigang pending');
-    if (!this.canOpenKanDora) throw new Error('4 kan dora max');
+    if (this.kanDoraCount >= 4) throw new Error('4 kan dora max');
+    if (!this.canOpenKanDora) throw new Error('not enough wall tiles for kan dora');
     this._weikaigang = true;
     this.lastZimoGold = false;
     this.lastDrawnHuapai = [];
@@ -292,9 +308,43 @@ export class Shan3 {
     throw new Error('shan exhausted [during gangzimo huapai skip]');
   }
 
+  /** 北抜きの補充牌を王牌から取得する。
+   *  槓とは異なりカンドラを開かず、`_weikaigang` も立てない。 */
+  nukizimo(): Pai {
+    if (this._blind) {
+      const draw = this._blindQueue.shift();
+      if (!draw) throw new Error('blind shan: nukizimo queue empty');
+      this.lastDrawnHuapai = draw.huapai;
+      this.lastZimoGold = draw.gold;
+      this.lastZimoPochi = draw.pochi;
+      return draw.tile;
+    }
+    if (this._closed) throw new Error('shan closed');
+    this.lastZimoGold = false;
+    this.lastDrawnHuapai = [];
+    this.lastZimoPochi = null;
+    const colorMap: Record<string, 'blue' | 'red' | 'green' | 'yellow'> = {
+      z5b: 'blue', z5r: 'red', z5g: 'green', z5y: 'yellow',
+    };
+    while (this._rinshan.length > 0) {
+      const pai = this._rinshan.shift()!;
+      this.consumeRinshan();
+      if (pai.startsWith('f')) {
+        this.lastDrawnHuapai.push(pai);
+        continue;
+      }
+      this.lastZimoGold = pai === 'gp' || pai === 'gs' || pai === 'gN';
+      this.lastZimoPochi = colorMap[pai] ?? null;
+      return pai;
+    }
+    throw new Error('shan exhausted [during nukizimo huapai skip]');
+  }
+
   /** カン後のドラ表開示 */
   kaigang(): void {
     if (!this._weikaigang) throw new Error('not pending kaigang');
+    const requiredIndicators = this._fubaopai ? 2 : 1;
+    if (this.paishu < requiredIndicators) throw new Error('not enough wall tiles for kan dora');
     // リョー指示: カン後のドラ表は山末尾から 1 枚 [残山 -1]
     this.drawNewDora(false);
     if (this._fubaopai) this.drawNewDora(true);
@@ -376,7 +426,7 @@ export function generateTilePool(rule: ShanRule): Pai[] {
   return pai;
 }
 
-/** 三麻のデフォルト rule [アンミカ準拠: 5p / 5s 各 4 枚中 赤 2 枚 [うち 1 枚を金扱い]] */
+/** 三麻のデフォルト rule [5p / 5s 各4枚 = 通常2・赤1・金1] */
 export function defaultSanmaRule(): ShanRule {
   return {
     hongpai: { m: 0, p: 1, s: 1 },

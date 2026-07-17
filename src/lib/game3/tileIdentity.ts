@@ -58,17 +58,27 @@ export function resolvePhysicalDiscardPai(opts: {
   const expanded = opts.expanded ?? {};
   const available = (pai: string) => Math.max(0, Number(expanded[pai as keyof AnmikaCounts] ?? 0));
 
-  if (isAnmikaExpandedPai(requested) && available(requested) > 0) return requested;
+  // An explicitly named expanded face is a physical-tile assertion, not a
+  // suggestion.  Falling back to its core face here allowed a client to send
+  // `np3`/`gp`/`z5b` while only owning p3/p0/a different white and obtain the
+  // expanded-tile bonus.  Reject the action before any hand/counter mutation.
+  if (isAnmikaExpandedPai(requested)) {
+    if (available(requested) > 0) return requested;
+    throw new Error(`requested physical tile is not in hand: ${requested}`);
+  }
 
   if (core === 'z5') {
     const byMeta = opts.meta?.pochi ? POCHI_BY_COLOR[opts.meta.pochi] : null;
-    if (byMeta && available(byMeta) > 0) return byMeta;
+    if (byMeta) {
+      if (available(byMeta) > 0) return byMeta;
+      throw new Error(`requested pochi tile is not in hand: ${byMeta}`);
+    }
     const last = opts.lastDrawnPai ?? null;
     if (last && toCorePai(last) === core && isAnmikaExpandedPai(last) && available(last) > 0) return last;
     for (const pai of ['z5b', 'z5r', 'z5g', 'z5y'] as const) {
       if (available(pai) > 0) return pai;
     }
-    return requested;
+    throw new Error('no physical pochi tile is available for z5 discard');
   }
 
   const nijiByCore: Record<string, string> = { p3: 'np3', s3: 'ns3', z3: 'nz3' };
@@ -81,8 +91,10 @@ export function resolvePhysicalDiscardPai(opts: {
   const goldByCore = core === 'p0' ? 'gp' : core === 's0' ? 'gs' : core === 'z4' ? 'gN' : null;
   if (!goldByCore) return requested;
 
-  if (opts.meta?.gold === true && available(goldByCore) > 0) return goldByCore;
-  if (opts.meta?.gold === false) return requested;
+  if (opts.meta?.gold === true) {
+    if (available(goldByCore) > 0) return goldByCore;
+    throw new Error(`requested gold tile is not in hand: ${goldByCore}`);
+  }
 
   const last = opts.lastDrawnPai ?? null;
   if (last === goldByCore && available(goldByCore) > 0) return goldByCore;
@@ -93,8 +105,13 @@ export function resolvePhysicalDiscardPai(opts: {
   const digit = core[1];
   const coreCount = Number(opts.bingpai?.[suit]?.[Number(digit)] ?? 0);
   const plainCount = Math.max(0, coreCount - available(goldByCore));
+  if (opts.meta?.gold === false) {
+    if (plainCount > 0) return requested;
+    throw new Error(`requested non-gold tile is not in hand: ${requested}`);
+  }
   if (plainCount > 0) return requested;
-  return available(goldByCore) > 0 ? goldByCore : requested;
+  if (available(goldByCore) > 0) return goldByCore;
+  throw new Error(`tile is not in hand: ${requested}`);
 }
 
 export interface PhysicalHandSnapshot {

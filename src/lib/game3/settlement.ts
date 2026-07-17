@@ -2,8 +2,18 @@ import type { PlayerId } from '../types';
 
 export type DefenByPlayer = Record<PlayerId, number>;
 
+export interface WinResultPoints {
+  fu?: number;
+  fanshu?: number;
+  damanguan?: number;
+  /** 夏で本役満が五倍満・六倍満へ昇格した場合などの三麻基本点。 */
+  _basePointOverride?: number;
+  /** ロンでも親ツモと同じ二家払いにする裁定 [八連荘]。 */
+  _treatAsTsumo?: boolean;
+}
+
 export interface WinPointInput {
-  result: { fu?: number; fanshu?: number; damanguan?: number };
+  result: WinResultPoints;
   winner: PlayerId;
   loser: PlayerId | null;
   oya: PlayerId;
@@ -20,7 +30,9 @@ export interface WinPointEvaluation {
 }
 
 /** Pure three-player base-point evaluation. */
-export function computeSanmaBase(result: { fu?: number; fanshu?: number; damanguan?: number }): number {
+export function computeSanmaBase(result: WinResultPoints): number {
+  const override = Number(result._basePointOverride);
+  if (Number.isFinite(override) && override > 0) return override;
   const fu = result.fu ?? 30;
   const fanshu = result.fanshu ?? 0;
   const damanguan = result.damanguan ?? 0;
@@ -49,11 +61,12 @@ export function evaluateWinPoints(input: WinPointInput): WinPointEvaluation {
   const base = computeSanmaBase(input.result) * feverMultiplier;
   const isOya = input.winner === input.oya;
 
-  if (input.loser !== null) {
+  const effectiveLoser = input.result._treatAsTsumo ? null : input.loser;
+  if (effectiveLoser !== null) {
     const handPayment = isOya ? ceil100(base * 6) : ceil100(base * 4);
     const payment = (handPayment + input.benbang * 2000) * pointMultiplier;
     deltas[input.winner] += payment;
-    deltas[input.loser] -= payment;
+    deltas[effectiveLoser] -= payment;
   } else if (isOya) {
     const payment = (ceil100(base * 2) + input.benbang * 1000 + 1000) * pointMultiplier;
     for (const player of [0, 1, 2] as PlayerId[]) {

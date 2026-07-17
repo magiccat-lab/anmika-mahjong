@@ -11,18 +11,22 @@ type PochiHand = Record<PlayerId, { blue: number; red: number; green: number; ye
 type Huapai = Record<PlayerId, string[]>;
 type PlayerCounts = Record<PlayerId, number>;
 type KinpeiTarget = Record<PlayerId, 'haru' | 'natsu' | 'aki' | 'fuyu' | null>;
+type KamiPochiDoraChoices = Record<PlayerId, Record<string, string>>;
 
 export type PreHuleSnapshot = {
   defen: Record<PlayerId, number>;
   chipLedger: Record<PlayerId, number>;
   akiUsedCount: Record<PlayerId, number>;
   feverActive: Record<PlayerId, boolean>;
+  feverSaiAwarded?: Record<PlayerId, string[]>;
+  lateShuvariWindow?: Record<PlayerId, boolean>;
   goldHand: GoldHand;
   pochiHand: PochiHand;
   huapai: Huapai;
   nukidora: PlayerCounts;
   nukidoraGold: PlayerCounts;
   kinpeiTarget: KinpeiTarget;
+  kamiPochiDoraChoices: KamiPochiDoraChoices;
   shanSnapshot: any | null;
   baopaiLen: number;
   fubaopaiLen: number;
@@ -30,6 +34,7 @@ export type PreHuleSnapshot = {
   qianggangPending: boolean;
   eventsLen: number;
   chipBreakdownLen: number;
+  fuyuRevealState: any;
 };
 
 export type SnapshotRefs = {
@@ -37,15 +42,18 @@ export type SnapshotRefs = {
   chipLedger: Record<PlayerId, number>;
   akiUsedCount: Record<PlayerId, number>;
   feverActive: Record<PlayerId, boolean>;
+  feverSaiAwarded: Record<PlayerId, string[]>;
+  lateShuvariWindow: Record<PlayerId, boolean>;
   goldHand: GoldHand;
   pochiHand: PochiHand;
   huapai: Huapai;
   nukidora: PlayerCounts;
   nukidoraGold: PlayerCounts;
   kinpeiTarget: KinpeiTarget;
+  kamiPochiDoraChoices?: KamiPochiDoraChoices;
   shan: any;
-  state: { lizhibang: number };
-  game: any; // for qianggangPending / events / chipBreakdown
+  state?: { lizhibang: number };
+  game?: any; // for qianggangPending / events / chipBreakdown
 };
 
 function cloneGoldHand(src: Partial<GoldHand> | undefined): GoldHand {
@@ -94,12 +102,23 @@ export function saveSnapshot(refs: SnapshotRefs): PreHuleSnapshot {
     chipLedger: { ...refs.chipLedger },
     akiUsedCount: { ...refs.akiUsedCount },
     feverActive: { ...refs.feverActive },
+    feverSaiAwarded: {
+      0: [...(refs.feverSaiAwarded?.[0] ?? [])],
+      1: [...(refs.feverSaiAwarded?.[1] ?? [])],
+      2: [...(refs.feverSaiAwarded?.[2] ?? [])],
+    },
+    lateShuvariWindow: { ...(refs.lateShuvariWindow ?? { 0: false, 1: false, 2: false }) },
     goldHand: cloneGoldHand(refs.goldHand),
     pochiHand: clonePochiHand(refs.pochiHand),
     huapai: cloneHuapai(refs.huapai),
     nukidora: clonePlayerCounts(refs.nukidora),
     nukidoraGold: clonePlayerCounts(refs.nukidoraGold),
     kinpeiTarget: cloneKinpeiTarget(refs.kinpeiTarget),
+    kamiPochiDoraChoices: {
+      0: { ...(refs.kamiPochiDoraChoices?.[0] ?? {}) },
+      1: { ...(refs.kamiPochiDoraChoices?.[1] ?? {}) },
+      2: { ...(refs.kamiPochiDoraChoices?.[2] ?? {}) },
+    },
     shanSnapshot: typeof refs.shan?.snapshot === 'function' ? refs.shan.snapshot() : null,
     baopaiLen: refs.shan.baopai.length,
     fubaopaiLen: (refs.shan.fubaopai ?? []).length,
@@ -107,6 +126,9 @@ export function saveSnapshot(refs: SnapshotRefs): PreHuleSnapshot {
     qianggangPending: refs.game?.qianggangPending ?? false,
     eventsLen: (refs.game?.events ?? []).length,
     chipBreakdownLen: (refs.game?.chipBreakdown ?? []).length,
+    fuyuRevealState: refs.game?.fuyuRevealState
+      ? JSON.parse(JSON.stringify(refs.game.fuyuRevealState))
+      : { 0: null, 1: null, 2: null },
   };
 }
 
@@ -118,6 +140,14 @@ export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null
   Object.assign(refs.chipLedger, snap.chipLedger);
   Object.assign(refs.akiUsedCount, snap.akiUsedCount);
   Object.assign(refs.feverActive, snap.feverActive);
+  if (refs.feverSaiAwarded) {
+    for (const p of PLAYERS) {
+      refs.feverSaiAwarded[p] = [...(snap.feverSaiAwarded?.[p] ?? [])];
+    }
+  }
+  if (refs.lateShuvariWindow) {
+    Object.assign(refs.lateShuvariWindow, snap.lateShuvariWindow ?? { 0: false, 1: false, 2: false });
+  }
   for (const p of PLAYERS) {
     Object.assign(refs.goldHand[p], snap.goldHand[p]);
     Object.assign(refs.pochiHand[p], snap.pochiHand[p]);
@@ -127,6 +157,11 @@ export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null
   Object.assign(refs.nukidora, snap.nukidora);
   Object.assign(refs.nukidoraGold, snap.nukidoraGold);
   Object.assign(refs.kinpeiTarget, snap.kinpeiTarget);
+  if (refs.kamiPochiDoraChoices) {
+    for (const p of PLAYERS) {
+      refs.kamiPochiDoraChoices[p] = { ...(snap.kamiPochiDoraChoices?.[p] ?? {}) };
+    }
+  }
   if (snap.shanSnapshot && typeof refs.shan?.restore === 'function') {
     refs.shan.restore(snap.shanSnapshot);
   } else {
@@ -145,5 +180,8 @@ export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null
     refs.game.qianggangPending = snap.qianggangPending;
     if (Array.isArray(refs.game.events)) refs.game.events.length = snap.eventsLen;
     if (Array.isArray(refs.game.chipBreakdown)) refs.game.chipBreakdown.length = snap.chipBreakdownLen;
+    refs.game.fuyuRevealState = snap.fuyuRevealState
+      ? JSON.parse(JSON.stringify(snap.fuyuRevealState))
+      : { 0: null, 1: null, 2: null };
   }
 }

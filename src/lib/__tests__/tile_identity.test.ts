@@ -30,6 +30,26 @@ describe('physical tile identity', () => {
     expect(resolvePhysicalDiscardPai({ requestedPai: 'p0', meta: { gold: true }, ...common })).toBe('gp');
   });
 
+  it('rejects forged expanded faces and unavailable explicit metadata', () => {
+    expect(() => resolvePhysicalDiscardPai({
+      requestedPai: 'np3',
+      expanded: { np3: 0 },
+      bingpai: { p: [0, 0, 0, 1] },
+    })).toThrow(/not in hand/);
+    expect(() => resolvePhysicalDiscardPai({
+      requestedPai: 'p0',
+      meta: { gold: true },
+      expanded: { gp: 0 },
+      bingpai: { p: [1] },
+    })).toThrow(/gold tile/);
+    expect(() => resolvePhysicalDiscardPai({
+      requestedPai: 'z5',
+      meta: { pochi: 'blue' },
+      expanded: { z5r: 1 },
+      bingpai: { z: [0, 0, 0, 0, 0, 1] },
+    })).toThrow(/pochi tile/);
+  });
+
   it('restores expanded and fulou metadata as one transaction', () => {
     const sp = buildShoupai(['z5b', 'z5g', 'z5y']);
     const before = snapshotPhysicalHandState(sp);

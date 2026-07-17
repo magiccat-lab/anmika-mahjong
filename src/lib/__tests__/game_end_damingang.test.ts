@@ -18,12 +18,12 @@ describe('Game3 isGameEnd', () => {
     expect(g.isGameEnd()).toBe(true);
   });
 
-  it('ignoreTobiFor で 指定 player のマイナスは無視 [親ツモ連荘 例外]', () => {
+  it('親の逆ぽっち自己トビも例外なく終了', () => {
     const g = new Game3();
     g.qipai();
     g.state.defen = { 0: -100, 1: 50000, 2: 55100 };
     expect(g.isGameEnd()).toBe(true);
-    expect(g.isGameEnd({ ignoreTobiFor: 0 as PlayerId })).toBe(false);
+    expect(g.isGameEnd({ ignoreTobiFor: 0 as PlayerId })).toBe(true);
   });
 
   it('オーラス終了 + トップ 40000+ で true [ゲーム終了]', () => {

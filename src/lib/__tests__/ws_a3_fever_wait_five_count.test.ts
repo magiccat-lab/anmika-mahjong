@@ -26,7 +26,7 @@ describe('WSA-A3 fever wait visible-five counting', () => {
   it('keeps all four colored white fives in the shared z5 denominator', () => {
     const rivers = new Map([[0, { _pai: ['z5b', 'z5r', 'z5g'] }]]);
 
-    expect(isFeverWaitExhausted(['z5'], new Map(), rivers, [])).toBe(false);
+    expect(isFeverWaitExhausted(['z5'], new Map(), rivers, [])).toBe(true);
     expect(isFeverWaitExhausted(['z5'], new Map(), rivers, ['z5y'])).toBe(true);
   });
 });

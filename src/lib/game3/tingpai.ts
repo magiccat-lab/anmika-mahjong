@@ -174,6 +174,8 @@ export function canTsumoWithPochiSwap(shoupai: any, fromCore: string = 'z5'): bo
       candidates.push(`${s}${n}`);
     }
   }
+  // 嵌八萬だけは山に存在しない m8 をぽっちが代用するため、通常牌 catalog 外でも候補に含める。
+  candidates.push('m8');
   for (const swap of candidates) {
     const sp_clone = shoupai.clone();
     try {

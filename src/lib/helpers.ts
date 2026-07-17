@@ -44,7 +44,9 @@ import type { PochiPai } from './types';
  *  - np3 → p3, ns3 → s3, nz3 → z3
  */
 export function toCorePai(p: string): string {
-  if (typeof p === 'string' && p.length > 2 && p[0] === 'z' && p[1] === '5') return 'z5';
+  // expanded tile は列挙した物理牌名だけを変換する。`z555+` のような
+  // 副露後の疑似 _zimo を z5 と誤認してはならない。
+  if (p === 'z5b' || p === 'z5r' || p === 'z5g' || p === 'z5y') return 'z5';
   if (p === 'gp') return 'p0';
   if (p === 'gs') return 's0';
   if (p === 'gN') return 'z4';
@@ -157,7 +159,11 @@ export function patchAnmikaShoupai(sp: any, tiles: string[] = []): any {
     const nijiKey = nijiMap[core];
     if (nijiKey && (counts[nijiKey] ?? 0) > 0) {
       const totalCore = sp._bingpai?.[core[0]]?.[parseInt(core[1])] ?? 0;
-      if (totalCore < (counts[nijiKey] ?? 0)) {
+      // totalCore includes the rainbow copy itself.  Equality means no plain
+      // copy remains and the consumed physical tile must therefore be the
+      // rainbow.  The old strict comparison could never be true for a valid
+      // hand, leaving rainbow metadata concealed after it had been melded.
+      if (totalCore <= (counts[nijiKey] ?? 0)) {
         addAnmikaPai(sp, nijiKey, -1);
         return nijiKey;
       }

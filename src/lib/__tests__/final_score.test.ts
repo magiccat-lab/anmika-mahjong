@@ -112,6 +112,8 @@ describe('getFinalScore [トントンブー]', () => {
       { qijia: 0, jushu: 0, changbang: 0, tobiHule: false }
     );
     const score = g.getFinalScore();
-    for (const r of score) expect(r.tontonbuBonus).toBe(0);
+    const oya = score.find(r => r.player === g.state.qijia)!;
+    expect(oya.tontonbuBonus).toBe(12);
+    for (const r of score) if (r.player !== g.state.qijia) expect(r.tontonbuBonus).toBe(-6);
   });
 });

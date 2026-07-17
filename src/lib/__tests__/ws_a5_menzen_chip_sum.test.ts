@@ -53,9 +53,9 @@ describe('WSA-A5 additive menzen yaku chips', () => {
     ]);
   });
 
-  it('takes honitsu plus ryanpeikou as 20 chips only from the ron loser', () => {
+  it('pays honitsu plus ryanpeikou as 20 chips o-all on ron', () => {
     expect(applyMenzenYaku(['混一色', '二盃口'], 1)).toEqual([
-      { mode: 'ron', winner: 0, loser: 1, chips: 20, label: 'ホンイツ等 面前役' },
+      { mode: 'oall', winner: 0, chips: 20, label: 'ホンイツ等 面前役' },
     ]);
   });
 
@@ -65,9 +65,9 @@ describe('WSA-A5 additive menzen yaku chips', () => {
     ]);
   });
 
-  it('takes chinitsu plus ryanpeikou as 25 chips only from the ron loser', () => {
+  it('pays chinitsu plus ryanpeikou as 25 chips o-all on ron', () => {
     expect(applyMenzenYaku(['清一色', '二盃口'], 1)).toEqual([
-      { mode: 'ron', winner: 0, loser: 1, chips: 25, label: 'ホンイツ等 面前役' },
+      { mode: 'oall', winner: 0, chips: 25, label: 'ホンイツ等 面前役' },
     ]);
   });
 });

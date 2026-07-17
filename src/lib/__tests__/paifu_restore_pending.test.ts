@@ -21,7 +21,7 @@ function basePaifu(overrides: Record<string, any>) {
     type: 'anmika-mahjong-paifu',
     version: 2,
     timestamp: 'pending-test',
-    shan: { currentPai: [], initialPai: [], baopai: [], fubaopai: [], rinshan: ['m1','m2','m3','m4'], rinshanUsed: 0, kanDoraCount: 0 },
+    shan: { currentPai: ['s1','s2'], initialPai: [], baopai: [], fubaopai: [], rinshan: ['m1','m2','m3','m4'], rinshanUsed: 0, kanDoraCount: 0 },
     state: {
       qijia: 0,
       lunban: 0,
@@ -69,5 +69,16 @@ describe('buildStateFromPaifu pending action restore', () => {
     expect(s!.lastDapai).toEqual({ player: 1, pai: 'p7' });
     expect(s!.awaitingFulou).toBe(true);
     expect(s!.kanCandidates.some((c) => c.player === 0 && c.mianzi.length > 0)).toBe(true);
+  });
+
+  it('restores the v2 kan-dora limit and preserves disabled ura-dora', () => {
+    const paifu = basePaifu({});
+    paifu.shan.kanDoraCount = 3;
+    paifu.shan.fubaopai = null;
+    const s = buildStateFromPaifu(paifu);
+
+    expect(s).not.toBeNull();
+    expect(s!.game.shan.kanDoraCount).toBe(3);
+    expect((s!.game.shan as any)._fubaopai).toBeNull();
   });
 });

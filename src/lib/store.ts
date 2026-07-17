@@ -1,6 +1,7 @@
 ﻿
 // Svelte store wrapper for Game3
 import { writable, get } from 'svelte/store';
+import Majiang from '@kobalab/majiang-core';
 import { Game3, buildShoupai, isGoldPai, pochiColorFromPai } from './game3';
 import type { PlayerId } from './types';
 import { dlog, toCorePai } from './helpers';
@@ -11,6 +12,7 @@ import { cpuStepImpl, autoAdvanceImpl } from './store/cpuActions';
 import { Shan3, generateTilePool, defaultSanmaRule } from './shan3';
 import { declareKanImpl, ponImpl, damingangImpl } from './store/fulouActions';
 import { hasGoldKita } from './game3/gold';
+import { evaluateWinPoints } from './game3/settlement';
 import {
   advanceSaiKoroStage,
   appendSaiKoroChances,
@@ -34,7 +36,9 @@ import {
   sortRonResultsByKamicha,
   type PendingFeverContinue,
   type PendingFuyu,
+  type PendingKamiPochi,
   type PendingKinpei,
+  type PendingPochiSwap,
   type PendingQianggang,
   type PendingSaiKoro,
   type ReactionCandidate,
@@ -95,10 +99,16 @@ export interface StoreState {
   pendingKinpei: PendingKinpei | null;
   // R7 P0 #3 fix: 冬 modal 経由でも human ダブロン候補を保持、 selectFuyu で 救済可能に
   pendingFuyu: PendingFuyu | null;
+  /** ドラ表示・冬めくり中に出た正ぽっちの任意牌選択待ち。 */
+  pendingKamiPochi: PendingKamiPochi | null;
+  /** 白ぽっち／でかぽっちで祝儀期待値が同率になった高目候補の選択待ち。 */
+  pendingPochiSwap: PendingPochiSwap | null;
   pendingFeverContinue: PendingFeverContinue | null; // フィーバー中 アガリ後の 「続行」 ボタン待ち
   pendingPingju: boolean; // 流局成立、 「次局へ」 で 判定フェーズ [流し役満 / tenpai 罰符] を apply 待ち [リョー指示 2026-05-11]
   // R9 P1 #7 fix: 加槓 後の 槍槓 ron window 中の deferred state、 全員 pass で declareKan 実行
   pendingQianggang: PendingQianggang | null;
+  /** 北抜きに対する字一色・四喜和・国士ロンの反応窓。 */
+  pendingNukiBei?: { player: PlayerId; meta?: { gold?: boolean } } | null;
   /** サイコロチャンス [出目当て] modal 表示中 [MVP、 アガリ時の saiKoroChances を順に処理]
    *  chances: result.saiKoroChances [push 順]、 currentIdx: 現在処理中 index、
    *  selectedCombo: 宣言した出目 [小さい方 / 大きい方]、 rolls: 4 回ぶんの結果 */
@@ -161,8 +171,166 @@ function saveHuleSnapshot(game: Game3): void {
   game.saveSnapshot();
 }
 
+type WinChoiceContext = {
+  winner: PlayerId;
+  isRon: boolean;
+  ronfrom: PlayerId | null;
+};
+
+type PreSettlementChoiceResolution = {
+  result: any;
+  pending: boolean;
+};
+
+/** A pre-settlement choice rewinds hule(), then re-enters the ordinary win
+ * action after the choice is recorded.  Keep the reaction window replayable
+ * and remove only this claimant from the duplicate-submit guard. */
+function prepareWinChoiceReplay(s: StoreState, context: WinChoiceContext): void {
+  s.game.snapshotLocked = false;
+  s.roundEnded = false;
+  if (context.isRon) {
+    s.ronDeclaredPlayers = (s.ronDeclaredPlayers ?? []).filter((player) => player !== context.winner);
+    continueRonDecisionStage(s);
+    return;
+  }
+  s.lastWinner = null;
+  s.lastHuleResult = null;
+  s.ronResults = [];
+}
+
+/**
+ * Resolve the two choices that must be fixed before point/chip settlement:
+ * a positive pochi used as a dora indicator, and a tied all-mighty pochi high.
+ * hule() may reveal a new indicator through Autumn, so this runs after hule and
+ * rewinds to the pre-hule snapshot before asking the decision owner.
+ */
+export function resolvePreSettlementPochiChoices(
+  s: StoreState,
+  initialResult: any,
+  context: WinChoiceContext,
+  recalculate: () => any,
+): PreSettlementChoiceResolution {
+  let result = initialResult;
+  for (let guard = 0; guard < 16; guard++) {
+    const occurrence = s.game.getKamiPochiDoraOccurrences(context.winner)
+      .find((candidate) => candidate.target === null);
+    if (occurrence) {
+      const candidates = s.game.getKamiPochiCandidates('dora');
+      const decisionOwners = s.game.pochiDecisionOwners(context.winner);
+      const needsHumanDecision = decisionOwners.some((owner) => !s.cpu[owner]);
+      s.game.restoreSnapshot();
+      if (needsHumanDecision) {
+        s.pendingKamiPochi = {
+          winner: context.winner,
+          context: 'dora',
+          occurrenceKey: occurrence.key,
+          rawPai: occurrence.raw,
+          candidates,
+          decisionOwners,
+          decisionOwnerIndex: 0,
+          isRon: context.isRon,
+          ronfrom: context.ronfrom,
+        };
+        prepareWinChoiceReplay(s, context);
+        s.message = `✨ 神ぽっち ${occurrence.key}: 任意牌を選択してください`;
+        return { result, pending: true };
+      }
+      // CPU-only decision. 神ぽっちは任意牌なので、安定した候補順の先頭を採る。
+      s.game.kamiPochiDoraChoices[context.winner][occurrence.key] = candidates[0];
+      saveHuleSnapshot(s.game);
+      result = recalculate();
+      if (!result) return { result: null, pending: false };
+      continue;
+    }
+
+    const swap = result?._pochiSwapPending as PendingPochiSwap | undefined;
+    if (swap) {
+      const decisionOwners = Array.isArray(swap.decisionOwners)
+        ? [...swap.decisionOwners]
+        : s.game.pochiDecisionOwners(context.winner);
+      const needsHumanDecision = decisionOwners.some((owner) => !s.cpu[owner as PlayerId]);
+      if (needsHumanDecision) {
+        s.game.restoreSnapshot();
+        s.pendingPochiSwap = {
+          winner: context.winner,
+          kind: swap.kind,
+          candidates: swap.candidates.map((candidate) => ({ ...candidate })),
+          decisionOwners,
+          decisionOwnerIndex: 0,
+          isRon: context.isRon,
+          ronfrom: context.ronfrom,
+        };
+        prepareWinChoiceReplay(s, context);
+        s.message = `🀄 高目が同率です: ${swap.candidates.map((candidate) => candidate.target).join(' / ')}`;
+        return { result, pending: true };
+      }
+      const target = swap.candidates[0]?.target;
+      if (target) s.game.setPochiSwapChoice(context.winner, target, swap.candidates);
+      delete result._pochiSwapPending;
+    }
+    return { result, pending: false };
+  }
+  throw new Error('神ぽっち選択の再計算回数が上限を超えました');
+}
+
+function resultForWinner(s: StoreState, winner: PlayerId): any | null {
+  return s.ronResults.find((entry) => entry.player === winner)?.result
+    ?? (s.lastWinner === winner ? s.lastHuleResult : null);
+}
+
+function syncFuyuResult(s: StoreState, winner: PlayerId): void {
+  const result = resultForWinner(s, winner);
+  const reveal = s.game.fuyuRevealState[winner];
+  if (!result || !reveal) return;
+  result.fuyuLog = reveal.fuyuLog.map((entry) => ({ ...entry }));
+  result.fuyuKamiPochiPending = reveal.pendingChoice ? { ...reveal.pendingChoice } : null;
+}
+
+/** Pause on each physical positive pochi revealed by Winter. CPU-only owners
+ * make a deterministic legal choice; a human owner receives the modal. */
+export function enterFuyuKamiPochiStage(s: StoreState, context: WinChoiceContext): boolean {
+  const winners = context.isRon && s.ronResults.length > 0
+    ? s.ronResults.map((entry) => entry.player as PlayerId)
+    : [context.winner];
+  for (const winner of winners) {
+    for (let guard = 0; guard < 64; guard++) {
+      const pending = s.game.getPendingFuyuKamiPochi(winner);
+      if (!pending?.occurrenceKey) break;
+      const decisionOwners = pending.decisionOwners.length > 0
+        ? [...pending.decisionOwners]
+        : s.game.pochiDecisionOwners(winner);
+      const revealChoice = s.game.fuyuRevealState[winner]?.pendingChoice;
+      const needsHumanDecision = decisionOwners.some((owner) => !s.cpu[owner]);
+      if (needsHumanDecision) {
+        s.pendingKamiPochi = {
+          winner,
+          context: 'fuyu',
+          occurrenceKey: pending.occurrenceKey,
+          rawPai: revealChoice?.pai,
+          tier: revealChoice?.tier,
+          candidates: [...pending.candidates],
+          decisionOwners,
+          decisionOwnerIndex: 0,
+          isRon: context.isRon,
+          ronfrom: context.ronfrom,
+        };
+        syncFuyuResult(s, winner);
+        s.roundEnded = false;
+        s.message = `✨ 冬の神ぽっち ${revealChoice?.tier === 'lower' ? '下段' : '上段'}: 任意牌を選択してください`;
+        return true;
+      }
+      const advance = s.game.resumeFuyuKamiPochi(winner, pending.occurrenceKey, pending.candidates[0]);
+      if (!advance) throw new Error('冬の神ぽっち自動選択に失敗しました');
+      syncFuyuResult(s, winner);
+      if (advance.status === 'complete') break;
+    }
+  }
+  return false;
+}
+
 function hasPostWinDecision(s: StoreState): boolean {
-  return !!(s.pendingFuyu || s.pendingKinpei || s.pendingSaiKoro || s.pendingFeverContinue);
+  return !!(s.pendingFuyu || s.pendingKinpei || s.pendingKamiPochi || s.pendingPochiSwap
+    || s.pendingSaiKoro || s.pendingFeverContinue);
 }
 
 function isLiveTurnActionBlocked(s: StoreState, allowLizhiDiscard = false): boolean {
@@ -171,6 +339,7 @@ function isLiveTurnActionBlocked(s: StoreState, allowLizhiDiscard = false): bool
     || s.awaitingRonDecision
     || s.awaitingFulou
     || s.pendingQianggang !== null
+    || s.pendingNukiBei != null
     || hasPostWinDecision(s)
     || (!allowLizhiDiscard && s.lizhiPending !== null);
 }
@@ -211,9 +380,12 @@ export function createGameStore() {
     lizhiPending: null,
     pendingKinpei: null,
     pendingFuyu: null,
+    pendingKamiPochi: null,
+    pendingPochiSwap: null,
     pendingFeverContinue: null,
     pendingPingju: false,
       pendingQianggang: null,
+    pendingNukiBei: null,
     pendingSaiKoro: null,
     cpuWinAck: true,
     stamps: { 0: null, 1: null, 2: null },
@@ -295,7 +467,197 @@ export function createGameStore() {
     }
   }
 
-  return {
+  const cloneWire = <T>(value: T): T => {
+    if (typeof structuredClone === 'function') return structuredClone(value);
+    return JSON.parse(JSON.stringify(value)) as T;
+  };
+
+  /**
+   * Restore a seat-scoped server projection without ever reconstructing the
+   * hidden wall or another player's concealed tiles.  Accepted online
+   * commands are authoritative state transitions; the local reducer is not a
+   * source of truth because masked draws cannot be replayed deterministically.
+   */
+  function hydrateProjectionState(projection: any): boolean {
+    try {
+      if (!projection || projection.schemaVersion !== 1) return false;
+      if (myOnlineSeat === null || projection.recipientSeat !== myOnlineSeat) return false;
+      if (!projection.gameState || !projection.shan || !projection.fields || !projection.store) return false;
+      if (!projection.privateHand || !projection.publicHands || !projection.rivers) return false;
+
+      const current = get(store) as StoreState;
+      const ng = new Game3({
+        shanRule: current.game.shanRule,
+        qijia: projection.gameState.qijia,
+        startingDefen: current.game.startingDefen,
+        changshu: current.game.changshu,
+      });
+      ng.state = cloneWire(projection.gameState);
+      ng.shan = Shan3.createBlind({
+        rule: ng.shanRule,
+        baopai: cloneWire(projection.shan.baopai ?? []),
+        fubaopai: projection.shan.fubaopai == null ? null : cloneWire(projection.shan.fubaopai),
+        paishu: Number(projection.shan.paishu ?? 0),
+        kanDoraCount: Number(projection.shan.kanDoraCount ?? 0),
+      });
+      ng.shan.rinshanUsed = Number(projection.shan.rinshanUsed ?? 0);
+      (ng.shan as any)._fuyuRevealed = cloneWire(projection.shan.fuyuRevealed ?? []);
+
+      const restoreHand = (serialized: any): any => {
+        if (!serialized?.bingpai) throw new Error('online projection hand missing bingpai');
+        const bp = serialized.bingpai;
+        const numericArray = (value: unknown, minLength: number): number[] => {
+          if (!Array.isArray(value) || value.length < minLength) throw new Error('online projection invalid bingpai');
+          const out = value.map((n) => Number(n));
+          if (out.some((n) => !Number.isInteger(n) || n < 0 || n > 4)) throw new Error('online projection invalid tile count');
+          return out;
+        };
+        const sp = buildShoupai([]);
+        sp._bingpai = {
+          _: Number(bp._ ?? 0),
+          m: numericArray(bp.m, 10),
+          p: numericArray(bp.p, 10),
+          s: numericArray(bp.s, 10),
+          z: numericArray(bp.z, 8),
+        };
+        if (!Number.isInteger(sp._bingpai._) || sp._bingpai._ < 0 || sp._bingpai._ > 14) {
+          throw new Error('online projection invalid hidden count');
+        }
+        if (bp.anmika && typeof bp.anmika === 'object') {
+          sp._bingpai.__anmika = cloneWire(bp.anmika);
+          for (const [pai, count] of Object.entries(bp.anmika)) {
+            const n = Number(count);
+            if (!Number.isInteger(n) || n < 0 || n > 1) throw new Error(`online projection invalid ${pai} count`);
+            sp._bingpai[pai] = n;
+          }
+        }
+        sp._fulou = cloneWire(serialized.fulou ?? []);
+        sp._zimo = serialized.zimo ?? null;
+        sp._anmikaZimo = serialized.anmikaZimo ?? null;
+        sp._anmikaFulou = cloneWire(serialized.anmikaFulou ?? []);
+        sp._anmikaFulouPhysical = cloneWire(serialized.anmikaFulouPhysical ?? []);
+        return sp;
+      };
+
+      const restorePublicHand = (value: any): any => {
+        if (value?.revealedHand) return restoreHand(value.revealedHand);
+        const revealedWaitTiles = Array.isArray(value?.revealedWaitTiles)
+          ? value.revealedWaitTiles.filter((pai: unknown) => typeof pai === 'string')
+          : [];
+        const count = Number(value?.concealedCount ?? 0);
+        if (!Number.isInteger(count) || count < 0 || count > 14 || revealedWaitTiles.length > count) {
+          throw new Error('online projection invalid concealed count');
+        }
+        const sp = buildShoupai(revealedWaitTiles);
+        sp._bingpai._ = count - revealedWaitTiles.length;
+        sp._fulou = cloneWire(value?.fulou ?? []);
+        sp._anmikaFulou = cloneWire(value?.anmikaFulou ?? []);
+        sp._anmikaFulouPhysical = cloneWire(value?.anmikaFulouPhysical ?? []);
+        // A hidden draw still has to keep the public turn phase out of the
+        // "needs draw" state.  Its face never enters this client.
+        sp._zimo = value?.pseudoZimo ?? (value?.hasZimo ? '__hidden_draw__' : null);
+        sp._anmikaZimo = null;
+        return sp;
+      };
+
+      ng.shoupai = new Map();
+      for (const player of [0, 1, 2] as const) {
+        const serialized = player === myOnlineSeat
+          ? projection.privateHand
+          : projection.publicHands[player] ?? projection.publicHands[String(player)];
+        ng.shoupai.set(player, player === myOnlineSeat ? restoreHand(serialized) : restorePublicHand(serialized));
+      }
+      ng.he = new Map();
+      for (const player of [0, 1, 2] as const) {
+        const he = new Majiang.He();
+        const river = projection.rivers[player] ?? projection.rivers[String(player)] ?? [];
+        if (!Array.isArray(river)) throw new Error('online projection invalid river');
+        (he as any)._pai = cloneWire(river);
+        ng.he.set(player, he);
+      }
+      ng.events = cloneWire(projection.publicEvents ?? []);
+
+      const fields = projection.fields as Record<string, any>;
+      for (const [field, value] of Object.entries(fields)) {
+        if (field === 'lizhi' || field === 'doubleLizhi' || field === 'openLizhi') {
+          (ng as any)[field] = new Set(Array.isArray(value) ? value : []);
+        } else if (field === 'firstTurnState') {
+          ng.restoreFirstTurnState(value);
+        } else {
+          (ng as any)[field] = cloneWire(value);
+        }
+      }
+
+      // Keep the Game3 object identity stable so animation observers do not
+      // replay every historical draw after each authoritative update.
+      Object.assign(current.game as any, ng as any);
+      const wireStore = projection.store as Record<string, any>;
+      const next: StoreState = {
+        ...current,
+        game: current.game,
+        lastZimo: wireStore.lastZimo ?? null,
+        lastDapai: cloneWire(wireStore.lastDapai ?? null),
+        lastWinner: wireStore.lastWinner ?? null,
+        lastHuleResult: cloneWire(wireStore.lastHuleResult ?? null),
+        awaitingRonDecision: !!wireStore.awaitingRonDecision,
+        ronPassedPlayers: cloneWire(wireStore.ronPassedPlayers ?? []),
+        ronDeclaredPlayers: cloneWire(wireStore.ronDeclaredPlayers ?? []),
+        ronResults: cloneWire(wireStore.ronResults ?? []),
+        awaitingFulou: !!wireStore.awaitingFulou,
+        ponCandidates: cloneWire(wireStore.ponCandidates ?? []),
+        kanCandidates: cloneWire(wireStore.kanCandidates ?? []),
+        roundEnded: !!wireStore.roundEnded,
+        message: wireStore.message ?? null,
+        cpu: cloneWire(wireStore.cpu ?? current.cpu),
+        lizhiPending: wireStore.lizhiPending ?? null,
+        pendingKinpei: cloneWire(wireStore.pendingKinpei ?? null),
+        pendingFuyu: cloneWire(wireStore.pendingFuyu ?? null),
+        pendingKamiPochi: cloneWire(wireStore.pendingKamiPochi ?? null),
+        pendingPochiSwap: cloneWire(wireStore.pendingPochiSwap ?? null),
+        pendingFeverContinue: cloneWire(wireStore.pendingFeverContinue ?? null),
+        pendingPingju: !!wireStore.pendingPingju,
+        pendingQianggang: cloneWire(wireStore.pendingQianggang ?? null),
+        pendingNukiBei: cloneWire(wireStore.pendingNukiBei ?? null),
+        pendingSaiKoro: cloneWire(wireStore.pendingSaiKoro ?? null),
+        cpuWinAck: wireStore.cpuWinAck !== false,
+        _onlineMode: true,
+      };
+      // Candidate identity remains private, but tests/debug views may consume
+      // this self-only list when supplied by the projection.
+      (next as any).ronCandidates = cloneWire(wireStore.ronCandidates ?? []);
+      set(next);
+      return true;
+    } catch (error) {
+      dlog('[online-projection-reject]', error);
+      return false;
+    }
+  }
+
+  function finishAfterFuyuKamiPochi(s: StoreState, context: WinChoiceContext): StoreState {
+    if (enterFuyuKamiPochiStage(s, context)) return s;
+    const results = context.isRon && s.ronResults.length > 0
+      ? s.ronResults
+      : (s.lastHuleResult ? [{ player: context.winner, result: s.lastHuleResult }] : []);
+    for (const entry of results) {
+      syncFuyuResult(s, entry.player as PlayerId);
+      if (entry.result?._anmikaPostWinEffectsQueued) continue;
+      if (!entry.result?._anmikaRonEffectsQueued) {
+        s = enqueueCutinState(s, context.isRon ? 'ron' : 'tsumo', entry.player as PlayerId);
+        s = triggerSaiKoroIfAny(s, entry.result, entry.player);
+      }
+      entry.result._anmikaPostWinEffectsQueued = true;
+      if (s.pendingSaiKoro && s.cpu[entry.player as PlayerId]) s.cpuWinAck = false;
+    }
+    if (context.isRon) finishRonDecisionStage(s);
+    settleAfterWin(s, {
+      winner: (s.lastWinner ?? context.winner) as PlayerId,
+      isRon: context.isRon,
+    });
+    s.message = `${s.message ?? ''} [神ぽっち選択確定]`.trim();
+    return s;
+  }
+
+  const api = {
     subscribe,
     /** オンライン対戦 接続 & game init */
     initOnlineGame(opts: {
@@ -350,9 +712,12 @@ export function createGameStore() {
         lizhiPending: null,
         pendingKinpei: null,
         pendingFuyu: null,
+        pendingKamiPochi: null,
+        pendingPochiSwap: null,
         pendingFeverContinue: null,
         pendingPingju: false,
       pendingQianggang: null,
+        pendingNukiBei: null,
         pendingSaiKoro: null,
     cpuWinAck: true,
         stamps: { 0: null, 1: null, 2: null },
@@ -366,6 +731,10 @@ export function createGameStore() {
       onlineRevision = opts.revision;
       onlineMatchId = opts.matchId;
       onlineRoundId = opts.roundId;
+    },
+    /** Apply the server's seat-scoped canonical state. */
+    hydrateOnlineProjection(projection: unknown): boolean {
+      return hydrateProjectionState(projection);
     },
     getOnlineProtocolState() {
       return { revision: onlineRevision, matchId: onlineMatchId, roundId: onlineRoundId };
@@ -385,6 +754,7 @@ export function createGameStore() {
      *  2026-05-14 codex review #1 fix: from_seat と action.player / 現在手番 / 候補者 の
      *  整合 check を追加、 不正 seat からの proxy action [他人の宣言/打牌 横取り] を reject */
     applyOnlineRemoteAction(from_seat: number, action: any) {
+      if (action?._state) return hydrateProjectionState(action._state);
       // スタンプ [cosmetic、 game state 副作用なし]: 全 validation skip、
       // from_seat の stamps slot に set + STAMP_DURATION_MS 後に null に戻す
       if (action?.type === 'stamp') {
@@ -457,6 +827,12 @@ export function createGameStore() {
             // ron 候補の妥当性は ron() 内で再 check されるが、 ここでは明確な proxy を弾く
             break;
           }
+          case 'shuvari': {
+            const targetP = action.player ?? from_seat;
+            if (from_seat !== targetP) return reject(`shuvari: from_seat ${from_seat} ≠ action.player ${targetP}`);
+            if (!s.game.canDeclareLateShuvari(targetP as PlayerId)) return reject(`shuvari: player ${targetP} is outside declaration window`);
+            break;
+          }
           // pon / damingang は action.player === from_seat、 副露候補に from_seat 含まれる事
           // R4 P0 #7 fix: action.mianzi が候補配列内 mianzi と一致する事も必須化、
           // 不正 mianzi で declarePon false → 状態破綻を防ぐ
@@ -499,15 +875,26 @@ export function createGameStore() {
           // winner 限定 action: selectFuyu / selectKinpei / continueFever / agariyame
           case 'selectFuyu':
           case 'selectKinpei':
+          case 'selectKamiPochi':
+          case 'selectPochiSwap':
           case 'continueFever':
           case 'agariyame': {
             // R6 P2 #11 fix: continueFever は pendingFeverContinue.winner で gate
+            const owners = action.type === 'selectFuyu' ? s.pendingFuyu?.decisionOwners
+              : action.type === 'selectKinpei' ? s.pendingKinpei?.decisionOwners
+              : action.type === 'selectKamiPochi' ? s.pendingKamiPochi?.decisionOwners
+              : action.type === 'selectPochiSwap' ? s.pendingPochiSwap?.decisionOwners
+              : undefined;
             const expected = action.type === 'selectFuyu' ? s.pendingFuyu?.winner
               : action.type === 'selectKinpei' ? s.pendingKinpei?.winner
+              : action.type === 'selectKamiPochi' ? s.pendingKamiPochi?.winner
+              : action.type === 'selectPochiSwap' ? s.pendingPochiSwap?.winner
               : action.type === 'continueFever' ? s.pendingFeverContinue?.winner
               : winner;
             if (expected === undefined || expected === null) return reject(`${action.type}: no expected winner`);
-            if (from_seat !== expected) return reject(`${action.type}: from_seat ${from_seat} ≠ winner ${expected}`);
+            if (owners?.length) {
+              if (!owners.includes(from_seat)) return reject(`${action.type}: from_seat ${from_seat} not in decisionOwners ${owners}`);
+            } else if (from_seat !== expected) return reject(`${action.type}: from_seat ${from_seat} ≠ winner ${expected}`);
             // agariyame は親アガリ前提、 現親限定 [Round 2 codex fix P1: state.qijia → currentOya]
             if (action.type === 'agariyame' && from_seat !== s.game.currentOya) return reject(`agariyame: ${from_seat} ≠ currentOya ${s.game.currentOya}`);
             break;
@@ -555,6 +942,7 @@ export function createGameStore() {
         switch (action.type) {
           case 'discard': (this as any).discard(action.pai, action.meta); break;
           case 'lizhi': (this as any).lizhi(action.opts ?? {}); break;
+          case 'shuvari': (this as any).shuvari(action.player ?? from_seat); break;
           case 'tsumo': (this as any).tsumo(); break;
           case 'ron': (this as any).ron(action.player ?? from_seat); break;
           case 'pass': (this as any).pass(action.player ?? from_seat); break;
@@ -564,6 +952,8 @@ export function createGameStore() {
           case 'drawNext': (this as any).drawNext(); break;  // R4 P1 #18
           case 'selectFuyu': (this as any).selectFuyu(action.use); break;
           case 'selectKinpei': (this as any).selectKinpei(action.target); break;
+          case 'selectKamiPochi': (this as any).selectKamiPochi(action.target, action.occurrenceKey); break;
+          case 'selectPochiSwap': (this as any).selectPochiSwap(action.target); break;
           case 'continueFever': (this as any).continueFever(); break;
           case 'nextRound': (this as any).nextRound(action.preShuffledPool); break;
           case 'nextMatch': (this as any).nextMatch({ finalize: action.finalize, resetChip: action.resetChip, preShuffledPool: action.preShuffledPool, qijia: action.qijia, cpuSeats: action.cpuSeats }); break;
@@ -661,7 +1051,7 @@ export function createGameStore() {
           // 旧仕様 [不可牌なら通常リーチへ自動降格] を廃止し、打牌自体を reject する
           // [UI 側も候補をフィーバー成立牌に絞る]
           const isFeverDecl = !!(s as any)._lizhiFever;
-          let feverCheckForDeclare: { ok: boolean; tiles: string[]; tier: 1 | 2 | 3 } | undefined;
+          let feverCheckForDeclare: { ok: boolean; tiles: string[]; tier: 1 | 2 | 3 | 4 } | undefined;
           if (isFeverDecl) {
             const feverMap = s.game.feverCandidatesByDapai(player);
             feverCheckForDeclare = feverMap.get(corePai);
@@ -681,14 +1071,6 @@ export function createGameStore() {
           (s as any)._lizhiShuvari = false;
           (s as any)._lizhiFever = false;
           s = enqueueCutinState(s, isFeverDecl ? 'fever' : 'reach', player as PlayerId);
-          // フィーバー宣言時、 待ち牌全消失で 1 人テンパイ流局 [ルール 5-2、 P0-1 後半]
-          //   spec: 宣言通っても待ちがその段階でなかったら fever 成立 + 1 人テンパイ流局 [2026-05-11]
-          if (isFeverDecl && s.game.isFeverWaitExhausted(player)) {
-            // 2026-05-14 codex review P2 fix: 流局 path で applyPingjuTransition を経由、
-            // 罰符 / 流し役満 / defen 移動 を きちんと apply してから pendingPingju
-            s = applyPingjuTransition(s, `🔥 フィーバー立直成立、 待ち牌全消失で 1 人テンパイ流局 [「次局へ」 で確定]`);
-            return { ...s };
-          }
         }
         return innerDiscard(s, pai, meta);
       });
@@ -720,22 +1102,28 @@ export function createGameStore() {
         if (!s.lastDapai) return { ...s };
         if (!s.awaitingRonDecision) return { ...s };
         if (!s.game.canRon(player as any, s.lastDapai.pai, s.lastDapai.player as any)) return { ...s };
+        // 北抜き牌へのロンが成立したら補充処理を破棄する。
+        if (s.pendingNukiBei) s.pendingNukiBei = null;
         // P0-1: 宣言牌 ron → フィーバー不正立 [リョー指示 2026-05-11]
         //   宣言牌の discarder が feverDeclareDapaiPlayer なら、 fever を undo してから ron 処理
         //   [lizhi 自体は通常通り成立、 ron も通常進行、 fever 倍率のみ消える]
         const fdp = s.game.feverDeclareDapaiPlayer;
         if (fdp !== null && fdp === s.lastDapai.player) {
-          s.game.feverActive[fdp] = false;
-          s.game.feverTier[fdp] = 1;
-          s.game.feverDeclareDapaiPlayer = null;
+          s.game.cancelFeverDeclaration(fdp);
           dlog('[fever undone] 宣言牌 ron、 player=', fdp);
         }
         // フィーバー中 + 冬持ち + 自家 → 冬使う / 保留 modal
-        if (s.game.feverActive[player as 0|1|2] && s.game.effectiveHuapaiAtHule(player as PlayerId).includes('f4') && !s.cpu[player as 0|1|2]) {
+        const reversePochiDecisionRon = !!(s.game.feverActive[player as 0|1|2]
+          && s.game.pochiPaymentMode[player as 0|1|2]);
+        const reverseRonHasHumanOwner = reversePochiDecisionRon
+          && ([0, 1, 2] as const).some((p) => p !== player && !s.cpu[p]);
+        if (s.game.feverActive[player as 0|1|2]
+          && s.game.effectiveHuapaiAtHule(player as PlayerId).includes('f4')
+          && (!s.cpu[player as 0|1|2] || reverseRonHasHumanOwner)) {
           // [2026-05-15 機能 11] 待ち残山 0 → modal skip で 自動冬使用 [user 選択不要]
-          if (s.game.isFeverWaitExhausted(player as 0|1|2)) {
+          if (s.game.isFeverWaitExhausted(player as 0|1|2) && !reversePochiDecisionRon) {
             s.game.fuyuConsumed[player as 0|1|2] = true;
-            s.game.feverActive[player as 0|1|2] = false;
+            s.game.endFever(player as PlayerId);
             // fall through で 通常 ron path に
           } else {
             // 2026-05-14 codex review P1 fix: pendingFuyu 化前に saveSnapshot
@@ -761,8 +1149,9 @@ export function createGameStore() {
         }
         // フィーバー + 払い状態 [pochiPaymentMode] では 金北 強化先 modal をスキップ、 自動確定
         // [リョー仕様 2026-05-12: 赤/黄ツモ後 青/緑ツモまでの間は player 任意選択ナシ]
-        const isFeverPayAuto_ron =
-          s.game.feverActive[player as 0|1|2] && s.game.pochiPaymentMode[player as 0|1|2];
+        const reverseDecisionOwnersRon = ([0, 1, 2] as const).filter((p) => p !== player);
+        const isFeverPayAuto_ron = reversePochiDecisionRon
+          && reverseDecisionOwnersRon.every((p) => s.cpu[p]);
         // snapshot 保存 [後で金北変更時に巻き戻し]
         saveHuleSnapshot(s.game);
         // ダブロン対応
@@ -774,6 +1163,20 @@ export function createGameStore() {
         if (!result) {
           s.message = `player ${player} はロンできない [役なし or majiang-core 拒否]`;
           return { ...s };
+        }
+        {
+          const choice = resolvePreSettlementPochiChoices(
+            s,
+            result,
+            { winner: player as PlayerId, isRon: true, ronfrom: s.lastDapai.player as PlayerId },
+            () => s.game.hule(player as PlayerId, s.lastDapai!.pai, s.lastDapai!.player as PlayerId),
+          );
+          if (choice.pending) return { ...s };
+          result = choice.result;
+          if (!result) {
+            s.message = `player ${player} 神ぽっち選択後のロン再計算失敗`;
+            return { ...s };
+          }
         }
         // 秋効果で新たに冬が表示された場合も、和了時に抜いた扱いとして冬選択へ戻す。
         if (s.game.feverActive[player as 0|1|2]
@@ -804,11 +1207,21 @@ export function createGameStore() {
             if (isFeverPayAuto_ron && s.game.kinpeiTarget[player as 0|1|2] === 'fuyu') {
               s.game.fuyuConsumed[player as 0|1|2] = true;
             }
+            // 神ぽっち / 高目選択で再度 restore しても、確定した金北を失わない。
+            saveHuleSnapshot(s.game);
             result = s.game.hule(player as any, s.lastDapai.pai, s.lastDapai.player as any);
             if (!result) {
               s.message = `player ${player} 金北自動選択後のロン再計算失敗`;
               return { ...s };
             }
+            const choice = resolvePreSettlementPochiChoices(
+              s,
+              result,
+              { winner: player as PlayerId, isRon: true, ronfrom: s.lastDapai.player as PlayerId },
+              () => s.game.hule(player as PlayerId, s.lastDapai!.pai, s.lastDapai!.player as PlayerId),
+            );
+            if (choice.pending) return { ...s };
+            result = choice.result;
           }
         }
         if (otherCands.length > 0) s.game.snapshotLocked = true;
@@ -823,8 +1236,35 @@ export function createGameStore() {
           if (s.cpu[p as 0|1|2]) {
             // WSA: 秋ダブロン対策 — 全 winner を同一 pre-ron snapshot から評価
             s.game.restoreSnapshot();
-            if (hasGoldKita(s.game, p as PlayerId)) s.game.autoResolveKinpei(p as any);
-            const r2 = s.game.hule(p as any, ld.pai, ld.player as any);
+            if (hasGoldKita(s.game, p as PlayerId)) {
+              s.game.autoResolveKinpei(p as any);
+              saveHuleSnapshot(s.game);
+            }
+            let r2 = s.game.hule(p as any, ld.pai, ld.player as any);
+            if (r2) {
+              const choice = resolvePreSettlementPochiChoices(
+                s,
+                r2,
+                { winner: p as PlayerId, isRon: true, ronfrom: ld.player as PlayerId },
+                () => s.game.hule(p as PlayerId, ld.pai, ld.player as PlayerId),
+              );
+              if (choice.pending) {
+                result._anmikaRonSettlementDeferred = true;
+                for (const prior of ronResults) prior.result._anmikaRonSettlementDeferred = true;
+                s.ronResults = sortRonResultsByKamicha(
+                  ld.player as PlayerId,
+                  mergeRonResults(s.ronResults, ronResults),
+                );
+                s.ronDeclaredPlayers = Array.from(new Set([
+                  ...(s.ronDeclaredPlayers ?? []),
+                  ...ronResults.map((entry) => entry.player),
+                ]));
+                s.lastWinner = winnerByOya(s.game, s.ronResults);
+                s.lastHuleResult = s.ronResults.at(-1)?.result ?? result;
+                return { ...s };
+              }
+              r2 = choice.result;
+            }
             if (r2) {
               r2._anmikaRonSettlementDeferred = true;
               ronResults.push({ player: p, result: r2 });
@@ -867,7 +1307,9 @@ export function createGameStore() {
         if (humanOthers.length > 0) {
           // R9 P1 #8 fix: humanOthers 残り時も pendingKinpei を 作って winner の金北選択権を保持。
           // 全 human が pass / ron した後 finalize 時に 既存 pendingKinpei を踏襲する
-          if (hasGoldKita(s.game, player as PlayerId) && !s.cpu[player as 0|1|2] && !isFeverPayAuto_ron && !s.pendingKinpei
+          if (hasGoldKita(s.game, player as PlayerId)
+            && (!s.cpu[player as 0|1|2] || reverseRonHasHumanOwner)
+            && !isFeverPayAuto_ron && !s.pendingKinpei
             && s.game.kinpeiTarget[player as 0|1|2] === null) {
             const otherWinners = allRonResults.filter(r => r.player !== player).map(r => r.player);
             enterKinpeiStage(s, {
@@ -892,6 +1334,14 @@ export function createGameStore() {
         } else {
           s.message = `🎉 player ${player} ロン和了！ ${formatHuleResult(result)} ${feverNote}`;
         }
+        if (enterFuyuKamiPochiStage(s, {
+          winner: player as PlayerId,
+          isRon: true,
+          ronfrom: ld.player as PlayerId,
+        })) {
+          s.game.snapshotLocked = false;
+          return { ...s };
+        }
         for (const rr of allRonResults) {
           if (rr.result?._anmikaRonEffectsQueued) continue;
           s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
@@ -910,7 +1360,9 @@ export function createGameStore() {
         // 抜く前の金北で強化選択漏れ
         // 2026-07-15 リョー裁定: 一度選択した適用先は以降変更不可 [保留のみ再選択可]。
         // 選択済み [kinpeiTarget != null] なら modal を開かない [tsumo 側 1677 と同じガード]
-        if (hasGoldKita(s.game, player as PlayerId) && !s.cpu[player as 0|1|2] && !isFeverPayAuto_ron
+        if (hasGoldKita(s.game, player as PlayerId)
+          && (!s.cpu[player as 0|1|2] || reverseRonHasHumanOwner)
+          && !isFeverPayAuto_ron
           && s.game.kinpeiTarget[player as 0|1|2] === null) {
           // R4 P1 #10 fix: ダブロン CPU 他 winner を otherWinners に持って、 selectKinpei で 再適用する
           const otherWinners = allRonResults.filter(r => r.player !== player).map(r => r.player);
@@ -935,10 +1387,11 @@ export function createGameStore() {
     },
     /** フィーバー中 冬使う / 保留 選択 */
     selectFuyu(use: boolean) {
-      // gate: pendingFuyu.winner 限定
+      // 正ぽっちはwinner、逆ぽっちは同卓者側が決定する。
       if (onlineMode && !isApplyingRemote && myOnlineSeat !== null) {
         const s = get(store) as StoreState;
-        if (s.pendingFuyu && myOnlineSeat !== s.pendingFuyu.winner) { dlog('[gate-block]', { type: 'selectFuyu', my: myOnlineSeat, w: s.pendingFuyu.winner }); return; }
+        const owners = s.pendingFuyu?.decisionOwners ?? (s.pendingFuyu ? [s.pendingFuyu.winner] : []);
+        if (s.pendingFuyu && !owners.includes(myOnlineSeat)) { dlog('[gate-block]', { type: 'selectFuyu', my: myOnlineSeat, owners }); return; }
       }
       if (sendOnlineAction({ type: 'selectFuyu', use })) return;
       update((s) => {
@@ -965,6 +1418,22 @@ export function createGameStore() {
         if (!result) {
           s.message = `player ${winner} アガリ失敗 [役なし]`;
           return { ...s };
+        }
+        {
+          const choice = resolvePreSettlementPochiChoices(
+            s,
+            result,
+            { winner: winner as PlayerId, isRon, ronfrom: ronfrom as PlayerId | null },
+            () => isRon && ronfrom !== null
+              ? s.game.hule(winner as PlayerId, s.lastDapai!.pai, ronfrom as PlayerId)
+              : s.game.hule(winner as PlayerId),
+          );
+          if (choice.pending) return { ...s };
+          result = choice.result;
+          if (!result) {
+            s.message = `player ${winner} 神ぽっち選択後の再計算失敗`;
+            return { ...s };
+          }
         }
         const resolvedHuapai = s.game.effectiveHuapaiAtHule(winner as PlayerId);
         if (hasGoldKita(s.game, winner as PlayerId)
@@ -1000,6 +1469,7 @@ export function createGameStore() {
           && resolvedHuapai.length > 0) {
           s.game.restoreSnapshot();
           s.game.autoResolveKinpei(winner as any, resolvedHuapai);
+          saveHuleSnapshot(s.game);
           result = isRon && ronfrom !== null
             ? s.game.hule(winner as any, s.lastDapai!.pai, ronfrom as any)
             : s.game.hule(winner as any);
@@ -1007,20 +1477,58 @@ export function createGameStore() {
             s.message = `player ${winner} 金北自動選択後の再計算失敗`;
             return { ...s };
           }
+          const choice = resolvePreSettlementPochiChoices(
+            s,
+            result,
+            { winner: winner as PlayerId, isRon, ronfrom: ronfrom as PlayerId | null },
+            () => isRon && ronfrom !== null
+              ? s.game.hule(winner as PlayerId, s.lastDapai!.pai, ronfrom as PlayerId)
+              : s.game.hule(winner as PlayerId),
+          );
+          if (choice.pending) return { ...s };
+          result = choice.result;
+          if (!result) {
+            s.message = `player ${winner} 金北・神ぽっち選択後の再計算失敗`;
+            return { ...s };
+          }
         }
-        s.game.applyHule(result, winner as any, isRon ? (ronfrom as any) : null);
-        // R3 P1 #7 fix: ロン経路 [isRon] で 他ダブロン候補 [他 CPU 限定 自動 ron] を計算 + apply、
-        // 冬 modal pass 中に失われた候補を救済。 human 他候補は P1 #5 同様 log のみ
+        // 冬 modal 経由でも全ロン候補を同じ pre-hule snapshot から評価する。
         const ronResults: Array<{ player: number; result: any }> = [{ player: winner, result }];
         if (isRon && ronfrom !== null && s.lastDapai) {
           const ld = s.lastDapai;
           const otherCands = ([0,1,2] as const).filter(p => p !== winner && p !== ld.player && s.game.canRon(p as any, ld.pai, ld.player as any));
           for (const p of otherCands) {
             if (s.cpu[p as 0|1|2]) {
-              if (hasGoldKita(s.game, p as PlayerId)) s.game.autoResolveKinpei(p as any);
-              const r2 = s.game.hule(p as any, ld.pai, ld.player as any);
+              s.game.restoreSnapshot();
+              if (hasGoldKita(s.game, p as PlayerId)) {
+                s.game.autoResolveKinpei(p as any);
+                saveHuleSnapshot(s.game);
+              }
+              let r2 = s.game.hule(p as any, ld.pai, ld.player as any);
               if (r2) {
-                s.game.applyHule(r2, p as any, ld.player as any);
+                const choice = resolvePreSettlementPochiChoices(
+                  s,
+                  r2,
+                  { winner: p as PlayerId, isRon: true, ronfrom: ld.player as PlayerId },
+                  () => s.game.hule(p as PlayerId, ld.pai, ld.player as PlayerId),
+                );
+                if (choice.pending) {
+                  for (const prior of ronResults) prior.result._anmikaRonSettlementDeferred = true;
+                  s.ronResults = sortRonResultsByKamicha(
+                    ld.player as PlayerId,
+                    mergeRonResults(s.ronResults, ronResults),
+                  );
+                  s.ronDeclaredPlayers = Array.from(new Set([
+                    ...(s.ronDeclaredPlayers ?? []),
+                    ...ronResults.map((entry) => entry.player),
+                  ]));
+                  s.lastWinner = winnerByOya(s.game, s.ronResults);
+                  s.lastHuleResult = s.ronResults.at(-1)?.result ?? result;
+                  return { ...s };
+                }
+                r2 = choice.result;
+              }
+              if (r2) {
                 ronResults.push({ player: p, result: r2 });
               }
             } else {
@@ -1034,10 +1542,24 @@ export function createGameStore() {
         const fuyuHumans = fuyuHumanOthers.filter(p =>
           !(s.ronPassedPlayers ?? []).includes(p) && !(s.ronDeclaredPlayers ?? []).includes(p)
         );
+        if (isRon && ronfrom !== null) {
+          const combined = sortRonResultsByKamicha(
+            ronfrom as PlayerId,
+            mergeRonResults(s.ronResults, ronResults),
+          );
+          if (fuyuHumans.length > 0) {
+            for (const entry of ronResults) entry.result._anmikaRonSettlementDeferred = true;
+            s.ronResults = combined;
+          } else {
+            s.ronResults = settleRonResultsInKamichaOrder(s.game, ronfrom as PlayerId, combined);
+          }
+        } else {
+          s.game.applyHule(result, winner as PlayerId, null);
+          s.ronResults = [];
+        }
         s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), ...ronResults.map(r => r.player).filter(p => !(s.ronDeclaredPlayers ?? []).includes(p))];
         const isFever = s.game.feverActive[winner as 0|1|2];
         const feverNote = isFever ? '🔥 [フィーバー継続中]' : '';
-        s.ronResults = isRon ? mergeRonResults(s.ronResults, ronResults) : [];
         s.message = s.ronResults.length > 1
           ? `🎉🎉 ダブロン! ${formatRonResults(s.ronResults)} ${feverNote}`
           : `🎉 player ${winner} ${isRon ? 'ロン' : 'ツモ'}和了！ ${formatHuleResult(result)} ${feverNote}`;
@@ -1046,6 +1568,13 @@ export function createGameStore() {
         if (fuyuHumans.length > 0) {
           continueRonDecisionStage(s);
           s.message += ` [他 human 候補 p${fuyuHumans.join('/')} 判断待ち]`;
+          return { ...s };
+        }
+        if (enterFuyuKamiPochiStage(s, {
+          winner: (s.lastWinner ?? winner) as PlayerId,
+          isRon,
+          ronfrom: ronfrom as PlayerId | null,
+        })) {
           return { ...s };
         }
         finishRonDecisionStage(s);
@@ -1059,16 +1588,17 @@ export function createGameStore() {
           if (!fuyuCutinQueued) s = enqueueCutinState(s, isRon ? 'ron' : 'tsumo', rr.player as PlayerId);
           s = triggerSaiKoroIfAny(s, rr.result, rr.player);
         }
-        settleAfterWin(s, { winner: winner as PlayerId, isRon });
+        settleAfterWin(s, { winner: (s.lastWinner ?? winner) as PlayerId, isRon });
         return { ...s };
       });
     },
     /** 金北 modal で強化対象選択 [target=null は保留] */
     selectKinpei(target: 'haru' | 'natsu' | 'aki' | 'fuyu' | null) {
-      // gate: pendingKinpei.winner 限定
+      // 正ぽっちはwinner、逆ぽっちは同卓者側が決定する。
       if (onlineMode && !isApplyingRemote && myOnlineSeat !== null) {
         const s = get(store) as StoreState;
-        if (s.pendingKinpei && myOnlineSeat !== s.pendingKinpei.winner) { dlog('[gate-block]', { type: 'selectKinpei', my: myOnlineSeat, w: s.pendingKinpei.winner }); return; }
+        const owners = s.pendingKinpei?.decisionOwners ?? (s.pendingKinpei ? [s.pendingKinpei.winner] : []);
+        if (s.pendingKinpei && !owners.includes(myOnlineSeat)) { dlog('[gate-block]', { type: 'selectKinpei', my: myOnlineSeat, owners }); return; }
       }
       if (sendOnlineAction({ type: 'selectKinpei', target })) return;
       update((s) => {
@@ -1113,6 +1643,9 @@ export function createGameStore() {
           }
           s.game.kinpeiTarget[winner as 0|1|2] = null;
         }
+        // この snapshot を以後の神ぽっち / 高目 / 冬再計算の基準にする。
+        // 選択前 snapshot のままだと restore 時に金北 target が消えてしまう。
+        saveHuleSnapshot(s.game);
         clearKinpeiStage(s);
         // 再 hule
         let result: any;
@@ -1124,6 +1657,22 @@ export function createGameStore() {
         if (!result) {
           s.message = `player ${winner} 再計算失敗`;
           return { ...s };
+        }
+        {
+          const choice = resolvePreSettlementPochiChoices(
+            s,
+            result,
+            { winner: winner as PlayerId, isRon, ronfrom: ronfrom as PlayerId | null },
+            () => isRon && ronfrom !== null
+              ? s.game.hule(winner as PlayerId, s.lastDapai!.pai, ronfrom as PlayerId)
+              : s.game.hule(winner as PlayerId),
+          );
+          if (choice.pending) return { ...s };
+          result = choice.result;
+          if (!result) {
+            s.message = `player ${winner} 金北・神ぽっち選択後の再計算失敗`;
+            return { ...s };
+          }
         }
         // 秋金北の追加表示で初めて冬が出た場合も、冬選択を挟んで同じ和了を再計算する。
         if (!fuyuDecisionMade
@@ -1146,43 +1695,92 @@ export function createGameStore() {
           s.message = `❄️ 秋金北のドラ表示で冬、冬を使う？ [使う = アリス発動 + フィーバー終了 / 保留 = 継続]`;
           return { ...s };
         }
-        if (otherWinners.length > 0) s.game.snapshotLocked = true;
-        s.game.applyHule(result, winner as any, isRon ? (ronfrom as any) : null);
-        // R4 P1 #10 fix: otherWinners [ダブロン CPU 他 winner] を 再 hule + applyHule。
-        // snapshot 復元で消えた CPU ダブロンの点数・チップ・サイコロ chance を回復
+        // 金北を選んだ winner と他のCPU winnerを同じ pre-ron snapshot から再計算する。
         const allResults: Array<{ player: number; result: any }> = [{ player: winner, result }];
         for (const ow of otherWinners) {
-          if (hasGoldKita(s.game, ow as PlayerId)) s.game.autoResolveKinpei(ow as any);
-          const r2 = isRon && ronfrom !== null
+          s.game.restoreSnapshot();
+          if (hasGoldKita(s.game, ow as PlayerId)) {
+            s.game.autoResolveKinpei(ow as any);
+            saveHuleSnapshot(s.game);
+          }
+          let r2 = isRon && ronfrom !== null
             ? s.game.hule(ow as any, s.lastDapai!.pai, ronfrom as any)
             : s.game.hule(ow as any);
           if (r2) {
-            s.game.applyHule(r2, ow as any, isRon ? (ronfrom as any) : null);
+            const choice = resolvePreSettlementPochiChoices(
+              s,
+              r2,
+              { winner: ow as PlayerId, isRon, ronfrom: ronfrom as PlayerId | null },
+              () => isRon && ronfrom !== null
+                ? s.game.hule(ow as PlayerId, s.lastDapai!.pai, ronfrom as PlayerId)
+                : s.game.hule(ow as PlayerId),
+            );
+            if (choice.pending) {
+              for (const prior of allResults) prior.result._anmikaRonSettlementDeferred = true;
+              if (isRon && ronfrom !== null) {
+                s.ronResults = sortRonResultsByKamicha(
+                  ronfrom as PlayerId,
+                  mergeRonResults(s.ronResults, allResults),
+                );
+              }
+              s.ronDeclaredPlayers = Array.from(new Set([
+                ...(s.ronDeclaredPlayers ?? []),
+                ...allResults.map((entry) => entry.player),
+              ]));
+              s.lastWinner = winnerByOya(s.game, s.ronResults);
+              s.lastHuleResult = s.ronResults.at(-1)?.result ?? result;
+              return { ...s };
+            }
+            r2 = choice.result;
+          }
+          if (r2) {
             allResults.push({ player: ow, result: r2 });
           }
+        }
+        const kinpeiRemainingHumans = kinpeiHumanOthers.filter(p =>
+          !(s.ronPassedPlayers ?? []).includes(p) && !(s.ronDeclaredPlayers ?? []).includes(p)
+        );
+        if (isRon && ronfrom !== null) {
+          const combined = sortRonResultsByKamicha(
+            ronfrom as PlayerId,
+            mergeRonResults(s.ronResults, allResults),
+          );
+          if (kinpeiRemainingHumans.length > 0) {
+            for (const entry of allResults) entry.result._anmikaRonSettlementDeferred = true;
+            s.ronResults = combined;
+          } else {
+            s.ronResults = settleRonResultsInKamichaOrder(s.game, ronfrom as PlayerId, combined);
+          }
+        } else {
+          s.game.applyHule(result, winner as PlayerId, null);
+          s.ronResults = [];
         }
         const isFever = s.game.feverActive[winner as 0|1|2];
         const feverNote = isFever ? '🔥 [フィーバー継続中]' : '';
         const targetLabel = target ? ` [金北→${target}]` : ' [金北→保留]';
-        s.message = allResults.length > 1
-          ? `🎉🎉 ダブロン! ${allResults.map(r => `p${r.player}: ${formatHuleResult(r.result)}`).join(' / ')} ${feverNote}${targetLabel}`
+        const settledResults = isRon && s.ronResults.length > 0 ? s.ronResults : allResults;
+        s.message = settledResults.length > 1
+          ? `🎉🎉 ダブロン! ${settledResults.map(r => `p${r.player}: ${formatHuleResult(r.result)}`).join(' / ')} ${feverNote}${targetLabel}`
           : `🎉 player ${winner} ${isRon ? 'ロン' : 'ツモ'}和了！ ${formatHuleResult(result)} ${feverNote}${targetLabel}`;
-        s.ronResults = isRon ? allResults : [];
-        s.lastHuleResult = allResults[allResults.length - 1].result;
+        s.lastHuleResult = settledResults[settledResults.length - 1].result;
         // R5 P1 #3 fix: lastWinner を oya 優先に [ron path と揃え、 親アガリ含むダブロン後の連荘継続]
-        {
-          const oya = s.game.currentOya;
-          const oyaWon = allResults.find(r => r.player === oya);
-          s.lastWinner = oyaWon ? oyaWon.player : allResults[allResults.length - 1].player;
+        s.lastWinner = winnerByOya(s.game, settledResults) ?? winner;
+        // R8 P0 #1 fix: 冬 modal 経由で持ち越した humanOthers が残ってる場合 awaitingRonDecision 維持
+        s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), ...allResults.map(r => r.player).filter(p => !(s.ronDeclaredPlayers ?? []).includes(p))];
+        if (kinpeiRemainingHumans.length > 0) {
+          continueRonDecisionStage(s);
+          s.message += ` [他 human 候補 p${kinpeiRemainingHumans.join('/')} 判断待ち]`;
+          return { ...s };
         }
-        // 2026-05-14 codex review P1 fix: 金北選択経由のアガリでもサイコロチャンス trigger
-        // R4 P1 #10: 全 winner の chances を trigger [queue 化]
-        // R13 P0 #3 緩和: ron/pass の pending modal reject を awaitingRonDecision 中除外したので
-        // inline trigger で OK
-        // bug E3 fix 2026-05-15: 初回 hule で 既に pendingSaiKoro が trigger 済の場合、
-        // selectKinpei の 再 hule で triggerSaiKoroIfAny が append → サイコロ chance が 2 倍 に
-        // 重複する bug。 selectKinpei は authoritative な再計算なので、 既存 pendingSaiKoro [この
-        // hule winners 分] を clear してから 再 trigger する。 finalized 済 chance は保持
+        if (enterFuyuKamiPochiStage(s, {
+          winner: (s.lastWinner ?? winner) as PlayerId,
+          isRon,
+          ronfrom: ronfrom as PlayerId | null,
+        })) {
+          s.game.snapshotLocked = false;
+          return { ...s };
+        }
+        // 金北再計算前に同じ winner のサイコロが既に積まれていれば差し替え、二重化を防ぐ。
         if (s.pendingSaiKoro) {
           const winners = new Set(allResults.map(r => r.player));
           const remaining = s.pendingSaiKoro.chances.filter((c: any) => !winners.has(c.winner));
@@ -1191,23 +1789,80 @@ export function createGameStore() {
         for (const rr of allResults) {
           if (!cutinQueued) s = enqueueCutinState(s, isRon ? 'ron' : 'tsumo', rr.player as PlayerId);
           s = triggerSaiKoroIfAny(s, rr.result, rr.player);
-        }
-        // R8 P0 #1 fix: 冬 modal 経由で持ち越した humanOthers が残ってる場合 awaitingRonDecision 維持
-        s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), ...allResults.map(r => r.player).filter(p => !(s.ronDeclaredPlayers ?? []).includes(p))];
-        const kinpeiRemainingHumans = kinpeiHumanOthers.filter(p =>
-          !(s.ronPassedPlayers ?? []).includes(p) && !(s.ronDeclaredPlayers ?? []).includes(p)
-        );
-        if (kinpeiRemainingHumans.length > 0) {
-          continueRonDecisionStage(s);
-          s.message += ` [他 human 候補 p${kinpeiRemainingHumans.join('/')} 判断待ち]`;
-          return { ...s };
+          rr.result._anmikaPostWinEffectsQueued = true;
         }
         s.game.snapshotLocked = false;
         finishRonDecisionStage(s);
         // fever 継続: 次家へ advance、 selectKinpei が ron/tsumo を兼ねるので両 path 対応
-        settleAfterWin(s, { winner: winner as PlayerId, isRon });
+        settleAfterWin(s, { winner: (s.lastWinner ?? winner) as PlayerId, isRon });
         return { ...s };
       });
+    },
+    /** ドラ表示または冬めくりで現れた正ぽっちを任意牌に取る。 */
+    selectKamiPochi(target: string, occurrenceKey?: string) {
+      if (onlineMode && !isApplyingRemote && myOnlineSeat !== null) {
+        const s = get(store) as StoreState;
+        const pending = s.pendingKamiPochi;
+        if (!pending || !pending.decisionOwners.includes(myOnlineSeat)) {
+          dlog('[gate-block]', { type: 'selectKamiPochi', my: myOnlineSeat });
+          return;
+        }
+      }
+      const current = get(store) as StoreState;
+      const initialPending = current.pendingKamiPochi;
+      const wireKey = occurrenceKey ?? initialPending?.occurrenceKey;
+      if (sendOnlineAction({ type: 'selectKamiPochi', target, occurrenceKey: wireKey })) return;
+      update((s) => {
+        const pending = s.pendingKamiPochi;
+        if (!pending || !pending.candidates.includes(target)) return { ...s };
+        if (occurrenceKey !== undefined && occurrenceKey !== pending.occurrenceKey) return { ...s };
+        const context: WinChoiceContext = {
+          winner: pending.winner as PlayerId,
+          isRon: pending.isRon,
+          ronfrom: pending.ronfrom as PlayerId | null,
+        };
+        if (pending.context === 'dora') {
+          s.game.kamiPochiDoraChoices[context.winner][pending.occurrenceKey] = target;
+          s.pendingKamiPochi = null;
+          return { ...s };
+        }
+
+        const advance = s.game.resumeFuyuKamiPochi(context.winner, pending.occurrenceKey, target);
+        if (!advance) return { ...s };
+        s.pendingKamiPochi = null;
+        syncFuyuResult(s, context.winner);
+        return { ...finishAfterFuyuKamiPochi(s, context) };
+      });
+      if (initialPending?.context === 'dora'
+        && initialPending.candidates.includes(target)
+        && (occurrenceKey === undefined || occurrenceKey === initialPending.occurrenceKey)) {
+        if (initialPending.isRon) api.ron(initialPending.winner);
+        else api.tsumo();
+      }
+    },
+    /** 祝儀期待値が同率の白ぽっち／でかぽっち高目候補を確定する。 */
+    selectPochiSwap(target: string) {
+      if (onlineMode && !isApplyingRemote && myOnlineSeat !== null) {
+        const s = get(store) as StoreState;
+        const pending = s.pendingPochiSwap;
+        if (!pending || !pending.decisionOwners.includes(myOnlineSeat)) {
+          dlog('[gate-block]', { type: 'selectPochiSwap', my: myOnlineSeat });
+          return;
+        }
+      }
+      const initialPending = (get(store) as StoreState).pendingPochiSwap;
+      if (sendOnlineAction({ type: 'selectPochiSwap', target })) return;
+      update((s) => {
+        const pending = s.pendingPochiSwap;
+        if (!pending || !pending.candidates.some((candidate) => candidate.target === target)) return { ...s };
+        if (!s.game.setPochiSwapChoice(pending.winner as PlayerId, target, pending.candidates)) return { ...s };
+        s.pendingPochiSwap = null;
+        return { ...s };
+      });
+      if (initialPending?.candidates.some((candidate) => candidate.target === target)) {
+        if (initialPending.isRon) api.ron(initialPending.winner);
+        else api.tsumo();
+      }
     },
     /** フィーバー中 アガリ後 「続行」 button 押下 → 次家ツモへ */
     /** サイコロチャンス [出目当て] - 出目宣言 [small/large 順序なし]、 MVP */
@@ -1275,9 +1930,13 @@ export function createGameStore() {
         // R4 P1 #8 fix: current chance の winner で applyChipOall、 ダブロン後勝者 chip 喪失防止
         const curChance = ps.chances[ps.currentIdx];
         const chanceWinner: 0|1|2 = ((curChance as any)?.winner ?? ps.winner) as 0|1|2;
-        // シュバサイのゾロ目連続特典: 宣言状態に関係なく、対象サイコロなら常時適用。
+        // シュバサイは実際にシュバリーを宣言した勝者、または役固有の
+        // 「常時シュバサイ」にだけ発動する。
         let zoroBonusThisRoll = 0;
-        const shuvariSai = curChance?.shuvariApplicable === true;
+        // シュバリー中は発生源を問わず全ての出目当てがシュバサイコロになる。
+        // alwaysShuvari は天和系・流し役満など、宣言なしでも同じ振り方をする役用。
+        const shuvariSai = curChance?.alwaysShuvari === true
+          || s.game.shuvariActive[chanceWinner];
         if (zoro && shuvariSai) {
           let consec = 1;
           for (let i = ps.rolls.length - 2; i >= 0; i--) {
@@ -1287,12 +1946,12 @@ export function createGameStore() {
           if (consec >= 2) {
             const n = d1;
             zoroBonusThisRoll = n === 1 ? 111 : n * 11;
-            // サイコロチャンス: シュバは倍率に乗らない [リョー指示 2026-05-12 改定]
-            // シュバの役割は 「ゾロ目連続判定の発動」 のみ、 chip 倍率は ぽっち + フィーバー だけ
+            // 通常の出目当て的中はシュバリー非適用だが、連続ゾロ目祝儀は
+            // ルール4本文どおりシュバリー・ぽっち・FEVERの全倍率を受ける。
             const chanceMode = (curChance as any)?.mode ?? 'tsumo';
             s.game.applyChipOall(chanceWinner, zoroBonusThisRoll, {
-              bypassShuvari: true,
-              bypassPochi: chanceMode === 'ron',
+              bypassShuvari: curChance?.alwaysShuvari === true && !s.game.shuvariActive[chanceWinner],
+              bypassPochi: chanceMode === 'ron' && !s.game.feverActive[chanceWinner],
               bypassFever: false,
               label: `🎲 シュバゾロ連続特典 [${n},${n}] ×${consec}`,
               mode: chanceMode,
@@ -1305,20 +1964,22 @@ export function createGameStore() {
             s.message = `🎲 シュバゾロ目連続特典 [${n},${n}] × ${consec}: chip ${zoroBonusThisRoll} オール`;
           }
         }
-        // ゾロ目はリプレイ扱い [回数外]、 ゾロ目以外の振り数で 4 回到達したら finalize
+        // ゾロ目はリプレイ扱い [回数外]。虹All-Star等は5〜7投になる。
         const nonZoroCount = ps.rolls.filter((r) => !r.zoro).length;
-        if (nonZoroCount >= 4) {
+        const requiredRolls = Math.max(1, Number(curChance?.rollCount ?? 4));
+        if (nonZoroCount >= requiredRolls) {
           // chip 計算 + 適用、 finalized=true で表示維持 [user の「次へ」 click 待ち]
           const chance = ps.chances[ps.currentIdx];
           const hits = ps.rolls.filter((r) => r.hit).length;
           const baseChip = chance.baseChip;
-          const chipN = baseChip * hits * chance.count;
+          // count回はtrigger時に独立chanceへ展開する。
+          const chipN = baseChip * hits;
           if (hits > 0 && chipN > 0) {
             // ぽっち倍率はツモ由来だけに適用。ロン由来サイコロでは明示 bypass。
             // シュバは サイコロ chip 倍率に乗らない [リョー指示 2026-05-12]
             s.game.applyChipOall(chanceWinner, chipN, {
               bypassShuvari: true,
-              bypassPochi: (chance as any).mode === 'ron',
+              bypassPochi: (chance as any).mode === 'ron' && !s.game.feverActive[chanceWinner],
               bypassFever: false,
               label: `🎲 サイコロ ${chance.name} [${hits} hit × ${baseChip}]`,
               mode: (chance as any).mode ?? 'tsumo',
@@ -1339,7 +2000,7 @@ export function createGameStore() {
           const chanceMode = (chanceFin as any).mode ?? 'tsumo';
           const mulFin = s.game.computeChipMultiplier(chanceWinner, {
             bypassShuvari: true,
-            bypassPochi: chanceMode === 'ron',
+            bypassPochi: chanceMode === 'ron' && !s.game.feverActive[chanceWinner],
             mode: chanceMode,
           });
           ps.summary = { hits, chipN: chipN * mulFin, zoroBonusTotal: zoroAcc };
@@ -1402,6 +2063,8 @@ export function createGameStore() {
           const winnerPid = winner as 0|1|2;
           const nextPlayer = ((winnerPid - 1) + 3) % 3;
           s.game.state.lunban = (((s.game.currentOya - nextPlayer) % 3 + 3) % 3) as any;
+          s = confirmPendingFeverBeforeDraw(s);
+          if (s.pendingPingju || s.roundEnded) return { ...s };
           s.lastZimo = s.game.zimo();
           // [2026-05-21] フィーバー強制ツモ切り [fulou next-player zimo 経路]
           s = applyFeverAutoTsumokiri(s);
@@ -1487,6 +2150,7 @@ export function createGameStore() {
             s.ronDeclaredPlayers = [];
             return declareKanImpl(s, pq.mianzi);
           }
+          if (s.pendingNukiBei) return { ...finalizePendingNukiBei(s) };
           // 2026-05-14 fix [user 報告 + codex 同定]: 候補全 skip 後の zimo は lastDapai.player の
           // 次家 [反時計 = player - 1] を確定。 dapai が事前 lunban+1 してるが ポンスキップで stale
           // 化する case あり、 ここで明示再計算して 「親より下家 捨て牌多い」 ズレ防止
@@ -1495,6 +2159,8 @@ export function createGameStore() {
             const nextPlayer = ((from - 1) + 3) % 3;
             s.game.state.lunban = (((s.game.currentOya - nextPlayer) % 3 + 3) % 3) as any;
           }
+          s = confirmPendingFeverBeforeDraw(s);
+          if (s.pendingPingju || s.roundEnded) return { ...s };
           s.lastZimo = s.game.zimo();
           if (!s.lastZimo) {
             s = applyPingjuTransition(s, '🌀 流局:');
@@ -1541,20 +2207,39 @@ export function createGameStore() {
           const cpuRemaining = remainingRon.filter(p => s.cpu[p as 0|1|2]);
           const humanRemaining = remainingRon.filter(p => !s.cpu[p as 0|1|2]);
           if (humanRemaining.length === 0 && cpuRemaining.length > 0) {
+            if (s.game.feverDeclareDapaiPlayer === s.lastDapai.player) {
+              s.game.cancelFeverDeclaration(s.lastDapai.player as PlayerId);
+            }
             saveHuleSnapshot(s.game);
-            if (cpuRemaining.length > 1 || (s.ronResults ?? []).length > 0) s.game.snapshotLocked = true;
             const ronResults: Array<{ player: number; result: any }> = [];
             for (const p of cpuRemaining) {
+              // Every claimant is evaluated from the same pre-ron state.  hule()
+              // can consume Autumn indicators, so carrying the prior claimant's
+              // mutation into this calculation would change the hand value.
+              s.game.restoreSnapshot();
               // R5 P1 #4 fix: human pass 後 CPU 後発ロン でも 金北 autoResolve、 通常 path と揃える
               if (hasGoldKita(s.game, p as PlayerId)) {
                 s.game.autoResolveKinpei(p as any);
+                saveHuleSnapshot(s.game);
               }
-              const result = s.game.hule(p as any, s.lastDapai.pai, s.lastDapai.player as any);
+              let result = s.game.hule(p as any, s.lastDapai.pai, s.lastDapai.player as any);
+              if (result) {
+                const choice = resolvePreSettlementPochiChoices(
+                  s,
+                  result,
+                  { winner: p as PlayerId, isRon: true, ronfrom: s.lastDapai.player as PlayerId },
+                  () => s.game.hule(p as PlayerId, s.lastDapai!.pai, s.lastDapai!.player as PlayerId),
+                );
+                if (choice.pending) return { ...s };
+                result = choice.result;
+              }
               if (result) {
                 ronResults.push({ player: p, result });
               }
             }
             if (ronResults.length > 0) {
+              if (ronResults.length > 1 || (s.ronResults ?? []).length > 0) s.game.snapshotLocked = true;
+              s.pendingNukiBei = null;
               const allRonResults = settleRonResultsInKamichaOrder(
                 s.game,
                 s.lastDapai.player as PlayerId,
@@ -1567,6 +2252,14 @@ export function createGameStore() {
                 ? `🎉🎉 ダブロン! ${formatRonResults(allRonResults)}`
                 : `🎉 CPU ロン: ${ronResults.map(r => `p${r.player}`).join('/')}`;
               finishRonDecisionStage(s);
+              if (enterFuyuKamiPochiStage(s, {
+                winner: s.lastWinner as PlayerId,
+                isRon: true,
+                ronfrom: s.lastDapai.player as PlayerId,
+              })) {
+                s.game.snapshotLocked = false;
+                return { ...s };
+              }
               // R18 #4 fix: pass 後 CPU ロンで fever 継続抜けてた、 winner が fever 中なら
               // pendingFeverContinue にして 通常 ロンと揃える
               const winnerSeat = s.lastWinner as PlayerId;
@@ -1611,6 +2304,9 @@ export function createGameStore() {
           s.ronDeclaredPlayers = [];
           return declareKanImpl(s, pq.mianzi);
         }
+        if (s.pendingNukiBei && (s.ronDeclaredPlayers ?? []).length === 0) {
+          return { ...finalizePendingNukiBei(s) };
+        }
         // R3 follow-up #29: ron 宣言済 player が居る場合は「次の手番へ」へ進まず finalize。
         // WSA-A6: 他候補の pass 待ち中は精算を保留しているため、ここで上家順に確定する。
         if ((s.ronDeclaredPlayers ?? []).length > 0) {
@@ -1623,12 +2319,6 @@ export function createGameStore() {
               s.lastDapai.player as PlayerId,
               s.ronResults,
             );
-            for (const rr of s.ronResults) {
-              if (rr.result?._anmikaRonEffectsQueued) continue;
-              s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
-              s = triggerSaiKoroIfAny(s, rr.result, rr.player);
-              rr.result._anmikaRonEffectsQueued = true;
-            }
             s.game.snapshotLocked = false;
           }
           if ((s.ronResults ?? []).length > 1) {
@@ -1637,8 +2327,22 @@ export function createGameStore() {
             s.lastHuleResult = s.ronResults[s.ronResults.length - 1].result;
           }
           // fever check: 最後に宣言した winner を基準に
-          const lastWinner = s.lastWinner;
+          const lastWinner = s.lastWinner ?? winnerByOya(s.game, s.ronResults);
           if (lastWinner !== null) {
+            s.lastWinner = lastWinner;
+            if (s.lastDapai && enterFuyuKamiPochiStage(s, {
+              winner: lastWinner as PlayerId,
+              isRon: true,
+              ronfrom: s.lastDapai.player as PlayerId,
+            })) {
+              return { ...s };
+            }
+            for (const rr of s.ronResults) {
+              if (rr.result?._anmikaRonEffectsQueued) continue;
+              s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
+              s = triggerSaiKoroIfAny(s, rr.result, rr.player);
+              rr.result._anmikaRonEffectsQueued = true;
+            }
             settleAfterWin(s, { winner: lastWinner as PlayerId, isRon: true });
           } else {
             s.roundEnded = true;
@@ -1659,6 +2363,8 @@ export function createGameStore() {
           s.game.state.lunban = (((s.game.currentOya - nextPlayer) % 3 + 3) % 3) as any;
         }
         s.lastDapai = null;
+        s = confirmPendingFeverBeforeDraw(s);
+        if (s.pendingPingju || s.roundEnded) return { ...s };
         s.lastZimo = s.game.zimo();
         if (!s.lastZimo) {
           s = applyPingjuTransition(s, '🌀 流局:');
@@ -1677,12 +2383,17 @@ export function createGameStore() {
         const player = s.game.lunbanToPlayerId(s.game.state.lunban);
         // R7 P0 #2 fix: canTsumo 妥当性検証必須、 不正 client が pending modal を作る攻撃防止
         if (!s.game.canTsumo(player)) return { ...s };
-        if (s.game.feverActive[player] && s.game.effectiveHuapaiAtHule(player).includes('f4') && !s.cpu[player]) {
+        const reversePochiDecisionTsumo = !!(s.game.feverActive[player] && s.game.pochiPaymentMode[player]);
+        const reverseTsumoHasHumanOwner = reversePochiDecisionTsumo
+          && ([0, 1, 2] as const).some((p) => p !== player && !s.cpu[p]);
+        if (s.game.feverActive[player]
+          && s.game.effectiveHuapaiAtHule(player).includes('f4')
+          && (!s.cpu[player] || reverseTsumoHasHumanOwner)) {
           // [2026-05-15 機能 11] フィーバー中 + 冬持ち + 待ち残山 0 → modal skip で 自動冬使用
           // [user confirm 不要、 「使う以外 ありえない」 局面なので 自動 applyFuyu(true)]
-          if (s.game.isFeverWaitExhausted(player)) {
+          if (s.game.isFeverWaitExhausted(player) && !reversePochiDecisionTsumo) {
             s.game.fuyuConsumed[player] = true;
-            s.game.feverActive[player] = false;
+            s.game.endFever(player);
             s.message = `❄️ フィーバー中 + 待ち残山 0、 冬 自動使用 [機能 11]`;
             // fall through で 通常 tsumo path に [pendingFuyu set しない]
           } else {
@@ -1701,12 +2412,28 @@ export function createGameStore() {
         }
         // フィーバー + 払い state 自動: modal スキップ、秋の表示結果を見て priority で自動確定
         // 冬選択時は 局終了 [リョー仕様 2026-05-12]
-        const isFeverPayAuto_tsumo = s.game.feverActive[player] && s.game.pochiPaymentMode[player];
+        const reverseDecisionOwnersTsumo = ([0, 1, 2] as const).filter((p) => p !== player);
+        const isFeverPayAuto_tsumo = reversePochiDecisionTsumo
+          && reverseDecisionOwnersTsumo.every((p) => s.cpu[p]);
         saveHuleSnapshot(s.game);
         let result = s.game.hule(player as any);
         if (!result) {
           s.message = `player ${player} はツモアガリできない [役なし or majiang-core 拒否]`;
           return { ...s };
+        }
+        {
+          const choice = resolvePreSettlementPochiChoices(
+            s,
+            result,
+            { winner: player as PlayerId, isRon: false, ronfrom: null },
+            () => s.game.hule(player as PlayerId),
+          );
+          if (choice.pending) return { ...s };
+          result = choice.result;
+          if (!result) {
+            s.message = `player ${player} 神ぽっち選択後のツモ再計算失敗`;
+            return { ...s };
+          }
         }
         // 秋効果で新たに冬が表示された場合も、表示前へ戻して冬選択後に同じ和了を再計算する。
         if (s.game.feverActive[player]
@@ -1724,7 +2451,7 @@ export function createGameStore() {
         if (hasGoldKita(s.game, player as PlayerId)
           && s.game.kinpeiTarget[player] === null
           && resolvedHuapai.length > 0
-          && !s.cpu[player]
+          && (!s.cpu[player] || reverseTsumoHasHumanOwner)
           && !isFeverPayAuto_tsumo) {
           s.lastHuleResult = result;
           s.lastWinner = player;
@@ -1746,11 +2473,20 @@ export function createGameStore() {
           if (isFeverPayAuto_tsumo && s.game.kinpeiTarget[player] === 'fuyu') {
             s.game.fuyuConsumed[player] = true;
           }
+          saveHuleSnapshot(s.game);
           result = s.game.hule(player as any);
           if (!result) {
             s.message = `player ${player} 金北自動選択後のツモ再計算失敗`;
             return { ...s };
           }
+          const choice = resolvePreSettlementPochiChoices(
+            s,
+            result,
+            { winner: player as PlayerId, isRon: false, ronfrom: null },
+            () => s.game.hule(player as PlayerId),
+          );
+          if (choice.pending) return { ...s };
+          result = choice.result;
         }
         s.game.applyHule(result, player as any, null);
         const isFever = s.game.feverActive[player as 0|1|2];
@@ -1759,6 +2495,9 @@ export function createGameStore() {
         s.lastHuleResult = result;
         s.lastWinner = player;
         s.ronResults = [];
+        if (enterFuyuKamiPochiStage(s, { winner: player as PlayerId, isRon: false, ronfrom: null })) {
+          return { ...s };
+        }
         s = enqueueCutinState(s, 'tsumo', player as PlayerId);
         s = triggerSaiKoroIfAny(s, result, player);
         settleAfterWin(s, { winner: player as PlayerId, isRon: false });
@@ -1775,14 +2514,7 @@ export function createGameStore() {
       update((s) => {
         if (isLiveTurnActionBlocked(s)) return { ...s };
         const player = s.game.lunbanToPlayerId(s.game.state.lunban);
-        const replacement = s.game.declareNukiBei(player, meta);
-        if (!replacement) {
-          s.message = `player ${player} 北抜き不可`;
-        } else {
-          s.lastZimo = replacement;
-          s.message = `player ${player} 北抜き [${s.game.nukidora[player]} 枚目]`;
-        }
-        return { ...s };
+        return { ...beginNukiBei(s, player, meta) };
       });
     },
     /** 金牌消費 [打牌 / 北抜きの直前に呼ぶ、 アンミカ独自レイヤー] */
@@ -1827,26 +2559,50 @@ export function createGameStore() {
             s.lastDapai = { player, pai: kakanPai };
             const ronResults: Array<{ player: number; result: any }> = [];
             for (const p of cpuRonCands) {
+              s.game.restoreSnapshot();
               if (hasGoldKita(s.game, p as PlayerId)) {
                 s.game.autoResolveKinpei(p as any);
+                saveHuleSnapshot(s.game);
               }
-              const r = s.game.hule(p as any, kakanPai, player as any);
+              let r = s.game.hule(p as any, kakanPai, player as any);
               if (r) {
-                s.game.applyHule(r, p as any, player as any);
+                const choice = resolvePreSettlementPochiChoices(
+                  s,
+                  r,
+                  { winner: p as PlayerId, isRon: true, ronfrom: player as PlayerId },
+                  () => s.game.hule(p as PlayerId, kakanPai, player as PlayerId),
+                );
+                if (choice.pending) return { ...s };
+                r = choice.result;
+              }
+              if (r) {
                 ronResults.push({ player: p, result: r });
               }
             }
             s.game.qianggangPending = false;
             if (ronResults.length > 0) {
+              const settledRonResults = settleRonResultsInKamichaOrder(
+                s.game,
+                player as PlayerId,
+                ronResults,
+              );
               const oya = s.game.currentOya;
-              const oyaWon = ronResults.find(r => r.player === oya);
-              s.lastWinner = oyaWon ? oyaWon.player : ronResults[ronResults.length - 1].player;
-              s.lastHuleResult = ronResults[ronResults.length - 1].result;
+              const oyaWon = settledRonResults.find(r => r.player === oya);
+              s.lastWinner = oyaWon ? oyaWon.player : settledRonResults[settledRonResults.length - 1].player;
+              s.lastHuleResult = settledRonResults[settledRonResults.length - 1].result;
+              s.ronResults = settledRonResults;
+              if (enterFuyuKamiPochiStage(s, {
+                winner: s.lastWinner as PlayerId,
+                isRon: true,
+                ronfrom: player as PlayerId,
+              })) {
+                return { ...s };
+              }
               // R18 #4 fix: CPU 槍槓 ロンも fever 継続対応 [旧 roundEnded=true 固定で fever 抜け]
               const winnerSeatQ = s.lastWinner as PlayerId;
               settleAfterWin(s, { winner: winnerSeatQ, isRon: true });
-              s.message = `🎉 CPU 槍槓 ron: ${ronResults.map(r => `p${r.player}`).join('/')}`;
-              for (const rr of ronResults) {
+              s.message = `🎉 CPU 槍槓 ron: ${settledRonResults.map(r => `p${r.player}`).join('/')}`;
+              for (const rr of settledRonResults) {
                 s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
                 s = triggerSaiKoroIfAny(s, rr.result, rr.player);
               }
@@ -1907,6 +2663,23 @@ export function createGameStore() {
     },
     /** [互換] 旧 openLizhi action は lizhi({open:true}) 経由 */
     openLizhi() { (this as any).lizhi({ open: true }); },
+    /** 通常立直成立後、次家の打牌までに行う遅延シュバリ宣言。 */
+    shuvari(player?: number) {
+      const state = get(store) as StoreState;
+      const target = (player ?? myOnlineSeat
+        ?? ([0, 1, 2] as const).find((p) => state.game.canDeclareLateShuvari(p))) as PlayerId | undefined;
+      if (target === undefined) return;
+      if (onlineMode && !isApplyingRemote && myOnlineSeat !== target) return;
+      if (sendOnlineAction({ type: 'shuvari', player: target })) return;
+      update((s) => {
+        if (!s.game.declareLateShuvari(target)) {
+          s.message = `player ${target} はシュバリ宣言期限外`;
+        } else {
+          s.message = `player ${target} シュバリーチ成立`;
+        }
+        return { ...s };
+      });
+    },
     /** 牌譜 JSON v2 から完全復元 [paifuIo.ts に委譲] */
     loadFromPaifu(paifu: any) {
       update((s) => {
@@ -1981,11 +2754,9 @@ export function createGameStore() {
           }
         }
         const winner = s.lastWinner;
-        const isTsumoOyaSelfRenchan = winner !== null && s.lastDapai === null
-          && winner === (((s.game.state.qijia - s.game.state.jushu) % 3 + 3) % 3);
         const blindState = (remotePool as any)?._blindState;
         s.game.nextRound({ winner: winner as any, preShuffledPool: blindState ? undefined : remotePool as any });
-        if (s.game.isGameEnd(isTsumoOyaSelfRenchan ? { ignoreTobiFor: winner as any } : {})) {
+        if (s.game.isGameEnd()) {
           s.game.state.finished = true;
           const ranking = s.game.getRanking();
           s.message = '🏁 半荘終了 ' + ranking.map(r => `${r.rank}位 p${r.player} ${r.defen}点`).join(' / ');
@@ -2038,6 +2809,8 @@ export function createGameStore() {
         const player = s.game.lunbanToPlayerId(s.game.state.lunban);
         const sp = s.game.shoupai.get(player);
         if (sp?._zimo != null) return { ...s }; // 既にツモ済、 no-op
+        s = confirmPendingFeverBeforeDraw(s);
+        if (s.pendingPingju || s.roundEnded) return { ...s };
         const z = s.game.zimo();
         if (z == null) {
           // 2026-05-14 codex review P2 fix: applyPingjuTransition で 罰符 / 流し役満 / defen
@@ -2056,9 +2829,7 @@ export function createGameStore() {
       if (!checkOnlineGate({ type: 'tsumokiri' }, 'currentPlayer')) return;
       if (sendOnlineAction({ type: 'tsumokiri' })) return;
       update((s) => {
-        if (s.roundEnded || s.awaitingRonDecision || s.awaitingFulou
-            || s.pendingFuyu || s.pendingKinpei || s.pendingSaiKoro
-            || s.pendingFeverContinue || (s.lizhiPending ?? null) !== null) return { ...s };
+        if (isLiveTurnActionBlocked(s) || (s.lizhiPending ?? null) !== null) return { ...s };
         if (!s.lastZimo) return { ...s };
         const player = s.game.lunbanToPlayerId(s.game.state.lunban);
         if (expectedPlayer !== undefined && player !== expectedPlayer) return { ...s };
@@ -2298,9 +3069,12 @@ export function createGameStore() {
         lizhiPending: null,
         pendingKinpei: null,
         pendingFuyu: null,
+        pendingKamiPochi: null,
+        pendingPochiSwap: null,
     pendingFeverContinue: null,
     pendingPingju: false,
       pendingQianggang: null,
+    pendingNukiBei: null,
     pendingSaiKoro: null,
     cpuWinAck: true,
     stamps: { 0: null, 1: null, 2: null },
@@ -2347,6 +3121,7 @@ export function createGameStore() {
       });
     },
   };
+  return api;
 }
 
 /** アガリ result.saiKoroChances を pendingSaiKoro に転記、 chances 1+ あれば modal trigger
@@ -2365,19 +3140,130 @@ export function applyFeverAutoTsumokiri(s: StoreState): StoreState {
   return s;
 }
 
+function finalizePendingNukiBei(s: StoreState): StoreState {
+  const pending = s.pendingNukiBei;
+  if (!pending) return s;
+  s.pendingNukiBei = null;
+  clearReactionStage(s);
+  s.lastDapai = null;
+  const replacement = s.game.declareNukiBei(pending.player, pending.meta);
+  s.lastZimo = replacement;
+  if (replacement === null) {
+    s.message = `player ${pending.player} 北抜き不可`;
+  } else {
+    s.message = `player ${pending.player} 北抜き [${s.game.nukidora[pending.player] + s.game.nukidoraGold[pending.player]}枚目]`;
+  }
+  return s;
+}
+
+export function beginNukiBei(s: StoreState, player: PlayerId, meta?: { gold?: boolean }): StoreState {
+  if (!s.game.canNukiBei(player)) {
+    s.message = `player ${player} 北抜き不可`;
+    return s;
+  }
+  const ronCandidates = ([0, 1, 2] as const).filter((p) =>
+    p !== player && s.game.canRon(p, 'z4', player)
+  );
+  if (ronCandidates.length === 0) {
+    s.pendingNukiBei = { player, meta };
+    return finalizePendingNukiBei(s);
+  }
+
+  s.pendingNukiBei = { player, meta };
+  s.lastDapai = { player, pai: 'z4' };
+  const cpuRon = ronCandidates.filter((p) => s.cpu[p]);
+  const humanRon = ronCandidates.filter((p) => !s.cpu[p]);
+  if (cpuRon.length > 0 && humanRon.length === 0) {
+    saveHuleSnapshot(s.game);
+    const results: Array<{ player: number; result: any }> = [];
+    for (const p of cpuRon) {
+      s.game.restoreSnapshot();
+      if (hasGoldKita(s.game, p)) {
+        s.game.autoResolveKinpei(p);
+        saveHuleSnapshot(s.game);
+      }
+      let result = s.game.hule(p, 'z4', player);
+      if (result) {
+        const choice = resolvePreSettlementPochiChoices(
+          s,
+          result,
+          { winner: p, isRon: true, ronfrom: player },
+          () => s.game.hule(p, 'z4', player),
+        );
+        if (choice.pending) return s;
+        result = choice.result;
+      }
+      if (result) results.push({ player: p, result });
+    }
+    if (results.length > 0) {
+      s.pendingNukiBei = null;
+      s.ronResults = settleRonResultsInKamichaOrder(s.game, player, results);
+      s.lastWinner = winnerByOya(s.game, s.ronResults);
+      s.lastHuleResult = s.ronResults.at(-1)?.result ?? null;
+      finishRonDecisionStage(s);
+      if (enterFuyuKamiPochiStage(s, {
+        winner: s.lastWinner as PlayerId,
+        isRon: true,
+        ronfrom: player,
+      })) return s;
+      for (const rr of s.ronResults) s = triggerSaiKoroIfAny(s, rr.result, rr.player);
+      settleAfterWin(s, { winner: s.lastWinner as PlayerId, isRon: true });
+      s.message = `北抜きロン: ${formatRonResults(s.ronResults)}`;
+      return s;
+    }
+    return finalizePendingNukiBei(s);
+  }
+  enterRonDecisionStage(s);
+  s.message = `北抜きロン可能: player ${ronCandidates.join(',')}`;
+  return s;
+}
+
+/** FEVER宣言牌の反応窓が閉じた直後に成立を確定し、次ツモより先に待ち枯れを判定する。 */
+export function confirmPendingFeverBeforeDraw(s: StoreState): StoreState {
+  const player = s.game.feverDeclareDapaiPlayer;
+  if (player === null) return s;
+  s.game.confirmFeverDeclaration(player);
+  if (s.game.isFeverWaitExhausted(player)) {
+    return applyPingjuTransition(s, '🔥 フィーバー立直成立、待ち牌全消失で1人テンパイ流局:');
+  }
+  return s;
+}
+
 export function triggerSaiKoroIfAny(s: StoreState, result: any, winner: number): StoreState {
-  const chances = result?.saiKoroChances ?? [];
+  const rawChances = result?.saiKoroChances ?? [];
+  const awarded: Record<number, string[]> = (s.game as any).feverSaiAwarded
+    ?? ((s.game as any).feverSaiAwarded = { 0: [], 1: [], 2: [] });
+  const seen = new Set<string>(awarded[winner] ?? []);
+  const chances = rawChances.filter((c: any) => {
+    const key = typeof c?.awardKey === 'string' ? c.awardKey : null;
+    // During FEVER, ordinary conditions are paid once. A true-yakuman dice
+    // award is the documented exception and repeats on every win.
+    if (!s.game.feverActive[winner as PlayerId] || !key || key.startsWith('yakuman:')) return true;
+    return !seen.has(key);
+  });
   if (chances.length === 0) return s;
-  // R4 P1 #8 fix: 各 chance に winner を埋め込む、 ダブロン append 時に owner 維持
-  const mappedChances = chances.map((c: any) => ({
-    name: c.name,
-    baseChip: c.baseChip,
-    shuvariApplicable: c.shuvariApplicable,
-    count: c.count ?? 1,
-    plusMinus: c.plusMinus ?? '+',
-    mode: c.mode ?? (result?._isRon ? 'ron' : 'tsumo'),
-    winner,
-  }));
+  for (const c of chances) {
+    const key = typeof c?.awardKey === 'string' ? c.awardKey : null;
+    if (s.game.feverActive[winner as PlayerId] && key && !key.startsWith('yakuman:')) seen.add(key);
+  }
+  awarded[winner] = [...seen];
+  // `count` is a number of independent sessions, not a payout multiplier.
+  // Expand it here so every session declares its own combination and rolls.
+  const mappedChances = chances.flatMap((c: any) => {
+    const sessions = Math.max(1, Math.trunc(Number(c.count ?? 1)));
+    return Array.from({ length: sessions }, (_, sessionIndex) => ({
+      awardKey: c.awardKey,
+      name: sessions > 1 ? `${c.name} [${sessionIndex + 1}/${sessions}]` : c.name,
+      baseChip: c.baseChip,
+      shuvariApplicable: c.shuvariApplicable,
+      alwaysShuvari: c.alwaysShuvari === true,
+      rollCount: Math.max(1, Math.trunc(Number(c.rollCount ?? 4))),
+      count: 1,
+      plusMinus: c.plusMinus ?? '+',
+      mode: c.mode ?? (result?._isRon ? 'ron' : 'tsumo'),
+      winner,
+    }));
+  });
   appendSaiKoroChances(s, winner, mappedChances);
   return s;
 }
@@ -2395,13 +3281,8 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
       lastZimo: s.lastZimo,
       lastZimoGold: s.game.shan.lastZimoGold,
     });
-    const replacement = s.game.declareNukiBei(player as any, nukiMeta);
-    s.lastZimo = replacement ?? null;
-    s.message = `[ツモ切り] 北 [${pai}] → 北抜き`;
-    if (replacement == null) {
-      // 2026-05-14 codex review P2 fix: 北抜きでの 王牌枯渇 流局も applyPingjuTransition
-      s = applyPingjuTransition(s, `🌀 流局 [北抜きで王牌枯渇]:`);
-    }
+    s = beginNukiBei(s, player as PlayerId, nukiMeta);
+    if (!s.awaitingRonDecision && !s.roundEnded) s.message = `[ツモ切り] 北 [${pai}] → 北抜き`;
     return { ...s };
   }
   dlog('[discard] from=', player, 'pai=', pai, 'meta=', meta, 'fever=', JSON.stringify(s.game.feverActive));
@@ -2426,18 +3307,32 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
   const cpuRonCands = ronCandidates.filter(p => s.cpu[p as 0|1|2]);
   const humanRonCands = ronCandidates.filter(p => !s.cpu[p as 0|1|2]);
   if (cpuRonCands.length > 0 && humanRonCands.length === 0) {
+    if (s.game.feverDeclareDapaiPlayer === player) {
+      s.game.cancelFeverDeclaration(player as PlayerId);
+    }
     let ronResults: Array<{ player: number; result: any }> = [];
     // 2026-05-14 codex review P1 fix: ダブロンで各 winner ごとに saveSnapshot すると
     // 2 人目の snapshot が 1 人目 適用後 になる。 全 hule 適用前に 1 度だけ saveSnapshot
     saveHuleSnapshot(s.game);
-    if (cpuRonCands.length > 1) s.game.snapshotLocked = true;
     for (const p of cpuRonCands) {
+      s.game.restoreSnapshot();
       // R7 P1 #6 fix: CPU 直ロン経路 [discard 直後] でも autoResolveKinpei、 通常 path と揃え
       if (hasGoldKita(s.game, p as PlayerId)) {
         s.game.autoResolveKinpei(p as any);
+        saveHuleSnapshot(s.game);
       }
       // fromPlayer 渡し忘れで ronpaiWithDir null → hule が ロン認識せず役なし扱いになる bug fix
-      const result = s.game.hule(p as any, committedPai, player as any);
+      let result = s.game.hule(p as any, committedPai, player as any);
+      if (result) {
+        const choice = resolvePreSettlementPochiChoices(
+          s,
+          result,
+          { winner: p as PlayerId, isRon: true, ronfrom: player as PlayerId },
+          () => s.game.hule(p as PlayerId, committedPai, player as PlayerId),
+        );
+        if (choice.pending) return { ...s };
+        result = choice.result;
+      }
       if (result) {
         ronResults.push({ player: p, result });
       }
@@ -2451,6 +3346,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
       // CPU 候補を ronCandidates から除外、 残りが空なら zimo に進む
       ronCandidates = ronCandidates.filter(p => !s.cpu[p as 0|1|2]);
     } else {
+      if (ronResults.length > 1) s.game.snapshotLocked = true;
       ronResults = settleRonResultsInKamichaOrder(s.game, player as PlayerId, ronResults);
       // 親アガリ含む場合 lastWinner = 親 [連荘継続]、 そうでなければ最後のアガリ player
       // 2026-05-14 Round 2 codex fix P1 #5: 現親判定で CPU ダブロン後の連荘継続 [子アガリ後の現親 が含まれた時]
@@ -2465,6 +3361,14 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
         : `🎉 [CPU] player ${ronResults[0].player} ロン和了！ ${formatHuleResult(ronResults[0].result)}`;
       s.lastHuleResult = winnerResult;
       finishRonDecisionStage(s);
+      if (enterFuyuKamiPochiStage(s, {
+        winner: winner as PlayerId,
+        isRon: true,
+        ronfrom: player as PlayerId,
+      })) {
+        s.game.snapshotLocked = false;
+        return { ...s };
+      }
       // 2026-05-14 codex review P1 fix: CPU ロン経路でも 特殊効果の state 遷移を 人間 ron と
       // 揃える。 triggerSaiKoroIfAny / feverWinCount inc / pendingFeverContinue / roundEnded 制御
       // Round 2 codex fix P2 #11: 全 winner の saiKoroChances を queue 化、 ダブロン 両方処理
@@ -2585,6 +3489,8 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     }
     // 誰もポンしない → 通常のツモへ
     try {
+      s = confirmPendingFeverBeforeDraw(s);
+      if (s.pendingPingju || s.roundEnded) return { ...s };
       s.lastZimo = s.game.zimo();
       s.lastDapai = null;
     } catch (e: any) {
@@ -2666,14 +3572,9 @@ export function autoLizhiInline(s: StoreState, safetyMax = 12): StoreState {
     if (s.game.canTsumo(player)) break;
     // 北 [z4] は河に切らず抜く [春夏秋冬は shan.zimo で skip 済なので考慮不要]
     if (s.lastZimo != null && toCorePai(s.lastZimo) === 'z4' && s.game.canNukiBei(player)) {
-      const replacement = s.game.declareNukiBei(player);
-      s.lastZimo = replacement ?? null;
+      s = beginNukiBei(s, player);
+      if (s.awaitingRonDecision || s.roundEnded || s.pendingPingju) break;
       s.message = `[自動北抜き] player ${player}`;
-      if (replacement == null) {
-        // 2026-05-14 codex review P2 fix: 自動北抜きでの王牌枯渇 流局も applyPingjuTransition
-        s = applyPingjuTransition(s, `🌀 流局 [自動北抜きで王牌枯渇]:`);
-        break;
-      }
       safety++;
       continue;
     }
@@ -2710,34 +3611,83 @@ export function autoLizhiInline(s: StoreState, safetyMax = 12): StoreState {
  *  [リョー指示 2026-05-12: agari panel 内で 点数移動表示できるよう apply を 前倒し] */
 export function applyPingjuTransition(s: StoreState, msgPrefix: string = ''): StoreState {
   saveHuleSnapshot(s.game);
-  const { message, nagashiWinner } = computePingjuResult(s.game);
+  const { message, nagashiWinner, nagashiResult } = computePingjuResult(s.game);
   s.message = msgPrefix ? `${msgPrefix} ${message}` : message;
   s.pendingPingju = true;
   s.roundEnded = true;
   // R9 P1 #10 fix: 流し役満は本役満ツモ扱い、 lastWinner を set [親流れ / 連荘 / 局結果表示 に反映]
   if (nagashiWinner !== null) {
     s.lastWinner = nagashiWinner;
-    // WSA: 実際の点数移動を反映 [旧: 固定 8000]
-    const isOya = nagashiWinner === s.game.currentOya;
-    const nagashiDefen = isOya ? 32000 : 24000;
-    s.lastHuleResult = {
-      hupai: [{ name: '流し役満', fanshu: '*' }],
-      damanguan: 1,
-      fanshu: undefined,
-      defen: nagashiDefen,
-      chipBreakdown: [],
-      chipTotal: 10,
-    } as any;
+    s.lastHuleResult = nagashiResult;
+    if (enterFuyuKamiPochiStage(s, { winner: nagashiWinner as PlayerId, isRon: false, ronfrom: null })) return s;
+    if (nagashiResult) triggerSaiKoroIfAny(s, nagashiResult, nagashiWinner);
   }
   return s;
 }
 
-// R9 P1 #10 fix: 流し役満 winner も返す形に
-function computePingjuResult(g: Game3): { message: string; nagashiWinner: number | null } {
+function settleNagashiYakuman(g: Game3, winner: PlayerId): any {
+  const point = evaluateWinPoints({
+    result: { damanguan: 1 },
+    winner,
+    loser: null,
+    oya: g.currentOya,
+    benbang: g.state.benbang,
+  });
+  for (const p of [0, 1, 2] as PlayerId[]) g.state.defen[p] += point.deltas[p];
+
+  const chipBefore = g.chipLedger[winner];
+  const chipStart = g.chipBreakdown.length;
+  // 流し役満は本役満ツモ: 打点祝儀5枚 + 本役満ボーナス10枚を別々に加算。
+  g.applyChipOall(winner, 5, { label: '流し役満 役満ツモ' });
+  g.applyChipOall(winner, 10, { label: '流し役満 本役満10枚オール' });
+
+  // 手牌内の赤金虹は数えず、ルールで明記された「抜いた北・華」の祝儀だけを加算する。
+  const nukiTotal = (g.nukidora[winner] ?? 0) + (g.nukidoraGold[winner] ?? 0);
+  if (nukiTotal > 0) g.applyChipOall(winner, nukiTotal, { label: `流し役満 抜きドラ ×${nukiTotal}` });
+  const ownHua = g.huapai[winner] ?? [];
+  const haruCount = ownHua.filter((p) => p === 'f1').length;
+  if (haruCount > 0) {
+    const kinpei = g.kinpeiTarget[winner] === 'haru';
+    const base = ownHua.length * haruCount * (kinpei ? 2 : 1);
+    g.applyChipOall(winner, base, { label: `流し役満 春${kinpei ? '金北' : ''}` });
+  }
+  const fuyuCount = ownHua.filter((p) => p === 'f4').length;
+  if (fuyuCount > 0) g.applyFuyuChip(winner, null, fuyuCount, g.kinpeiTarget[winner] === 'fuyu');
+
+  const result: any = {
+    hupai: [{ name: '流し役満', fanshu: '*' }],
+    damanguan: 1,
+    fanshu: undefined,
+    defen: point.winnerGain,
+    defen3: point.winnerGain,
+    chipBreakdown: g.chipBreakdown.slice(chipStart),
+    chipTotal: g.chipLedger[winner] - chipBefore,
+    saiKoroChances: [{
+      awardKey: 'yakuman:流し役満',
+      name: '流し役満',
+      baseChip: 70,
+      shuvariApplicable: false,
+      alwaysShuvari: true,
+      count: 1,
+      plusMinus: '+',
+      mode: 'tsumo',
+    }],
+  };
+  const reveal = g.fuyuRevealState[winner];
+  if (reveal) {
+    result.fuyuLog = reveal.fuyuLog.map((entry) => ({ ...entry }));
+    result.fuyuKamiPochiPending = reveal.pendingChoice ? { ...reveal.pendingChoice } : null;
+  }
+  return result;
+}
+
+// 流局判定と流し役満の精算結果をまとめて返す。
+function computePingjuResult(g: Game3): { message: string; nagashiWinner: number | null; nagashiResult: any | null } {
   const message = computePingjuMessage(g);
   const m = message.match(/流し役満 \[player (\d)\]/);
   const nagashiWinner = m ? parseInt(m[1], 10) : null;
-  return { message, nagashiWinner };
+  const nagashiResult = nagashiWinner === null ? null : settleNagashiYakuman(g, nagashiWinner as PlayerId);
+  return { message, nagashiWinner, nagashiResult };
 }
 
 function computePingjuMessage(g: Game3): string {
@@ -2763,30 +3713,7 @@ function computePingjuMessage(g: Game3): string {
     const allYao = (he._pai as string[]).every((d: string) => isYao(d));
     const noFulou = (he._pai as string[]).every((d: string) => !d.match(/[\+=\-]$/));
     if (allYao && noFulou) {
-      // 流し役満: 本役満ツモ扱い [chip +5 オール + 役満点 加算]
-      // [リョー指示 2026-05-11: chip だけでなく defen も役満点で動かす]
-      g.chipLedger[p] += 10;
-      g.chipLedger[((p + 1) % 3) as PlayerId] -= 5;
-      g.chipLedger[((p + 2) % 3) as PlayerId] -= 5;
-      // 役満ツモ 点数: 現親なら 8000 オール [合計 16000]、 子なら 4000/4000/8000 [親 8000 + 子 4000] = 16000
-      // 2026-05-14 Round 2 codex fix P1 #6: 流し役満 親子 payment を currentOya 判定に
-      const currentOyaSeat = g.currentOya;
-      const isOya = p === currentOyaSeat;
-      if (isOya) {
-        for (const q of [0, 1, 2] as PlayerId[]) {
-          if (q === p) continue;
-          g.state.defen[q] -= 16000;
-          g.state.defen[p] += 16000;
-        }
-      } else {
-        for (const q of [0, 1, 2] as PlayerId[]) {
-          if (q === p) continue;
-          const pay = q === currentOyaSeat ? 16000 : 8000;
-          g.state.defen[q] -= pay;
-          g.state.defen[p] += pay;
-        }
-      }
-      return `🌊 流し役満 [player ${p}]、 役満ツモ + chip +5 オール`;
+      return `🌊 流し役満 [player ${p}]、 本役満ツモ + 抜き牌祝儀 + サイコロチャンス`;
     }
   }
   if (feverWonAny) return '流局 [フィーバーアガリ済]';

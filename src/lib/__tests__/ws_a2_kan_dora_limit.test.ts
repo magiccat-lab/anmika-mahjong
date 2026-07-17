@@ -99,6 +99,7 @@ describe('WSA-A2 kan-derived dora limit', () => {
     expect(game.declareKan(0, fourth!)).toBe('z1');
     expect(game.shan.kanDoraCount).toBe(4);
 
+    game.lizhi.add(0);
     const result = game.hule(0);
     expect(result).not.toBeNull();
     expect(result!.hupai.map((h: { name: string }) => h.name)).toContain('四槓子 [ダブル役満]');

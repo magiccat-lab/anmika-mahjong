@@ -126,6 +126,27 @@ describe('authoritative websocket runtime', () => {
     clients[0].ws.send(JSON.stringify({ type: 'start', qijia: 0 }));
     const start = await waitUntil(() => clients[0].messages.find((message) => message.type === 'start'));
     expect(start).toMatchObject({ revision: 0, matchId: 1, roundId: 1 });
+    const starts = await Promise.all(clients.map((client) => waitUntil(
+      () => client.messages.find((message) => message.type === 'start'),
+    )));
+    for (const [seat, privateStart] of starts.entries()) {
+      expect(privateStart.privateSeat).toBe(seat);
+      expect(privateStart.hands[seat]).toHaveLength(13);
+      for (const other of [0, 1, 2].filter((value) => value !== seat)) {
+        expect(privateStart.hands[other]).toEqual([]);
+        expect(privateStart.goldHand[other]).toEqual({ p: 0, s: 0, z: 0 });
+        expect(privateStart.pochiHand[other]).toEqual({ blue: 0, red: 0, green: 0, yellow: 0 });
+      }
+      expect(privateStart.fubaopai).toBeNull();
+      expect(privateStart.state.recipientSeat).toBe(seat);
+      expect(privateStart.state.privateHand).toBeTruthy();
+      expect(privateStart.state.publicEvents.every((event: any) =>
+        event.type !== 'qipai' || event.tiles === undefined)).toBe(true);
+      expect(privateStart.state.publicEvents.every((event: any) =>
+        event.type !== 'zimo' || event.player === seat || event.pai === null)).toBe(true);
+      if (privateStart.firstZimoPlayer === seat) expect(privateStart.firstZimo).toBeTruthy();
+      else expect(privateStart.firstZimo).toBeNull();
+    }
 
     const room = runtime.rooms.get(roomId)!;
     const current = room.authority!.currentPlayer();
@@ -148,6 +169,17 @@ describe('authoritative websocket runtime', () => {
     ));
     expect(accepted.revision).toBe(1);
     expect(persistence.loadSnapshot(roomId)?.revision).toBe(1);
+    const acceptedAtEverySeat = await Promise.all(clients.map((client) => waitUntil(
+      () => client.messages.find((message) => message.type === 'action' && message.commandId === command.commandId),
+    )));
+    for (const [seat, relayed] of acceptedAtEverySeat.entries()) {
+      expect(relayed.action.preShuffledPool).toBeUndefined();
+      expect(relayed.action._state.recipientSeat).toBe(seat);
+      expect(relayed.action._state.privateHand).toBeTruthy();
+      const draw = relayed.action._draw;
+      if (draw?.player === seat) expect(draw.lastZimo).toBeTruthy();
+      else if (draw) expect(draw.lastZimo).toBeNull();
+    }
 
     clients[current].ws.send(JSON.stringify(command));
     const duplicate = await waitUntil(() => clients[current].messages.find(
@@ -171,6 +203,13 @@ describe('authoritative websocket runtime', () => {
     const sync = await waitUntil(() => replacement.messages.find((message) => message.type === 'sync'));
     expect(sync.snapshot).toMatchObject({ revision: 1, started: true });
     expect(sync.snapshot.commands).toHaveLength(1);
+    expect(sync.snapshot.start.preShuffledPool).toEqual([]);
+    expect(sync.snapshot.start.hands[0]).toHaveLength(13);
+    expect(sync.snapshot.start.hands[1]).toEqual([]);
+    expect(sync.snapshot.start.hands[2]).toEqual([]);
+    expect(sync.snapshot.start.fubaopai).toBeNull();
+    expect(sync.snapshot.state.recipientSeat).toBe(0);
+    expect(sync.snapshot.state.privateHand).toBeTruthy();
     await waitUntil(() => runtime.rooms.get(roomId)?.members.get('u0')?.connected ? true : undefined);
     expect(runtime.rooms.get(roomId)?.members.get('u0')?.generation).toBeGreaterThan(previousGeneration);
 
@@ -215,6 +254,8 @@ describe('authoritative websocket runtime', () => {
       expect(die).toBeGreaterThanOrEqual(1);
       expect(die).toBeLessThanOrEqual(6);
     }
+    // Selecting/rolling post-win dice must not re-feed the old turn draw.
+    expect(diceAtSeat1.action._draw?.lastZimo ?? null).toBeNull();
 
     const recycled = await connect(url('new-host', 0, true, 'room-instance-test-2'));
     cleanups.push(async () => recycled.ws.close());

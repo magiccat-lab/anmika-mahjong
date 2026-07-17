@@ -52,6 +52,7 @@ describe('北の手牌使用制限', () => {
     const sp = buildShoupai(['z1','z1','z1','z2','z2','z2','z3','z3','z3','z4','z4','z5','z5']);
     sp.zimo('z5');
     g.shoupai.set(player, sp);
+    g.lizhi.add(player);
 
     expect(g.canTsumo(player)).toBe(true);
     const result = g.hule(player);

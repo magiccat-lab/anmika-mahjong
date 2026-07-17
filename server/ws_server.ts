@@ -17,6 +17,7 @@ import {
   type AcceptedRoomCommand,
   type CanonicalRoomSnapshot,
   type CommandAck,
+  type OnlineSeatProjection,
   type RoomMemberSnapshot,
 } from './protocol';
 
@@ -30,7 +31,7 @@ const STAMP_IDS = new Set([
   'shunkashutou', 'kita4', 'konmika', 'shubapotsumo',
   'doko', 'gyakushubatsumo', 'plus', 'saikoro',
 ]);
-const PLAYER_FIELD_ACTIONS = new Set(['ron', 'pass', 'pon', 'damingang']);
+const PLAYER_FIELD_ACTIONS = new Set(['ron', 'pass', 'pon', 'damingang', 'shuvari']);
 
 type WsTokenPayload = {
   uid: string;
@@ -119,47 +120,507 @@ export function restoreAuthority(
   return authority;
 }
 
-function captureBlindStart(authority: RoomAuthority): Record<string, unknown> {
+type BlindStartState = {
+  hands: Record<number, string[]>;
+  handCounts: Record<number, number>;
+  huapai: Record<number, string[]>;
+  goldHand: Record<number, { p: number; s: number; z: number }>;
+  pochiHand: Record<number, Record<string, number>>;
+  firstZimo: string | null;
+  firstZimoPlayer: number | null;
+  paishu: number;
+  baopai: string[];
+  fubaopai: string[] | null;
+};
+
+type ActionCapture = {
+  eventsLength: number;
+  baopai: string[];
+  fubaopai: string[] | null;
+  fuyuRevealedLength: number;
+};
+
+function captureBlindStart(authority: RoomAuthority): BlindStartState {
   const g = authority.game;
   const hands: Record<number, string[]> = {};
+  const handCounts: Record<number, number> = {};
   const huapai: Record<number, string[]> = {};
   const goldHand: Record<number, { p: number; s: number; z: number }> = {};
   const pochiHand: Record<number, Record<string, number>> = {};
   for (const p of [0, 1, 2] as const) {
     const qipaiEvent = g.events.findLast((e: any) => e.type === 'qipai' && e.player === p);
     hands[p] = qipaiEvent?.type === 'qipai' ? [...qipaiEvent.tiles] : [];
+    handCounts[p] = hands[p].length + (g.lastZimoInfo.player === p && authority.lastZimo ? 1 : 0);
     huapai[p] = [...(g.huapai?.[p] ?? [])];
     goldHand[p] = { ...(g.goldHand?.[p] ?? { p: 0, s: 0, z: 0 }) };
     pochiHand[p] = { ...(g.pochiHand?.[p] ?? { blue: 0, red: 0, green: 0, yellow: 0 }) };
   }
   return {
-    hands, huapai, goldHand, pochiHand,
+    hands, handCounts, huapai, goldHand, pochiHand,
     firstZimo: authority.lastZimo,
+    firstZimoPlayer: g.lastZimoInfo.player,
     paishu: g.shan.paishu,
     baopai: [...g.shan.baopai],
     fubaopai: g.shan.fubaopai ? [...g.shan.fubaopai] : null,
   };
 }
 
-function captureDraw(authority: RoomAuthority, preBaopai: string[], preFubaopai: string[] | null): Record<string, unknown> | null {
+function maskBlindStart(state: BlindStartState, recipientSeat: number): Record<string, unknown> {
+  const emptyGold = () => ({ p: 0, s: 0, z: 0 });
+  const emptyPochi = () => ({ blue: 0, red: 0, green: 0, yellow: 0 });
+  const hands: Record<number, string[]> = { 0: [], 1: [], 2: [] };
+  const goldHand: Record<number, { p: number; s: number; z: number }> = {
+    0: emptyGold(), 1: emptyGold(), 2: emptyGold(),
+  };
+  const pochiHand: Record<number, Record<string, number>> = {
+    0: emptyPochi(), 1: emptyPochi(), 2: emptyPochi(),
+  };
+  if (recipientSeat === 0 || recipientSeat === 1 || recipientSeat === 2) {
+    hands[recipientSeat] = [...(state.hands[recipientSeat] ?? [])];
+    goldHand[recipientSeat] = { ...(state.goldHand[recipientSeat] ?? emptyGold()) };
+    pochiHand[recipientSeat] = { ...(state.pochiHand[recipientSeat] ?? emptyPochi()) };
+  }
+  return {
+    hands,
+    handCounts: { ...state.handCounts },
+    huapai: structuredClone(state.huapai),
+    goldHand,
+    pochiHand,
+    firstZimo: state.firstZimoPlayer === recipientSeat ? state.firstZimo : null,
+    firstZimoPlayer: state.firstZimoPlayer,
+    privateSeat: recipientSeat,
+    paishu: state.paishu,
+    baopai: [...state.baopai],
+    // Ura indicators remain secret until a valid win reaches its resolution pipeline.
+    fubaopai: null,
+  };
+}
+
+function serializePrivateHand(sp: any): Record<string, unknown> | null {
+  if (!sp?._bingpai) return null;
+  const bp = sp._bingpai;
+  return {
+    bingpai: {
+      _: bp._ ?? 0,
+      m: [...(bp.m ?? [])],
+      p: [...(bp.p ?? [])],
+      s: [...(bp.s ?? [])],
+      z: [...(bp.z ?? [])],
+      anmika: bp.__anmika ? { ...bp.__anmika } : null,
+    },
+    fulou: [...(sp._fulou ?? [])],
+    zimo: sp._zimo ?? null,
+    anmikaZimo: sp._anmikaZimo ?? null,
+    anmikaFulou: structuredClone(sp._anmikaFulou ?? []),
+    anmikaFulouPhysical: structuredClone(sp._anmikaFulouPhysical ?? []),
+  };
+}
+
+function concealedCount(sp: any): number {
+  if (!sp?._bingpai) return 0;
+  const bp = sp._bingpai;
+  let count = Number(bp._ ?? 0);
+  for (const suit of ['m', 'p', 's'] as const) {
+    for (let number = 1; number <= 9; number += 1) count += Number(bp[suit]?.[number] ?? 0);
+  }
+  for (let number = 1; number <= 7; number += 1) count += Number(bp.z?.[number] ?? 0);
+  return count;
+}
+
+/**
+ * Expand a concealed Shoupai into physical Anmika tile names.  Core Shoupai
+ * counts merge red/gold/rainbow/pochi copies, so subtract the expanded
+ * inventory before adding those copies back under their physical names.
+ */
+function physicalConcealedTiles(sp: any): string[] {
+  if (!sp?._bingpai) return [];
+  const bp = sp._bingpai;
+  const expanded = bp.__anmika ?? {};
+  const out: string[] = [];
+  const push = (pai: string, count: unknown): void => {
+    const n = Math.max(0, Number(count) || 0);
+    for (let index = 0; index < n; index += 1) out.push(pai);
+  };
+
+  for (const suit of ['m', 'p', 's', 'z'] as const) {
+    const max = suit === 'z' ? 7 : 9;
+    for (let number = 1; number <= max; number += 1) {
+      if (suit === 'z' && number === 5) continue;
+      let count = Number(bp[suit]?.[number] ?? 0);
+      if ((suit === 'p' || suit === 's') && number === 5) {
+        // p/s[5] includes every five; index 0 holds red + gold copies.
+        count -= Number(bp[suit]?.[0] ?? 0);
+      }
+      if (suit === 'z' && number === 4) count -= Number(expanded.gN ?? 0);
+      if (suit === 'p' && number === 3) count -= Number(expanded.np3 ?? 0);
+      if (suit === 's' && number === 3) count -= Number(expanded.ns3 ?? 0);
+      if (suit === 'z' && number === 3) count -= Number(expanded.nz3 ?? 0);
+      push(`${suit}${number}`, count);
+    }
+  }
+
+  push('p0', Number(bp.p?.[0] ?? 0) - Number(expanded.gp ?? 0));
+  push('gp', expanded.gp);
+  push('s0', Number(bp.s?.[0] ?? 0) - Number(expanded.gs ?? 0));
+  push('gs', expanded.gs);
+  push('gN', expanded.gN);
+  push('np3', expanded.np3);
+  push('ns3', expanded.ns3);
+  push('nz3', expanded.nz3);
+  push('z5b', expanded.z5b);
+  push('z5r', expanded.z5r);
+  push('z5g', expanded.z5g);
+  push('z5y', expanded.z5y);
+  const coloredZ5 = ['z5b', 'z5r', 'z5g', 'z5y']
+    .reduce((sum, key) => sum + Number(expanded[key] ?? 0), 0);
+  // Keep old/imported plain z5 data visible as z5 without inventing a color.
+  push('z5', Number(bp.z?.[5] ?? 0) - coloredZ5);
+  return out;
+}
+
+function publicWaitCore(pai: string): string {
+  const stripped = String(pai ?? '').replace(/[+=\-_*]/g, '');
+  const core = toCorePai(stripped);
+  return core.length >= 2 && core[1] === '0' ? `${core[0]}5` : core;
+}
+
+type FeverWaitPublicInfo = {
+  player: 0 | 1 | 2;
+  waits: Array<{
+    tile: string;
+    remain: number;
+    hasRed: boolean;
+    hasGold: boolean;
+    hasNiji: boolean;
+  }>;
+};
+
+function confirmedFeverWaitInfo(game: any): {
+  waitInfo: FeverWaitPublicInfo[];
+  waitsByDeclarer: Map<0 | 1 | 2, Set<string>>;
+} {
+  const liveWall = [...((game.shan as any)._pai ?? [])] as string[];
+  const waitInfo: FeverWaitPublicInfo[] = [];
+  const waitsByDeclarer = new Map<0 | 1 | 2, Set<string>>();
+  for (const player of [0, 1, 2] as const) {
+    if (!game.isFeverConfirmed(player)) continue;
+    const rawWaits = [...(game.feverDeclareTing?.[player] ?? [])] as string[];
+    const waits = new Set(rawWaits.map(publicWaitCore).filter(Boolean));
+    waitsByDeclarer.set(player, waits);
+    const seen = new Set<string>();
+    const rows: FeverWaitPublicInfo['waits'] = [];
+    for (const rawWait of rawWaits) {
+      const core = publicWaitCore(rawWait);
+      if (!core || seen.has(core)) continue;
+      seen.add(core);
+      // Rule 5-2: a white wait whose only physical copies are pochi does not
+      // keep FEVER alive.  Keep it in waitsByDeclarer for hand exposure, but
+      // publish zero surviving wall copies.
+      const remaining = core === 'z5'
+        ? []
+        : liveWall.filter((pai) => publicWaitCore(pai) === core);
+      rows.push({
+        tile: core,
+        remain: remaining.length,
+        hasRed: remaining.some((pai) => pai === 'p0' || pai === 's0'),
+        hasGold: remaining.some((pai) => pai === 'gp' || pai === 'gs' || pai === 'gN'),
+        hasNiji: remaining.some((pai) => pai === 'np3' || pai === 'ns3' || pai === 'nz3'),
+      });
+    }
+    waitInfo.push({ player, waits: rows });
+  }
+  return { waitInfo, waitsByDeclarer };
+}
+
+function publicEventForSeat(event: any, recipientSeat: number): Record<string, unknown> {
+  if (event?.type === 'qipai') {
+    return { type: 'qipai', player: event.player, count: Array.isArray(event.tiles) ? event.tiles.length : 13 };
+  }
+  if (event?.type === 'zimo') {
+    return { type: 'zimo', player: event.player, pai: event.player === recipientSeat ? event.pai : null };
+  }
+  return structuredClone(event);
+}
+
+function shouldRevealUra(authority: RoomAuthority): boolean {
+  const state = authority.canonicalState();
+  return !!state.lastHuleResult
+    || !!state.pendingFuyu
+    || !!state.pendingKinpei
+    || !!state.pendingKamiPochi
+    || !!state.pendingPochiSwap
+    || !!state.pendingSaiKoro
+    || (state.roundEnded && state.lastWinner !== null);
+}
+
+/**
+ * Seat-scoped canonical state.  A client may optimistically run its local
+ * reducer for animation, but this projection is the source of truth after
+ * every accepted command and on every reconnect.
+ */
+export function captureSeatProjection(authority: RoomAuthority, recipientSeat: number): OnlineSeatProjection {
+  const state = authority.canonicalState();
+  const game = state.game;
+  const revealUra = shouldRevealUra(authority);
+  const emptyGold = () => ({ p: 0, s: 0, z: 0 });
+  const emptyPochi = () => ({ blue: 0, red: 0, green: 0, yellow: 0 });
+  const maskedGold: Record<number, { p: number; s: number; z: number }> = {
+    0: emptyGold(), 1: emptyGold(), 2: emptyGold(),
+  };
+  const maskedPochi: Record<number, Record<string, number>> = {
+    0: emptyPochi(), 1: emptyPochi(), 2: emptyPochi(),
+  };
+  if (recipientSeat === 0 || recipientSeat === 1 || recipientSeat === 2) {
+    maskedGold[recipientSeat] = { ...game.goldHand[recipientSeat] };
+    maskedPochi[recipientSeat] = { ...game.pochiHand[recipientSeat] };
+  }
+  const { waitInfo: feverWaitPublicInfo, waitsByDeclarer } = confirmedFeverWaitInfo(game);
+  const publicHands: Record<number, Record<string, unknown>> = {};
+  for (const player of [0, 1, 2] as const) {
+    const sp: any = game.shoupai.get(player);
+    const publiclyRevealed = game.openLizhi.has(player)
+      || (game.feverActive[player] && game.feverDeclareDapaiPlayer !== player);
+    const exposedWaits = new Set<string>();
+    for (const [declarer, waits] of waitsByDeclarer) {
+      if (declarer === player) continue;
+      for (const wait of waits) exposedWaits.add(wait);
+    }
+    const revealedWaitTiles = exposedWaits.size === 0
+      ? []
+      : physicalConcealedTiles(sp).filter((pai) => exposedWaits.has(publicWaitCore(pai)));
+    const zimo = typeof sp?._zimo === 'string' ? sp._zimo : null;
+    publicHands[player] = {
+      concealedCount: concealedCount(sp),
+      hasZimo: zimo !== null && zimo.length <= 3,
+      pseudoZimo: zimo !== null && zimo.length > 3 ? zimo : null,
+      fulou: [...(sp?._fulou ?? [])],
+      anmikaFulou: structuredClone(sp?._anmikaFulou ?? []),
+      anmikaFulouPhysical: structuredClone(sp?._anmikaFulouPhysical ?? []),
+      revealedHand: publiclyRevealed ? serializePrivateHand(sp) : null,
+      revealedWaitTiles,
+    };
+  }
+  const own = recipientSeat === 0 || recipientSeat === 1 || recipientSeat === 2
+    ? recipientSeat as 0 | 1 | 2
+    : null;
+  const ownRonCandidates = own !== null && authority.ronCandidates.includes(own) ? [own] : [];
+  const ownPonCandidates = own === null ? [] : state.ponCandidates.filter((entry) => entry.player === own);
+  const ownKanCandidates = own === null ? [] : state.kanCandidates.filter((entry) => entry.player === own);
+  const maskOwnerDecision = (pending: any): any => {
+    if (!pending) return null;
+    if (pending.winner === own) return structuredClone(pending);
+    const value: any = pending;
+    return {
+      winner: value.winner,
+      isRon: value.isRon,
+      ronfrom: value.ronfrom,
+    };
+  };
+  const neutralMultiplier = { defen: 1, chip: 1 };
+  const pochiMultiplier = {
+    0: own === 0 || revealUra ? { ...game.pochiMultiplier[0] } : { ...neutralMultiplier },
+    1: own === 1 || revealUra ? { ...game.pochiMultiplier[1] } : { ...neutralMultiplier },
+    2: own === 2 || revealUra ? { ...game.pochiMultiplier[2] } : { ...neutralMultiplier },
+  };
+  const maskPrivateRecord = <T>(record: Record<0 | 1 | 2, T>, fallback: T): Record<number, T> => ({
+    0: own === 0 || revealUra ? structuredClone(record[0]) : structuredClone(fallback),
+    1: own === 1 || revealUra ? structuredClone(record[1]) : structuredClone(fallback),
+    2: own === 2 || revealUra ? structuredClone(record[2]) : structuredClone(fallback),
+  });
+  const shan: any = game.shan;
+  return {
+    schemaVersion: 1,
+    recipientSeat,
+    gameState: structuredClone(game.state),
+    shan: {
+      paishu: game.shan.paishu,
+      baopai: [...game.shan.baopai],
+      fubaopai: revealUra && game.shan.fubaopai ? [...game.shan.fubaopai] : null,
+      kanDoraCount: game.shan.kanDoraCount,
+      rinshanUsed: game.shan.rinshanUsed,
+      fuyuRevealed: [...(shan._fuyuRevealed ?? [])],
+    },
+    privateHand: own === null ? null : serializePrivateHand(game.shoupai.get(own)),
+    publicHands,
+    rivers: {
+      0: [...(game.he.get(0)?._pai ?? [])],
+      1: [...(game.he.get(1)?._pai ?? [])],
+      2: [...(game.he.get(2)?._pai ?? [])],
+    },
+    publicEvents: game.events.map((event) => publicEventForSeat(event, recipientSeat)),
+    fields: {
+      nukidora: structuredClone(game.nukidora),
+      nukidoraGold: structuredClone(game.nukidoraGold),
+      yifaActive: structuredClone(game.yifaActive),
+      lizhiDeclareDapai: structuredClone(game.lizhiDeclareDapai),
+      lingshangActive: structuredClone(game.lingshangActive),
+      firstTurnState: structuredClone(game.firstTurnState),
+      qianggangPending: game.qianggangPending,
+      feverWinCount: structuredClone(game.feverWinCount),
+      goldHand: maskedGold,
+      huapai: structuredClone(game.huapai),
+      pochiHand: maskedPochi,
+      lastZimoInfo: game.lastZimoInfo.player === own
+        ? structuredClone(game.lastZimoInfo)
+        : { player: game.lastZimoInfo.player, pai: null, pochi: null, gold: false },
+      pochiMultiplier,
+      pochiPaymentMode: maskPrivateRecord(game.pochiPaymentMode, false),
+      pochiChipReverse: maskPrivateRecord(game.pochiChipReverse, false),
+      pochiChipDouble: maskPrivateRecord(game.pochiChipDouble, false),
+      chipLedger: structuredClone(game.chipLedger),
+      haruActive: structuredClone(game.haruActive),
+      fuyuSkip: structuredClone(game.fuyuSkip),
+      fuyuConsumed: structuredClone(game.fuyuConsumed),
+      fuyuRevealState: structuredClone(game.fuyuRevealState),
+      akiUsedCount: structuredClone(game.akiUsedCount),
+      kinpeiTarget: maskPrivateRecord(game.kinpeiTarget, null),
+      kamiPochiDoraChoices: structuredClone(game.kamiPochiDoraChoices),
+      pochiSwapChoice: structuredClone(game.pochiSwapChoice),
+      chipBreakdown: structuredClone(game.chipBreakdown),
+      discardLog: structuredClone(game.discardLog),
+      justNukidBei: structuredClone(game.justNukidBei),
+      lizhi: [...game.lizhi],
+      doubleLizhi: [...game.doubleLizhi],
+      openLizhi: [...game.openLizhi],
+      feverActive: structuredClone(game.feverActive),
+      // Rule 5-2: waits and exact live-wall remainder become public only after
+      // the declaration tile's ron window has closed and FEVER is confirmed.
+      feverWaitPublicInfo,
+      feverDeclareTing: {
+        0: game.feverDeclareDapaiPlayer === 0 && own !== 0 ? [] : [...game.feverDeclareTing[0]],
+        1: game.feverDeclareDapaiPlayer === 1 && own !== 1 ? [] : [...game.feverDeclareTing[1]],
+        2: game.feverDeclareDapaiPlayer === 2 && own !== 2 ? [] : [...game.feverDeclareTing[2]],
+      },
+      feverTier: structuredClone(game.feverTier),
+      feverDeclareDapaiPlayer: game.feverDeclareDapaiPlayer,
+      feverPendingShuvari: structuredClone(game.feverPendingShuvari),
+      feverSaiAwarded: structuredClone(game.feverSaiAwarded),
+      shuvariActive: structuredClone(game.shuvariActive),
+      shuvariUsed: structuredClone(game.shuvariUsed),
+      lateShuvariWindow: structuredClone(game.lateShuvariWindow),
+      tobiChipPaid: game.tobiChipPaid,
+    },
+    store: {
+      matchStartChipLedger: authority.currentMatchStartChipLedger(),
+      lastZimo: game.lastZimoInfo.player === own ? state.lastZimo : null,
+      lastDapai: structuredClone(state.lastDapai),
+      lastWinner: state.lastWinner,
+      lastHuleResult: structuredClone(state.lastHuleResult),
+      awaitingRonDecision: state.awaitingRonDecision,
+      ronCandidates: ownRonCandidates,
+      ronPassedPlayers: own === null ? [] : state.ronPassedPlayers.filter((player) => player === own),
+      ronDeclaredPlayers: structuredClone(state.ronDeclaredPlayers),
+      ronResults: structuredClone(state.ronResults),
+      awaitingFulou: state.awaitingFulou,
+      ponCandidates: structuredClone(ownPonCandidates),
+      kanCandidates: structuredClone(ownKanCandidates),
+      roundEnded: state.roundEnded,
+      message: state.message,
+      cpu: structuredClone(state.cpu),
+      lizhiPending: state.lizhiPending === own ? own : null,
+      pendingKinpei: structuredClone(state.pendingKinpei),
+      pendingFuyu: structuredClone(state.pendingFuyu),
+      pendingKamiPochi: structuredClone(state.pendingKamiPochi),
+      pendingPochiSwap: structuredClone(state.pendingPochiSwap),
+      pendingFeverContinue: maskOwnerDecision(state.pendingFeverContinue as any),
+      pendingPingju: state.pendingPingju,
+      pendingQianggang: structuredClone(state.pendingQianggang),
+      pendingNukiBei: structuredClone(state.pendingNukiBei ?? null),
+      pendingSaiKoro: structuredClone(state.pendingSaiKoro),
+      cpuWinAck: state.cpuWinAck,
+    },
+  } as unknown as OnlineSeatProjection;
+}
+
+function captureBeforeAction(authority: RoomAuthority): ActionCapture {
+  const g = authority.game;
+  return {
+    eventsLength: g.events.length,
+    baopai: [...g.shan.baopai],
+    fubaopai: g.shan.fubaopai ? [...g.shan.fubaopai] : null,
+    fuyuRevealedLength: (((g.shan as any)._fuyuRevealed ?? []) as string[]).length,
+  };
+}
+
+function captureActionEffects(authority: RoomAuthority, before: ActionCapture): Record<string, unknown> | null {
   const g = authority.game;
   const postBaopai = [...g.shan.baopai];
   const postFubaopai = g.shan.fubaopai ? [...g.shan.fubaopai] : null;
-  const newBaopai = postBaopai.slice(preBaopai.length);
-  const newFubaopai = preFubaopai && postFubaopai ? postFubaopai.slice(preFubaopai.length) : [];
-  if (authority.lastZimo == null && newBaopai.length === 0 && newFubaopai.length === 0) return null;
+  const newBaopai = postBaopai.slice(before.baopai.length);
+  const newFubaopai = before.fubaopai && postFubaopai
+    ? postFubaopai.slice(before.fubaopai.length)
+    : [];
+  const newEvents = g.events.slice(before.eventsLength);
+  const drawEvent = newEvents.findLast((event: any) => event.type === 'zimo') as any;
+  const fuyuAll = (((g.shan as any)._fuyuRevealed ?? []) as string[]);
+  const fuyuRevealed = fuyuAll.slice(before.fuyuRevealedLength);
+  const state = authority.canonicalState();
+  const revealUra = !!state.lastHuleResult
+    || !!state.pendingFuyu
+    || !!state.pendingKinpei
+    || !!state.pendingKamiPochi
+    || !!state.pendingPochiSwap
+    || !!state.pendingSaiKoro
+    || (state.roundEnded && state.lastWinner !== null);
+  if (!drawEvent && newBaopai.length === 0 && newFubaopai.length === 0
+    && fuyuRevealed.length === 0 && !revealUra) return null;
+  const doraDraws: Array<{ tile: string; isFu: boolean }> = [];
+  const maxDora = Math.max(newBaopai.length, newFubaopai.length);
+  for (let index = 0; index < maxDora; index += 1) {
+    if (newBaopai[index]) doraDraws.push({ tile: newBaopai[index], isFu: false });
+    if (newFubaopai[index]) doraDraws.push({ tile: newFubaopai[index], isFu: true });
+  }
   return {
-    lastZimo: authority.lastZimo,
+    player: drawEvent?.player ?? null,
+    lastZimo: drawEvent?.pai ?? null,
     paishu: g.shan.paishu,
     huapai: [...g.shan.lastDrawnHuapai],
     gold: g.shan.lastZimoGold,
     pochi: g.shan.lastZimoPochi,
     newBaopai: newBaopai.length > 0 ? newBaopai : undefined,
     newFubaopai: newFubaopai.length > 0 ? newFubaopai : undefined,
+    doraDraws: doraDraws.length > 0 ? doraDraws : undefined,
+    fuyuRevealed: fuyuRevealed.length > 0 ? fuyuRevealed : undefined,
+    revealFubaopai: revealUra ? postFubaopai : undefined,
   };
 }
 
-function actionRelay(command: AcceptedRoomCommand, snapshot: CanonicalRoomSnapshot, duplicate = false) {
+function sanitizeActionForSeat(actionInput: Record<string, unknown>, recipientSeat: number): Record<string, unknown> {
+  const action = { ...actionInput };
+  delete action.preShuffledPool;
+  if (action._blindState && typeof action._blindState === 'object') {
+    action._blindState = maskBlindStart(action._blindState as BlindStartState, recipientSeat);
+  }
+  if (action._draw && typeof action._draw === 'object') {
+    const draw = { ...(action._draw as Record<string, unknown>) };
+    const ownDraw = draw.player === recipientSeat;
+    if (!ownDraw) {
+      draw.lastZimo = null;
+      delete draw.gold;
+      delete draw.pochi;
+    }
+    // Ura-dora draws stay server-only until revealFubaopai is present.
+    if (!Array.isArray(draw.revealFubaopai)) {
+      delete draw.newFubaopai;
+      if (Array.isArray(draw.doraDraws)) {
+        draw.doraDraws = (draw.doraDraws as Array<Record<string, unknown>>)
+          .filter((entry) => entry.isFu !== true);
+      }
+    }
+    action._draw = draw;
+  }
+  return action;
+}
+
+function actionRelay(
+  command: AcceptedRoomCommand,
+  snapshot: CanonicalRoomSnapshot,
+  recipientSeat: number,
+  authority: RoomAuthority | null,
+  duplicate = false,
+) {
+  const action = sanitizeActionForSeat(command.action, recipientSeat);
+  if (authority) action._state = captureSeatProjection(authority, recipientSeat);
   return {
     type: 'action',
     commandId: command.commandId,
@@ -169,7 +630,7 @@ function actionRelay(command: AcceptedRoomCommand, snapshot: CanonicalRoomSnapsh
     from_seat: command.actorSeat,
     from_user_id: command.fromUserId,
     duplicate,
-    action: command.action,
+    action,
   };
 }
 
@@ -182,15 +643,44 @@ function broadcast(room: Room, payload: unknown): void {
   for (const member of room.members.values()) sendJson(member.ws, payload);
 }
 
-function sendSync(ws: WebSocket | null, snapshot: CanonicalRoomSnapshot, fullCommands?: AcceptedRoomCommand[]): void {
+function broadcastAction(room: Room, command: AcceptedRoomCommand): void {
+  for (const member of room.members.values()) {
+    sendJson(member.ws, actionRelay(command, room.snapshot, member.seat, room.authority));
+  }
+}
+
+function sendSync(
+  ws: WebSocket | null,
+  snapshot: CanonicalRoomSnapshot,
+  recipientSeat: number,
+  authority: RoomAuthority | null,
+  fullCommands?: AcceptedRoomCommand[],
+): void {
   const payload = fullCommands ? { ...snapshot, commands: fullCommands } : snapshot;
   let sanitizedStart = payload.start;
   if (sanitizedStart && sanitizedStart.preShuffledPool?.length > 0) {
     const tempAuth = createRoomAuthority({ preShuffledPool: sanitizedStart.preShuffledPool, qijia: sanitizedStart.qijia });
     const blindData = captureBlindStart(tempAuth);
-    sanitizedStart = { ...sanitizedStart, preShuffledPool: [], ...blindData, blindStart: true } as any;
+    sanitizedStart = {
+      ...sanitizedStart,
+      preShuffledPool: [],
+      ...maskBlindStart(blindData, recipientSeat),
+      blindStart: true,
+    } as any;
   }
-  sendJson(ws, { type: 'sync', snapshot: { ...payload, start: sanitizedStart } });
+  const commands = (payload.commands ?? []).map((command) => ({
+    ...command,
+    action: sanitizeActionForSeat(command.action, recipientSeat),
+  }));
+  sendJson(ws, {
+    type: 'sync',
+    snapshot: {
+      ...payload,
+      start: sanitizedStart,
+      commands,
+      state: authority ? captureSeatProjection(authority, recipientSeat) : null,
+    },
+  });
 }
 
 function lobbyPayload(room: Room) {
@@ -286,21 +776,20 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
 
   const fetchMembers = async (roomId: string): Promise<RoomMemberSnapshot[]> => {
     if (!internalApiSecret) return [];
-    try {
-      const response = await fetch(`${apiBase}/api/internal/rooms/${roomId}/members`, {
-        headers: { 'X-Anmika-Internal-Secret': internalApiSecret },
-      });
-      if (!response.ok) return [];
-      const data = await response.json() as { members?: Array<Record<string, unknown>> };
-      return (data.members ?? [])
-        .filter((member) => typeof member.user_id === 'string' && typeof member.seat === 'number')
-        .map((member) => ({
-          seat: member.seat as number,
-          user_id: member.user_id as string,
-          username: typeof member.username === 'string' ? member.username : String(member.user_id),
-          is_cpu: member.is_cpu === true || String(member.user_id).startsWith('CPU_'),
-        }));
-    } catch { return []; }
+    const response = await fetch(`${apiBase}/api/internal/rooms/${roomId}/members`, {
+      headers: { 'X-Anmika-Internal-Secret': internalApiSecret },
+    });
+    if (!response.ok) throw new Error(`member authority returned ${response.status}`);
+    const data = await response.json() as { members?: Array<Record<string, unknown>> };
+    if (!Array.isArray(data.members)) throw new Error('member authority response missing members');
+    return data.members
+      .filter((member) => typeof member.user_id === 'string' && typeof member.seat === 'number')
+      .map((member) => ({
+        seat: member.seat as number,
+        user_id: member.user_id as string,
+        username: typeof member.username === 'string' ? member.username : String(member.user_id),
+        is_cpu: member.is_cpu === true || String(member.user_id).startsWith('CPU_'),
+      }));
   };
 
   const getRoom = async (roomId: string, roomInstanceId: string, hostUserId: string): Promise<Room> => {
@@ -395,18 +884,28 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       if (action.type === 'nextRound' || action.type === 'nextMatch') {
         action.preShuffledPool = serverShuffledPool();
       }
-      const preBaopai = [...room.authority.game.shan.baopai];
-      const preFubaopai = room.authority.game.shan.fubaopai ? [...room.authority.game.shan.fubaopai] : null;
+      if (action.type === 'nextMatch') {
+        // The host may choose whether accumulated chips are reset.  All other
+        // settlement inputs are derived from canonical server state.
+        action.resetChip = action.resetChip === true;
+        action.finalize = action.resetChip !== true;
+        action.qijia = room.authority.game.state.qijia;
+        action.cpuSeats = membersForAuthority(room)
+          .filter((member) => member.is_cpu)
+          .map((member) => member.seat);
+        delete action.chipLedger;
+      }
+      const beforeEffects = captureBeforeAction(room.authority);
       const reason = room.authority.validateAndApply(actorSeat, action, membersForAuthority(room));
       if (reason) {
         room.authority = restoreAuthority(previous, persistence.loadCommands(room.roomId));
         return { reason };
       }
-      const drawData = captureDraw(room.authority, preBaopai, preFubaopai);
-      if (drawData) action._draw = drawData;
+      const drawData = captureActionEffects(room.authority, beforeEffects);
       if (action.type === 'nextRound' || action.type === 'nextMatch') {
         action._blindState = captureBlindStart(room.authority!);
-        delete action.preShuffledPool;
+      } else if (drawData) {
+        action._draw = drawData;
       }
     }
 
@@ -463,7 +962,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
         );
         if (accepted.command) {
-          broadcast(room, actionRelay(accepted.command, room.snapshot));
+          broadcastAction(room, accepted.command);
           scheduleRoomDeadline(room);
         }
       }).catch((error) => warn('[anmika-ws] next-round deadline failed', error));
@@ -481,18 +980,32 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     let postWinOwner: number | null = null;
     let postWinAction: Record<string, unknown> | null = null;
     if (canonical.pendingFuyu) {
-      postWinOwner = canonical.pendingFuyu.winner;
+      const pending = canonical.pendingFuyu;
+      postWinOwner = pending.decisionOwners?.[pending.decisionOwnerIndex ?? 0] ?? pending.winner;
       postWinAction = { type: 'selectFuyu', use: true };
     } else if (canonical.pendingKinpei) {
-      postWinOwner = canonical.pendingKinpei.winner;
-      const hua = canonical.pendingKinpei.availableHuapai
-        ?? canonical.game.effectiveHuapaiAtHule(postWinOwner as 0 | 1 | 2);
+      const pending = canonical.pendingKinpei;
+      postWinOwner = pending.decisionOwners?.[pending.decisionOwnerIndex ?? 0] ?? pending.winner;
+      const hua = pending.availableHuapai
+        ?? canonical.game.effectiveHuapaiAtHule(pending.winner as 0 | 1 | 2);
       const target = hua.includes('f4') ? 'fuyu'
         : hua.includes('f3') ? 'aki'
         : hua.includes('f2') ? 'natsu'
         : hua.includes('f1') ? 'haru'
         : null;
       postWinAction = { type: 'selectKinpei', target };
+    } else if (canonical.pendingKamiPochi) {
+      const pending = canonical.pendingKamiPochi;
+      postWinOwner = pending.decisionOwners[pending.decisionOwnerIndex] ?? pending.winner;
+      postWinAction = {
+        type: 'selectKamiPochi',
+        target: pending.candidates[0],
+        occurrenceKey: pending.occurrenceKey,
+      };
+    } else if (canonical.pendingPochiSwap) {
+      const pending = canonical.pendingPochiSwap;
+      postWinOwner = pending.decisionOwners[pending.decisionOwnerIndex] ?? pending.winner;
+      postWinAction = { type: 'selectPochiSwap', target: pending.candidates[0]?.target };
     } else if (canonical.pendingSaiKoro) {
       const pending = canonical.pendingSaiKoro;
       const chance = pending.chances[pending.currentIdx] as any;
@@ -500,7 +1013,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       postWinAction = !pending.selectedCombo
         ? { type: 'selectSaiKoroCombo', small: 1, large: 6 }
         : !pending.finalized
-          ? { type: 'rollSaiKoroDice' }
+          ? { type: 'rollSaiKoroDice', override: [cryptoRandomInt(1, 7), cryptoRandomInt(1, 7)] }
           : { type: 'advanceSaiKoro' };
     } else if (canonical.pendingFeverContinue) {
       postWinOwner = canonical.pendingFeverContinue.winner;
@@ -529,7 +1042,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
             postWinAction!,
             `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
           );
-          if (result.command) broadcast(room, actionRelay(result.command, room.snapshot));
+          if (result.command) broadcastAction(room, result.command);
           scheduleRoomDeadline(room);
         }).catch((error) => warn('[anmika-ws] post-win deadline failed', error));
       }, Math.max(0, delay));
@@ -555,7 +1068,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
               { type: 'pass', player: seat },
               `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
             );
-            if (result.command) broadcast(room, actionRelay(result.command, room.snapshot));
+            if (result.command) broadcastAction(room, result.command);
           }
           scheduleRoomDeadline(room);
         }).catch((error) => warn('[anmika-ws] reaction deadline failed', error));
@@ -591,7 +1104,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           action,
           `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
         );
-        if (result.command) broadcast(room, actionRelay(result.command, room.snapshot));
+        if (result.command) broadcastAction(room, result.command);
         scheduleRoomDeadline(room);
       }).catch((error) => warn('[anmika-ws] turn deadline failed', error));
     }, Math.max(0, delay));
@@ -620,16 +1133,19 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     persistence.resetRoom(room.snapshot);
     room.pendingStart = null;
     const blindStart = captureBlindStart(room.authority!);
-    broadcast(room, {
-      type: 'start',
-      blindStart: true,
-      ...blindStart,
-      qijia: start.qijia,
-      members: start.members,
-      revision: room.snapshot.revision,
-      matchId: room.snapshot.matchId,
-      roundId: room.snapshot.roundId,
-    });
+    for (const member of room.members.values()) {
+      sendJson(member.ws, {
+        type: 'start',
+        blindStart: true,
+        ...maskBlindStart(blindStart, member.seat),
+        state: captureSeatProjection(room.authority!, member.seat),
+        qijia: start.qijia,
+        members: start.members,
+        revision: room.snapshot.revision,
+        matchId: room.snapshot.matchId,
+        roundId: room.snapshot.roundId,
+      });
+    }
     scheduleRoomDeadline(room);
   };
 
@@ -664,6 +1180,41 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       ws.close(4002, 'room session replaced');
       return;
     }
+    // Revalidate every connection, including reconnects to a cached room.
+    // Otherwise a member removed after token issuance could use the still-live
+    // short JWT to add themselves back to room.members and recover private state.
+    if (internalApiSecret) {
+      let liveMembers: RoomMemberSnapshot[];
+      try {
+        liveMembers = await fetchMembers(roomId);
+      } catch (error) {
+        warn(`[anmika-ws] member revalidation failed room=${roomId}`, error);
+        ws.close(1013, 'member authority unavailable');
+        return;
+      }
+      const liveMember = liveMembers.find((member) => member.user_id === payload.uid);
+      if (!liveMember || liveMember.is_cpu || liveMember.seat !== payload.seat) {
+        ws.close(4403, 'room membership changed');
+        return;
+      }
+      const liveIds = new Set(liveMembers.map((member) => member.user_id));
+      for (const [userId, staleMember] of room.members) {
+        if (liveIds.has(userId)) continue;
+        if (staleMember.ws) {
+          try { staleMember.ws.close(4410, 'evicted'); } catch { /* noop */ }
+        }
+        room.members.delete(userId);
+      }
+      for (const authoritativeMember of liveMembers) {
+        const cachedMember = room.members.get(authoritativeMember.user_id);
+        room.members.set(authoritativeMember.user_id, {
+          ...authoritativeMember,
+          ws: cachedMember?.ws ?? null,
+          generation: cachedMember?.generation ?? 0,
+          connected: cachedMember?.connected ?? false,
+        });
+      }
+    }
     if (!room.hostUserId && payload.is_host) room.hostUserId = payload.uid;
     if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
     room.cleanupTimer = null;
@@ -686,7 +1237,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         let msg: unknown;
         try { msg = JSON.parse(data.toString()); } catch { return; }
         if ((msg as Record<string, unknown>)?.type === 'resync') {
-          sendSync(ws, room.snapshot, persistence.loadCommands(room.roomId));
+          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId));
           return;
         }
         if ((msg as Record<string, unknown>)?.type === 'start') {
@@ -721,14 +1272,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           // The retrying client may have missed commands accepted after its
           // original one. A full canonical sync is safe and avoids relaying an
           // old revision with today's match/round identifiers.
-          sendSync(ws, room.snapshot, persistence.loadCommands(room.roomId));
+          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId));
           return;
         }
         if (envelope.expectedVersion !== room.snapshot.revision
           || envelope.matchId !== room.snapshot.matchId
           || envelope.roundId !== room.snapshot.roundId) {
           reject(ws, room, envelope.commandId, 'version conflict');
-          sendSync(ws, room.snapshot, persistence.loadCommands(room.roomId));
+          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId));
           return;
         }
         const validated = validateAction(room, payload.uid, payload.seat, envelope.action);
@@ -747,7 +1298,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           reject(ws, room, envelope.commandId, accepted.reason ?? 'action rejected');
           return;
         }
-        broadcast(room, actionRelay(accepted.command, room.snapshot));
+        broadcastAction(room, accepted.command);
         scheduleRoomDeadline(room);
       }).catch((error) => warn(`[anmika-ws] command queue room=${room.roomId}`, error));
     };
@@ -777,7 +1328,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     });
 
     broadcast(room, lobbyPayload(room));
-    if (room.snapshot.started) sendSync(ws, room.snapshot, persistence.loadCommands(room.roomId));
+    if (room.snapshot.started) {
+      sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId));
+    }
     if (!room.snapshot.started && room.pendingStart && room.members.size >= 3) {
       startRoom(room, room.pendingStart.qijia);
     }
@@ -786,7 +1339,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
   // Internal HTTP API for cross-process notifications (Python → Node)
   const internalPort = options.internalPort ?? Number(process.env.ANMIKA_WS_INTERNAL_PORT || (port === 0 ? 0 : port + 1));
   const internalHttp = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    if (req.headers['x-anmika-internal-secret'] !== internalApiSecret) {
+    if (!internalApiSecret || req.headers['x-anmika-internal-secret'] !== internalApiSecret) {
       res.writeHead(403); res.end('forbidden'); return;
     }
     if (req.method === 'POST' && req.url === '/internal/evict-member') {
@@ -819,15 +1372,21 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         const { room_id } = body;
         if (typeof room_id !== 'string') { res.writeHead(400); res.end('bad request'); return; }
         const room = rooms.get(room_id);
-        if (!room?.authority) {
+        const snapshot = room?.snapshot ?? persistence.loadSnapshot(room_id);
+        const authority = room?.authority
+          ?? (snapshot?.started ? restoreAuthority(snapshot, persistence.loadCommands(room_id)) : null);
+        if (!authority || !snapshot?.start) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true, ledger: null }));
           return;
         }
-        const state = room.authority.canonicalState();
+        const state = authority.canonicalState();
+        const matchLedger = state.game.state.finished
+          ? authority.matchResultLedger()
+          : state.game.chipLedger;
         const ledger: Record<string, number> = {};
-        for (const [seat, chips] of Object.entries(state.game.chipLedger ?? {})) {
-          const member = Array.from(room.members.values()).find((m) => m.seat === Number(seat));
+        for (const [seat, chips] of Object.entries(matchLedger ?? {})) {
+          const member = snapshot.start.members.find((m) => m.seat === Number(seat));
           if (member) ledger[member.user_id] = chips as number;
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });

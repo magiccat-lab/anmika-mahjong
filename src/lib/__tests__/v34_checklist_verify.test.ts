@@ -33,8 +33,8 @@ function buildRawGame(opts: {
   return g;
 }
 
-describe('V8 間八萬 [m7m9 + z5 ロン]', () => {
-  it('m7 / m9 各 1 + テンパイ z5 ロン → hupai に 間八萬 入る', () => {
+describe('V8 嵌八萬 [m7m9 + z5 ロン]', () => {
+  it('m7 / m9 各 1 + テンパイ z5 ロン → hupai に 嵌八萬 入る', () => {
     // 平和形 + m7 / m9 + 待ち m8 [z5 ぽっち swap]、 ロン牌 z5
     const sp0 = ['m7', 'm9', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 's4', 's5', 's6', 's2', 's2'];
     const g = buildRawGame({
@@ -45,7 +45,7 @@ describe('V8 間八萬 [m7m9 + z5 ロン]', () => {
     const result = g.hule(0, 'z5', 1);
     if (result) {
       const hasKanpa = result.hupai.some((h: any) =>
-        typeof h.name === 'string' && h.name.includes('間八萬'),
+        typeof h.name === 'string' && h.name.includes('嵌八萬'),
       );
       expect(hasKanpa).toBe(true);
     }

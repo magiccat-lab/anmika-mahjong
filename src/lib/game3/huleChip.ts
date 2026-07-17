@@ -8,11 +8,36 @@
 //
 // 関数自体は this 依存ナシの pure 形、 class 側は wrap method で互換維持。
 
-import { dlog, isNijiPai, toCorePai } from '../helpers';
+import { dlog, fanshuLevel, isNijiPai, toCorePai } from '../helpers';
 import type { PlayerId } from './chip';
 import { hasGoldKita as hasGoldKitaTile, type GoldHand } from './gold';
 import type { PochiHand } from './pochi';
 import { claimTileIdentity } from './claimTile';
+
+export type FuyuKamiPochiChoice = { occurrenceKey: string; target: string };
+export type FuyuRevealSlot = {
+  pai: string;
+  tier: 'upper' | 'lower';
+  occurrenceKey?: string;
+  target?: string;
+};
+export type FuyuRevealState = {
+  winner: PlayerId;
+  loser: PlayerId | null;
+  fuyuCount: number;
+  hasKinpei: boolean;
+  totalHits: number;
+  nextOccurrence: number;
+  currentPair: FuyuRevealSlot[] | null;
+  fuyuLog: Array<{ pai: string; tier: 'upper' | 'lower'; hit: number }>;
+  pendingChoice: { occurrenceKey: string; pai: string; tier: 'upper' | 'lower' } | null;
+  complete: boolean;
+  chipApplied: boolean;
+};
+export type FuyuAdvanceResult = {
+  status: 'pending' | 'complete';
+  state: FuyuRevealState;
+};
 
 export interface HuleChipCtx {
   shoupai: Map<PlayerId, any>;
@@ -29,6 +54,9 @@ export interface HuleChipCtx {
   feverActive: Record<PlayerId, boolean>;
   shuvariActive?: Record<PlayerId, boolean>;
   fuyuConsumed: Record<PlayerId, boolean>;
+  fuyuRevealState?: Record<PlayerId, FuyuRevealState | null>;
+  /** オールマイティ採用後の冬現物判定用、物理手牌上の1枚を置換した view。 */
+  pochiSwapView?: { from: string; target: string } | null;
   shan: any;
   // R23 #1 fix: 夏夏金北 ×4 の差分を state.defen に反映するため state 参照
   state?: { defen: Record<PlayerId, number> };
@@ -55,9 +83,27 @@ export function applyFuyuChip(
   loser: PlayerId | null,
   fuyuCount: number,
   hasKinpei: boolean,
-): void {
+  choice: FuyuKamiPochiChoice | null = null,
+): FuyuAdvanceResult {
   const sp = ctx.shoupai.get(winner);
-  if (!sp) return;
+  const emptyState = (): FuyuRevealState => ({
+    winner,
+    loser,
+    fuyuCount,
+    hasKinpei,
+    totalHits: 0,
+    nextOccurrence: 0,
+    currentPair: null,
+    fuyuLog: [],
+    pendingChoice: null,
+    complete: false,
+    chipApplied: false,
+  });
+  if (!sp) {
+    const state = emptyState();
+    state.complete = true;
+    return { status: 'complete', state };
+  }
   // [2026-05-15 bug 4 fix] 副露あり 判定は ankan [\d{4}$] 除く: 暗槓のみは 門前扱い、
   // 通常 副露 [+/=/-] が 1 つでも あれば 鳴き手 → 冬 chip 半減。
   // 旧 code は _fulou.length > 0 で 暗槓も鳴き扱い → 暗槓だけの 門前手で chip 半減してた bug。
@@ -92,6 +138,12 @@ export function applyFuyuChip(
     const ronTile = baseTile(coreRon[0], coreRon[1]);
     if (ronTile) genbutsuCount[ronTile] = (genbutsuCount[ronTile] ?? 0) + 1;
   }
+  if (ctx.pochiSwapView) {
+    const fromCore = toCorePai(ctx.pochiSwapView.from).replace(/0$/, '5');
+    const targetCore = toCorePai(ctx.pochiSwapView.target).replace(/0$/, '5');
+    if ((genbutsuCount[fromCore] ?? 0) > 0) genbutsuCount[fromCore] -= 1;
+    genbutsuCount[targetCore] = (genbutsuCount[targetCore] ?? 0) + 1;
+  }
   const nuki = ctx.nukidora[winner] ?? 0;
   if (nuki > 0) genbutsuCount['z4'] = (genbutsuCount['z4'] ?? 0) + nuki;
   // R19 #5 fix: nukidoraGold [金北 抜き済] も z4 + gN 現物に含める、
@@ -118,23 +170,29 @@ export function applyFuyuChip(
       genbutsuCount[tile] = (genbutsuCount[tile] ?? 0) + 1;
     }
   }
-  // 華牌 [抜き華] も genbutsu に追加 [冬めくり対象、 神ぽっち swap target にもなる]
-  for (const hp of ctx.huapai[winner] ?? []) {
+  // 和了時に「抜いた扱い」となる華。表ドラ表示の華は常時、裏ドラ表示の華は
+  // リーチ和了時だけ含む [通常の春夏秋冬判定と同じ母集団]。
+  const effectiveHua = [...(ctx.huapai[winner] ?? [])];
+  for (const p of ctx.shan?.baopai ?? []) {
+    if (typeof p === 'string' && /^f[1-4]$/.test(p)) effectiveHua.push(p);
+  }
+  if (ctx.lizhi.has(winner)) {
+    for (const p of ctx.shan?.fubaopai ?? []) {
+      if (typeof p === 'string' && /^f[1-4]$/.test(p)) effectiveHua.push(p);
+    }
+  }
+  // 華牌も genbutsu に追加 [冬めくり対象、神ぽっち swap target にもなる]
+  for (const hp of effectiveHua) {
     genbutsuCount[hp] = (genbutsuCount[hp] ?? 0) + 1;
   }
-  const isLizhiW = ctx.lizhi.has(winner);
-  const huaCount = ctx.huapai[winner].length + (isLizhiW ? 0 : 0);
+  const huaCount = effectiveHua.length;
 
   // めくり牌 1 枚 → 手牌中 match 数 [tulip は ±1 隣接 / m7↔m9 / m7m9↔z5 含む]
-  let naturalHuaCounted = false;
   const checkHit = (pai: string | undefined, opts: { kamiPochiHua?: boolean } = {}): number => {
     if (!pai) return 0;
     if (pai.startsWith('f')) {
-      let count = 0;
-      if (!naturalHuaCounted) {
-        count += huaCount;
-        naturalHuaCounted = true;
-      }
+      // 自然にめくれた華は、めくれるたびに有効華の枚数分ヒットする。
+      let count = huaCount;
       if (opts.kamiPochiHua) count += 1;
       return count;
     }
@@ -150,6 +208,9 @@ export function applyFuyuChip(
       } else if (s === 'z' && n === 5) {
         // z5 ↔ m7 / m9
         matches.add('m7'); matches.add('m9');
+      } else if (s === 'z' && n === 3) {
+        // 字牌チューリップの裁定例: 西なら東・北。
+        matches.add('z1'); matches.add('z4');
       } else if (s !== 'z') {
         // チューリップ ±1 隣接 [循環: 1↔9 も対象、 リョー指示 2026-05-11]
         if (n > 1) matches.add(`${s}${n - 1}`);
@@ -166,91 +227,81 @@ export function applyFuyuChip(
   const shanPai = ctx.shan._pai as string[];
   // めくった牌は shan._fuyuRevealed に保管 [inventory 維持 / ドラ表とは別管理]、 各めくりの hit / miss は fuyuLog
   const fuyuRevealed = ((ctx.shan as any)._fuyuRevealed ??= []) as string[];
-  const fuyuLog: Array<{ pai: string; tier: 'upper' | 'lower'; hit: number }> = [];
-  // 神ぽっち swap [冬めくり時]: 候補 = bingpai + 抜き北 + 抜き華、 最多枚数の牌を pick
-  // [リョー指示 2026-05-11: 手牌 + 北 + 華 を候補にして最多枚数を 「打点確定時点で固定」]
-  const mostCommon = (): string | null => {
-    const counts: Record<string, number> = {};
-    for (const s of ['m', 'p', 's'] as const) {
-      for (let n = 1; n <= 9; n++) {
-        const c = sp._bingpai[s]?.[n] ?? 0;
-        if (c > 0) counts[`${s}${n}`] = c;
-      }
-    }
-    for (let n = 1; n <= 7; n++) {
-      const c = sp._bingpai.z?.[n] ?? 0;
-      if (c > 0) counts[`z${n}`] = c;
-    }
-    const nuki = (ctx.nukidora[winner] ?? 0) + ((ctx as any).nukidoraGold?.[winner] ?? 0);
-    if (nuki > 0) counts['z4'] = (counts['z4'] ?? 0) + nuki;
-    for (const hp of ctx.huapai[winner] ?? []) {
-      counts[hp] = (counts[hp] ?? 0) + 1;
-    }
-    for (const m of sp._fulou ?? []) {
-      const stripped = (m as string).replace(/[\+=\-_*]/g, '');
-      const fsuit = stripped[0];
-      if (fsuit !== 'm' && fsuit !== 'p' && fsuit !== 's' && fsuit !== 'z') continue;
-      for (let i = 1; i < stripped.length; i++) {
-        const tile = baseTile(fsuit, stripped[i]);
-        if (!tile) continue;
-        counts[tile] = (counts[tile] ?? 0) + 1;
-      }
-    }
-    let best: { pai: string; n: number } | null = null;
-    for (const [pai, n] of Object.entries(counts)) {
-      if (!best || n > best.n) best = { pai, n };
-    }
-    return best?.pai ?? null;
-  };
-  const effectivePai = (pai: string | undefined): { pai: string | undefined; kamiPochiHua: boolean } => {
-    if (!pai) return { pai, kamiPochiHua: false };
-    // 青ぽっち [z5b] / 緑ぽっち [z5g] は 神ぽっち効果で 最大枚数の手牌 として扱う
-    if (pai === 'z5b' || pai === 'z5g') {
-      const swapped = mostCommon() ?? pai;
-      return { pai: swapped, kamiPochiHua: swapped.startsWith('f') };
-    }
-    return { pai, kamiPochiHua: false };
-  };
-  let totalHits = 0;
-  while (true) {
-    if (shanPai.length === 0) break;
-    if (!enableLowerDeck && shanPai.length < 1) break;
-    if (shanPai.length === 0) break;
-    const upper = shanPai.pop()!;
-    const lower = enableLowerDeck && shanPai.length > 0 ? shanPai.pop() : undefined;
-    const upEff = effectivePai(upper);
-    const lowEff = effectivePai(lower);
-    const upHit = checkHit(upEff.pai ?? upper, { kamiPochiHua: upEff.kamiPochiHua });
-    const lowHit = enableLowerDeck ? checkHit(lowEff.pai, { kamiPochiHua: lowEff.kamiPochiHua }) : 0;
-    fuyuRevealed.push(upper);
-    fuyuLog.push({ pai: upper, tier: 'upper', hit: upHit });
-    if (lower !== undefined) {
-      fuyuRevealed.push(lower);
-      fuyuLog.push({ pai: lower, tier: 'lower', hit: lowHit });
-    }
-    if (upHit + lowHit === 0) break;
-    totalHits += upHit + lowHit;
-    // 冬は上下どちらかヒットしてる限り続く [リョー指示 2026-05-12]、
-    // 旧 logic は アリス単体 [fuyu=1 + no kinpei] で 1 回めくって break してたが spec 違反
+  let state = ctx.fuyuRevealState?.[winner] ?? null;
+  if (!state || state.loser !== loser || state.fuyuCount !== fuyuCount || state.hasKinpei !== hasKinpei) {
+    state = emptyState();
+    if (ctx.fuyuRevealState) ctx.fuyuRevealState[winner] = state;
   }
-  if (totalHits > 0) {
-    const totalChip = totalHits * chipPerHit;
+
+  if (choice && state.pendingChoice?.occurrenceKey === choice.occurrenceKey && state.currentPair) {
+    const slot = state.currentPair.find((candidate) => candidate.occurrenceKey === choice.occurrenceKey);
+    if (slot) slot.target = choice.target;
+    state.pendingChoice = null;
+  }
+
+  while (!state.complete) {
+    if (!state.currentPair) {
+      if (shanPai.length === 0) {
+        state.complete = true;
+        break;
+      }
+      const pair: FuyuRevealSlot[] = [{ pai: shanPai.pop()!, tier: 'upper' }];
+      if (enableLowerDeck && shanPai.length > 0) pair.push({ pai: shanPai.pop()!, tier: 'lower' });
+      for (const slot of pair) {
+        fuyuRevealed.push(slot.pai);
+        if (slot.pai === 'z5b' || slot.pai === 'z5g') {
+          slot.occurrenceKey = `fuyu:${winner}:${state.nextOccurrence++}`;
+        }
+      }
+      state.currentPair = pair;
+    }
+
+    const unresolved = state.currentPair.find((slot) => slot.occurrenceKey && !slot.target);
+    if (unresolved?.occurrenceKey) {
+      state.pendingChoice = {
+        occurrenceKey: unresolved.occurrenceKey,
+        pai: unresolved.pai,
+        tier: unresolved.tier,
+      };
+      (ctx as any)._lastFuyuLog = state.fuyuLog;
+      return { status: 'pending', state };
+    }
+
+    let pairHits = 0;
+    for (const slot of state.currentPair) {
+      const effective = slot.target ?? slot.pai;
+      const hit = checkHit(effective, { kamiPochiHua: !!slot.target?.startsWith('f') });
+      pairHits += hit;
+      state.fuyuLog.push({ pai: slot.pai, tier: slot.tier, hit });
+    }
+    state.currentPair = null;
+    if (pairHits === 0) {
+      state.complete = true;
+      break;
+    }
+    state.totalHits += pairHits;
+  }
+
+  if (!state.chipApplied && state.totalHits > 0) {
+    const totalChip = state.totalHits * chipPerHit;
     // 冬冬金北 [fuyuCount>=2 + kinpei] のみ シュバリ非適用 [リョー指示 2026-05-11]
     // 冬単体 / 冬金北 [fuyuCount=1 + kinpei] は シュバリ乗る
     const bypassShuvari = isTulip && hasKinpei;
-    const opts = { label: `冬 ${totalHits}hit${bypassShuvari ? ' [冬冬金北 シュバ非適用]' : ''}`, bypassShuvari };
+    const opts = { label: `冬 ${state.totalHits}hit${bypassShuvari ? ' [冬冬金北 シュバ非適用]' : ''}`, bypassShuvari };
     if (loser !== null) ctx.applyChipFromLoser(winner, loser, totalChip, opts);
     else ctx.applyChipOall(winner, totalChip, opts);
+    state.chipApplied = true;
   }
   // 可視化用に fuyuLog を ctx 経由で stash [呼出側で result.fuyuLog として保持]
-  (ctx as any)._lastFuyuLog = fuyuLog;
+  (ctx as any)._lastFuyuLog = state.fuyuLog;
+  return { status: 'complete', state };
 }
 
 /** 和了時の chip 全集計
  *  - 赤 5 / 金 5 / 抜きドラ / 一発 / 裏ドラ
  *  - 春効果 [華 ×倍率 オール]
  *  - 冬効果 [applyFuyuChip 委譲]
- *  - 役満祝儀 / 三倍満 オール
+ *  - 本役満オール祝儀と打点ランク祝儀 [三倍満ロンは放銃者 6 枚]
  *  - 面前役祝儀 [混一 / 清一 / 二盃口]
  *  - 金北効果 [haru/natsu/aki/fuyu の打点 ×4 / chip 追加]
  *  result.hupai / result.defen / result.fanshu を mutate する
@@ -262,6 +313,18 @@ function countNiji(sp: any, ronpai: string | null): number {
     n += sp._bingpai.__anmika.np3 ?? 0;
     n += sp._bingpai.__anmika.ns3 ?? 0;
     n += sp._bingpai.__anmika.nz3 ?? 0;
+  }
+  // 副露時に expanded tile の物理情報は __anmika から消費され、
+  // _anmikaFulouPhysical に移される。虹は副露後も 7 枚祝儀の対象。
+  for (const physical of sp?._anmikaFulouPhysical ?? []) {
+    for (const pai of physical?.consumed ?? []) {
+      if (isNijiPai(pai)) n += 1;
+    }
+  }
+  // _anmikaFulouPhysical contains only tiles consumed from the winner's own
+  // hand. The called river tile keeps its physical face in _anmikaFulou.taken.
+  for (const called of sp?._anmikaFulou ?? []) {
+    if (isNijiPai(called?.taken)) n += 1;
   }
   if (ronpai && isNijiPai(ronpai)) n += 1;
   return n;
@@ -276,11 +339,19 @@ export function applyChipsOnHule(
   // 祝儀 panel 表示用: shuvari 使用状況を result に記録 [リョー指示 2026-05-12]
   result.shuvariUsedThisRound = !!ctx.shuvariActive?.[winner];
   // 面前満貫3枚→29枚: base chip (倍率前) を追跡
-  let rawBaseTotal = 0;
+  const rawBaseByPayer: Record<PlayerId, number> = { 0: 0, 1: 0, 2: 0 };
   const origOall = ctx.applyChipOall;
   const origFromLoser = ctx.applyChipFromLoser;
-  ctx.applyChipOall = (t, n, o) => { rawBaseTotal += n; origOall(t, n, o); };
-  ctx.applyChipFromLoser = (w, l, n, o) => { rawBaseTotal += n; origFromLoser(w, l, n, o); };
+  ctx.applyChipOall = (t, n, o) => {
+    for (const payer of [0, 1, 2] as PlayerId[]) {
+      if (payer !== t) rawBaseByPayer[payer] += n;
+    }
+    origOall(t, n, o);
+  };
+  ctx.applyChipFromLoser = (w, l, n, o) => {
+    rawBaseByPayer[l] += n;
+    origFromLoser(w, l, n, o);
+  };
   // The result carries the physical claim tile. River display metadata is not
   // authoritative and may be absent after reconnect or snapshot restoration.
   const claim = loser !== null ? claimTileIdentity(ctx.ronpai) : claimTileIdentity(null);
@@ -302,10 +373,23 @@ export function applyChipsOnHule(
       else if (head === 's') handAndFulouS0 += zeros;
     }
   }
-  // gold count を hand+fulou の '0' 枚数で cap [goldHand 累積バグ ガード]
-  const cappedGoldP = Math.min(ctx.goldHand[winner].p, handAndFulouP0) + ronGoldP;
-  const cappedGoldS = Math.min(ctx.goldHand[winner].s, handAndFulouS0) + ronGoldS;
+  // goldHand covers tiles dealt/drawn by the winner, including a gold moved
+  // from their hand into a meld. A gold called from another player's river is
+  // represented only by _anmikaFulou.taken and must be counted separately.
+  const calledGoldP = (sp?._anmikaFulou ?? []).filter((entry: any) => entry?.taken === 'gp').length;
+  const calledGoldS = (sp?._anmikaFulou ?? []).filter((entry: any) => entry?.taken === 'gs').length;
+  // Cap the two sources against distinct zero-marked hand/meld slots so a
+  // stale counter cannot count the called physical tile twice.
+  const ownGoldCapacityP = Math.max(0, handAndFulouP0 - calledGoldP);
+  const ownGoldCapacityS = Math.max(0, handAndFulouS0 - calledGoldS);
+  const cappedGoldP = Math.min(ctx.goldHand[winner].p, ownGoldCapacityP) + calledGoldP + ronGoldP;
+  const cappedGoldS = Math.min(ctx.goldHand[winner].s, ownGoldCapacityS) + calledGoldS + ronGoldS;
   const winnerGoldCount = cappedGoldP + cappedGoldS;
+  ctx.pochiSwapView = result?._allmightyPochi
+    ? { from: 'z5', target: result._allmightyPochi }
+    : result?._dekapochiSwap && result?._dekapochiFrom
+      ? { from: result._dekapochiFrom, target: result._dekapochiSwap }
+      : null;
   // 赤 count = 全 '0' marker - 金 count
   let redCount = 0;
   if (sp) {
@@ -379,25 +463,34 @@ export function applyChipsOnHule(
   const inFever = ctx.feverActive[winner];
   if (fuyuCount >= 1) {
     if (!inFever || ctx.fuyuConsumed[winner]) {
-      applyFuyuChip(ctx, winner, loser, fuyuCount, isFuyuKinpei);
+      const fuyuAdvance = applyFuyuChip(ctx, winner, loser, fuyuCount, isFuyuKinpei);
+      result.fuyuKamiPochiPending = fuyuAdvance.status === 'pending'
+        ? fuyuAdvance.state.pendingChoice
+        : null;
       // 冬めくり結果を result に紐付け [UI 表示用]
       if ((ctx as any)._lastFuyuLog) {
         result.fuyuLog = (ctx as any)._lastFuyuLog;
         (ctx as any)._lastFuyuLog = null;
       }
-      if (inFever) ctx.feverActive[winner] = false;
+      if (inFever && fuyuAdvance.status === 'complete') ctx.feverActive[winner] = false;
     }
   }
 
   const dama = result.damanguan ?? 0;
   if (dama > 0) {
     const tsumoChips = [5, 5, 7, 9][Math.min(dama, 3)] ?? 5;
-    const ronChips = [10, 10, 12, 14][Math.min(dama, 3)] ?? 10;
+    const ronChips = [10, 10, 14, 18][Math.min(dama, 3)] ?? 10;
     if (loser === null) {
       ctx.applyChipOall(winner, tsumoChips, { label: `役満ツモ ×${dama}` });
     } else {
       ctx.applyChipFromLoser(winner, loser, ronChips, { label: `役満ロン ×${dama}` });
     }
+    // 打点ランク祝儀とは別枠の「本役満 10 枚オール」。
+    // ロンでも同卓者全員が 10 枚ずつ支払う。
+    ctx.applyChipOall(winner, 10, {
+      label: '本役満 10枚オール',
+      mode: loser === null ? 'tsumo' : 'ron',
+    });
     // 本役満 13翻超過 chip ボーナス [ツモ・ロン共通]
     // 「役満以外でハン数を計算して 13翻超えたら超過枚数分 chip」、 夏除く
     // 夏 fanshu 加算分を除外: hupai 中の 「夏 [打点ランクアップ ...翻相当]」 entry の fanshu 合計を引く
@@ -418,21 +511,20 @@ export function applyChipsOnHule(
     }
   } else if (result.fanshu !== undefined && result.fanshu >= 11) {
     // 打点ランク chip [リョー指示 2026-05-12]:
-    //   3 倍満 [11-12 翻]: 常に 3 オール [ロンでもオール]
+    //   3 倍満 [11-12 翻]: ツモ 3 オール / ロン 6 from loser
     //   役満 [13-17 数え]: ツモ 5 オール / ロン 10 from loser
-    //   5 倍満 [18-23]: ツモ 7 オール / ロン 12 from loser
-    //   6 倍満 [24+]: ツモ 9 オール / ロン 14 from loser
+    //   5 倍満 [18-23]: ツモ 7 オール / ロン 14 from loser
+    //   6 倍満 [24+]: ツモ 9 オール / ロン 18 from loser
     if (result.fanshu >= 13) {
       let rankTsumo: number, rankRon: number, rankLabel: string;
-      if (result.fanshu >= 24) { rankTsumo = 9; rankRon = 14; rankLabel = '6 倍満'; }
-      else if (result.fanshu >= 18) { rankTsumo = 7; rankRon = 12; rankLabel = '5 倍満'; }
+      if (result.fanshu >= 24) { rankTsumo = 9; rankRon = 18; rankLabel = '6 倍満'; }
+      else if (result.fanshu >= 18) { rankTsumo = 7; rankRon = 14; rankLabel = '5 倍満'; }
       else { rankTsumo = 5; rankRon = 10; rankLabel = '役満 [数え]'; }
       if (loser === null) ctx.applyChipOall(winner, rankTsumo, { label: rankLabel });
       else ctx.applyChipFromLoser(winner, loser, rankRon, { label: rankLabel });
     } else {
-      // 3 倍満 [11-12 翻] のみ ロンでもオール。mode は breakdown 用に明示する。
-      const sanbaiMode: 'tsumo' | 'ron' | undefined = loser !== null ? 'ron' : 'tsumo';
-      ctx.applyChipOall(winner, 3, { label: '3 倍満', mode: sanbaiMode });
+      if (loser === null) ctx.applyChipOall(winner, 3, { label: '3 倍満', mode: 'tsumo' });
+      else ctx.applyChipFromLoser(winner, loser, 6, { label: '3 倍満', mode: 'ron' });
     }
   }
 
@@ -446,11 +538,10 @@ export function applyChipsOnHule(
       if (h.name === '二盃口') menzenChip += 15;
     }
     if (menzenChip > 0) {
-      if (loser === null) {
-        ctx.applyChipOall(winner, menzenChip, { label: 'ホンイツ等 面前役' });
-      } else {
-        ctx.applyChipFromLoser(winner, loser, menzenChip, { label: 'ホンイツ等 面前役' });
-      }
+      ctx.applyChipOall(winner, menzenChip, {
+        label: 'ホンイツ等 面前役',
+        mode: loser === null ? 'tsumo' : 'ron',
+      });
     }
   }
 
@@ -485,10 +576,18 @@ export function applyChipsOnHule(
       label = '夏夏金北 [打点 ×4]';
     } else if (target === 'natsu' && natsus === 1) {
       label = '夏金北 [+2 段アップ適用済]';
-    } else if (target === 'aki' && akis >= 2) {
-      if (result.fanshu !== undefined) {
-        const natsuW = hua.filter((p: string) => p === 'f2').length;
-        const chipN = result.fanshu + natsuW;
+    } else if (target === 'aki' && akis >= 2 && Number(result._akiRevealCount ?? 0) >= 2) {
+      const natsuW = hua.filter((p: string) => p === 'f2').length;
+      const reportedFanshu = typeof result.fanshu === 'number'
+        ? result.fanshu
+        : (result.hupai ?? [])
+          .filter((h: any) => typeof h.fanshu === 'number')
+          .reduce((sum: number, h: any) => sum + h.fanshu, 0);
+      const natsuRankBoost = (result.hupai ?? [])
+        .filter((h: any) => typeof h.name === 'string' && h.name.startsWith('夏') && h.name.includes('ランクアップ'))
+        .reduce((sum: number, h: any) => sum + (typeof h.fanshu === 'number' ? h.fanshu : 0), 0);
+      const chipN = Math.max(0, reportedFanshu - natsuRankBoost + natsuW * 2);
+      if (chipN > 0) {
         if (loser !== null) ctx.applyChipFromLoser(winner, loser, chipN);
         else ctx.applyChipOall(winner, chipN);
       }
@@ -508,17 +607,28 @@ export function applyChipsOnHule(
       result.hupai.push({ name: '金北 [強化保留中]', fanshu: 0 });
     }
   }
-  // 面前満貫3枚→29枚: 面前マンガン以上で base chip が 3 なら 29 に引き上げ
+  // 面前満貫3枚→29枚: 支払者ごとの倍率前祝儀が 3 枚なら 29 枚へ。
+  // 例: ロンで放銃者 10 / 同卓者 3 の場合は 10 / 29 となる。
   const sp3 = ctx.shoupai.get(winner);
   const isMenzen3 = !sp3._fulou || sp3._fulou.length === 0 || sp3._fulou.every((m: string) => m.match(/^[mpsz]\d{4}$/));
-  const isMangan = (typeof result.fanshu === 'number' && result.fanshu >= 5) || (result.damanguan ?? 0) > 0;
-  if (isMenzen3 && isMangan && rawBaseTotal === 3) {
-    const boost = 26;
-    if (loser !== null) origFromLoser(winner, loser, boost, { label: '面前満貫 3枚→29枚' });
-    else origOall(winner, boost, { label: '面前満貫 3枚→29枚' });
-    rawBaseTotal += boost;
+  // 4 翻は符にかかわらずアンミカの満貫段階。切り上げ満貫も同じ対象にする。
+  const isMangan = (typeof result.fanshu === 'number'
+    && fanshuLevel(result.fanshu, result.fu ?? 30) >= 4)
+    || (result.damanguan ?? 0) > 0;
+  const boostedPayers: PlayerId[] = [];
+  if (isMenzen3 && isMangan) {
+    for (const payer of [0, 1, 2] as PlayerId[]) {
+      if (payer === winner || rawBaseByPayer[payer] !== 3) continue;
+      origFromLoser(winner, payer, 26, {
+        label: '面前満貫 3枚→29枚',
+        mode: loser === null ? 'tsumo' : 'ron',
+      });
+      boostedPayers.push(payer);
+    }
+  }
+  if (boostedPayers.length > 0) {
     result.hupai = result.hupai ?? [];
-    result.hupai.push({ name: '面前満貫 [3枚→29枚]', fanshu: 0 });
+    result.hupai.push({ name: `面前満貫 [3枚→29枚: p${boostedPayers.join('/p')}]`, fanshu: 0 });
   }
   ctx.applyChipOall = origOall;
   ctx.applyChipFromLoser = origFromLoser;

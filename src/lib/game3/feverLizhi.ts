@@ -5,8 +5,27 @@
 // @ts-ignore - majiang-core 型定義なし
 import Majiang from '@kobalab/majiang-core';
 import { toCorePai } from '../helpers';
+import { americanChitoiXiangting } from './tingpai';
 
-export type FeverCheck = { ok: boolean; tiles: string[]; tier: 1 | 2 | 3; rainbow?: boolean };
+export type FeverCheck = { ok: boolean; tiles: string[]; tier: 1 | 2 | 3 | 4; rainbow?: boolean };
+
+/**
+ * 虹牌ツモからの暗槓で全虹が初めて揃った場合の昇格 tier。
+ * 通常リーチからはダブル、7暗刻 FEVER からは現在の7暗刻数に2段を足す。
+ * 宣言時からレインボーを含んでいた FEVER は既に1段を消費済みなので再昇格しない。
+ */
+export function rainbowKanUpgradeTier(
+  check: FeverCheck,
+  feverActive: boolean,
+  currentTier: 1 | 2 | 3 | 4,
+): 1 | 2 | 3 | 4 | null {
+  if (!check.ok || !check.rainbow) return null;
+  const sevenKinds = check.tiles.length;
+  const rainbowAlreadyCounted = feverActive && currentTier > sevenKinds;
+  if (rainbowAlreadyCounted) return null;
+  const next = Math.min(4, sevenKinds + 2) as 1 | 2 | 3 | 4;
+  return !feverActive || next > currentTier ? next : null;
+}
 
 function countTileInMianzi(mianzi: string, target: string): number {
   if (!mianzi || !target) return 0;
@@ -123,14 +142,21 @@ export function canFeverLizhi(shoupai: any): FeverCheck {
     if (ankanCount >= 3) {
       // ankan あれば 確定暗刻 [4 枚 ankan のみで成立]
       ok = true;
-    } else if (handCount + ankanCount >= 4) {
-      // 2026-05-15 [bug B] fix: 同種 7 が 計 4 枚あれば 順子 1 枚消費しても残 3 枚は
-      // 必ず 刻子 [雀頭は別 suit/字牌 ふくむ全体構成、 567 余地あっても 4 枚目は浮く=
-      // 暗刻として使われる解が必ず存在]。 majiang-core 厳密判定は 「全解で暗刻」 を要求し、
-      // 「s7×4 + 567 余地 → 1 解で順子使用」 を理由に false 返してしまうので 早期 ok=true。
-      // ツモ牌 [s4 等] が 7 と無関係でも 関係なく 4 枚保持で確定。
-      ok = true;
     } else if (handCount + ankanCount >= 3) {
+      // American七対子で同じ7の4枚を二対子として取れる形は、暗刻が確定しない。
+      if (handCount === 4) {
+        try {
+          if (americanChitoiXiangting(shoupai) <= 0) {
+            ok = false;
+            continue;
+          }
+        } catch { /* 通常形の厳密判定へ */ }
+        // 4枚の7は、七対子で二対子に取れる完成/聴牌形でない限り、
+        // 順子に1枚使っても3枚残るため確定暗刻。
+        ok = true;
+        tiles.push(s + '7');
+        continue;
+      }
       // handCount >= 3 必須。 majiang-core 厳密判定を試行
       const strict = isAlwaysAnkanByHule(shoupai, s);
       if (strict === true) {
@@ -148,17 +174,18 @@ export function canFeverLizhi(shoupai: any): FeverCheck {
     if (ok) tiles.push(s + '7');
   }
   // レインボーフィーバー: 虹3p + 虹3s + 虹西 が全て手牌にあればフィーバー成立
-  const anmikaCounts = shoupai._bingpai?.__anmika;
-  const hasAllNiji = anmikaCounts
-    && (anmikaCounts.np3 ?? 0) >= 1
-    && (anmikaCounts.ns3 ?? 0) >= 1
-    && (anmikaCounts.nz3 ?? 0) >= 1;
+  const anmikaCounts = shoupai._bingpai?.__anmika ?? {};
+  const meldExpanded = (shoupai._anmikaFulouPhysical ?? [])
+    .flatMap((entry: any) => entry?.consumed ?? []);
+  const nijiCount = (key: 'np3' | 'ns3' | 'nz3') =>
+    (anmikaCounts[key] ?? 0) + meldExpanded.filter((p: string) => p === key).length;
+  const hasAllNiji = nijiCount('np3') >= 1 && nijiCount('ns3') >= 1 && nijiCount('nz3') >= 1;
   if (tiles.length === 0 && !hasAllNiji) return { ok: false, tiles: [], tier: 1 };
   // 7暗刻の数 + 虹による tier 計算
   let tierCount = tiles.length;
   const rainbow = !!hasAllNiji;
   if (rainbow) tierCount += 1;
-  const tier: 1 | 2 | 3 = tierCount >= 3 ? 3 : tierCount >= 2 ? 2 : 1;
+  const tier: 1 | 2 | 3 | 4 = tierCount >= 4 ? 4 : tierCount >= 3 ? 3 : tierCount >= 2 ? 2 : 1;
   return { ok: true, tiles, tier, rainbow };
 }
 
@@ -200,38 +227,27 @@ export function isFeverWaitExhausted(
   ting: string[],
   shoupaiAll: Map<number, any>,
   heAll: Map<number, any>,
-  baopai: string[]
+  baopai: string[],
+  liveWall?: string[],
 ): boolean {
   if (ting.length === 0) return true;
-  const baseTile = (p: string) => p[0] + (p[1] === '0' ? '5' : p[1]);
+  // 配置が分かる権威側では、見えている枚数からの推定ではなく生牌領域を直接見る。
+  // 白ぽっちは待ち牌として残数に数えず、王牌内の牌も生存待ちに含めない。
+  if (Array.isArray(liveWall)) {
+    const waits = new Set(ting
+      .map((p) => toCorePai(p).replace('0', '5'))
+      .filter((p) => p !== 'z5'));
+    if (waits.size === 0) return true;
+    return !liveWall.some((p) => waits.has(toCorePai(p).replace('0', '5')));
+  }
+  const baseTile = (p: string) => {
+    const core = toCorePai(p);
+    return core[0] + (core[1] === '0' ? '5' : core[1]);
+  };
   let totalRemain = 0;
   for (const t of ting) {
     if (toCorePai(t) === 'z5') {
-      // R19 #6 + R20 #4 fix: z5 visible に 副露中の白 [_fulou 内 z5 含む] と
-      // ドラ表示 z5b/r/g/y も z5 として count、 旧 code は副露白 / 色別 baopai 漏れで 過大残
-      let z5Visible = 0;
-      for (const [, sp] of shoupaiAll) {
-        if (!sp) continue;
-        z5Visible += sp._bingpai?.z?.[5] ?? 0;
-        // R20 #4 fix: _fulou 内 z5 も visible
-        for (const m of sp._fulou ?? []) {
-          z5Visible += countTileInMianzi(m as string, 'z5');
-        }
-      }
-      for (const [, he] of heAll) {
-        if (!he?._pai) continue;
-        for (const d of he._pai as string[]) {
-          const stripped = d.replace(/[\+=\-_*]/g, '');
-          // [2026-05-21 fix] commit 4d1f476f で 河 _pai に z5b/r/g/y raw 牌が入る、
-          // 旧 code は plain 'z5' のみ count、 色付き白が river 透過で 待ち枯渇判定がガバる。
-          if (toCorePai(stripped) === 'z5') z5Visible++;
-        }
-      }
-      // R20 #4 fix: ドラ表示 z5b/r/g/y も z5 として count
-      for (const b of baopai ?? []) {
-        if (toCorePai(b) === 'z5') z5Visible++;
-      }
-      totalRemain += Math.max(0, 4 - z5Visible);
+      // ぽっちだけが残った待ちは「山に残っている」とみなさない。
       continue;
     }
     const tNorm = baseTile(t);

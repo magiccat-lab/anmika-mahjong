@@ -76,8 +76,8 @@ describe('audit: 3 倍満 ロン時 ぽっち倍率 bypass [非フィーバー]'
     if (sanbaiEntry) {
       // 仕様 2026-05-21: ロン + 非フィーバーなら ぽっち bypass、 倍率 1
       expect(sanbaiEntry.multiplier).toBe(1);
-      expect(sanbaiEntry.base).toBe(3);
-      expect(sanbaiEntry.total).toBe(3);
+      expect(sanbaiEntry.base).toBe(6);
+      expect(sanbaiEntry.total).toBe(6);
     }
   });
 

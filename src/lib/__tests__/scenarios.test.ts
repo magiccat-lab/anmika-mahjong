@@ -90,7 +90,8 @@ describe('V1 流し役満', () => {
     }
     const final = get(game);
     // shan 枯渇 → roundEnded + pendingPingju
-    expect(final.roundEnded).toBe(true);
+    // 流し役満はサイコロ完了まで局終了を保留する。
+    expect(final.roundEnded || final.pendingSaiKoro !== null).toBe(true);
     // pendingPingju は nextRound 呼ぶと 流し役満判定 → defen 動く
     if (final.pendingPingju) {
       const defenBefore = { ...final.game.state.defen };
@@ -464,14 +465,20 @@ describe('V21 フィーバー宣言牌 ron → fever 不正立 [P0-1、 2026-05-
   });
 });
 
-describe('V23 オープン三軒目 block [P1 verify]', () => {
-  it('既 2 人 open リーチ中、 3 人目の declareLizhi({open}) は false 返却', () => {
+describe('V23 オープン三軒目 [ルール本文どおり人数制限なし]', () => {
+  it('既に 2 人がオープン立直中でも、3 人目の宣言を許可する', () => {
     const g = new Game3({ qijia: 0 });
     g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    g.shoupai.set(player, buildShoupai([
+      'p1','p1','p1','p2','p2','p2','p3','p3','p3','s7','s7','s7','s8',
+    ]));
+    (g.shoupai.get(player) as any).zimo('s9');
     g.openLizhi.add(1);
     g.openLizhi.add(2);
     const ok = g.declareLizhi({ open: true });
-    expect(ok).toBe(false);
+    expect(ok).toBe(true);
+    expect(g.openLizhi.has(player)).toBe(true);
   });
 });
 

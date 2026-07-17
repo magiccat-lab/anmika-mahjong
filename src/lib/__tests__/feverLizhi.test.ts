@@ -51,9 +51,8 @@ describe('isFeverWaitExhausted [待ち枯渇 → 1 人テンパイ流局]', () =
   it('待ち 0 件は true', () => {
     expect(isFeverWaitExhausted([], new Map(), new Map(), [])).toBe(true);
   });
-  it('z5 待ちは常に 4 枚扱い、 全 z5* 別 key で山にあるとみなす → not exhausted', () => {
-    // helper の現実装は z5 を一律 4 として totalRemain に加算する
-    expect(isFeverWaitExhausted(['z5'], new Map(), new Map(), [])).toBe(false);
+  it('白ぽっちしか残っていない待ちは枯渇扱い', () => {
+    expect(isFeverWaitExhausted(['z5'], new Map(), new Map(), [])).toBe(true);
   });
   it('m1 待ち、 全 4 枚どこにも見えてない → not exhausted [remain=4]', () => {
     expect(isFeverWaitExhausted(['m1'], new Map(), new Map(), [])).toBe(false);
@@ -91,5 +90,12 @@ describe('isFeverWaitExhausted [待ち枯渇 → 1 人テンパイ流局]', () =
     const sp = mkSp({ z: [0, 0, 0, 0, 0, 1] }, ['z555-']);
     const spMap = new Map<number, any>([[1, sp]]);
     expect(isFeverWaitExhausted(['z5'], spMap, new Map(), [])).toBe(true);
+  });
+
+  it('expanded wait names are normalized before visible-tile counting', () => {
+    const p = Array(10).fill(0);
+    p[3] = 4;
+    const spMap = new Map<number, any>([[1, mkSp({ p })]]);
+    expect(isFeverWaitExhausted(['np3'], spMap, new Map(), [])).toBe(true);
   });
 });

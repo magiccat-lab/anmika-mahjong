@@ -28,11 +28,46 @@ describe('canonical paifu v3', () => {
     const unsafe = { ...source, awaitingRonDecision: true } as StoreState;
     expect(isSafePaifuSavePoint(unsafe)).toBe(false);
     expect(() => buildCanonicalPaifuSnapshot(unsafe)).toThrow(/安全な手番開始時/);
+
+    for (const key of ['pendingKamiPochi', 'pendingPochiSwap'] as const) {
+      const withTileChoice = { ...source, [key]: { winner: 0 } } as StoreState;
+      expect(isSafePaifuSavePoint(withTileChoice)).toBe(false);
+      expect(() => buildCanonicalPaifuSnapshot(withTileChoice)).toThrow(/安全な手番開始時/);
+    }
   });
 
   it('rejects tampered v3 data that claims an unsafe active state is portable', () => {
     const snapshot = buildCanonicalPaifuSnapshot(get(game));
     snapshot.store.lastDapai = { player: 1, pai: 'p1' };
     expect(buildStateFromPaifu(snapshot)).toBeNull();
+  });
+
+  it('rejects impossible tile counts and forged expanded metadata', () => {
+    const inflated = buildCanonicalPaifuSnapshot(get(game));
+    inflated.game.shoupai[0].bingpai.p[1] = 99;
+    expect(buildStateFromPaifu(inflated)).toBeNull();
+
+    const forged = buildCanonicalPaifuSnapshot(get(game));
+    forged.game.shoupai[0].bingpai.anmika.np3 = 2;
+    expect(buildStateFromPaifu(forged)).toBeNull();
+
+    const duplicate = buildCanonicalPaifuSnapshot(get(game));
+    duplicate.game.shan.pai.push(duplicate.game.shan.pai[0]);
+    expect(buildStateFromPaifu(duplicate)).toBeNull();
+  });
+
+  it('round-trips deferred Fever and double-riichi state', () => {
+    const snapshot = buildCanonicalPaifuSnapshot(get(game));
+    snapshot.game.fields.doubleLizhi = [1];
+    snapshot.game.fields.feverPendingShuvari = { 0: false, 1: true, 2: false };
+
+    const restored = buildStateFromPaifu(snapshot);
+    expect(restored).not.toBeNull();
+    expect(restored!.game.doubleLizhi.has(1)).toBe(true);
+    expect(restored!.game.feverPendingShuvari).toEqual({ 0: false, 1: true, 2: false });
+
+    const exported = buildCanonicalPaifuSnapshot(restored!, snapshot.timestamp);
+    expect(exported.game.fields.doubleLizhi).toEqual([1]);
+    expect(exported.game.fields.feverPendingShuvari).toEqual({ 0: false, 1: true, 2: false });
   });
 });

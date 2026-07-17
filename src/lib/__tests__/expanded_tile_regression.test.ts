@@ -43,6 +43,10 @@ describe('expanded tile regression coverage', () => {
     game.reset();
   });
 
+  it('does not normalize a fulou pseudo-zimo that merely starts with z5', () => {
+    expect(toCorePai('z555+')).toBe('z555+');
+  });
+
   it('normalizes every three-character rainbow tile to its core tile', () => {
     expect(toCorePai('np3')).toBe('p3');
     expect(toCorePai('ns3')).toBe('s3');
@@ -134,20 +138,35 @@ describe('expanded tile regression coverage', () => {
   });
 
   it('round-trips a three-character draw through a safe paifu snapshot', () => {
-    const state = get(game);
+    // Keep the snapshot physically valid: move the unique rainbow from the
+    // live wall into the current draw and return the original draw to that
+    // exact wall slot.  Merely overwriting _zimo would duplicate np3 and a
+    // hardened paifu importer must reject such a state.
+    let state = get(game);
+    for (let attempt = 0; attempt < 20 && !(state.game.shan as any)._pai.includes('np3'); attempt++) {
+      game.reset();
+      state = get(game);
+    }
+    const wall = (state.game.shan as any)._pai as string[];
+    const rainbowIndex = wall.indexOf('np3');
+    expect(rainbowIndex).toBeGreaterThanOrEqual(0);
     const player = state.game.lunbanToPlayerId(state.game.state.lunban);
     const sp = state.game.shoupai.get(player) as any;
-    sp._zimo = 'np3';
-    sp._anmikaZimo = 'np3';
+    const oldDraw = state.lastZimo!;
+    sp.dapai(oldDraw);
+    sp.zimo('np3');
+    wall[rainbowIndex] = oldDraw;
     state.lastZimo = 'np3';
     state.lastDapai = null;
+    state.game.lastZimoInfo = { player, pai: 'np3', pochi: null, gold: false };
 
     expect(isSafePaifuSavePoint(state)).toBe(true);
     const restored = buildStateFromPaifu(buildCanonicalPaifuSnapshot(state));
 
     expect(restored).not.toBeNull();
     expect(restored?.lastZimo).toBe('np3');
-    expect(restored?.game.shoupai.get(player)?._zimo).toBe('np3');
+    expect(restored?.game.shoupai.get(player)?._zimo).toBe('p3');
+    expect((restored?.game.shoupai.get(player) as any)?._anmikaZimo).toBe('np3');
   });
 
   it('counts m7 and expanded honors as terminals/honors for nagashi yakuman', () => {

@@ -68,7 +68,7 @@ describe('Game3 nuki bei', () => {
     expect(g.canNukiBei(me)).toBe(true);
   });
 
-  it('declareNukiBei で nukidora +1、 抜き後の justNukidBei flag が立つ', () => {
+  it('declareNukiBei で nukidora +1、次の通常捨牌への鳴きを抑止しない', () => {
     const g = new Game3();
     g.qipai();
     const player = g.lunbanToPlayerId(g.state.lunban);
@@ -81,7 +81,7 @@ describe('Game3 nuki bei', () => {
     const replacement = g.declareNukiBei(player);
     expect(replacement).toBeTruthy();
     expect(g.nukidora[player]).toBe(before + 1);
-    expect(g.justNukidBei[player]).toBe(true);
+    expect(g.justNukidBei[player]).toBe(false);
   });
 
   it('regression: リーチ後 北抜きの代替ツモは嶺上フラグを立てる', () => {
@@ -98,14 +98,14 @@ describe('Game3 nuki bei', () => {
 
     expect(replacement).toBeTruthy();
     expect(g.lingshangActive[player]).toBe(true);
-    expect(g.justNukidBei[player]).toBe(true);
+    expect(g.justNukidBei[player]).toBe(false);
   });
 
   // 2026-05-14 ゆーま 自走 bug fix:
   //   game.dapai 内で justNukidBei を clear すると、 store 側 pon 候補 check 時点で
   //   既に false になり 「抜き直後の他家ポン不可」 ルール 2-4 が破れる。
   //   game.dapai は flag を保持し、 store.ts pon check 後に clear する設計に変更。
-  it('declareNukiBei → dapai の直後でも justNukidBei が true で残る [pon check 防衛]', () => {
+  it('declareNukiBei → dapai の直後も通常どおり鳴ける', () => {
     const g = new Game3();
     g.qipai();
     const player = g.lunbanToPlayerId(g.state.lunban);
@@ -114,13 +114,13 @@ describe('Game3 nuki bei', () => {
     g.goldHand[player].z = 0;
     g.zimo();
     g.declareNukiBei(player);
-    expect(g.justNukidBei[player]).toBe(true);
+    expect(g.justNukidBei[player]).toBe(false);
     // 嶺上ツモ後、 すぐに dapai しても justNukidBei は維持される
     const dapai = sp._zimo;
     if (typeof dapai === 'string' && dapai.length <= 3) {
       try { g.dapai(dapai); } catch { /* dapai 失敗時は test skip */ }
       // dapai 後も flag は true [store 側で pon check 終了後に clear する仕様]
-      expect(g.justNukidBei[player]).toBe(true);
+      expect(g.justNukidBei[player]).toBe(false);
     }
   });
 

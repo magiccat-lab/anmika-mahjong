@@ -823,6 +823,8 @@ class RoomHub:
             "nukiBei",
             "selectFuyu",
             "selectKinpei",
+            "selectKamiPochi",
+            "selectPochiSwap",
             "continueFever",
             "agariyame",
             "selectSaiKoroCombo",
@@ -1014,12 +1016,15 @@ hub = RoomHub()
 
 @app.websocket("/legacy/ws/room/{room_id}")
 async def room_ws(ws: WebSocket, room_id: str):
-    # C1: gameplay /ws の正本は Node authority のみ。旧 relay は移行時の
-    # 明示 opt-in に限定し、通常構成から到達不能にする。
-    if os.environ.get("ANMIKA_ENABLE_LEGACY_WS") != "1":
-        await ws.accept()
-        await ws.close(code=4404, reason="legacy websocket disabled")
-        return
+    # Gameplay の正本は Node authority のみ。nginx 設定を誤って FastAPI
+    # へ向けた場合も旧 relay に fallback して権威/秘匿検証を迂回しないよう、
+    # legacy endpoint は環境変数による opt-in も含めて fail-closed にする。
+    await ws.accept()
+    await ws.close(code=4404, reason="legacy websocket permanently disabled")
+    return
+
+    # Historical implementation is intentionally unreachable and retained
+    # temporarily only as migration reference.
     await ws.accept()
     user_id = ws.session.get("user_id") if hasattr(ws, "session") else None
     # SessionMiddleware は WebSocket では session 取れないので、 query param で fallback
@@ -1392,7 +1397,8 @@ async def finish_match(request: Request):
             total += d
         if total != 0:
             raise HTTPException(status_code=400, detail=f"chip_delta sum != 0 (got {total})")
-        # WSA: Node authority の chipLedger と照合（best-effort、Node 停止時はスキップ）
+        # WSA: Node authority の match-local ledger と必ず照合する。
+        # authority 不在・未終了・通信失敗時は client 値を信用せず fail-closed。
         try:
             async with httpx.AsyncClient(timeout=3) as cli:
                 resp = await cli.post(
@@ -1404,17 +1410,41 @@ async def finish_match(request: Request):
                     ledger_data = resp.json()
                     auth_ledger = ledger_data.get("ledger")
                     if auth_ledger is not None:
+                        if ledger_data.get("finished") is not True:
+                            raise HTTPException(
+                                status_code=409,
+                                detail="authority match is not finished",
+                            )
+                        if set(auth_ledger.keys()) != set(chip_delta.keys()):
+                            raise HTTPException(
+                                status_code=400,
+                                detail="authority ledger member set mismatch",
+                            )
                         for uid, delta in chip_delta.items():
                             auth_val = auth_ledger.get(uid)
-                            if auth_val is not None and int(delta) != int(auth_val):
+                            if auth_val is None or int(delta) != int(auth_val):
                                 raise HTTPException(
                                     status_code=400,
                                     detail=f"chip_delta mismatch for {uid}: client={delta} authority={auth_val}",
                                 )
+                    else:
+                        raise HTTPException(
+                            status_code=503,
+                            detail="authority room state unavailable",
+                        )
+                else:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"authority ledger service returned {resp.status_code}",
+                    )
         except HTTPException:
             raise
-        except Exception:
-            log.warning("authority ledger check skipped [node unreachable]")
+        except Exception as e:
+            log.warning("authority ledger check failed closed: %s", e)
+            raise HTTPException(
+                status_code=503,
+                detail="authority ledger service unavailable",
+            ) from e
         # R20 #1 fix: match_uuid 必須 [client が deterministic 生成]、 既存 row check して
         # 同 uuid なら chip_total 二重加算せず 409 ack [冪等]
         if not match_uuid:

@@ -18,6 +18,55 @@ export type RoomStartSnapshot = {
   chipLedger?: Record<string, number>;
 };
 
+export type SerializedOnlineHand = {
+  bingpai: {
+    _: number;
+    m: number[];
+    p: number[];
+    s: number[];
+    z: number[];
+    anmika: Record<string, number> | null;
+  };
+  fulou: string[];
+  zimo: string | null;
+  anmikaZimo: string | null;
+  anmikaFulou: unknown[];
+  anmikaFulouPhysical: unknown[];
+};
+
+/** Seat-scoped authoritative wire state; hidden tiles exist only in privateHand. */
+export type OnlineSeatProjection = {
+  schemaVersion: 1;
+  recipientSeat: number;
+  gameState: Record<string, unknown>;
+  shan: {
+    paishu: number;
+    baopai: string[];
+    fubaopai: string[] | null;
+    kanDoraCount: number;
+    rinshanUsed: number;
+    fuyuRevealed: string[];
+  };
+  privateHand: SerializedOnlineHand | null;
+  publicHands: Record<number, {
+    concealedCount: number;
+    /** True only for a real 2/3-character draw tile. */
+    hasZimo: boolean;
+    /** A post-call pseudo-zimo is a public meld string, never a concealed tile. */
+    pseudoZimo: string | null;
+    fulou: string[];
+    anmikaFulou: unknown[];
+    anmikaFulouPhysical: unknown[];
+    revealedHand: SerializedOnlineHand | null;
+    /** Physical matching tiles exposed by confirmed FEVER (duplicates retained). */
+    revealedWaitTiles: string[];
+  }>;
+  rivers: Record<number, string[]>;
+  publicEvents: Array<Record<string, unknown>>;
+  fields: Record<string, unknown>;
+  store: Record<string, unknown>;
+};
+
 export type AcceptedRoomCommand = {
   commandId: string;
   revision: number;

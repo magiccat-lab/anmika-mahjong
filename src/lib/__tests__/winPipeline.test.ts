@@ -23,6 +23,8 @@ function baseState() {
     pendingQianggang: null,
     pendingFuyu: null,
     pendingKinpei: null,
+    pendingKamiPochi: null,
+    pendingPochiSwap: null,
     pendingSaiKoro: null,
     pendingFeverContinue: null,
     pendingPingju: false,
@@ -47,6 +49,8 @@ describe('winPipeline state machine helper', () => {
   it('defers fever settlement while kinpei is pending and applies it once', () => {
     const s: any = baseState();
     s.game.feverActive[0] = true;
+    s.game.feverDeclareTing[0] = ['p1'];
+    (s.game.shan as any)._pai = ['p1'];
     s.pendingKinpei = { winner: 0 };
 
     settleAfterWin(s, { winner: 0, isRon: true });
@@ -78,6 +82,22 @@ describe('winPipeline state machine helper', () => {
     expect(getWinPipelineState(s)).toEqual({ stage: 'fulou', owner: null });
     expect(s.awaitingRonDecision).toBe(false);
     expect(s.awaitingFulou).toBe(true);
+  });
+
+  it('keeps a post-win tile choice ahead of an unfinished double-ron window', () => {
+    const s: any = baseState();
+    enterRonDecisionStage(s);
+    s.pendingKamiPochi = {
+      winner: 1,
+      context: 'dora',
+      occurrenceKey: 'baopai:0',
+      candidates: ['p1'],
+      decisionOwners: [2],
+      decisionOwnerIndex: 0,
+      isRon: true,
+      ronfrom: 0,
+    };
+    expect(getWinPipelineState(s)).toEqual({ stage: 'kami-pochi', owner: 2 });
   });
 
   it('queues and advances saikoro chances without carrying roll state', () => {

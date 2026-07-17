@@ -9,6 +9,24 @@ function forceTurn(g: Game3, player: PlayerId): void {
 }
 
 describe('colored/gold pai identity', () => {
+  it('normalizes every expanded discard before majiang-core pon/kan candidate lookup', () => {
+    const from = 0 as PlayerId;
+    const player = 1 as PlayerId;
+    const cases = [
+      { discard: 'z5b', own: ['z5r', 'z5g', 'z5y'] },
+      { discard: 'gp', own: ['p5', 'p5', 'p5'] },
+      { discard: 'np3', own: ['p3', 'p3', 'p3'] },
+    ] as const;
+
+    for (const entry of cases) {
+      const g = new Game3({ qijia: 0 });
+      const filler = ['s1', 's2', 's3', 's4', 's5', 's6', 'z1', 'z2', 'm7', 'm9'];
+      g.shoupai.set(player, buildShoupai([...entry.own, ...filler].slice(0, 13)));
+      expect(g.getPonCandidates(player, from, entry.discard as any).length).toBeGreaterThan(0);
+      expect(g.getDamingangCandidates(player, from, entry.discard as any).length).toBeGreaterThan(0);
+    }
+  });
+
   it('z5b is kept in hand and discardLog from hand to dapai', () => {
     const g = new Game3({ qijia: 0 });
     const player = 0 as PlayerId;
@@ -96,5 +114,31 @@ describe('colored/gold pai identity', () => {
       expect(g.discardLog[player].at(-1)?.pai).not.toBe('z5');
       forceTurn(g, player);
     }
+  });
+
+  it('counts a called gold/rainbow physical tile with its own chip value', () => {
+    const makeGame = () => {
+      const g = new Game3({ qijia: 0 });
+      const player = 0 as PlayerId;
+      const sp = buildShoupai(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 's1', 's2', 's3', 'm7', 'm9', 'z1', 'z2']);
+      g.shoupai.set(player, sp);
+      g.huapai[player] = [];
+      (g.shan as any)._baopai = [];
+      (g.shan as any)._fubaopai = [];
+      return { g, player, sp };
+    };
+
+    const gold = makeGame();
+    gold.sp._fulou = ['p550+'];
+    gold.sp._anmikaFulou = [{ mianzi: 'p550+', from: 1, taken: 'gp' }];
+    gold.g.applyChipsOnHule({ hupai: [], fanshu: 1, fu: 30, damanguan: 0 }, gold.player, null);
+    expect(gold.g.chipBreakdown.some((entry: any) => entry.label === '金 5 ×1' && entry.base === 4)).toBe(true);
+    expect(gold.g.chipBreakdown.some((entry: any) => String(entry.label).startsWith('赤 5'))).toBe(false);
+
+    const rainbow = makeGame();
+    rainbow.sp._fulou = ['p333+'];
+    rainbow.sp._anmikaFulou = [{ mianzi: 'p333+', from: 1, taken: 'np3' }];
+    rainbow.g.applyChipsOnHule({ hupai: [], fanshu: 1, fu: 30, damanguan: 0 }, rainbow.player, null);
+    expect(rainbow.g.chipBreakdown.some((entry: any) => entry.label === '虹 ×1' && entry.base === 7)).toBe(true);
   });
 });

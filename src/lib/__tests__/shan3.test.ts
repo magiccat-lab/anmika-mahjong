@@ -99,6 +99,13 @@ describe('Shan3 構築 / paishu', () => {
 });
 
 describe('Shan3 rinshan / drawNewDora', () => {
+  it('rejects a kan when only one live-wall indicator tile remains', () => {
+    const s = new Shan3(baseRule) as any;
+    s._pai = ['p1'];
+    expect(s.canOpenKanDora).toBe(false);
+    expect(() => s.gangzimo()).toThrow(/not enough wall tiles/);
+  });
+
   it('consumeRinshan で rinshanUsed +1', () => {
     const s = new Shan3(baseRule);
     expect(s.rinshanUsed).toBe(0);

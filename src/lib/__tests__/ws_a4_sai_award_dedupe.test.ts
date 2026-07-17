@@ -37,14 +37,14 @@ describe('WSA-A4 sai-koro yakuman award registration', () => {
     ]);
   });
 
-  it('registers double-yakuman tenhou at replaceable count 1 and base 140', () => {
+  it('registers double-yakuman tenhou as two inherent-Shuba sessions at base 140', () => {
     const chances = postProcess({
       hupai: [{ name: '天和 [ダブル役満]', fanshu: '**' }],
       damanguan: 2,
     });
 
     expect(chances.filter((chance) => chance.name === '天和' || chance.name === '本役満アガリ')).toEqual([
-      expect.objectContaining({ awardKey: 'yakuman:天和', baseChip: 140, count: 1 }),
+      expect.objectContaining({ awardKey: 'yakuman:天和', baseChip: 140, count: 2, alwaysShuvari: true }),
     ]);
   });
 

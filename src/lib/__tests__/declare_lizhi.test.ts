@@ -59,14 +59,13 @@ describe('Game3 declareLizhi', () => {
     expect(g.state.lizhibang).toBe(2);
   });
 
-  it('オープン 3 軒目 block: 既 2 人 open なら 3 人目 open は false', () => {
+  it('3人目のオープン立直も許可する', () => {
     const g = makeTenpaiLunbanGame();
     g.openLizhi.add(1 as PlayerId);
     g.openLizhi.add(2 as PlayerId);
-    expect(g.declareLizhi({ open: true })).toBe(false);
-    // 通常リーチは OK
+    expect(g.declareLizhi({ open: true })).toBe(true);
     const player = g.lunbanToPlayerId(g.state.lunban);
-    expect(g.canLizhi(player)).toBe(true);
+    expect(g.openLizhi.has(player)).toBe(true);
   });
 
   it('shuvari=true で shuvariActive=true + 使用済 flag', () => {

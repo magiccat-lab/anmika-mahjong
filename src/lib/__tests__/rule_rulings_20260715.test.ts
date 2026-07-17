@@ -103,10 +103,12 @@ describe('2026-07-15確定裁定', () => {
     const visibleBefore = g.shan.baopai.length;
     const hiddenBefore = g.shan.fubaopai?.length ?? 0;
     // pop順: f3(表) → p8(裏) → p9(連鎖した表)。f3を飛ばして通常牌を同枠に足さない。
-    (g.shan as any)._pai = ['p9', 'p8', 'f3'];
+    // Keep a complete second front/back pair. A lone lower tile cannot be
+    // used for the Autumn that was just revealed.
+    (g.shan as any)._pai = ['p9', 'p7', 'p8', 'f3'];
     expect(g.hule(0)).not.toBeNull();
-    expect(g.shan.baopai.slice(visibleBefore)).toEqual(['f3', 'p9']);
-    expect(g.shan.fubaopai?.slice(hiddenBefore)).toEqual(['p8']);
+    expect(g.shan.baopai.slice(visibleBefore)).toEqual(['f3', 'p7']);
+    expect(g.shan.fubaopai?.slice(hiddenBefore)).toEqual(['p8', 'p9']);
   });
 
   it('秋で冬が表示されても通常牌まで飛ばさず、冬を抜いた扱いにする', () => {
@@ -231,7 +233,7 @@ describe('2026-07-15確定裁定', () => {
       damanguan: 1,
     }, 0, 1);
     expect(calls).toContainEqual({ mode: 'ron', chips: 10, label: '役満ロン ×1' });
-    expect(calls).toContainEqual({ mode: 'ron', chips: 25, label: 'ホンイツ等 面前役' });
+    expect(calls).toContainEqual({ mode: 'oall', chips: 25, label: 'ホンイツ等 面前役' });
   });
 
   it('本役満の13翻超過祝儀をロンでも放銃者払いにする', () => {
