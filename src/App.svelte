@@ -1587,6 +1587,7 @@
   $: if (viewMode === 'single' && !onlineGameStarted && $game.roundEnded && $game.lastWinner !== null
         && $game.cpu[$game.lastWinner as PlayerId] && !state.finished
         && !$game.pendingKinpei && !$game.pendingFuyu && !$game.pendingKamiPochi && !$game.pendingPochiSwap && !$game.pendingSaiKoro
+        && $game.cpuWinAck  // [2026-07-17] CPU和了は人間の確認まで自動進行しない
         && !$game.lastDapai  // ron 時は lastDapai が残ってる、 tsumo のみ
         && !cpuAutoAdvanceFired) {
     cpuAutoAdvanceFired = true;

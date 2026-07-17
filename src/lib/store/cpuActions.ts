@@ -96,6 +96,11 @@ export function cpuStepImpl(initial: StoreState): StoreState {
           }
         } else {
           s.roundEnded = true;
+          // [2026-07-17 リョー指摘: リーチ白ツモで勝手に上がって次へ行った]
+          // サイコロ無しの素の和了も 3 秒 auto-advance で判定表示ごと飛んでいた。
+          // 局終了時は必ず人間の確認 [次局へ or ackCpuWin] まで止める。
+          // fever 続行 [roundEnded=false] は手が続くためここで ack を要求しない
+          s.cpuWinAck = false;
         }
         break;
       }

@@ -2506,8 +2506,12 @@ export class Game3 {
         : -Infinity;
       const topCandidates = validCandidates.filter((candidate) => candidate._pochiExpectedChip === maxExpected);
       const explicit = this.pochiSwapChoice[player];
+      // 高目は常に自動選択 [リョー裁定 2026-07-17: 白ぽっちと同じく協議モーダルは出さない]。
+      // 祝儀期待値タイの時は打点 [役満数→翻数] で自動タイブレーク
       const best = (explicit ? topCandidates.find((candidate) => candidate._dekapochiSwap === explicit) : null)
-        ?? topCandidates[0]
+        ?? topCandidates.slice().sort((a, b) =>
+          ((b.damanguan ?? 0) - (a.damanguan ?? 0))
+          || ((typeof b.fanshu === 'number' ? b.fanshu : 0) - (typeof a.fanshu === 'number' ? a.fanshu : 0)))[0]
         ?? null;
       if (best) {
         result = best;
@@ -2515,19 +2519,6 @@ export class Game3 {
         result.hupai = result.hupai ?? [];
         const color = zimoCore === 'p1' ? '緑' : '黄';
         result.hupai.push({ name: `でかぽっち オールマイティ [${best._dekapochiSwap}] (${color})`, fanshu: 0 });
-        if (topCandidates.length > 1 && !explicit) {
-          result._pochiSwapPending = {
-            winner: player,
-            kind: 'deka',
-            candidates: topCandidates.map((candidate) => ({
-              target: candidate._dekapochiSwap,
-              expectedChip: candidate._pochiExpectedChip,
-              fanshu: typeof candidate.fanshu === 'number' ? candidate.fanshu : null,
-              damanguan: candidate.damanguan ?? 0,
-            })),
-            decisionOwners: this.pochiDecisionOwners(player),
-          } satisfies PochiSwapPendingChoice;
-        }
       }
     }
     // アンミカ独自: 7m を ヤオチュー牌として扱う再判定
