@@ -627,9 +627,11 @@ export function applyChipsOnHule(
   const sp3 = ctx.shoupai.get(winner);
   const isMenzen3 = !sp3._fulou || sp3._fulou.length === 0 || sp3._fulou.every((m: string) => m.match(/^[mpsz]\d{4}$/));
   // 4 翻は符にかかわらずアンミカの満貫段階。切り上げ満貫も同じ対象にする。
-  const isMangan = (typeof result.fanshu === 'number'
-    && fanshuLevel(result.fanshu, result.fu ?? 30) >= 4)
-    || (result.damanguan ?? 0) > 0;
+  // [2026-07-17 リョー指摘] 対象は「満貫段階 [Lv4] ちょうど」のみ。
+  // ハネ満以上・役満は 29 枚ルールの対象外 [従来 >=4 で倍満でも発動していた]
+  const isMangan = typeof result.fanshu === 'number'
+    && !((result.damanguan ?? 0) > 0)
+    && fanshuLevel(result.fanshu, result.fu ?? 30) === 4;
   const boostedPayers: PlayerId[] = [];
   if (isMenzen3 && isMangan) {
     for (const payer of [0, 1, 2] as PlayerId[]) {

@@ -172,6 +172,45 @@ describe('rule consistency: menzen mangan 3 to 29', () => {
 
     expect(calls).toContainEqual({ mode: 'ron', chips: 26, label: '面前満貫 3枚→29枚' });
   });
+
+  it('does NOT upgrade at haneman/baiman — mangan rank only [2026-07-17 リョー指摘]', () => {
+    for (const fanshu of [6, 8, 11]) {
+      const calls: Array<{ mode: 'oall' | 'ron'; chips: number; label?: string }> = [];
+      const hand = {
+        _bingpai: {
+          m: [0], p: [1, 0, 0, 0, 0, 0], s: [0], z: [0],
+          __anmika: {},
+        },
+        _fulou: [],
+      };
+      const ctx: HuleChipCtx = {
+        shoupai: new Map([[0, hand]]),
+        he: new Map(),
+        goldHand: { 0: { p: 0, s: 0, z: 0 }, 1: { p: 0, s: 0, z: 0 }, 2: { p: 0, s: 0, z: 0 } },
+        pochiHand: { 0: {}, 1: {}, 2: {} } as any,
+        huapai: { 0: [], 1: [], 2: [] },
+        nukidora: { 0: 0, 1: 0, 2: 0 },
+        nukidoraGold: { 0: 0, 1: 0, 2: 0 },
+        kinpeiTarget: { 0: null, 1: null, 2: null },
+        lizhi: new Set(),
+        openLizhi: new Set(),
+        feverActive: { 0: false, 1: false, 2: false },
+        fuyuConsumed: { 0: false, 1: false, 2: false },
+        shan: { baopai: [], fubaopai: [], _pai: [] },
+        applyChipOall: (_winner, chips, opts) => calls.push({ mode: 'oall', chips, label: opts?.label }),
+        applyChipFromLoser: (_winner, _loser, chips, opts) => calls.push({ mode: 'ron', chips, label: opts?.label }),
+      };
+
+      applyChipsOnHule(ctx, {
+        hupai: [{ name: '一発', fanshu: 1 }],
+        fanshu,
+        fu: 30,
+        damanguan: 0,
+      }, 0, 1);
+
+      expect(calls.some((c) => c.label === '面前満貫 3枚→29枚'), `fanshu=${fanshu}`).toBe(false);
+    }
+  });
 });
 
 describe('rule consistency: autumn-autumn gold north', () => {
