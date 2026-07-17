@@ -98,6 +98,8 @@
 
 ### ぽっちサイコロ [リョー裁定 2026-07-17、2系統独立]
 
+ルール原典: [65アンミカルール](https://docs.google.com/document/d/1PRRRWnLpzxWHRz2vFO7qszegmn7GLN5o63upEjJ9-tg/edit) §4 サイコロチャンス / §2-5 ぽっち
+
 トリガー [両立時は 2 セッション]:
 
 | 系統 | 条件 |
