@@ -45,6 +45,8 @@ export type OnlineSeatProjection = {
     fubaopai: string[] | null;
     kanDoraCount: number;
     rinshanUsed: number;
+    /** Whether the hidden reserve contains a non-flower replacement tile. */
+    canDrawRinshan: boolean;
     fuyuRevealed: string[];
   };
   privateHand: SerializedOnlineHand | null;

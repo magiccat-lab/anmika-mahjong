@@ -106,6 +106,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         gold: drawnNorth === 'gN' || s.game.shan.lastZimoGold,
       });
       if (s.awaitingRonDecision) break;
+      if (s.roundEnded) break;
       if (s.lastZimo == null) {
         // R5 P1 #5 fix: applyPingjuTransition で 罰符 / 流し役満 / snapshot を 通常流局と揃える
         s = applyPingjuTransition(s, `🌀 流局 [CPU 北抜きで王牌枯渇]`);
@@ -197,6 +198,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     if (declaredLizhiDapai === null && s.game.canNukiBei(cur)) {
       s = beginNukiBei(s, cur);
       if (s.awaitingRonDecision) break;
+      if (s.roundEnded) break;
       if (s.lastZimo == null) {
         s = applyPingjuTransition(s, `🌀 流局 [CPU 北抜きで王牌枯渇]`);
         break;
@@ -283,6 +285,7 @@ export function autoAdvanceImpl(initial: StoreState): StoreState {
         gold: drawnNorth === 'gN' || s.game.shan.lastZimoGold,
       });
       if (s.awaitingRonDecision) break;
+      if (s.roundEnded) break;
       if (s.lastZimo == null) {
         // R5 P1 #5 fix: applyPingjuTransition で 通常流局と揃える
         s = applyPingjuTransition(s, `🌀 流局 [自動進行で王牌枯渇]`);

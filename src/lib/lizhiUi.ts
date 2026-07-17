@@ -67,6 +67,13 @@ export function isLizhiDiscardableCandidate(pai: string): boolean {
   return toCorePai(pai.replace(/[_*]$/, '')) !== 'z4';
 }
 
+/** Return majiang-core's canonical white-kan meld string.  The valid form is
+ * `z5555`; rebuilding it from the physical tile label can accidentally send
+ * an invalid value such as `z5z5z5z5`. */
+export function findWhiteKanCandidate(candidates: string[]): string | null {
+  return candidates.find((mianzi) => mianzi.startsWith('z5')) ?? null;
+}
+
 /** Select the declaration tiles for the chosen mode without collapsing
  * physical identities.  p3 and np3 can produce different Rainbow-FEVER
  * results even though both normalize to p3 in majiang-core. */

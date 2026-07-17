@@ -5,6 +5,8 @@
 
 import type { Pai, SanmaTileSet } from './types';
 
+const RINSHAN_CAPACITY = 16;
+
 export interface ShanRule {
   /** 赤牌枚数。 例: { m: 0, p: 1, s: 1 } */
   hongpai: { m: number; p: number; s: number };
@@ -44,12 +46,47 @@ export class Shan3 {
   private _blindQueue: BlindDrawEntry[] = [];
   private _blindDoraQueue: Pai[] = [];
   private _blindPaishu = 0;
+  /** Authoritative legality bit supplied with an online projection.  It
+   * reveals no reserve identity, but prevents an all-flower tail from
+   * advertising a kan that the server must reject. */
+  private _blindCanDrawRinshan: boolean | null = null;
   /** 冬 [アリス / チューリップ] で live wall から公開済みの物理牌。 */
   _fuyuRevealed: Pai[] = [];
 
   get isBlind(): boolean { return this._blind; }
 
-  static createBlind(opts: { rule: ShanRule; baopai: Pai[]; fubaopai: Pai[] | null; paishu: number; kanDoraCount?: number }): Shan3 {
+  /** Remaining physical tiles in the replacement reserve.  A projected
+   * online wall cannot expose their identities, so reconstruct the count
+   * from the authoritative consumed count instead. */
+  get rinshanRemaining(): number {
+    return this._blind
+      ? Math.max(0, RINSHAN_CAPACITY - this.rinshanUsed)
+      : this._rinshan.length;
+  }
+
+  /** Whether at least one physical reserve tile can still be extracted.
+   * North extraction uses this weaker predicate so an all-flower tail can be
+   * consumed before the hand ends in an exhaustive draw. */
+  get hasRinshanTile(): boolean {
+    return this.rinshanRemaining > 0;
+  }
+
+  /** Whether a kan can obtain an actual replacement tile after auto-skipping
+   * flowers.  Online projections carry this legality bit without exposing
+   * hidden faces; the remaining-count fallback supports older projections. */
+  get canDrawRinshan(): boolean {
+    if (this._blind) return this._blindCanDrawRinshan ?? this.hasRinshanTile;
+    return this._rinshan.some((pai) => !pai.startsWith('f'));
+  }
+
+  static createBlind(opts: {
+    rule: ShanRule;
+    baopai: Pai[];
+    fubaopai: Pai[] | null;
+    paishu: number;
+    kanDoraCount?: number;
+    canDrawRinshan?: boolean;
+  }): Shan3 {
     const shan = new Shan3(opts.rule);
     shan._pai = [];
     shan._rinshan = [];
@@ -59,6 +96,7 @@ export class Shan3 {
     shan._blind = true;
     shan._blindPaishu = opts.paishu;
     shan.kanDoraCount = opts.kanDoraCount ?? 0;
+    shan._blindCanDrawRinshan = opts.canDrawRinshan ?? null;
     return shan;
   }
 
@@ -112,7 +150,7 @@ export class Shan3 {
     this._baopai = removeAt(raw, 4, 2);
     this._fubaopai = rule.fudora ? removeAt(raw, 4, 2) : null;
     // 嶺上 16 枚 [先頭から]、 raw 不足時は ある分のみ
-    const rinshanCount = Math.min(16, raw.length);
+    const rinshanCount = Math.min(RINSHAN_CAPACITY, raw.length);
     this._rinshan = raw.splice(0, rinshanCount);
     this._pai = raw;
     // 金牌は牌 key 自体 [gp/gs/gN] で識別、 _gold 配列は撤去済 [リョー指示 2026-05-10]
@@ -323,7 +361,7 @@ export class Shan3 {
 
   /** 北抜きの補充牌を王牌から取得する。
    *  槓とは異なりカンドラを開かず、`_weikaigang` も立てない。 */
-  nukizimo(): Pai {
+  nukizimo(): Pai | null {
     if (this._blind) {
       const draw = this._blindQueue.shift();
       if (!draw) throw new Error('blind shan: nukizimo queue empty');
@@ -350,7 +388,10 @@ export class Shan3 {
       this.lastZimoPochi = colorMap[pai] ?? null;
       return pai;
     }
-    throw new Error('shan exhausted [during nukizimo huapai skip]');
+    // A reserve tail made entirely of flowers is still extracted, but there
+    // is no legal tile to return to the hand.  The store turns this committed
+    // extraction into the common exhaustive-draw transition.
+    return null;
   }
 
   /** カン後のドラ表開示 */

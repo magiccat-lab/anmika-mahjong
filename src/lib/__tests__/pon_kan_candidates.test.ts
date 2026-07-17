@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Game3, buildShoupai } from '../game3';
+import { Shan3 } from '../shan3';
 import type { PlayerId } from '../types';
 
 // getPonCandidates / getKanCandidates の挙動を unit 固定。
@@ -83,5 +84,48 @@ describe('Game3 getKanCandidates', () => {
     g.feverActive[0] = true;
     // 結果 array は majiang-core 任せ、 空配列 / 1+ 件 のいずれか [throw しないこと]
     expect(Array.isArray(g.getKanCandidates(0 as PlayerId))).toBe(true);
+  });
+
+  it('オンライン投影の blind 山でも合法な自己暗槓候補を隠さない', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = 0 as PlayerId;
+    const sp = buildShoupai([
+      'z5b','z5r','z5g',
+      'p1','p2','p3','p4','p5','p6','s1','s2','s3','z1',
+    ]);
+    sp.zimo('z5y');
+    g.shoupai.set(player, sp);
+    g.shan = Shan3.createBlind({
+      rule: g.shanRule,
+      baopai: ['p1', 's1'],
+      fubaopai: null,
+      paishu: 3,
+    });
+    g.shan.rinshanUsed = 0;
+
+    expect(g.shan.canDrawRinshan).toBe(true);
+    expect(g.getKanCandidates(player)).toContain('z5555');
+  });
+
+  it('リーチ中の白暗槓は実候補 z5555 をそのまま宣言できる', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = 0 as PlayerId;
+    const sp = buildShoupai([
+      'z5b','z5r','z5g',
+      'p1','p2','p3','p4','p5','p6','s1','s2','s3','z1',
+    ]);
+    sp.zimo('z5y');
+    g.shoupai.set(player, sp);
+    g.lizhi.add(player);
+    g.lizhiDeclareDapai[player] = false;
+    (g.shan as any)._rinshan = ['p9'];
+    (g.shan as any)._pai = ['p7', 'p8', 'p9'];
+
+    const candidate = g.getKanCandidates(player).find((m) => m.startsWith('z5'));
+    expect(candidate).toBe('z5555');
+    expect(g.declareKan(player, candidate!)).toBe('p9');
+    expect(sp._fulou).toContain('z5555');
   });
 });

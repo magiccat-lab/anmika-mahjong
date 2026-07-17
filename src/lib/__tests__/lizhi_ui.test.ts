@@ -6,6 +6,7 @@ import {
   lizhiChoiceId,
   lizhiChoiceLabel,
   lizhiPaiLabel,
+  findWhiteKanCandidate,
   isLizhiDiscardableCandidate,
   lizhiCandidatesForFlags,
 } from '../lizhiUi';
@@ -33,6 +34,11 @@ describe('riichi choice UI labels', () => {
     expect(isLizhiDiscardableCandidate('z4_')).toBe(false);
     expect(isLizhiDiscardableCandidate('gN')).toBe(false);
     expect(isLizhiDiscardableCandidate('gp')).toBe(true);
+  });
+
+  it('passes the canonical white-kan meld instead of rebuilding an invalid string', () => {
+    expect(findWhiteKanCandidate(['p1111', 'z5555'])).toBe('z5555');
+    expect(findWhiteKanCandidate(['p1111'])).toBeNull();
   });
 
   it('filters FEVER declaration tiles by exact physical identity', () => {

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createRoomAuthority } from '../../../server/authority';
 import { captureSeatProjection } from '../../../server/ws_server';
 import { createGameStore } from '../store';
+import { buildShoupai } from '../game3';
 import { defaultSanmaRule, generateTilePool } from '../shan3';
 
 function concealedKnownCount(sp: any): number {
@@ -71,6 +72,47 @@ describe('seat-scoped online projection hydration', () => {
     });
 
     expect(game.hydrateOnlineProjection(captureSeatProjection(authority, 0))).toBe(false);
+  });
+
+  it('projects an all-flower replacement tail without leaking its tiles or advertising a rejected forced kan', () => {
+    const authority = createRoomAuthority({
+      preShuffledPool: generateTilePool(defaultSanmaRule()).map(String),
+      qijia: 0,
+    });
+    const canonical = authority.canonicalState();
+    const player = 0 as const;
+    const hand = buildShoupai([
+      'z4','z4','z4',
+      'p1','p2','p3','p4','p5','p6',
+      's1','s2','s3','z1',
+    ]);
+    hand.zimo('z4');
+    canonical.game.shoupai.set(player, hand);
+    canonical.game.lizhi.add(player);
+    canonical.game.lizhiDeclareDapai[player] = false;
+    (canonical.game.shan as any)._rinshan = ['f1'];
+    canonical.game.shan.rinshanUsed = 15;
+
+    const projection: any = captureSeatProjection(authority, player);
+    expect(projection.shan.canDrawRinshan).toBe(false);
+    expect(projection.shan).not.toHaveProperty('_rinshan');
+
+    const game = createGameStore();
+    game.initOnlineGame({
+      ws: { readyState: 0, send() {} } as unknown as WebSocket,
+      qijia: 0,
+      mySeat: player,
+      blindStart: {
+        hands: { 0: [], 1: [], 2: [] }, firstZimo: '', paishu: 3, baopai: [], fubaopai: null,
+      },
+    });
+
+    expect(game.hydrateOnlineProjection(projection)).toBe(true);
+    const hydrated: any = get(game);
+    expect(hydrated.game.shan.isBlind).toBe(true);
+    expect(hydrated.game.shan.canDrawRinshan).toBe(false);
+    expect(hydrated.game.getKanCandidates(player)).toEqual([]);
+    expect(hydrated.game.canNukiBei(player)).toBe(true);
   });
 
   it('hydrates authoritative Kami-pochi and tied-high decisions', () => {

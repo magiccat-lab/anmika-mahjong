@@ -342,6 +342,42 @@ describe('server RoomAuthority', () => {
     expect(a.canonicalState().roundEnded).toBe(true);
   });
 
+  it.each([
+    ['空の嶺上 reserve', []],
+    ['華だけの嶺上 reserve', ['f1']],
+  ] as const)('online canonicalも%sで北抜きをrejectせず流局へ進める', (_label, reserve) => {
+    const a = authority();
+    const current = a.currentPlayer();
+    const canonical = a.canonicalState();
+    const safeTiles = [
+      'p1','p2','p3','p4','p5','p6','p7','p8','p9','s1','s2','s4','z1',
+    ];
+    for (const game of [a.game, canonical.game]) {
+      const sp = buildShoupai(safeTiles);
+      sp.zimo('z4');
+      game.shoupai.set(current, sp);
+      for (const other of [0, 1, 2] as const) {
+        if (other !== current) game.shoupai.set(other, buildShoupai(safeTiles));
+      }
+      game.huapai = { 0: [], 1: [], 2: [] };
+      game.lastZimoInfo = { player: current, pai: 'z4', pochi: null, gold: false };
+      (game.shan as any)._pai = [];
+      (game.shan as any)._rinshan = [...reserve];
+    }
+    a.lastZimo = 'z4';
+    canonical.lastZimo = 'z4';
+
+    expect(turnTimeoutAction(a)).toEqual({ type: 'nukiBei', meta: { gold: false } });
+    expect(a.validateAndApply(current, { type: 'nukiBei', meta: { gold: false } }, members)).toBeNull();
+
+    const settled = a.canonicalState();
+    expect(settled.pendingPingju).toBe(true);
+    expect(settled.roundEnded).toBe(true);
+    expect(settled.lastZimo).toBeNull();
+    expect(settled.game.nukidora[current]).toBe(1);
+    expect(settled.game.huapai[current]).toEqual([...reserve]);
+  });
+
   it('server CPU declares FEVER/normal riichi before discarding while a human timeout does not', () => {
     const a = authority();
     a.lastZimo = 's9';

@@ -554,9 +554,16 @@ export class RoomAuthority {
     }
 
     if (toCorePai(physicalPai) === 'z4' && this.game.canNukiBei(actor)) {
+      const nukiBefore = (this.game.nukidora[actor] ?? 0)
+        + (this.game.nukidoraGold[actor] ?? 0);
       const replacement = this.game.declareNukiBei(actor, { gold: physicalPai === 'gN' });
-      if (replacement === null) return 'discard: north extraction replacement failed';
+      const nukiAfter = (this.game.nukidora[actor] ?? 0)
+        + (this.game.nukidoraGold[actor] ?? 0);
+      if (replacement === null && nukiAfter <= nukiBefore) {
+        return 'discard: north extraction replacement failed';
+      }
       this.lastZimo = replacement;
+      if (replacement === null) this.roundEnded = true;
       return null;
     }
 
@@ -796,9 +803,16 @@ export class RoomAuthority {
     const pendingErr = this.requireNoReactionPending('nukiBei');
     if (pendingErr) return pendingErr;
     if (!this.game.canNukiBei(actor)) return `nukiBei: player ${actor} cannot nuki`;
+    const nukiBefore = (this.game.nukidora[actor] ?? 0)
+      + (this.game.nukidoraGold[actor] ?? 0);
     const replacement = this.game.declareNukiBei(actor, meta);
-    if (replacement === null) return `nukiBei: requested physical north is unavailable`;
+    const nukiAfter = (this.game.nukidora[actor] ?? 0)
+      + (this.game.nukidoraGold[actor] ?? 0);
+    if (replacement === null && nukiAfter <= nukiBefore) {
+      return `nukiBei: requested physical north is unavailable`;
+    }
     this.lastZimo = replacement;
+    if (replacement === null) this.roundEnded = true;
     return null;
   }
 

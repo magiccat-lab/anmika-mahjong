@@ -226,6 +226,7 @@ type BlindStartState = {
   paishu: number;
   baopai: string[];
   fubaopai: string[] | null;
+  canDrawRinshan: boolean;
 };
 
 type ActionCapture = {
@@ -257,6 +258,7 @@ function captureBlindStart(authority: RoomAuthority): BlindStartState {
     paishu: g.shan.paishu,
     baopai: [...g.shan.baopai],
     fubaopai: g.shan.fubaopai ? [...g.shan.fubaopai] : null,
+    canDrawRinshan: g.shan.canDrawRinshan,
   };
 }
 
@@ -286,6 +288,7 @@ function maskBlindStart(state: BlindStartState, recipientSeat: number): Record<s
     privateSeat: recipientSeat,
     paishu: state.paishu,
     baopai: [...state.baopai],
+    canDrawRinshan: state.canDrawRinshan,
     // Ura indicators remain secret until a valid win reaches its resolution pipeline.
     fubaopai: null,
   };
@@ -580,6 +583,7 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       fubaopai: revealUra && game.shan.fubaopai ? [...game.shan.fubaopai] : null,
       kanDoraCount: game.shan.kanDoraCount,
       rinshanUsed: game.shan.rinshanUsed,
+      canDrawRinshan: game.shan.canDrawRinshan,
       fuyuRevealed: [...(shan._fuyuRevealed ?? [])],
     },
     privateHand: own === null ? null : serializePrivateHand(game.shoupai.get(own)),

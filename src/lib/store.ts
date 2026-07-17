@@ -505,6 +505,9 @@ export function createGameStore() {
         fubaopai: projection.shan.fubaopai == null ? null : cloneWire(projection.shan.fubaopai),
         paishu: Number(projection.shan.paishu ?? 0),
         kanDoraCount: Number(projection.shan.kanDoraCount ?? 0),
+        canDrawRinshan: typeof projection.shan.canDrawRinshan === 'boolean'
+          ? projection.shan.canDrawRinshan
+          : undefined,
       });
       ng.shan.rinshanUsed = Number(projection.shan.rinshanUsed ?? 0);
       (ng.shan as any)._fuyuRevealed = cloneWire(projection.shan.fuyuRevealed ?? []);
@@ -673,7 +676,7 @@ export function createGameStore() {
     initOnlineGame(opts: {
       ws: WebSocket; qijia: 0|1|2; cpuSeats?: number[]; mySeat?: 0|1|2; isHost?: boolean; hostSeat?: 0|1|2; revision?: number; matchId?: number; roundId?: number;
       preShuffledPool?: string[];
-      blindStart?: { hands: Record<0|1|2, string[]>; firstZimo: string; paishu: number; baopai: string[]; fubaopai: string[] | null; huapai?: Record<0|1|2, string[]>; goldHand?: Record<0|1|2, {p:number;s:number;z:number}>; pochiHand?: Record<0|1|2, Record<string, number>> };
+      blindStart?: { hands: Record<0|1|2, string[]>; firstZimo: string; paishu: number; baopai: string[]; fubaopai: string[] | null; canDrawRinshan?: boolean; huapai?: Record<0|1|2, string[]>; goldHand?: Record<0|1|2, {p:number;s:number;z:number}>; pochiHand?: Record<0|1|2, Record<string, number>> };
     }) {
       onlineWs = opts.ws;
       onlineMode = true;
@@ -689,7 +692,13 @@ export function createGameStore() {
       if (opts.blindStart) {
         const bs = opts.blindStart;
         ng = new Game3({ qijia: opts.qijia });
-        ng.shan = Shan3.createBlind({ rule: ng.shanRule, baopai: bs.baopai as any[], fubaopai: bs.fubaopai as any[] | null, paishu: bs.paishu });
+        ng.shan = Shan3.createBlind({
+          rule: ng.shanRule,
+          baopai: bs.baopai as any[],
+          fubaopai: bs.fubaopai as any[] | null,
+          paishu: bs.paishu,
+          canDrawRinshan: bs.canDrawRinshan,
+        });
         ng.initFromDeal({ hands: bs.hands as any, huapai: bs.huapai as any, goldHand: bs.goldHand as any, pochiHand: bs.pochiHand as any });
         fp = bs.firstZimo;
       } else {
@@ -2803,7 +2812,13 @@ export function createGameStore() {
           return { ...s };
         }
         if (blindState) {
-          s.game.shan = Shan3.createBlind({ rule: s.game.shanRule, baopai: blindState.baopai, fubaopai: blindState.fubaopai, paishu: blindState.paishu });
+          s.game.shan = Shan3.createBlind({
+            rule: s.game.shanRule,
+            baopai: blindState.baopai,
+            fubaopai: blindState.fubaopai,
+            paishu: blindState.paishu,
+            canDrawRinshan: blindState.canDrawRinshan,
+          });
           s.game.initFromDeal({ hands: blindState.hands, huapai: blindState.huapai, goldHand: blindState.goldHand, pochiHand: blindState.pochiHand });
           s.lastZimo = blindState.firstZimo;
         } else {
@@ -3185,9 +3200,19 @@ function finalizePendingNukiBei(s: StoreState): StoreState {
   s.pendingNukiBei = null;
   clearReactionStage(s);
   s.lastDapai = null;
+  const nukiBefore = (s.game.nukidora[pending.player] ?? 0)
+    + (s.game.nukidoraGold[pending.player] ?? 0);
   const replacement = s.game.declareNukiBei(pending.player, pending.meta);
   s.lastZimo = replacement;
   if (replacement === null) {
+    const nukiAfter = (s.game.nukidora[pending.player] ?? 0)
+      + (s.game.nukidoraGold[pending.player] ?? 0);
+    if (nukiAfter > nukiBefore) {
+      return applyPingjuTransition(
+        s,
+        `🌀 流局 [player ${pending.player} 北抜き後に嶺上牌枯渇]:`,
+      );
+    }
     s.message = `player ${pending.player} 北抜き不可`;
   } else {
     s.message = `player ${pending.player} 北抜き [${s.game.nukidora[pending.player] + s.game.nukidoraGold[pending.player]}枚目]`;

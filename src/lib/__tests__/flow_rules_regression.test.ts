@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { get } from 'svelte/store';
 import { Game3, buildShoupai } from '../game3';
 import { canFeverLizhi, isFeverWaitExhausted } from '../game3/feverLizhi';
-import { createGameStore, innerDiscard } from '../store';
+import { beginNukiBei, createGameStore, innerDiscard } from '../store';
 
 function makeTenpaiGame(): { game: Game3; player: 0 | 1 | 2 } {
   const game = new Game3();
@@ -72,6 +72,59 @@ describe('canonical flow-rule regressions', () => {
     const afterDiscard = innerDiscard(afterNuki, 's5');
     expect(afterDiscard.pendingPingju).toBe(true);
     expect(afterDiscard.roundEnded).toBe(true);
+  });
+
+  it.each([
+    ['空の嶺上 reserve', []],
+    ['華だけの嶺上 reserve', ['f1']],
+  ] as const)('%sでも北を抱えたまま停止せず共通流局へ進む', (_label, reserve) => {
+    const store = createGameStore();
+    const state: any = get(store);
+    const game: Game3 = state.game;
+    const player = game.lunbanToPlayerId(game.state.lunban);
+    const safeTiles = [
+      'p1','p2','p3','p4','p5','p6','p7','p8','p9','s1','s2','s4','z1',
+    ];
+    const sp = buildShoupai(safeTiles);
+    sp.zimo('z4');
+    game.shoupai.set(player, sp);
+    for (const other of [0, 1, 2] as const) {
+      if (other !== player) game.shoupai.set(other, buildShoupai(safeTiles));
+    }
+    game.huapai = { 0: [], 1: [], 2: [] };
+    game.lastZimoInfo = { player, pai: 'z4', pochi: null, gold: false };
+    (game.shan as any)._pai = [];
+    (game.shan as any)._rinshan = [...reserve];
+    state.lastZimo = 'z4';
+
+    const after = beginNukiBei(state, player, { gold: false });
+
+    expect(after.pendingPingju).toBe(true);
+    expect(after.roundEnded).toBe(true);
+    expect(after.lastZimo).toBeNull();
+    expect(game.nukidora[player]).toBe(1);
+    expect(sp._bingpai.z[4]).toBe(0);
+    expect(sp._zimo).toBeNull();
+    expect(game.huapai[player]).toEqual([...reserve]);
+    expect(game.shan.rinshanRemaining).toBe(0);
+  });
+
+  it('accepts the direct dapai North compatibility route when extraction commits but the reserve is empty', () => {
+    const game = new Game3();
+    game.qipai();
+    const player = game.lunbanToPlayerId(game.state.lunban);
+    const sp = buildShoupai([
+      'p1','p2','p3','p4','p5','p6','p7','p8','p9','s1','s2','s4','z1',
+    ]);
+    sp.zimo('z4');
+    game.shoupai.set(player, sp);
+    game.lastZimoInfo = { player, pai: 'z4', pochi: null, gold: false };
+    (game.shan as any)._pai = [];
+    (game.shan as any)._rinshan = [];
+
+    expect(() => game.dapai('z4')).not.toThrow();
+    expect(game.nukidora[player]).toBe(1);
+    expect(sp._zimo).toBeNull();
   });
 
   it('treats the replacement for a last-tile flower as a rinshan draw', () => {

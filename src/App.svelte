@@ -37,7 +37,7 @@
   import { feverWaitInfoFromLiveWall } from './lib/game3/feverLizhi';
   import { computeTileInventory, expectedInventory } from './lib/game3/inventory';
   import { countDisplayDora } from './lib/doraDisplay';
-  import { isLizhiDiscardableCandidate, lizhiCandidatesForFlags, lizhiChoiceId, lizhiChoiceLabel, type LizhiPendingFlags } from './lib/lizhiUi';
+  import { findWhiteKanCandidate, isLizhiDiscardableCandidate, lizhiCandidatesForFlags, lizhiChoiceId, lizhiChoiceLabel, type LizhiPendingFlags } from './lib/lizhiUi';
 
   // スタンプ pallet 開閉 [自家「💬」 button 押下時 true]
   let stampPalletOpen = false;
@@ -934,6 +934,11 @@
   // 宣言は「打牌後の手」で成立する候補がある場合だけ提示する。
   // 14 枚時点の全体判定だけを使うと、実際には押せない空の選択肢が表示される。
   $: feverAvailable = feverDapaiTiles.length > 0;
+  // majiang-core の白暗槓面子は z5555。物理牌表記を手書きすると
+  // z5z5z5z5 のような無効値になるため、必ず実候補をそのまま送る。
+  $: whiteKanCandidate = $game.game.lizhi.has(currentPlayer)
+    ? findWhiteKanCandidate($game.game.getKanCandidates(currentPlayer))
+    : null;
 
   // 手牌中のドラ数 [赤牌 + 表ドラ一致]
   function countDora(sp: any): number {
@@ -992,6 +997,7 @@
       initOpts.blindStart = {
         hands: msg.hands, firstZimo: msg.firstZimo, paishu: msg.paishu,
         baopai: msg.baopai, fubaopai: msg.fubaopai,
+        canDrawRinshan: msg.canDrawRinshan,
         huapai: msg.huapai, goldHand: msg.goldHand, pochiHand: msg.pochiHand,
       };
     } else {
@@ -1731,9 +1737,6 @@
       <div class="action-row hot">
         <span class="row-label">アガリ:</span>
         <button class="tsumo-btn" on:click={() => game.tsumo()}>🎉 ツモ宣言</button>
-        {#if $game.game.lizhi.has(currentPlayer) && $game.game.shoupai.get(currentPlayer)?._zimo === 'z5' && $game.game.getKanCandidates(currentPlayer).some((m: string) => m.startsWith('z5'))}
-          <button class="kan-btn" on:click={() => game.declareKan('z5z5z5z5')}>🤍 白暗カン</button>
-        {/if}
       </div>
     {/if}
     {#if !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && baseLizhiCandidates.length > 0 && (!onlineGameStarted || currentPlayer === selfPlayer)}
@@ -1763,7 +1766,7 @@
         {/if}
         {#if !$game.awaitingFulou}
           {#each $game.game.getKanCandidates(currentPlayer) as km}
-            <button class="kan-btn" on:click={() => game.declareKan(km)}>カン [{km}]</button>
+            <button class="kan-btn" on:click={() => game.declareKan(km)}>{km === whiteKanCandidate ? '🤍 白暗カン' : `カン [${km}]`}</button>
           {/each}
         {/if}
       </div>
@@ -2085,14 +2088,7 @@
     {#if viewMode === 'single'}
       <div class="toolbar toolbar-red">
         <!-- 現在 player [手番] が P0 [user] の時だけ アクション button 表示 [リョー指示 2026-05-12: CPU 手番中 北抜きボタンが出る bug fix] -->
-        <!-- ツモ button は center overlay に移動 [リョー指示 2026-05-12]、 toolbar 側は白暗カンのみ -->
-        {#if currentPlayer === selfPlayer && canTsumo && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingSaiKoro && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && !$game.lastDapai}
-          {#if $game.game.lizhi.has(currentPlayer) && $game.game.shoupai.get(currentPlayer)?._zimo === 'z5' && $game.game.getKanCandidates(currentPlayer).some((m: string) => m.startsWith('z5'))}
-            <div class="tb-row hot">
-              <button class="kan-btn" on:click={() => game.declareKan('z5z5z5z5')}>白暗カン</button>
-            </div>
-          {/if}
-        {/if}
+        <!-- ツモ button は center overlay に移動。暗槓は下の実候補一覧から宣言する。 -->
         {#if currentPlayer === selfPlayer && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && baseLizhiCandidates.length > 0}
           <div class="tb-row">
             <LizhiControls
@@ -2108,7 +2104,7 @@
         {/if}
         {#if currentPlayer === selfPlayer && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou}
           {#each $game.game.getKanCandidates(currentPlayer) as km}
-            <div class="tb-row"><button class="kan-btn" on:click={() => game.declareKan(km)}>カン</button></div>
+            <div class="tb-row"><button class="kan-btn" on:click={() => game.declareKan(km)}>{km === whiteKanCandidate ? '白暗カン' : 'カン'}</button></div>
           {/each}
         {/if}
         <!-- ロン+スキップ は ron-choice-panel に移動 [center overlay 白 bg]、 toolbar 側は出さない -->

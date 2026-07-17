@@ -819,9 +819,9 @@ export class Game3 {
     if (!sp) return false;
     if (!sp._zimo) return false;
     if (sp._zimo.length > 3) return false; // 副露直後の擬似 zimo は除外
-    // 海底の北も抜いて嶺上牌を補充し、その牌を切ってから山切れ流局にする。
-    // live wall の残数ではなく、実際に補充できる嶺上牌の有無だけを条件にする。
-    if (!this.shan.isBlind && (((this.shan as any)._rinshan?.length ?? 0) < 1)) return false;
+    // 海底の北も必ず抜く。嶺上 reserve が既に空、または残りが華だけなら
+    // 抜き処理を確定した後に store が共通の流局遷移へ送る。ここで false にすると
+    // 河へも切れない北を抱えたまま進行不能になる。
     // リーチ宣言牌の確定前は他 action 不可。成立後に待ち不変の暗槓があればカンを優先する。
     if (this.lizhiDeclareDapai[player]) return false;
     if (this.lizhi.has(player) && this.getForcedLizhiKanCandidates(player).length > 0) return false;
@@ -888,6 +888,15 @@ export class Game3 {
       this.nukidora[player] = _origNukidora; this.justNukidBei[player] = _origJustNukid;
       restorePhysicalHandState(sp, _origPhysicalHand);
       shanAny0.restore(_shanSnapshot);
+      return null;
+    }
+    if (rawReplacement === null) {
+      // The remaining replacement reserve consisted only of flowers.  North
+      // and those flowers are genuinely extracted; with no tile left to
+      // discard, the store completes the hand through the normal draw path.
+      for (const hp of this.shan.lastDrawnHuapai) this.huapai[player].push(hp);
+      this.lastZimoInfo = { player: null, pai: null, pochi: null, gold: false };
+      this.lingshangActive[player] = false;
       return null;
     }
     const replacement = rawReplacement as Pai;
@@ -1341,8 +1350,14 @@ export class Game3 {
       if (!this.canNukiBei(player)) {
         throw new Error(`dapai('${pai}'): 北抜き不可 [player=${player}]`);
       }
+      const nukiBefore = (this.nukidora[player] ?? 0) + (this.nukidoraGold[player] ?? 0);
       const rep = this.declareNukiBei(player, { gold: paiForHand === 'gN' });
-      if (rep === null) {
+      const nukiAfter = (this.nukidora[player] ?? 0) + (this.nukidoraGold[player] ?? 0);
+      // null can mean either an invalid physical request or a successfully
+      // extracted final North whose replacement reserve has been exhausted.
+      // Only the former is an API error; Store/authority settle the latter as
+      // the common exhaustive-draw transition.
+      if (rep === null && nukiAfter <= nukiBefore) {
         throw new Error(`dapai('${pai}'): declareNukiBei 失敗 [player=${player}]`);
       }
       return;
@@ -4039,8 +4054,7 @@ export class Game3 {
     const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => this.feverActive[p]);
     if (someoneFever && !this.feverActive[player]) return [];
     // WSA: 嶺上残量・カンドラ上限を getKanCandidates と同じ基準で check
-    const rinshanLen = (this.shan as any)._rinshan?.length ?? 0;
-    if (rinshanLen < 1) return [];
+    if (!this.shan.canDrawRinshan) return [];
     if (!this.shan.canOpenKanDora) return [];
     // 反時計 2026-05-13 fix
     const diff = (from - player + 3) % 3;
@@ -4184,9 +4198,8 @@ export class Game3 {
     // 嶺上が 1 枚も無ければ カン後の 嶺上ツモ 不可、 候補 0 件で UI に出さない。
     // 旧 code は declareKan → shan.gangzimo throw → rollback で 「カン候補は表示されたのに 失敗」
     // という UX 不整合 [華 抜きすぎで 嶺上枯渇] を起こしていた。
-    // リョー仕様: 嶺上 16 - 華枚数 ≥ 1 [= rinshan.length >= 1] なら カン OK。
-    const rinshanLen = (this.shan as any)._rinshan?.length ?? 0;
-    if (rinshanLen < 1) return [];
+    // 華を自動で抜いた後に実牌が 1 枚以上残る場合だけカン可能。
+    if (!this.shan.canDrawRinshan) return [];
     // WSA-A2: 初期ドラ・秋ドラの総枚数ではなく、カン由来ドラ4回を上限にする。
     // gangzimo と同じ述語を候補生成にも使い、表示後の silent failure を防ぐ。
     if (!this.shan.canOpenKanDora) return [];
