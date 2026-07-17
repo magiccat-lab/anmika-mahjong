@@ -2016,24 +2016,22 @@ export function createGameStore() {
           const chance = ps.chances[ps.currentIdx];
           const hits = ps.rolls.filter((r) => r.hit).length;
           const baseChip = chance.baseChip;
-          // マイナスサイコロ [即赤ぽっち -140 / 即2p -35 等、リョー裁定 2026-07-17]:
-          // hit するほど winner がオールで支払う。applyChipOall は符号どおりに動く
-          const saiSign = (chance as any).plusMinus === '-' ? -1 : 1;
           // count回はtrigger時に独立chanceへ展開する。
-          const chipN = baseChip * hits * saiSign;
-          if (hits > 0 && chipN !== 0) {
+          // 逆ぽっち等のマイナスサイコロは pochiMultiplier [chip 倍率、符号込み] が
+          // applyChipOall 内で自動適用する [即赤=70×(-2)=-140]。ここで符号を
+          // 掛けると二重反転になるので base は常に正のまま渡す。
+          const chipN = baseChip * hits;
+          if (hits > 0 && chipN > 0) {
             // ぽっち倍率はツモ由来だけに適用。ロン由来サイコロでは明示 bypass。
             // シュバは サイコロ chip 倍率に乗らない [リョー指示 2026-05-12]
             s.game.applyChipOall(chanceWinner, chipN, {
               bypassShuvari: true,
               bypassPochi: (chance as any).mode === 'ron' && !s.game.feverActive[chanceWinner],
               bypassFever: false,
-              label: `🎲 サイコロ ${chance.name} [${hits} hit × ${saiSign < 0 ? '-' : ''}${baseChip}]`,
+              label: `🎲 サイコロ ${chance.name} [${hits} hit × ${baseChip}]`,
               mode: (chance as any).mode ?? 'tsumo',
             });
-            s.message = saiSign < 0
-              ? `🎲 サイコロチャンス ${chance.name}: ${hits} hit、 chip ${Math.abs(chipN)} オール支払い`
-              : `🎲 サイコロチャンス ${chance.name}: ${hits} hit、 chip ${chipN} オール`;
+            s.message = `🎲 サイコロチャンス ${chance.name}: ${hits} hit、 chip ${chipN} オール`;
           } else if (zoroBonusThisRoll === 0) {
             s.message = `🎲 サイコロチャンス ${chance.name}: 0 hit、 chip ナシ`;
           }

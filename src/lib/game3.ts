@@ -3668,11 +3668,13 @@ export class Game3 {
     result.chipBreakdown = [..._preBreakdown, ...this.chipBreakdown];
     result.chipTotal = this.chipLedger[winner] - chipBefore;
     const chipDelta = this.chipLedger[winner] - chipBefore;
-    // ぽっちツモのサイコロは 2 系統が独立して存在する [リョー裁定 2026-07-17]:
+    // ぽっちツモのサイコロは 2 系統が独立して存在する [リョー裁定 2026-07-17、65アンミカルール §4-1]:
     //  A) ぽっちツモ + その和了の祝儀 0 枚 → 救済サイコロ [一発は不要]
     //  B) 即ぽっちツモ [一発中] → サイコロ [祝儀の有無と無関係]
-    // 両立時は 2 セッション。額は base70 × 色倍率 [リョー裁定 同日追記]:
-    //   青=+2 [＋140] / 赤=-2 [−140] / 緑=+1 [＋70] / 黄=-1 [−70]
+    // 両立時は 2 セッション。base はどちらも 70 で固定し、
+    // 色の増減 [青=+2 / 赤=-2 / 緑=+1 / 黄=-1、即赤=-140 等] は
+    // pochiMultiplier [applyChipOall の chip 倍率] が符号込みで自動適用する。
+    // ここで 140 や '-' を焼き込むと倍率と二重掛けになる [280 事故] ので厳禁。
     // [2026-05-21 fix] commit 4d1f476f で z5b/z5r/z5g/z5y を 独立 牌化したため、
     // _zimo / lastZimoInfo.pai は z5b 等 raw 文字列で入る。 toCorePai で z5 正規化して比較。
     const sp_w = this.shoupai.get(winner);
@@ -3686,22 +3688,16 @@ export class Game3 {
       && this.lastZimoInfo.player === winner
       && lastZimoIsZ5
       && !!this.lastZimoInfo.pochi;
-    const POCHI_SAI_TABLE: Record<string, { baseChip: number; plusMinus: '+' | '-' }> = {
-      blue: { baseChip: 140, plusMinus: '+' },
-      red: { baseChip: 140, plusMinus: '-' },
-      green: { baseChip: 70, plusMinus: '+' },
-      yellow: { baseChip: 70, plusMinus: '-' },
-    };
-    const pochiSai = this.lastZimoInfo.pochi ? POCHI_SAI_TABLE[this.lastZimoInfo.pochi] : null;
-    if (isPochiTsumo && pochiSai && chipDelta === 0) {
+    if (isPochiTsumo && chipDelta === 0) {
       result.saiKoroChances = result.saiKoroChances ?? [];
-      result.saiKoroChances.push({ awardKey: '白ぽっちツモ祝儀0', name: `白ぽっちツモ祝儀 0 枚 [${pochiSai.plusMinus}${pochiSai.baseChip}]`, baseChip: pochiSai.baseChip, shuvariApplicable: true, count: 1, plusMinus: pochiSai.plusMinus, mode: 'tsumo' });
+      result.saiKoroChances.push({ awardKey: '白ぽっちツモ祝儀0', name: '白ぽっちツモ祝儀 0 枚', baseChip: 70, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
     }
-    if (isPochiTsumo && pochiSai && this.yifaActive[winner]) {
+    if (isPochiTsumo && this.yifaActive[winner]) {
       result.saiKoroChances = result.saiKoroChances ?? [];
-      result.saiKoroChances.push({ awardKey: '白ぽっち即ツモ', name: `白ぽっち即ツモ [${pochiSai.plusMinus}${pochiSai.baseChip}]`, baseChip: pochiSai.baseChip, shuvariApplicable: true, count: 1, plusMinus: pochiSai.plusMinus, mode: 'tsumo' });
+      result.saiKoroChances.push({ awardKey: '白ぽっち即ツモ', name: '白ぽっち即ツモ', baseChip: 70, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
     }
-    // でかぽっち即ツモ → サイコロ base 35。即 1p=+35 / 即 2p=-35 [リョー裁定 2026-07-17]
+    // でかぽっち即ツモ → サイコロ base 35 [70×0.5]。2p [黄扱い] の -35 は
+    // ツモ時に applyPochiColorMultiplier(yellow) 済みの倍率が自動で符号反転する
     const zimoCoreDeka = sp_w?._zimo ? toCorePai(sp_w._zimo) : null;
     const isDekapochiTsumo =
       loser === null
@@ -3710,9 +3706,8 @@ export class Game3 {
       && (zimoCoreDeka === 'p1' || zimoCoreDeka === 'p2')
       && (result.hupai ?? []).some((h: any) => h.name?.includes('でかぽっち'));
     if (isDekapochiTsumo) {
-      const dekaSign: '+' | '-' = zimoCoreDeka === 'p2' ? '-' : '+';
       result.saiKoroChances = result.saiKoroChances ?? [];
-      result.saiKoroChances.push({ awardKey: 'でかぽっち', name: `でかぽっち [${dekaSign}35]`, baseChip: 35, shuvariApplicable: true, count: 1, plusMinus: dekaSign, mode: 'tsumo' });
+      result.saiKoroChances.push({ awardKey: 'でかぽっち', name: 'でかぽっち', baseChip: 35, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
     }
     // 3 麻実点を defen / defen3 両方に書き戻し [古い majiang-core の 4 麻 defen を上書き]
     // winnerGain は 逆ぽっち反転時に既に -値 になってる
