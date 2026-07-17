@@ -41,3 +41,6 @@ server/run/
 server/data/
 server/.venv/
 .venv/
+
+# local codex CLI workspace config
+.codex/
