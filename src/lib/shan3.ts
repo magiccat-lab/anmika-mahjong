@@ -44,6 +44,8 @@ export class Shan3 {
   private _blindQueue: BlindDrawEntry[] = [];
   private _blindDoraQueue: Pai[] = [];
   private _blindPaishu = 0;
+  /** 冬 [アリス / チューリップ] で live wall から公開済みの物理牌。 */
+  _fuyuRevealed: Pai[] = [];
 
   get isBlind(): boolean { return this._blind; }
 
@@ -76,7 +78,10 @@ export class Shan3 {
    * paired back indicator. With only the lower tile left the rules require
    * play to continue without declaring the otherwise-forced kan. */
   get canOpenKanDora(): boolean {
-    const requiredIndicators = this._fubaopai ? 2 : 1;
+    // オンラインの blind 山は未和了時の裏ドラ現物を null で秘匿するが、
+    // 物理的な裏表示枠まで無いわけではない。必要残枚数は公開状態ではなく
+    // 局ルールで判定する。
+    const requiredIndicators = this._rule.fudora ? 2 : 1;
     return this.kanDoraCount < 4 && this.paishu >= requiredIndicators;
   }
 
@@ -139,6 +144,7 @@ export class Shan3 {
     blindQueue: BlindDrawEntry[];
     blindDoraQueue: Pai[];
     blindPaishu: number;
+    fuyuRevealed: Pai[];
   } {
     return {
       pai: [...this._pai],
@@ -154,6 +160,7 @@ export class Shan3 {
       blindQueue: this._blindQueue.map((d) => ({ ...d, huapai: [...d.huapai] })),
       blindDoraQueue: [...this._blindDoraQueue],
       blindPaishu: this._blindPaishu,
+      fuyuRevealed: [...this._fuyuRevealed],
     };
   }
   restore(snap: ReturnType<Shan3['snapshot']>): void {
@@ -170,14 +177,16 @@ export class Shan3 {
     this._blindQueue = (snap.blindQueue ?? []).map((d) => ({ ...d, huapai: [...d.huapai] }));
     this._blindDoraQueue = [...(snap.blindDoraQueue ?? [])];
     this._blindPaishu = snap.blindPaishu ?? this._blindPaishu;
+    this._fuyuRevealed = [...(snap.fuyuRevealed ?? [])];
   }
 
-  /** カン / 秋ドラめくりで 残山を 2 つ消費 [ドラ表示牌 + リンシャン代用]、 paishu 計算で別途 引く */
+  /** カン / 秋ドラめくりで 残山を消費する。追加表示牌は配牌時から
+   *  王牌との境界側に固定され、通常ツモ（配列末尾）とは反対側から開く。 */
   extraSanReduction: number = 0;
 
   /** 残り山枚数 [リョー指示: 王牌 20 = リンシャン 16 + ドラ表 2 + 裏ドラ 2 (固定)]
    *  R24 P2 #5/#12 fix: 物理分離後 _pai 自体が live wall 専用、 paishu = _pai.length
-   *  drawNewDora は _pai.pop() で自然に減る、 嶺上は _rinshan から取るので _pai 影響なし */
+   *  drawNewDora は _pai.shift() で深い側から自然に減る、 嶺上は _rinshan から取るので _pai 影響なし */
   get paishu(): number {
     if (this._blind) return this._blindPaishu;
     return this._pai.length;
@@ -188,7 +197,9 @@ export class Shan3 {
   consumeRinshan(): void {
     this.rinshanUsed += 1;
   }
-  /** ドラ追加 [秋・カン]: _pai 末尾から 1 枚 pop して baopai/fubaopai に push、 残山 -1 ずつ */
+  /** ドラ追加 [秋・カン]: 王牌との境界側（_pai 先頭）から固定位置を1枚開き、
+   *  baopai/fubaopai の末尾へ追加する。通常ツモは _pai 末尾から進むため、
+   *  開く現物は巡目に左右されない。 */
   drawNewDora(isFu: boolean): string | null {
     if (this._blind) {
       const tile = this._blindDoraQueue.shift();
@@ -198,7 +209,7 @@ export class Shan3 {
       return tile;
     }
     if (this._pai.length === 0) return null;
-    const newPai = this._pai.pop()!;
+    const newPai = this._pai.shift()!;
     // _gold 撤去済
     if (isFu) (this._fubaopai ??= []).push(newPai);
     else this._baopai.push(newPai);
@@ -246,12 +257,14 @@ export class Shan3 {
         // リョー指示 2026-05-15: 華牌は 残山サイズを 減らさず、 嶺上から 1 枚 _pai 末尾に
         // 補充して 次牌を 取る [本来仕様: 華抜き → 嶺上から補充、 山サイズ不変]
         this.lastDrawnHuapai.push(pai);
-        this.consumeRinshan();
         if (this._rinshan.length === 0) {
           // リンシャン枯渇: もう補充できないので 山サイズ -1 のまま loop 継続
           continue;
         }
         const replacement = this._rinshan.shift()!;
+        // 実際に王牌から補充した時だけ使用枚数を進める。枯渇後の華牌で
+        // 17以上へ増やすと、正規の局面を牌譜v3自身が不正値として弾いてしまう。
+        this.consumeRinshan();
         this._pai.push(replacement);
         continue;
       }
@@ -343,9 +356,9 @@ export class Shan3 {
   /** カン後のドラ表開示 */
   kaigang(): void {
     if (!this._weikaigang) throw new Error('not pending kaigang');
-    const requiredIndicators = this._fubaopai ? 2 : 1;
+    const requiredIndicators = this._rule.fudora ? 2 : 1;
     if (this.paishu < requiredIndicators) throw new Error('not enough wall tiles for kan dora');
-    // リョー指示: カン後のドラ表は山末尾から 1 枚 [残山 -1]
+    // カン後のドラ表は配牌時に固定された深い側から 1 枚 [残山 -1]
     this.drawNewDora(false);
     if (this._fubaopai) this.drawNewDora(true);
     this.kanDoraCount += 1;

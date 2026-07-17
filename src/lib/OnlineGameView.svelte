@@ -163,7 +163,7 @@
       </div>
       <div class="dora">
         ドラ表:
-        {#each (state.baopai ?? []).filter((t: string) => !t.startsWith('f')) as t}
+        {#each (state.baopai ?? []) as t}
           <Tile pai={t} size="sm" />
         {/each}
       </div>

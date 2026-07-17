@@ -56,7 +56,8 @@ describe('fuyu kami-pochi target selection', () => {
   }
 
   it('pauses independently for consecutive positive pochi reveals', () => {
-    const g = buildFuyuGame(['f1', 'f2'], ['z5g', 'z5b']);
+    // 通常アリスは下段 z1 を飛ばし、次の上段 z5b を開く。
+    const g = buildFuyuGame(['f1', 'f2'], ['z5g', 'z1', 'z5b']);
     const winner = 0 as PlayerId;
 
     expect(g.applyFuyuChip(winner, null, 1, false).status).toBe('pending');

@@ -56,10 +56,10 @@
     {/if}
     <div class="dora-row">
       <span class="dora-label">表ドラ表:</span>
-      {#each baopai.filter((b) => typeof b === 'string' && !b.startsWith('f')) as b}<Tile pai={b} size="sm" />{/each}
+      {#each baopai.filter((b) => typeof b === 'string') as b}<Tile pai={b} size="sm" />{/each}
       {#if winnerLizhi && fubaopai}
         <span class="dora-label">裏ドラ表:</span>
-        {#each fubaopai.filter((b) => typeof b === 'string' && !b.startsWith('f')) as b}<Tile pai={b} size="sm" />{/each}
+        {#each fubaopai.filter((b) => typeof b === 'string') as b}<Tile pai={b} size="sm" />{/each}
       {/if}
     </div>
     {#if agariPai && agariType}

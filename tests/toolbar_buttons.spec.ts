@@ -23,8 +23,10 @@ test.describe('toolbar 基礎 button gate [single mode]', () => {
     await expect(page.locator('section.player').first()).toBeVisible({ timeout: 15000 });
     // 初手 = qipai 直後 P0 ツモ済、 random 手で ノーテン or テンパイ未確定
     // 「toolbar lizhi-btn」 が 0 件 or 1 件、 複数表示は NG [bug regression]
-    const count = await page.locator('button.lizhi-btn').count();
-    expect(count, '複数 lizhi-btn 表示 NG').toBeLessThanOrEqual(1);
+    const count = await page.locator('button.lizhi-choice').count();
+    // リーチ可能時は種別ごとに最大6択を同時表示する。旧「1個以下」は
+    // どのリーチを選ぶかを隠してしまうため、新UIの上限だけを検証する。
+    expect(count, 'リーチ種別ボタンの重複表示 NG').toBeLessThanOrEqual(6);
   });
 
   test('ロン button: 非自家手番 [打牌ナシ state] では 表示ナシ', async ({ page }) => {

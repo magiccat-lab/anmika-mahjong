@@ -30,9 +30,11 @@ describe('doraIndicatorOf [逆引き 神ぽっち用]', () => {
     expect(doraIndicatorOf('z7')).toBe('z6');
   });
 
-  it('想定外 key [金 / 色付き / 華] は そのまま返す [防御的]', () => {
-    expect(doraIndicatorOf('gp')).toBe('gp');
-    expect(doraIndicatorOf('z5b')).toBe('z5b');
+  it('expanded tile は core牌のドラ対象として逆算し、華だけはそのまま返す', () => {
+    expect(doraIndicatorOf('gp')).toBe('p4');
+    expect(doraIndicatorOf('gN')).toBe('z3');
+    expect(doraIndicatorOf('np3')).toBe('p2');
+    expect(doraIndicatorOf('z5b')).toBe('z7');
     expect(doraIndicatorOf('f1')).toBe('f1');
   });
 });

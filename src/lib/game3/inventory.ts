@@ -4,6 +4,7 @@
 // 期待値 [赤/金/4 色ぽっち 別 key] と diff を返す。 z5g → z5 等の normalize 漏れ検出に使う。
 
 import { toCorePai } from '../helpers';
+import { matchesFulouMianzi } from '../fulouDisplay';
 import { goldPaiFromCorePai } from './gold';
 import { pochiPaiFromColor } from './pochi';
 
@@ -106,11 +107,9 @@ export function computeTileInventory(g: any): Record<string, number> {
           const key = suite + digit;
           local[key] = (local[key] ?? 0) + 1;
         }
-        const matchesMianzi = (entry: { mianzi?: string }) =>
-          !!entry?.mianzi && (entry.mianzi === m || String(m).startsWith(entry.mianzi));
         const physicalMatches = physicalMeta
           .map((f, idx) => ({ f, idx }))
-          .filter(({ f, idx }) => !usedPhysicalMeta.has(idx) && matchesMianzi(f));
+          .filter(({ f, idx }) => !usedPhysicalMeta.has(idx) && matchesFulouMianzi(f, String(m)));
         for (const { f, idx } of physicalMatches) {
           usedPhysicalMeta.add(idx);
           for (const p of f.consumed ?? []) {
@@ -120,7 +119,7 @@ export function computeTileInventory(g: any): Record<string, number> {
         }
         const openMatches = openMeta
           .map((f, idx) => ({ f, idx }))
-          .filter(({ f, idx }) => !usedOpenMeta.has(idx) && matchesMianzi(f));
+          .filter(({ f, idx }) => !usedOpenMeta.has(idx) && matchesFulouMianzi(f, String(m)));
         for (const { f, idx } of openMatches) {
           usedOpenMeta.add(idx);
           const taken = f.taken;

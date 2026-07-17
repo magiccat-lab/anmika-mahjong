@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyAnmikaFulouIdentity, parseMianzi, parseFulouList, fulouFlatTiles, isNakiHePai } from '../fulouDisplay';
+import { applyAnmikaFulouIdentity, parseMianzi, parseFulouList, fulouFlatTiles, fulouPhysicalFlatTiles, isNakiHePai } from '../fulouDisplay';
 
 describe('fulouDisplay.parseMianzi', () => {
   describe('F2: pon (3 牌副露) の 方向 mark → rotateIdx', () => {
@@ -122,6 +122,21 @@ describe('fulouDisplay.parseMianzi', () => {
 
       expect(r.tiles).toEqual(['z5r', 'z5b', 'z5g']);
       expect(r.kakanTile).toBe('z5y');
+    });
+
+    it('方向記号が途中にあるポン記録も加槓後の同じ副露へ引き継ぐ', () => {
+      const flat = fulouPhysicalFlatTiles(
+        ['p000+0'],
+        [{ mianzi: 'p00+0', taken: 'gp' }],
+        [
+          { mianzi: 'p00+0', consumed: ['p0', 'gp'] },
+          { mianzi: 'p000+0', consumed: ['p0'] },
+        ],
+      );
+
+      expect(flat).toHaveLength(4);
+      expect(flat.filter((pai) => pai === 'gp')).toHaveLength(2);
+      expect(flat.filter((pai) => pai === 'p0')).toHaveLength(2);
     });
   });
 

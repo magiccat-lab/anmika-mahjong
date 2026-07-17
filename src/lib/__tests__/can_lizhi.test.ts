@@ -51,10 +51,21 @@ describe('Game3 canLizhi', () => {
   });
 
   it('副露が暗槓のみなら リーチ可能 [門前扱い]', () => {
-    const { g, player } = makeTenpaiGame();
-    const sp = g.shoupai.get(player) as any;
-    // 暗槓表記: mpsz + 4 digit、 方向 mark なし [例 m7777]
-    sp._fulou = ['p7777']; // 暗槓
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    // Real ankan state: fixed meld + ten concealed tiles, then one replacement
+    // draw. Appending _fulou to an unchanged 14-tile hand is not a legal state.
+    const sp = buildShoupai([
+      'p7', 'p7', 'p7', 'p7',
+      'p1', 'p1', 'p1',
+      'p2', 'p2', 'p2',
+      's8', 's8', 'z1',
+    ]);
+    sp.zimo('z1');
+    sp.gang('p7777');
+    sp.zimo('z6');
+    g.shoupai.set(player, sp);
     expect(g.canLizhi(player)).toBe(true);
   });
 
@@ -67,5 +78,15 @@ describe('Game3 canLizhi', () => {
     const sp = g.shoupai.get(player) as any;
     sp.zimo('z6');
     expect(g.canLizhi(player)).toBe(false);
+  });
+
+  it('フィーバー成立中は非宣言者がテンパイしていてもリーチ不可', () => {
+    const { g, player } = makeTenpaiGame();
+    const feverPlayer = ((player + 1) % 3) as PlayerId;
+    g.feverActive[feverPlayer] = true;
+
+    expect(g.canLizhi(player)).toBe(false);
+    expect(g.declareLizhi()).toBe(false);
+    expect(g.lizhi.has(player)).toBe(false);
   });
 });

@@ -44,6 +44,9 @@ function autumnWinnerGame(): Game3 {
   g.huapai[0] = ['f3'];
   g.lizhi.add(0);
   g.diyizimo = false;
+  // 秋回数・役計算をランダムな初期表示華に左右させない。
+  (g.shan as any)._baopai = ['z1', 'z1'];
+  (g.shan as any)._fubaopai = ['z1', 'z1'];
   return g;
 }
 
@@ -102,19 +105,47 @@ describe('2026-07-15確定裁定', () => {
     const g = autumnWinnerGame();
     const visibleBefore = g.shan.baopai.length;
     const hiddenBefore = g.shan.fubaopai?.length ?? 0;
-    // pop順: f3(表) → p8(裏) → p9(連鎖した表)。f3を飛ばして通常牌を同枠に足さない。
+    // 深い側から f3(表) → p8(裏) → p7(連鎖した表) → p9(裏)。
     // Keep a complete second front/back pair. A lone lower tile cannot be
     // used for the Autumn that was just revealed.
-    (g.shan as any)._pai = ['p9', 'p7', 'p8', 'f3'];
+    (g.shan as any)._pai = ['f3', 'p8', 'p7', 'p9'];
     expect(g.hule(0)).not.toBeNull();
     expect(g.shan.baopai.slice(visibleBefore)).toEqual(['f3', 'p7']);
     expect(g.shan.fubaopai?.slice(hiddenBefore)).toEqual(['p8', 'p9']);
   });
 
+  it('非リーチ秋秋でも固定ペアの上段2枚を表、下段2枚を裏枠へ切り出す', () => {
+    const g = autumnWinnerGame();
+    g.lizhi.delete(0);
+    g.huapai[0] = ['f3', 'f3'];
+    const visibleBefore = g.shan.baopai.length;
+    const hiddenBefore = g.shan.fubaopai?.length ?? 0;
+    (g.shan as any)._pai = ['p1', 's1', 'p2', 's2'];
+
+    g.hule(0);
+    expect(g.shan.baopai.slice(visibleBefore)).toEqual(['p1', 'p2']);
+    expect(g.shan.fubaopai?.slice(hiddenBefore)).toEqual(['s1', 's2']);
+    expect((g.shan as any)._pai).toEqual([]);
+  });
+
+  it('非リーチ時の秘匿下段が秋でも追加の秋連鎖を起こさない', () => {
+    const g = autumnWinnerGame();
+    g.lizhi.delete(0);
+    g.huapai[0] = ['f3'];
+    const visibleBefore = g.shan.baopai.length;
+    const hiddenBefore = g.shan.fubaopai?.length ?? 0;
+    (g.shan as any)._pai = ['p1', 'f3', 'p2', 's2'];
+
+    g.hule(0);
+    expect(g.shan.baopai.slice(visibleBefore)).toEqual(['p1']);
+    expect(g.shan.fubaopai?.slice(hiddenBefore)).toEqual(['f3']);
+    expect((g.shan as any)._pai).toEqual(['p2', 's2']);
+  });
+
   it('秋で冬が表示されても通常牌まで飛ばさず、冬を抜いた扱いにする', () => {
     const g = autumnWinnerGame();
     const visibleBefore = g.shan.baopai.length;
-    (g.shan as any)._pai = ['p9', 'f4'];
+    (g.shan as any)._pai = ['f4', 'p9'];
     expect(g.hule(0)).not.toBeNull();
     expect(g.shan.baopai.slice(visibleBefore)).toEqual(['f4']);
     expect(g.effectiveHuapaiAtHule(0)).toContain('f4');
@@ -137,7 +168,7 @@ describe('2026-07-15確定裁定', () => {
     s0.game.huapai[player] = ['f3'];
     s0.game.goldHand[player].z = 1;
     s0.game.lizhi.add(player);
-    (s0.game.shan as any)._pai = ['p9', 'f1'];
+    (s0.game.shan as any)._pai = ['f1', 'p9'];
     s0.lastZimo = 's8';
     s0.lastDapai = null;
     s0.lastWinner = null;
@@ -174,7 +205,7 @@ describe('2026-07-15確定裁定', () => {
     s0.game.huapai[player] = ['f3'];
     s0.game.goldHand[player].z = 1;
     s0.game.lizhi.add(player);
-    (s0.game.shan as any)._pai = ['p9', 'f4'];
+    (s0.game.shan as any)._pai = ['f4', 'p9'];
     s0.lastZimo = 's8';
     s0.lastDapai = null;
     s0.lastWinner = null;

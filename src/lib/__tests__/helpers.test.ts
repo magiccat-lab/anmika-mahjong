@@ -139,6 +139,32 @@ describe('buildShoupai', () => {
     expect(sp._bingpai.s[0]).toBe(1);
     expect(sp._bingpai.z[4]).toBe(1);
   });
+
+  it('通常牌をツモると前回の expanded zimo identity を残さない', () => {
+    const sp = buildShoupai([
+      'p1', 'p2', 'p3', 'p5', 'p6', 'p7',
+      's1', 's2', 's3', 's4', 's5', 'm7', 'm9',
+    ]);
+    sp._anmikaZimo = 'np3';
+    sp.zimo('p4');
+    expect(sp._zimo).toBe('p4');
+    expect(sp._anmikaZimo).toBeNull();
+  });
+
+  it('cloneでも副露の呼び牌と手出し物理牌を独立して保持する', () => {
+    const sp = buildShoupai(['gp', 'np3', 'z5b', 'p1', 'p2', 'p3', 's1', 's2', 's3', 'm7', 'm9', 'z1', 'z2']);
+    sp._anmikaFulou = [{ mianzi: 'p000+', from: 1, taken: 'gp' }];
+    sp._anmikaFulouPhysical = [{ mianzi: 'p000+', consumed: ['gp', 'p0'] }];
+
+    const cloned = sp.clone();
+
+    expect(cloned._anmikaFulou).toEqual(sp._anmikaFulou);
+    expect(cloned._anmikaFulouPhysical).toEqual(sp._anmikaFulouPhysical);
+    cloned._anmikaFulou[0].taken = 'p0';
+    cloned._anmikaFulouPhysical[0].consumed[0] = 'p0';
+    expect(sp._anmikaFulou[0].taken).toBe('gp');
+    expect(sp._anmikaFulouPhysical[0].consumed[0]).toBe('gp');
+  });
 });
 
 describe('LEVEL_TO_FANSHU', () => {

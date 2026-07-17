@@ -114,4 +114,40 @@ describe('seat-scoped online projection hydration', () => {
     expect(hydrated.pendingKamiPochi).toEqual(canonical.pendingKamiPochi);
     expect(hydrated.pendingPochiSwap).toEqual(canonical.pendingPochiSwap);
   });
+
+  it('preserves the acting seat riichi choice while keeping it private from opponents', () => {
+    const authority = createRoomAuthority({
+      preShuffledPool: generateTilePool(defaultSanmaRule()).map(String),
+      qijia: 0,
+    });
+    const canonical = authority.canonicalState();
+    canonical.lizhiPending = 0;
+    canonical.lizhiPendingFlags = { open: false, shuvari: true, fever: true };
+    canonical._lizhiOpen = false;
+    canonical._lizhiShuvari = true;
+    canonical._lizhiFever = true;
+
+    const ownProjection: any = captureSeatProjection(authority, 0);
+    expect(ownProjection.store.lizhiPendingFlags).toEqual({
+      open: false, shuvari: true, fever: true,
+    });
+    expect(ownProjection.store._lizhiFever).toBe(true);
+    expect(captureSeatProjection(authority, 1).store.lizhiPendingFlags).toBeNull();
+
+    const game = createGameStore();
+    game.initOnlineGame({
+      ws: { readyState: 0, send() {} } as unknown as WebSocket,
+      qijia: 0,
+      mySeat: 0,
+      blindStart: {
+        hands: { 0: [], 1: [], 2: [] }, firstZimo: '', paishu: 55, baopai: [], fubaopai: null,
+      },
+    });
+    expect(game.hydrateOnlineProjection(ownProjection)).toBe(true);
+    const hydrated = get(game);
+    expect(hydrated.lizhiPending).toBe(0);
+    expect(hydrated.lizhiPendingFlags).toEqual({ open: false, shuvari: true, fever: true });
+    expect(hydrated._lizhiShuvari).toBe(true);
+    expect(hydrated._lizhiFever).toBe(true);
+  });
 });

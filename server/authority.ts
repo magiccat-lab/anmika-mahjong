@@ -2,7 +2,6 @@ import { Game3 } from '../src/lib/game3';
 import { createGameStore, type StoreState } from '../src/lib/store';
 import { get } from 'svelte/store';
 import { toCorePai } from '../src/lib/helpers';
-import { resolveNukiBeiMeta } from '../src/lib/game3/bei';
 import type { Pai, PlayerId } from '../src/lib/types';
 
 export type AuthorityMember = {
@@ -19,6 +18,24 @@ type PendingQianggang = {
   player: PlayerId;
   mianzi: string;
   kakanPai: Pai;
+};
+
+type ValidationMirrorSnapshot = {
+  game: Game3;
+  lastZimo: Pai | null;
+  lastDapai: LastDapai | null;
+  awaitingRonDecision: boolean;
+  awaitingFulou: boolean;
+  ponCandidates: Array<{ player: PlayerId; mianzi: string[] }>;
+  kanCandidates: Array<{ player: PlayerId; mianzi: string[] }>;
+  ronCandidates: PlayerId[];
+  ronPassedPlayers: PlayerId[];
+  ronDeclaredPlayers: PlayerId[];
+  pendingQianggang: PendingQianggang | null;
+  pendingLizhiOpts: { open: boolean; shuvari: boolean; fever: boolean } | null;
+  roundEnded: boolean;
+  lastWinner: PlayerId | null;
+  deferredCpuRon: PlayerId[];
 };
 
 export type RoomAuthorityInit = {
@@ -161,6 +178,14 @@ export class RoomAuthority {
       if (phaseError) return phaseError;
     }
 
+    // Validation deliberately runs against a separate Game3 mirror before the
+    // canonical reducer.  Some validators must tentatively mutate that mirror
+    // (riichi declaration, kan, reaction resolution, next round, ...).  If the
+    // canonical reducer subsequently rejects the command, retaining those
+    // tentative changes makes the next otherwise-legal command fail against a
+    // state that no client has.  Treat the whole validation pass as a
+    // transaction and restore it on every rejected/exceptional exit.
+    const validationSnapshot = this.captureValidationMirror();
     let reason: string | null;
     try {
       switch (action.type) {
@@ -198,14 +223,19 @@ export class RoomAuthority {
             : `unknown action type ${action.type}`;
       }
     } catch (e: any) {
+      this.restoreValidationMirror(validationSnapshot);
       return e?.message ? `authority exception: ${e.message}` : 'authority exception';
     }
-    if (reason) return reason;
+    if (reason) {
+      this.restoreValidationMirror(validationSnapshot);
+      return reason;
+    }
     try {
       const beforeCanonical = this.canonicalMutationToken(this.canonicalState());
       this.applyCanonicalAction(actor, action);
       const canonical = this.canonicalState();
       if (this.canonicalMutationToken(canonical) === beforeCanonical) {
+        this.restoreValidationMirror(validationSnapshot);
         return `${action.type}: canonical reducer rejected or made no state change`;
       }
       // WSA: canonical store の reducer は副作用を伴う (continueFever→draw→discard 等)。
@@ -218,8 +248,47 @@ export class RoomAuthority {
       }
       return null;
     } catch (e: any) {
+      this.restoreValidationMirror(validationSnapshot);
       return e?.message ? `canonical reducer exception: ${e.message}` : 'canonical reducer exception';
     }
+  }
+
+  private captureValidationMirror(): ValidationMirrorSnapshot {
+    return {
+      game: this.cloneValidationGame(this.game),
+      lastZimo: this.lastZimo,
+      lastDapai: this.lastDapai ? { ...this.lastDapai } : null,
+      awaitingRonDecision: this.awaitingRonDecision,
+      awaitingFulou: this.awaitingFulou,
+      ponCandidates: structuredClone(this.ponCandidates),
+      kanCandidates: structuredClone(this.kanCandidates),
+      ronCandidates: [...this.ronCandidates],
+      ronPassedPlayers: [...this.ronPassedPlayers],
+      ronDeclaredPlayers: [...this.ronDeclaredPlayers],
+      pendingQianggang: this.pendingQianggang ? { ...this.pendingQianggang } : null,
+      pendingLizhiOpts: this.pendingLizhiOpts ? { ...this.pendingLizhiOpts } : null,
+      roundEnded: this.roundEnded,
+      lastWinner: this.lastWinner,
+      deferredCpuRon: [...this.deferredCpuRon],
+    };
+  }
+
+  private restoreValidationMirror(snapshot: ValidationMirrorSnapshot): void {
+    this.game = snapshot.game;
+    this.lastZimo = snapshot.lastZimo;
+    this.lastDapai = snapshot.lastDapai;
+    this.awaitingRonDecision = snapshot.awaitingRonDecision;
+    this.awaitingFulou = snapshot.awaitingFulou;
+    this.ponCandidates = snapshot.ponCandidates;
+    this.kanCandidates = snapshot.kanCandidates;
+    this.ronCandidates = snapshot.ronCandidates;
+    this.ronPassedPlayers = snapshot.ronPassedPlayers;
+    this.ronDeclaredPlayers = snapshot.ronDeclaredPlayers;
+    this.pendingQianggang = snapshot.pendingQianggang;
+    this.pendingLizhiOpts = snapshot.pendingLizhiOpts;
+    this.roundEnded = snapshot.roundEnded;
+    this.lastWinner = snapshot.lastWinner;
+    this.deferredCpuRon = snapshot.deferredCpuRon;
   }
 
   /** JSON-safe projection used to detect reducers that silently reject invalid input. */
@@ -445,6 +514,12 @@ export class RoomAuthority {
     if (!paiValue) return 'discard: missing pai';
 
     const pai = paiValue as Pai;
+    let physicalPai: Pai;
+    try {
+      physicalPai = this.game.resolveDiscardPai(actor, pai, meta) as Pai;
+    } catch (error: any) {
+      return `discard: ${error?.message ?? 'physical tile is not in hand'}`;
+    }
 
     // Handle pending lizhi (2-stage): call declareLizhi at discard time with
     // feverCheck / feverDapai computed from the current hand, matching the
@@ -453,19 +528,24 @@ export class RoomAuthority {
       const lizhiOpts = this.pendingLizhiOpts;
       this.pendingLizhiOpts = null;
       if (lizhiOpts.fever) {
-        const feverMap = this.game.feverCandidatesByDapai(actor);
-        const feverCheck = feverMap.get(pai);
-        if (!feverCheck) {
-          return `discard: ${pai} does not satisfy fever condition`;
+        const lizhiCandidates = this.game.getLizhiCandidates(actor)
+          .map((candidate) => candidate.replace(/[_*]$/, ''));
+        if (!lizhiCandidates.includes(physicalPai)) {
+          return `discard: ${physicalPai} is not a valid lizhi candidate`;
         }
-        if (!this.game.declareLizhi({ open: lizhiOpts.open, shuvari: lizhiOpts.shuvari, fever: true, feverCheck, feverDapai: pai })) {
+        const feverMap = this.game.feverCandidatesByDapai(actor);
+        const feverCheck = feverMap.get(physicalPai);
+        if (!feverCheck) {
+          return `discard: ${physicalPai} does not satisfy fever condition`;
+        }
+        if (!this.game.declareLizhi({ open: lizhiOpts.open, shuvari: lizhiOpts.shuvari, fever: true, feverCheck, feverDapai: physicalPai })) {
           return `lizhi: declare failed for player ${actor}`;
         }
       } else {
         // WSA: 通常リーチの宣言牌が正規候補内か検証 [聴牌を崩す牌で進行不能を防ぐ]
         const lizhiCandidates = this.game.getLizhiCandidates(actor);
-        if (lizhiCandidates.length > 0 && !lizhiCandidates.includes(toCorePai(pai))) {
-          return `discard: ${pai} is not a valid lizhi candidate`;
+        if (!lizhiCandidates.includes(physicalPai)) {
+          return `discard: ${physicalPai} is not a valid lizhi candidate`;
         }
         if (!this.game.declareLizhi({ open: lizhiOpts.open, shuvari: lizhiOpts.shuvari })) {
           return `lizhi: declare failed for player ${actor}`;
@@ -473,15 +553,10 @@ export class RoomAuthority {
       }
     }
 
-    if (toCorePai(pai) === 'z4' && this.game.canNukiBei(actor)) {
-      const replacement = this.game.declareNukiBei(actor, resolveNukiBeiMeta({
-        requestedPai: pai,
-        metaGold: meta?.gold,
-        lastZimo: this.lastZimo,
-        lastZimoGold: this.game.shan.lastZimoGold,
-      }));
+    if (toCorePai(physicalPai) === 'z4' && this.game.canNukiBei(actor)) {
+      const replacement = this.game.declareNukiBei(actor, { gold: physicalPai === 'gN' });
+      if (replacement === null) return 'discard: north extraction replacement failed';
       this.lastZimo = replacement;
-      if (replacement === null) this.roundEnded = true;
       return null;
     }
 
@@ -722,8 +797,8 @@ export class RoomAuthority {
     if (pendingErr) return pendingErr;
     if (!this.game.canNukiBei(actor)) return `nukiBei: player ${actor} cannot nuki`;
     const replacement = this.game.declareNukiBei(actor, meta);
+    if (replacement === null) return `nukiBei: requested physical north is unavailable`;
     this.lastZimo = replacement;
-    if (replacement === null) this.roundEnded = true;
     return null;
   }
 
@@ -737,13 +812,17 @@ export class RoomAuthority {
     const open = opts.open === true;
     const shuvari = opts.shuvari === true;
     const fever = opts.fever === true;
-    // Fever pre-validation: same as canonical store — allow if canFeverLizhi
-    // is ok OR feverCandidatesByDapai has entries (conditional fever that
-    // becomes valid only after specific discards).
+    // FEVER is established by the declaration discard.  A pre-discard FEVER
+    // shape is not enough: at least one exact physical discard must both keep
+    // riichi tenpai and preserve the FEVER condition.
     if (fever) {
-      const fv = this.game.canFeverLizhi(actor);
       const feverByDapai = this.game.feverCandidatesByDapai(actor);
-      if (!fv.ok && feverByDapai.size === 0) {
+      const lizhiCandidates = new Set(
+        this.game.getLizhiCandidates(actor).map((pai) => pai.replace(/[_*]$/, '')),
+      );
+      const hasLegalFeverDapai = [...feverByDapai.keys()]
+        .some((pai) => lizhiCandidates.has(pai.replace(/[_*]$/, '')));
+      if (!hasLegalFeverDapai) {
         return `lizhi: player ${actor} cannot declare fever`;
       }
     }

@@ -34,12 +34,98 @@ type DiscardMeta = {
   pochi?: 'blue' | 'red' | 'green' | 'yellow';
 };
 
+function stripDiscardMarker(pai: string): string {
+  return String(pai).replace(/[_*]$/, '');
+}
+
 const POCHI_BY_COLOR = {
   blue: 'z5b',
   red: 'z5r',
   green: 'z5g',
   yellow: 'z5y',
 } as const;
+
+/**
+ * Expand majiang-core's discard faces back into the physical faces that are
+ * actually present in a patched Anmika hand.
+ *
+ * This must not be replaced by a core-equality filter.  Removing `p3` and
+ * removing `np3` have the same shanten result, but only the latter breaks the
+ * three-rainbow FEVER condition.  Callers which evaluate a rule after a
+ * discard therefore need one entry per physical face.
+ */
+export function physicalDiscardCandidates(
+  shoupai: any,
+  coreCandidates: readonly string[],
+): string[] {
+  if (!shoupai?._bingpai) return [];
+  const bp = shoupai._bingpai;
+  const expanded = (bp.__anmika ?? {}) as Partial<AnmikaCounts>;
+  const countExpanded = (pai: keyof AnmikaCounts) =>
+    Math.max(0, Number(expanded[pai] ?? 0));
+  const result: string[] = [];
+  const seen = new Set<string>();
+  const push = (pai: string, count: number) => {
+    if (count <= 0 || seen.has(pai)) return;
+    seen.add(pai);
+    result.push(pai);
+  };
+
+  for (const candidate of coreCandidates) {
+    const core = toCorePai(stripDiscardMarker(candidate));
+    if (!/^[mpsz][0-9]$/.test(core)) continue;
+
+    // 北は通常牌・金牌とも河へ切れず、北抜き専用。
+    if (core === 'z4') continue;
+
+    if (core === 'p0') {
+      const gold = countExpanded('gp');
+      push('p0', Number(bp.p?.[0] ?? 0) - gold);
+      push('gp', gold);
+      continue;
+    }
+    if (core === 's0') {
+      const gold = countExpanded('gs');
+      push('s0', Number(bp.s?.[0] ?? 0) - gold);
+      push('gs', gold);
+      continue;
+    }
+    if (core === 'z5') {
+      const pochi = (['z5b', 'z5r', 'z5g', 'z5y'] as const)
+        .reduce((sum, pai) => sum + countExpanded(pai), 0);
+      push('z5', Number(bp.z?.[5] ?? 0) - pochi);
+      for (const pai of ['z5b', 'z5r', 'z5g', 'z5y'] as const) {
+        push(pai, countExpanded(pai));
+      }
+      continue;
+    }
+
+    const rainbowByCore = {
+      p3: 'np3',
+      s3: 'ns3',
+      z3: 'nz3',
+    } as const;
+    const rainbow = rainbowByCore[core as keyof typeof rainbowByCore];
+    if (rainbow) {
+      const rainbowCount = countExpanded(rainbow);
+      push(core, Number(bp[core[0]]?.[3] ?? 0) - rainbowCount);
+      push(rainbow, rainbowCount);
+      continue;
+    }
+
+    const suit = core[0];
+    const digit = Number(core[1]);
+    let count = Number(bp[suit]?.[digit] ?? 0);
+    // majiang-core's [5] count includes red/gold [0] copies.  A `p5`/`s5`
+    // candidate specifically means an ordinary five.
+    if ((suit === 'p' || suit === 's') && digit === 5) {
+      count -= Number(bp[suit]?.[0] ?? 0);
+    }
+    push(core, count);
+  }
+
+  return result;
+}
 
 /**
  * Resolve one actual tile before mutating any counters.  This is the single
@@ -96,9 +182,6 @@ export function resolvePhysicalDiscardPai(opts: {
     throw new Error(`requested gold tile is not in hand: ${goldByCore}`);
   }
 
-  const last = opts.lastDrawnPai ?? null;
-  if (last === goldByCore && available(goldByCore) > 0) return goldByCore;
-
   // A plain/red physical tile wins when one exists.  Falling back to gold is
   // only valid when the normalized counter contains no non-gold copy.
   const suit = core[0];
@@ -109,6 +192,8 @@ export function resolvePhysicalDiscardPai(opts: {
     if (plainCount > 0) return requested;
     throw new Error(`requested non-gold tile is not in hand: ${requested}`);
   }
+  const last = opts.lastDrawnPai ?? null;
+  if (last === goldByCore && available(goldByCore) > 0) return goldByCore;
   if (plainCount > 0) return requested;
   if (available(goldByCore) > 0) return goldByCore;
   throw new Error(`tile is not in hand: ${requested}`);

@@ -75,4 +75,57 @@ describe('WSA-A6 double-ron claim order', () => {
 
     expect(outcome.delta).toEqual({ 0: -8000, 1: 4000, 2: 6000 });
   });
+
+  it('starts Winter after Autumn indicators even when the Winter winner settles first', () => {
+    const game = new Game3({ qijia: 0, preShuffledPool: generateTilePool(defaultSanmaRule()) });
+    const shan = game.shan as any;
+    shan._pai = ['p1', 'p9', 's1', 's9'];
+    const beforeAutumn = game.shan.snapshot();
+
+    const autumnResult: any = {
+      fanshu: 1,
+      fu: 30,
+      hupai: [{ name: '秋 [ドラ表追加]', fanshu: 0 }],
+      _akiRevealCount: 1,
+    };
+    const winterResult: any = {
+      fanshu: 1,
+      fu: 30,
+      // Plain Winter is only labelled later by applyHule; ordering must use
+      // the effective flower state, not this result text.
+      hupai: [],
+    };
+    game.huapai[2] = ['f4'];
+
+    expect(game.shan.drawNewDora(false)).toBe('p1');
+    expect(game.shan.drawNewDora(true)).toBe('p9');
+    game.akiUsedCount[1] = 1;
+    const afterAutumn = game.shan.snapshot();
+    (game as any)._huleRevealStateByResult.set(autumnResult, {
+      shan: afterAutumn,
+      akiUsedCount: { ...game.akiUsedCount },
+      effectiveHuapai: ['f3'],
+    });
+
+    // The last candidate evaluation was the Winter winner, so the live game has
+    // returned to the pre-Autumn wall. Settlement must recover Autumn's wall.
+    game.shan.restore(beforeAutumn);
+    game.akiUsedCount[1] = 0;
+    const winterStart: string[] = [];
+    vi.spyOn(game, 'applyHule').mockImplementation((_result, winner) => {
+      if (winner === 2) winterStart.push((game.shan as any)._pai.shift());
+    });
+
+    settleRonResultsInKamichaOrder(game, 0, [
+      { player: 1, result: autumnResult },
+      { player: 2, result: winterResult },
+    ]);
+
+    // p2 is first in upper-seat settlement order, but its Winter starts after
+    // Autumn's fixed [front, back] pair p1/p9 rather than reopening p1.
+    expect(winterStart).toEqual(['s1']);
+    expect(game.shan.baopai.at(-1)).toBe('p1');
+    expect(game.shan.fubaopai?.at(-1)).toBe('p9');
+    expect(game.akiUsedCount[1]).toBe(1);
+  });
 });

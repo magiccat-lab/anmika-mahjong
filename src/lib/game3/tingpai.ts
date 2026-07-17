@@ -23,6 +23,49 @@ function stripMarker(p: string): string {
   return core;
 }
 
+/**
+ * majiang-core の待ちを、このゲームで実在する牌名へ戻す。
+ * 一萬は牌山に存在せず七萬がその役割を担うため、外へ返す待ちは m7 に統一する。
+ * m8 は嵌八萬（ぽっちだけで完成する仮想待ち）なので例外的に残す。
+ */
+function normalizeAnmikaWait(p: string): string | null {
+  const raw = String(p).replace(/[\+\=\-_*]/g, '');
+  const core = toCorePai(raw);
+  if (core.length < 2) return null;
+  const suit = core[0] as Suit;
+  const digit = core[1] === '0' ? '5' : core[1];
+  const normalized = suit === 'm' && digit === '1' ? 'm7' : `${suit}${digit}`;
+  if (normalized === 'm8') return normalized;
+  const n = Number(normalized[1]);
+  return isValidAnmikaTile(suit, n) ? normalized : null;
+}
+
+/**
+ * 通常解釈と「m7 を m1 とみなす」解釈のうち、実際に聴牌している解だけから待ちを集める。
+ * Util.tingpai は非聴牌手では向聴数を下げる牌を返すため、xiangting===0 の guard が必要。
+ */
+function getStandardAnmikaWaits(shoupai: any): string[] {
+  const variants: any[] = [shoupai];
+  const m7Count = Number(shoupai?._bingpai?.m?.[7] ?? 0);
+  if (m7Count > 0) {
+    const swapped = shoupai.clone();
+    swapped._bingpai.m[1] = Number(swapped._bingpai.m[1] ?? 0) + m7Count;
+    swapped._bingpai.m[7] = 0;
+    if (swapped._zimo === 'm7') swapped._zimo = 'm1';
+    variants.push(swapped);
+  }
+
+  const waits = new Set<string>();
+  for (const variant of variants) {
+    if (Majiang.Util.xiangting(variant) !== 0) continue;
+    for (const raw of (Majiang.Util.tingpai(variant) ?? []) as string[]) {
+      const normalized = normalizeAnmikaWait(raw);
+      if (normalized) waits.add(normalized);
+    }
+  }
+  return [...waits];
+}
+
 function cloneCounts(shoupai: any): Record<Suit, number[]> | null {
   if (!shoupai) return null;
   if ((shoupai._fulou ?? []).length > 0) return null;
@@ -83,7 +126,7 @@ export function getTingpaiList(shoupai: any): string[] {
   try {
     const sp_clone = shoupai.clone();
     sp_clone._zimo = null;
-    const base = Majiang.Util.tingpai(sp_clone) ?? [];
+    const base = getStandardAnmikaWaits(sp_clone);
     return Array.from(new Set([...base, ...getAmericanChitoiWaits(shoupai)]));
   } catch {
     return getAmericanChitoiWaits(shoupai);
@@ -95,7 +138,8 @@ export function getTingpaiListBeforeZimo(shoupai: any): string[] {
   if (!shoupai) return [];
   try {
     const sp_clone = shoupai.clone();
-    if (sp_clone._zimo) {
+    if (typeof sp_clone._zimo === 'string' && sp_clone._zimo.length > 3) return [];
+    if (typeof sp_clone._zimo === 'string' && sp_clone._zimo.length <= 3) {
       const core = toCorePai(sp_clone._zimo);
       const ss = core[0];
       const nn = parseInt(core[1] === '0' ? '5' : core[1]);
@@ -103,7 +147,7 @@ export function getTingpaiListBeforeZimo(shoupai: any): string[] {
       if (core[1] === '0' && ss !== 'z') sp_clone._bingpai[ss][0] -= 1;
       sp_clone._zimo = null;
     }
-    const base = Majiang.Util.tingpai(sp_clone) ?? [];
+    const base = getStandardAnmikaWaits(sp_clone);
     return Array.from(new Set([...base, ...getAmericanChitoiWaits(sp_clone)]));
   } catch {
     return getAmericanChitoiWaits(shoupai);

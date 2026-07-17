@@ -52,10 +52,13 @@ export function isKanpaman(shoupai: any, agariPai: string | null, substituteFrom
  *  アンミカ独自: m7/m9 は swap、 字牌は 1-4 / 5-7 で循環
  *  target に来るのは 通常牌 [m/p/s/z] のみ [mostCommonPaiInHand の出力] */
 export function doraIndicatorOf(pai: string): string {
-  // 防御的: 想定外 key [g*/z5*/f*] は pai そのまま返す → 呼び側で 後段の処理に害なし
-  if (pai.length > 2 || pai[0] === 'g' || pai[0] === 'f') return pai;
-  const s = pai[0];
-  const n = pai[1] === '0' ? 5 : parseInt(pai[1]);
+  // expanded tile も同じ物理数牌・字牌のドラ対象として逆算する。
+  // 華牌はドラ対象を持たないため、そのまま返して呼び側の華処理へ渡す。
+  if (pai[0] === 'f') return pai;
+  const core = toCorePai(pai);
+  if (!/^[mpsz][0-9]$/.test(core)) return pai;
+  const s = core[0];
+  const n = core[1] === '0' ? 5 : parseInt(core[1]);
   if (!Number.isFinite(n)) return pai;
   if (s === 'z') {
     if (n <= 4) return `z${((n - 2 + 4) % 4) + 1}`;

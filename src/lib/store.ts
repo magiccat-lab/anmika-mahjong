@@ -13,6 +13,7 @@ import { Shan3, generateTilePool, defaultSanmaRule } from './shan3';
 import { declareKanImpl, ponImpl, damingangImpl } from './store/fulouActions';
 import { hasGoldKita } from './game3/gold';
 import { evaluateWinPoints } from './game3/settlement';
+import type { LizhiPendingFlags } from './lizhiUi';
 import {
   advanceSaiKoroStage,
   appendSaiKoroChances,
@@ -91,6 +92,11 @@ export interface StoreState {
   message: string | null;        // 状況メッセージ [和了表示等]
   cpu: { 0: boolean; 1: boolean; 2: boolean };  // 各 player が CPU か
   lizhiPending: number | null;   // リーチ宣言済 / 宣言牌待機中
+  /** 宣言牌待ち中に選んだリーチ種別。オンライン同期後もUIと候補制限を一致させる。 */
+  lizhiPendingFlags?: LizhiPendingFlags | null;
+  _lizhiOpen?: boolean;
+  _lizhiShuvari?: boolean;
+  _lizhiFever?: boolean;
   // R4 P1 #10 fix: ダブロン後の 金北再選択で CPU 他 winner 分の hule 適用が消える bug 対応。
   // pendingKinpei に otherWinners を保持して、 selectKinpei で restoreSnapshot 後に
   // 全 winner [winner + otherWinners] を再 hule + applyHule する
@@ -610,6 +616,10 @@ export function createGameStore() {
         message: wireStore.message ?? null,
         cpu: cloneWire(wireStore.cpu ?? current.cpu),
         lizhiPending: wireStore.lizhiPending ?? null,
+        lizhiPendingFlags: cloneWire(wireStore.lizhiPendingFlags ?? null),
+        _lizhiOpen: wireStore._lizhiOpen === true,
+        _lizhiShuvari: wireStore._lizhiShuvari === true,
+        _lizhiFever: wireStore._lizhiFever === true,
         pendingKinpei: cloneWire(wireStore.pendingKinpei ?? null),
         pendingFuyu: cloneWire(wireStore.pendingFuyu ?? null),
         pendingKamiPochi: cloneWire(wireStore.pendingKamiPochi ?? null),
@@ -789,8 +799,22 @@ export function createGameStore() {
       if (action._draw && s.game.shan.isBlind) {
         const d = action._draw;
         if (d.lastZimo) s.game.shan.feedDraw({ tile: d.lastZimo, huapai: d.huapai ?? [], gold: d.gold ?? false, pochi: d.pochi ?? null, paishu: d.paishu });
-        for (const t of d.newBaopai ?? []) s.game.shan.feedDora(t);
-        for (const t of d.newFubaopai ?? []) s.game.shan.feedDora(t);
+        // 1 action で秋ドラを複数組開く場合、実行順は
+        // 表1→裏1→表2→裏2。表配列を全件入れてから裏配列を入れると
+        // blind 側の drawNewDora(false/true) が別の牌を対応付けてしまう。
+        // server が送る物理的な開示順を優先し、旧 payload だけ pairwise fallback する。
+        const doraDraws = Array.isArray(d.doraDraws)
+          ? d.doraDraws
+          : Array.from(
+              { length: Math.max(d.newBaopai?.length ?? 0, d.newFubaopai?.length ?? 0) },
+              (_, index) => [
+                d.newBaopai?.[index] ? { tile: d.newBaopai[index], isFu: false } : null,
+                d.newFubaopai?.[index] ? { tile: d.newFubaopai[index], isFu: true } : null,
+              ].filter(Boolean),
+            ).flat();
+        for (const draw of doraDraws) {
+          if (draw && typeof draw.tile === 'string') s.game.shan.feedDora(draw.tile);
+        }
         if (d.paishu !== undefined && !d.lastZimo) (s.game.shan as any)._blindPaishu = d.paishu;
       }
       isApplyingRemote = true;
@@ -1041,9 +1065,15 @@ export function createGameStore() {
             return { ...s };
           }
           const cands = s.game.getLizhiCandidates(player);
-          const norm = (p: string) => p.replace(/_$/, '');
-          const corePai = toCorePai(pai);
-          if (!cands.some((c) => norm(c) === corePai)) {
+          const norm = (p: string) => p.replace(/[_*]$/, '');
+          let physicalPai: string;
+          try {
+            physicalPai = s.game.resolveDiscardPai(player, pai, meta);
+          } catch {
+            s.message = `${pai} は手牌にない物理牌です`;
+            return { ...s };
+          }
+          if (!cands.some((c) => norm(c) === physicalPai)) {
             s.message = `${pai} はリーチ宣言牌じゃない、 赤枠の牌から選んで`;
             return { ...s };
           }
@@ -1054,22 +1084,27 @@ export function createGameStore() {
           let feverCheckForDeclare: { ok: boolean; tiles: string[]; tier: 1 | 2 | 3 | 4 } | undefined;
           if (isFeverDecl) {
             const feverMap = s.game.feverCandidatesByDapai(player);
-            feverCheckForDeclare = feverMap.get(corePai);
+            feverCheckForDeclare = feverMap.get(physicalPai);
             if (!feverCheckForDeclare) {
               s.message = `${pai} ではフィーバーが成立しない [7 暗刻を崩さない宣言牌を選んで]`;
               return { ...s };
             }
           }
           // リーチ確定 [defen -1000、 供託 +1、 lizhi.add]
-          if (!s.game.declareLizhi({ open: !!(s as any)._lizhiOpen, shuvari: !!(s as any)._lizhiShuvari, fever: isFeverDecl, feverCheck: feverCheckForDeclare, feverDapai: isFeverDecl ? pai : undefined })) {
+          if (!s.game.declareLizhi({ open: !!(s as any)._lizhiOpen, shuvari: !!(s as any)._lizhiShuvari, fever: isFeverDecl, feverCheck: feverCheckForDeclare, feverDapai: isFeverDecl ? physicalPai : undefined })) {
             s.message = 'リーチ確定失敗';
             s.lizhiPending = null;
+            s.lizhiPendingFlags = null;
+            s._lizhiOpen = false;
+            s._lizhiShuvari = false;
+            s._lizhiFever = false;
             return { ...s };
           }
           s.lizhiPending = null;
-          (s as any)._lizhiOpen = false;
-          (s as any)._lizhiShuvari = false;
-          (s as any)._lizhiFever = false;
+          s.lizhiPendingFlags = null;
+          s._lizhiOpen = false;
+          s._lizhiShuvari = false;
+          s._lizhiFever = false;
           s = enqueueCutinState(s, isFeverDecl ? 'fever' : 'reach', player as PlayerId);
         }
         return innerDiscard(s, pai, meta);
@@ -2639,19 +2674,23 @@ export function createGameStore() {
           return { ...s };
         }
         if (opts.fever) {
-          const fv = s.game.canFeverLizhi(player);
           const feverByDapai = s.game.feverCandidatesByDapai(player);
-          if (!fv.ok && feverByDapai.size === 0) {
+          const lizhiCandidates = new Set(
+            s.game.getLizhiCandidates(player).map((pai) => pai.replace(/[_*]$/, '')),
+          );
+          const hasLegalFeverDapai = [...feverByDapai.keys()]
+            .some((pai) => lizhiCandidates.has(pai.replace(/[_*]$/, '')));
+          if (!hasLegalFeverDapai) {
             s.message = `player ${player} フィーバー条件未達 [7p/7s 暗刻なし]`;
             return { ...s };
           }
         }
         s.lizhiPending = player;
         // 選択フラグを reactive 反映用 store 直下にも持つ [リョー指示 2026-05-12: リーチ宣言時 button 枠表示]
-        (s as any).lizhiPendingFlags = { open: !!opts.open, shuvari: !!opts.shuvari, fever: !!opts.fever };
-        (s as any)._lizhiOpen = !!opts.open;
-        (s as any)._lizhiShuvari = !!opts.shuvari;
-        (s as any)._lizhiFever = !!opts.fever;
+        s.lizhiPendingFlags = { open: !!opts.open, shuvari: !!opts.shuvari, fever: !!opts.fever };
+        s._lizhiOpen = !!opts.open;
+        s._lizhiShuvari = !!opts.shuvari;
+        s._lizhiFever = !!opts.fever;
         const labels = [];
         if (opts.shuvari) labels.push('シュバ');
         if (opts.fever) labels.push('フィバ');

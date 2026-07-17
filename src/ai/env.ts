@@ -187,7 +187,7 @@ export class AnmikaEnv {
           // 候補ナシ → ツモ切り fallback
           const sspNow = this.game.shoupai.get(curPlayer);
           const z = (sspNow as any)?._zimo;
-          if (z && typeof z === 'string' && z.length <= 2) {
+          if (z && typeof z === 'string' && z.length <= 3) {
             (this.game as any).dapai?.(z);
           } else {
             break;

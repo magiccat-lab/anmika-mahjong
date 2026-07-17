@@ -5,9 +5,48 @@
 // @ts-ignore - majiang-core 型定義なし
 import Majiang from '@kobalab/majiang-core';
 import { toCorePai } from '../helpers';
+import { physicalDiscardCandidates } from './tileIdentity';
 import { americanChitoiXiangting } from './tingpai';
 
 export type FeverCheck = { ok: boolean; tiles: string[]; tier: 1 | 2 | 3 | 4; rainbow?: boolean };
+export type FeverWaitWallInfo = {
+  tile: string;
+  remain: number;
+  hasRed: boolean;
+  hasGold: boolean;
+  hasNiji: boolean;
+};
+
+function normalizedWaitCore(pai: string): string {
+  const core = toCorePai(String(pai).replace(/[\+=\-_*]/g, '')).replace('0', '5');
+  const normalized = `${core[0] ?? ''}${core[1] ?? ''}`;
+  // 旧牌譜の m1 待ちも、現行ルール上の実在牌 m7 と同一視する。
+  return normalized === 'm1' ? 'm7' : normalized;
+}
+
+/** 宣言時に固定した待ちごとの「現在の生牌領域」だけを集計する。
+ *  裏ドラ・嶺上など王牌内の現物は残数に含めず、赤・金・虹の有無も
+ *  推測ではなく live wall の物理牌から判定する。 */
+export function feverWaitInfoFromLiveWall(ting: string[], liveWall: string[]): FeverWaitWallInfo[] {
+  const seen = new Set<string>();
+  const rows: FeverWaitWallInfo[] = [];
+  for (const rawWait of ting) {
+    const tile = normalizedWaitCore(rawWait);
+    if (!/^[mpsz][0-9]$/.test(tile) || seen.has(tile)) continue;
+    seen.add(tile);
+    const remaining = tile === 'z5'
+      ? []
+      : liveWall.filter((pai) => normalizedWaitCore(pai) === tile);
+    rows.push({
+      tile,
+      remain: remaining.length,
+      hasRed: remaining.some((pai) => pai === 'p0' || pai === 's0'),
+      hasGold: remaining.some((pai) => pai === 'gp' || pai === 'gs' || pai === 'gN'),
+      hasNiji: remaining.some((pai) => pai === 'np3' || pai === 'ns3' || pai === 'nz3'),
+    });
+  }
+  return rows;
+}
 
 /**
  * 虹牌ツモからの暗槓で全虹が初めて揃った場合の昇格 tier。
@@ -208,12 +247,15 @@ export function feverCandidatesByDapai(
   } catch {
     return result;
   }
-  for (const c of candidates) {
+  // get_dapai() is a majiang-core API and therefore collapses rainbow/gold/
+  // pochi faces to core names.  Expand it before simulation: core-equal tiles
+  // can have different FEVER outcomes (notably p3 versus np3).
+  for (const c of physicalDiscardCandidates(shoupai, candidates)) {
     try {
       const sp_after = shoupai.clone();
       sp_after.dapai(c);
       const fc = canFeverLizhi(sp_after);
-      if (fc.ok) result.set(c.replace(/_$/, ''), fc);
+      if (fc.ok) result.set(c, fc);
     } catch {
       continue;
     }
@@ -235,15 +277,12 @@ export function isFeverWaitExhausted(
   // 白ぽっちは待ち牌として残数に数えず、王牌内の牌も生存待ちに含めない。
   if (Array.isArray(liveWall)) {
     const waits = new Set(ting
-      .map((p) => toCorePai(p).replace('0', '5'))
+      .map(normalizedWaitCore)
       .filter((p) => p !== 'z5'));
     if (waits.size === 0) return true;
-    return !liveWall.some((p) => waits.has(toCorePai(p).replace('0', '5')));
+    return !liveWall.some((p) => waits.has(normalizedWaitCore(p)));
   }
-  const baseTile = (p: string) => {
-    const core = toCorePai(p);
-    return core[0] + (core[1] === '0' ? '5' : core[1]);
-  };
+  const baseTile = normalizedWaitCore;
   let totalRemain = 0;
   for (const t of ting) {
     if (toCorePai(t) === 'z5') {
@@ -256,28 +295,24 @@ export function isFeverWaitExhausted(
     for (const [, sp] of shoupaiAll) {
       if (!sp) continue;
       visible += sp._bingpai?.[ss]?.[nn] ?? 0;
+      // m1 を保存していた旧牌譜も m7 と同じ4枚枠として数える。
+      if (ss === 'm' && nn === 7) visible += sp._bingpai?.m?.[1] ?? 0;
       // _bingpai[s][5] は通常・赤・金を合算した core 5 の現物数。
       // _bingpai[s][0] / goldHand を重ねると手牌内だけ二重計上になる。
       for (const m of sp._fulou ?? []) {
         visible += countTileInMianzi(m as string, ss + nn);
+        if (ss === 'm' && nn === 7) visible += countTileInMianzi(m as string, 'm1');
       }
     }
     for (const [, he] of heAll) {
       if (!he?._pai) continue;
       for (const d of he._pai as string[]) {
         const stripped = d.replace(/[\+=\-_*]/g, '');
-        if (stripped === ss + nn) visible++;
-        // R20 #4 fix: 5 待ち で 赤 / 金 5 が河に出てる場合も count
-        if (nn === 5 && (ss === 'p' || ss === 's')) {
-          if (stripped === `${ss}0` || stripped === `g${ss}`) visible++;
-        }
+        if (baseTile(stripped) === tNorm) visible++;
       }
     }
     for (const b of baopai ?? []) {
-      if (b === ss + nn) visible++;
-      if (nn === 5 && (ss === 'p' || ss === 's')) {
-        if (b === `${ss}0` || b === `g${ss}`) visible++;
-      }
+      if (baseTile(b) === tNorm) visible++;
     }
     totalRemain += Math.max(0, 4 - visible);
   }

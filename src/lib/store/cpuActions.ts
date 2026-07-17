@@ -126,25 +126,44 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       safety++;
       continue;
     }
+    let declaredLizhiDapai: string | null = null;
     if (s.game.canLizhi(cur)) {
       // この卓では通常の面前ダマ和了は禁止。残り山やぽっち倍率を理由に
       // リーチを見送ると、CPUだけが自ら和了不能な状態を選んでしまう。
       // また、他家の伏せ牌を数えて待ち残数を判断するのはオンラインの
       // 公平性にも反するため、リーチ可能なら公開情報に依存せず宣言する。
       const spForFever = s.game.shoupai.get(cur);
-      const rawZimo = typeof spForFever?._zimo === 'string' ? spForFever._zimo.replace(/_$/, '') : null;
+      // _zimo is a majiang-core face.  The expanded draw is retained in
+      // _anmikaZimo and must win here, otherwise np3 is looked up as p3 and a
+      // Rainbow-FEVER-breaking discard can be declared.
+      const rawZimo = typeof spForFever?._anmikaZimo === 'string'
+        ? spForFever._anmikaZimo.replace(/_$/, '')
+        : typeof spForFever?._zimo === 'string'
+          ? spForFever._zimo.replace(/_$/, '')
+          : null;
       const zimoPai = rawZimo && rawZimo.length <= 3 ? rawZimo : null;
+      const lizhiCandidates = s.game.getLizhiCandidates(cur);
+      const lizhiCandidateSet = new Set(lizhiCandidates.map((pai) => pai.replace(/[_*]$/, '')));
       let declared = false;
       let declaredFever = false;
-      if (zimoPai) {
-        const feverMap = s.game.feverCandidatesByDapai(cur);
-        const fc = feverMap.get(zimoPai);
+      const feverMap = s.game.feverCandidatesByDapai(cur);
+      const legalFeverCandidates = [...feverMap.keys()]
+        .filter((pai) => lizhiCandidateSet.has(pai.replace(/[_*]$/, '')));
+      const feverDapai = zimoPai && legalFeverCandidates.includes(zimoPai)
+        ? zimoPai
+        : (legalFeverCandidates[0] ?? null);
+      if (feverDapai) {
+        const fc = feverMap.get(feverDapai);
         if (fc) {
-          declared = s.game.declareLizhi({ fever: true, feverCheck: fc, feverDapai: zimoPai });
+          declared = s.game.declareLizhi({ fever: true, feverCheck: fc, feverDapai });
           declaredFever = declared;
+          if (declared) declaredLizhiDapai = feverDapai;
         }
       }
-      if (!declared) declared = s.game.declareLizhi({});
+      if (!declared) {
+        declared = s.game.declareLizhi({});
+        if (declared) declaredLizhiDapai = lizhiCandidates[0] ?? null;
+      }
       if (declared) {
         s = enqueueCutinState(s, declaredFever ? 'fever' : 'reach', cur as 0 | 1 | 2);
       }
@@ -171,7 +190,11 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     // [2026-07-16 リョー指示] 配牌由来で手牌に滞留した北 [z4] も抜く。
     // ツモ直後の北は loop 先頭の lastZimo 分岐が処理する。フィーバー中の
     // 「ツモ牌のみ可」等の制限は canNukiBei が内部で見る
-    if (s.game.canNukiBei(cur)) {
+    // A declaration is already charged and bound to one exact physical
+    // discard.  Do not alter the hand with a held-North extraction before
+    // committing that tile; the replacement draw can invalidate the chosen
+    // declaration shape and leave lizhiDeclareDapai stuck.
+    if (declaredLizhiDapai === null && s.game.canNukiBei(cur)) {
       s = beginNukiBei(s, cur);
       if (s.awaitingRonDecision) break;
       if (s.lastZimo == null) {
@@ -189,7 +212,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     //   - 副露直後 [_zimo が mianzi 文字列、 length>3] は kan 不可 [実 tile 無いため skip]
     let didKan = false;
     const _zimoLen = typeof curSp?._zimo === 'string' ? curSp._zimo.length : 0;
-    if (_zimoLen > 0 && _zimoLen <= 3) {
+    if (declaredLizhiDapai === null && _zimoLen > 0 && _zimoLen <= 3) {
       try {
         const kanMianzis = s.game.getKanCandidates(cur);
         for (const m of kanMianzis) {
@@ -208,7 +231,11 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       } catch { /* skip kan, fall through to discard */ }
     }
     if (didKan) { safety++; continue; }
-    const best = s.game.pickBestDiscard(cur);
+    // Once riichi has been charged, the same step must commit one of the
+    // declaration candidates.  A general efficiency pick may break tenpai;
+    // FEVER additionally requires the exact physical candidate evaluated
+    // above, not merely a core-equal tile.
+    const best = declaredLizhiDapai ?? s.game.pickBestDiscard(cur);
     let dapai: string | null = null;
     if (best) dapai = best;
     else if (typeof curSp._zimo === 'string' && curSp._zimo.length <= 3 && toCorePai(curSp._zimo) !== 'z4') {

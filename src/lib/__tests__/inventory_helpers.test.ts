@@ -88,4 +88,32 @@ describe('computeTileInventory + diffInventory', () => {
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     expect(total).toBe(116);
   });
+
+  it('方向記号の前へ牌が入る加槓表記でも、元ポンの物理牌メタ情報を引き継ぐ', () => {
+    const zeros = (length: number) => Array.from({ length }, () => 0);
+    const sp = {
+      _bingpai: { m: zeros(10), p: zeros(10), s: zeros(10), z: zeros(8) },
+      _fulou: ['p000+0'],
+      _anmikaFulou: [{ mianzi: 'p00+0', taken: 'gp' }],
+      _anmikaFulouPhysical: [
+        { mianzi: 'p00+0', consumed: ['p0', 'gp'] },
+        { mianzi: 'p000+0', consumed: ['p0'] },
+      ],
+    };
+    const g = {
+      shan: { _pai: [], _rinshan: [], _baopai: [], _fubaopai: [], _fuyuRevealed: [] },
+      shoupai: new Map([[0, sp]]),
+      he: new Map(),
+      goldHand: { 0: { p: 0, s: 0, z: 0 } },
+      pochiHand: { 0: { blue: 0, red: 0, green: 0, yellow: 0 } },
+      discardLog: { 0: [], 1: [], 2: [] },
+      huapai: { 0: [], 1: [], 2: [] },
+      nukidora: { 0: 0, 1: 0, 2: 0 },
+      nukidoraGold: { 0: 0, 1: 0, 2: 0 },
+    };
+
+    const counts = computeTileInventory(g);
+    expect(counts.gp).toBe(2);
+    expect(counts.p0).toBe(2);
+  });
 });

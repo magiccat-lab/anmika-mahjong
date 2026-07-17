@@ -3,6 +3,7 @@
   // 1 player の 手牌 + 副露 + 抜き華 + 抜きドラ + 河
   import Tile from './Tile.svelte';
   import type { FulouMianzi } from './fulouDisplay';
+  import { lizhiPaiLabel } from './lizhiUi';
   export let player: number;
   export let label: string;
   export let isCurrent: boolean;
@@ -18,6 +19,7 @@
   export let lastZimoIdx: number;
   export let isLizhiCand: (t: string) => boolean = () => false;
   export let lizhiPending: boolean = false;
+  export let lizhiKindLabel: string = 'リーチ';
   export let onTileClick: (p: number, t: string) => void = () => {};
   export let disabled: boolean = false;
   export let shuvariActive: boolean = false;
@@ -30,15 +32,20 @@
   </h2>
   <div class="hand">
     {#each shoupai as t, i}
+      {@const isPendingCandidate = isCurrent && lizhiPending && isLizhiCand(t)}
       <button
         class="tile-btn"
         class:tsumo-tile={i === lastZimoIdx && isCurrent}
-        class:lizhi-cand={isCurrent && isLizhiCand(t)}
+        class:lizhi-cand={isPendingCandidate}
         class:lizhi-dim={isCurrent && lizhiPending && !isLizhiCand(t)}
+        aria-label={isPendingCandidate ? `${lizhiKindLabel}の宣言牌として${lizhiPaiLabel(t)}を切る` : undefined}
+        title={isPendingCandidate ? `${lizhiKindLabel}: ${lizhiPaiLabel(t)}を切る` : undefined}
+        data-lizhi-candidate={isPendingCandidate ? 'true' : undefined}
         on:click={() => onTileClick(player, t)}
         disabled={disabled || !isCurrent}
       >
         <Tile pai={t} face={revealHand ? 'up' : 'down'} />
+        {#if isPendingCandidate}<span class="cut-marker" aria-hidden="true">切る</span>{/if}
       </button>
     {/each}
     {#each fulou as m}
@@ -126,6 +133,7 @@
     filter: grayscale(0.6);
   }
   .tile-btn {
+    position: relative;
     background: none;
     border: 0;
     padding: 0;
@@ -133,8 +141,26 @@
   }
   .tile-btn:disabled { cursor: default; opacity: 0.6; }
   .tile-btn.tsumo-tile { box-shadow: 0 0 0 2px #f0c040 inset; border-radius: 4px; margin-left: 16px; }
-  .tile-btn.lizhi-cand { box-shadow: 0 0 0 2px #c04040 inset; border-radius: 4px; }
+  .tile-btn.lizhi-cand {
+    box-shadow: 0 0 0 3px #ffb000, 0 0 12px rgba(255, 176, 0, 0.9);
+    border-radius: 4px;
+  }
   .tile-btn.lizhi-dim { opacity: 0.35; filter: grayscale(0.5); pointer-events: none; }
+  .cut-marker {
+    position: absolute;
+    right: -3px;
+    bottom: -5px;
+    z-index: 2;
+    padding: 1px 3px;
+    border: 1px solid #fff;
+    border-radius: 3px;
+    background: #d62020;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1.1;
+    pointer-events: none;
+  }
   .fulou-group { display: inline-flex; gap: 1px; padding: 0 3px; border-left: 1px dashed #ccc; margin-left: 16px; align-items: flex-end; }
   /* F2 [2026-05-15]: 鳴き先方向で 横倒し 表示 */
   .fulou-group .rot-tile { display: inline-block; transform: rotate(90deg); transform-origin: center; margin: 0 6px; }

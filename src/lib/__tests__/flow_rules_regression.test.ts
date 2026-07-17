@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { get } from 'svelte/store';
 import { Game3, buildShoupai } from '../game3';
 import { canFeverLizhi, isFeverWaitExhausted } from '../game3/feverLizhi';
-import { createGameStore } from '../store';
+import { createGameStore, innerDiscard } from '../store';
 
 function makeTenpaiGame(): { game: Game3; player: 0 | 1 | 2 } {
   const game = new Game3();
@@ -39,7 +39,56 @@ describe('canonical flow-rule regressions', () => {
     sp._bingpai.z[4] = 1;
     sp._zimo = 'z4';
     (game.shan as any)._pai = [];
-    expect(game.canNukiBei(player)).toBe(false);
+    (game.shan as any)._rinshan = ['s9'];
+    expect(game.canNukiBei(player)).toBe(true);
+    expect(game.declareNukiBei(player)).toBe('s9');
+    expect(game.shan.paishu).toBe(0);
+  });
+
+  it('ends only after discarding the replacement for a last-tile north', () => {
+    const store = createGameStore();
+    const state: any = get(store);
+    const game: Game3 = state.game;
+    const player = game.lunbanToPlayerId(game.state.lunban);
+    const otherPlayers = ([0, 1, 2] as const).filter((p) => p !== player);
+    const safeTiles = [
+      'p1','p2','p3','p4','p5','p6','p7','p8','p9','s1','s2','s4','z1',
+    ];
+    const sp = buildShoupai(safeTiles);
+    sp.zimo('z4');
+    game.shoupai.set(player, sp);
+    for (const other of otherPlayers) game.shoupai.set(other, buildShoupai(safeTiles));
+    game.huapai = { 0: [], 1: [], 2: [] };
+    game.lastZimoInfo = { player, pai: 'z4', pochi: null, gold: false };
+    (game.shan as any)._pai = [];
+    (game.shan as any)._rinshan = ['s5'];
+    state.lastZimo = 'z4';
+
+    const afterNuki = innerDiscard(state, 'z4');
+    expect(afterNuki.lastZimo).toBe('s5');
+    expect(afterNuki.roundEnded).toBe(false);
+    expect(afterNuki.game.shan.paishu).toBe(0);
+
+    const afterDiscard = innerDiscard(afterNuki, 's5');
+    expect(afterDiscard.pendingPingju).toBe(true);
+    expect(afterDiscard.roundEnded).toBe(true);
+  });
+
+  it('treats the replacement for a last-tile flower as a rinshan draw', () => {
+    const game = new Game3();
+    game.qipai();
+    const player = game.lunbanToPlayerId(game.state.lunban);
+    game.shoupai.set(player, buildShoupai([
+      'p1','p2','p3','p4','p5','p6','p7','p8','p9','s1','s2','s4','z1',
+    ]));
+    game.huapai[player] = [];
+    (game.shan as any)._pai = ['f1'];
+    (game.shan as any)._rinshan = ['s9'];
+
+    expect(game.zimo()).toBe('s9');
+    expect(game.huapai[player]).toEqual(['f1']);
+    expect(game.shan.paishu).toBe(0);
+    expect(game.lingshangActive[player]).toBe(true);
   });
 
   it('北抜きロンは列挙役満でも北単騎だけに限定する', () => {
@@ -165,6 +214,46 @@ describe('canonical flow-rule regressions', () => {
     const feverPlayer = ((player + 1) % 3) as 0 | 1 | 2;
     game.feverActive[feverPlayer] = true;
     expect(() => game.dapai(handTile!)).toThrow(/ツモ切り/);
+  });
+
+  it('フィーバー強制ツモ切りは既存オープンリーチの打牌禁止と衝突しない', () => {
+    const game = new Game3();
+    game.qipai();
+    const player = game.lunbanToPlayerId(game.state.lunban);
+    const openPlayer = ((player + 1) % 3) as 0 | 1 | 2;
+    const sp = buildShoupai([
+      'p1','p2','p3','p4','p5','p6','p7','p8','s1','s2','s3','z1','z2',
+    ]);
+    (sp as any).zimo('p9');
+    game.shoupai.set(player, sp);
+    game.lastZimoInfo = { player, pai: 'p9', pochi: null, gold: false };
+    game.openLizhi.add(openPlayer);
+    (game as any).getTingpaiList = (target: number) => target === openPlayer ? ['p9'] : [];
+
+    expect(() => game.dapai('p9')).toThrow(/オープン立直/);
+
+    game.feverActive[openPlayer] = true;
+    expect(() => game.dapai('p9')).not.toThrow();
+  });
+
+  it('フィーバー成立中の非宣言者はリーチ牌選択待ちに入らない', () => {
+    const store = createGameStore();
+    const state: any = get(store);
+    const game: Game3 = state.game;
+    const player = game.lunbanToPlayerId(game.state.lunban);
+    const feverPlayer = ((player + 1) % 3) as 0 | 1 | 2;
+    game.shoupai.set(player, buildShoupai([
+      'p1','p1','p1','p2','p2','p2','p3','p3','p3','s7','s7','s7','s8',
+    ]));
+    (game.shoupai.get(player) as any).zimo('s9');
+    game.feverActive[feverPlayer] = true;
+
+    store.lizhi();
+
+    const after: any = get(store);
+    expect(after.lizhiPending).toBeNull();
+    expect(after.game.lizhi.has(player)).toBe(false);
+    expect(after.message).toContain('リーチ不可');
   });
 
   it('送り槓は待ち不変でも立直後槓候補にならない', () => {

@@ -133,6 +133,7 @@ export function settleRonResultsInKamichaOrder(
   results: RonResult[],
 ): RonResult[] {
   const sorted = sortRonResultsByKamicha(discarder, results);
+  game.prepareDoubleRonAutumnBeforeWinter(sorted, discarder);
   for (const claim of sorted) {
     if (claim.result?._anmikaRonSettlementApplied) continue;
     game.applyHule(claim.result, claim.player as PlayerId, discarder);

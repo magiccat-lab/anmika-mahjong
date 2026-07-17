@@ -88,7 +88,7 @@ describe('restoreSnapshot', () => {
     expect(refs.defen).toBe(beforeRef);
   });
 
-  it('baopai 増加分を pop して山末尾に戻す', () => {
+  it('baopai 増加分を pop して山の深い側に戻す', () => {
     const refs = makeRefs();
     const snap = saveSnapshot(refs);
     // hule 後 baopai が増えた状態を 模擬: _baopai に 1 件 push → baopai len 1
@@ -97,12 +97,12 @@ describe('restoreSnapshot', () => {
     const shanLenBefore = refs.shan._pai.length;
     restoreSnapshot(refs, snap);
     expect(refs.shan.baopai.length).toBe(0);
-    // 戻された tile は _pai 末尾に追加
+    // 戻された tile は _pai の深い側（先頭）へ戻す
     expect(refs.shan._pai.length).toBe(shanLenBefore + 1);
-    expect(refs.shan._pai[refs.shan._pai.length - 1]).toBe('p3');
+    expect(refs.shan._pai[0]).toBe('p3');
   });
 
-  it('fubaopai も同様に pop + 山戻し', () => {
+  it('fubaopai も同様に pop + 深い側へ山戻し', () => {
     const refs = makeRefs();
     const snap = saveSnapshot(refs);
     refs.shan._fubaopai.push('s9');
@@ -111,6 +111,26 @@ describe('restoreSnapshot', () => {
     restoreSnapshot(refs, snap);
     expect(refs.shan.fubaopai.length).toBe(0);
     expect(refs.shan._pai.length).toBe(shanLenBefore + 1);
-    expect(refs.shan._pai[refs.shan._pai.length - 1]).toBe('s9');
+    expect(refs.shan._pai[0]).toBe('s9');
+  });
+
+  it('複数の秋ドラを戻しても表裏の物理順を並べ替えない', () => {
+    const refs = makeRefs();
+    const originalWall = [...refs.shan._pai];
+    const snap = saveSnapshot(refs);
+
+    // 実際の開示順: 表1 → 裏1 → 表2 → 裏2。
+    const front1 = refs.shan._pai.shift();
+    const back1 = refs.shan._pai.shift();
+    const front2 = refs.shan._pai.shift();
+    const back2 = refs.shan._pai.shift();
+    refs.shan._baopai.push(front1, front2);
+    refs.shan._fubaopai.push(back1, back2);
+
+    restoreSnapshot(refs, snap);
+
+    expect(refs.shan._pai).toEqual(originalWall);
+    expect(refs.shan.baopai).toEqual([]);
+    expect(refs.shan.fubaopai).toEqual([]);
   });
 });

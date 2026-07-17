@@ -60,4 +60,23 @@ describe('Game3 countDoraFromIndicator', () => {
     expect(g.countDoraFromIndicator(sp, 'f1')).toBe(0);
     expect(g.countDoraFromIndicator(sp, 'f4')).toBe(0);
   });
+
+  it('副露内のドラと、手牌にまだ入っていないロン牌のドラも数える', () => {
+    const g = new Game3();
+    g.qipai();
+    const sp = buildShoupai(['p1', 's1']);
+    sp._fulou = ['p222+'];
+
+    expect(g.countDoraFromIndicator(sp, 'p1')).toBe(3);
+    expect(g.countDoraFromIndicator(sp, 'p1', 'p2-')).toBe(4);
+  });
+
+  it('expandedロン牌をcoreへ変換してドラ一致を数える', () => {
+    const g = new Game3();
+    g.qipai();
+    const sp = buildShoupai(['p1', 's1']);
+
+    expect(g.countDoraFromIndicator(sp, 'p2', 'np3')).toBe(1);
+    expect(g.countDoraFromIndicator(sp, 'p4', 'gp')).toBe(1);
+  });
 });

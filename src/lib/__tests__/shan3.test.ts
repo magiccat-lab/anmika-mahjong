@@ -99,11 +99,85 @@ describe('Shan3 構築 / paishu', () => {
 });
 
 describe('Shan3 rinshan / drawNewDora', () => {
+  it('追加ドラは巡目に左右されず、配牌時に固定された山の深い側から開く', () => {
+    // zimo は配列末尾から進む。追加ドラは反対側（王牌との境界）に
+    // 配牌時から固定されているため、何巡進んでも同じ現物になる。
+    const pool = Array.from({ length: 116 }, () => 'z1');
+    pool[4] = 'm7';
+    pool[5] = 'm9';
+    pool[6] = 'p1';
+    pool[7] = 's1';
+    pool[20] = 'p2';
+    pool[21] = 's2';
+    for (let i = 96; i < pool.length; i += 1) pool[i] = i % 2 === 0 ? 'p9' : 's9';
+
+    const early = new Shan3(baseRule, pool as any);
+    const late = new Shan3(baseRule, pool as any);
+    const initialBaopai = [...late.baopai];
+    const initialFubaopai = [...(late.fubaopai ?? [])];
+
+    for (let i = 0; i < 12; i += 1) late.zimo();
+    expect(late.baopai).toEqual(initialBaopai);
+    expect(late.fubaopai).toEqual(initialFubaopai);
+
+    const earlyFront = early.drawNewDora(false);
+    const earlyBack = early.drawNewDora(true);
+    const lateFront = late.drawNewDora(false);
+    const lateBack = late.drawNewDora(true);
+
+    expect([lateFront, lateBack]).toEqual([earlyFront, earlyBack]);
+    expect([lateFront, lateBack]).toEqual(['p2', 's2']);
+    expect(late.baopai).toEqual([...initialBaopai, 'p2']);
+    expect(late.fubaopai).toEqual([...initialFubaopai, 's2']);
+  });
+
   it('rejects a kan when only one live-wall indicator tile remains', () => {
     const s = new Shan3(baseRule) as any;
     s._pai = ['p1'];
     expect(s.canOpenKanDora).toBe(false);
     expect(() => s.gangzimo()).toThrow(/not enough wall tiles/);
+  });
+
+  it('blind 山でも裏ドラ秘匿 null を裏ドラなしと誤認しない', () => {
+    const hiddenUra = Shan3.createBlind({
+      rule: baseRule,
+      baopai: ['p1'],
+      fubaopai: null,
+      paishu: 1,
+    });
+    expect(hiddenUra.fubaopai).toBeNull();
+    expect(hiddenUra.canOpenKanDora).toBe(false);
+
+    const noUra = Shan3.createBlind({
+      rule: { ...baseRule, fudora: false },
+      baopai: ['p1'],
+      fubaopai: null,
+      paishu: 1,
+    });
+    expect(noUra.canOpenKanDora).toBe(true);
+  });
+
+  it('嶺上枯渇後の華牌は存在しない補充牌の使用数を増やさない', () => {
+    const s = new Shan3(baseRule) as any;
+    s._pai = ['p1', 'f1'];
+    s._rinshan = [];
+    s.rinshanUsed = 16;
+
+    expect(s.zimo()).toBe('p1');
+    expect(s.lastDrawnHuapai).toEqual(['f1']);
+    expect(s.rinshanUsed).toBe(16);
+  });
+
+  it('replaces a flower in the last live-wall slot before exhausting the hand', () => {
+    const s = new Shan3(baseRule) as any;
+    s._pai = ['f1'];
+    s._rinshan = ['s9'];
+    s.rinshanUsed = 0;
+
+    expect(s.zimo()).toBe('s9');
+    expect(s.lastDrawnHuapai).toEqual(['f1']);
+    expect(s.paishu).toBe(0);
+    expect(s.rinshanUsed).toBe(1);
   });
 
   it('consumeRinshan で rinshanUsed +1', () => {

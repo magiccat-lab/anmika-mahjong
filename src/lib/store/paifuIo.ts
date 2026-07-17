@@ -20,6 +20,29 @@ const isPhysicalTile = (value: unknown): value is string =>
   typeof value === 'string' && PHYSICAL_TILE_NAMES.has(value);
 const isPhysicalTileArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(isPhysicalTile);
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+const isPlayerRecord = (
+  value: unknown,
+  predicate: (entry: unknown) => boolean,
+): value is Record<PlayerId, unknown> =>
+  isRecord(value) && PLAYERS.every((player) => predicate(value[player]));
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+const isPlayerId = (value: unknown): value is PlayerId =>
+  value === 0 || value === 1 || value === 2;
+const isPlayerIdArray = (value: unknown): value is PlayerId[] =>
+  Array.isArray(value) && value.every(isPlayerId) && new Set(value).size === value.length;
+const isMianzi = (value: unknown): value is string =>
+  typeof value === 'string'
+  // 加槓は majiang-core で `p555+5`（元のポン + 追加牌）の形になる。
+  // `p5555+` だけを許す旧式 regex では、正規の加槓を含む v3 牌譜を
+  // 自分で保存できても読み戻せなかった。
+  && /^[mpsz](?:[0-9]{3,4}[+\-=]?|[0-9]{3}[+\-=][0-9])[*_]*$/.test(value);
+const isCoreHandTile = (value: unknown): value is string =>
+  typeof value === 'string' && /^(?:m[1-9]|[ps][0-9]|z[1-7])$/.test(value);
+const isHandTile = (value: unknown): value is string =>
+  isPhysicalTile(value) || isCoreHandTile(value);
 
 function validateSerializedHand(data: any): boolean {
   if (!isRecord(data) || !isRecord(data.bingpai)) return false;
@@ -38,26 +61,125 @@ function validateSerializedHand(data: any): boolean {
     }
     if (Object.keys(bp.anmika).some((key) => !isAnmikaExpandedPai(key))) return false;
   }
-  if (!Array.isArray(data.fulou) || !data.fulou.every((m: unknown) =>
-    typeof m === 'string' && /^[mpsz][0-9]{3,4}[+\-=]?[*_]*$/.test(m))) return false;
-  if (data.zimo !== null && data.zimo !== undefined && typeof data.zimo !== 'string') return false;
+  if (!Array.isArray(data.fulou) || !data.fulou.every(isMianzi)) return false;
+  if (data.zimo !== null && data.zimo !== undefined) {
+    if (typeof data.zimo !== 'string') return false;
+    const zimo = data.zimo.replace(/[*_]$/, '');
+    if (!isHandTile(zimo) && !isMianzi(data.zimo)) return false;
+  }
   if (data.anmikaZimo !== null && data.anmikaZimo !== undefined && !isAnmikaExpandedPai(data.anmikaZimo)) return false;
   if (data.anmikaZimo && (!data.zimo || toCorePai(data.anmikaZimo) !== String(data.zimo).replace(/[_*]$/, ''))) return false;
   if (!Array.isArray(data.anmikaFulou ?? []) || !Array.isArray(data.anmikaFulouPhysical ?? [])) return false;
-  for (const entry of data.anmikaFulouPhysical ?? []) {
-    if (!isRecord(entry) || !Array.isArray(entry.consumed) || !entry.consumed.every(isAnmikaExpandedPai)) return false;
+  for (const entry of data.anmikaFulou ?? []) {
+    if (!isRecord(entry) || !isMianzi(entry.mianzi) || !isPlayerId(entry.from) || !isHandTile(entry.taken)) return false;
   }
+  for (const entry of data.anmikaFulouPhysical ?? []) {
+    if (!isRecord(entry) || !isMianzi(entry.mianzi)
+      || !Array.isArray(entry.consumed) || !entry.consumed.every(isAnmikaExpandedPai)) return false;
+  }
+  return true;
+}
+
+function validateV3GameFields(fields: any): boolean {
+  if (!isRecord(fields)) return false;
+
+  const booleanPlayerFields = [
+    'yifaActive', 'lizhiDeclareDapai', 'lingshangActive', 'pochiPaymentMode',
+    'pochiChipReverse', 'pochiChipDouble', 'haruActive', 'fuyuSkip',
+    'fuyuConsumed', 'justNukidBei', 'feverActive', 'feverPendingShuvari',
+    'shuvariActive', 'shuvariUsed', 'lateShuvariWindow',
+  ];
+  if (booleanPlayerFields.some((field) =>
+    !isPlayerRecord(fields[field], (value) => typeof value === 'boolean'))) return false;
+
+  const nonNegativePlayerFields = ['nukidora', 'nukidoraGold', 'feverWinCount', 'akiUsedCount'];
+  if (nonNegativePlayerFields.some((field) =>
+    !isPlayerRecord(fields[field], isNonNegativeInt))) return false;
+  if (!isPlayerRecord(fields.chipLedger, (value) => Number.isInteger(value))) return false;
+  if (!isPlayerRecord(fields.feverTier, (value) =>
+    value === 1 || value === 2 || value === 3 || value === 4)) return false;
+
+  if (!isPlayerRecord(fields.goldHand, (value) => isRecord(value)
+    && ['p', 's', 'z'].every((suit) => isNonNegativeInt(value[suit])))) return false;
+  if (!isPlayerRecord(fields.huapai, (value) => Array.isArray(value)
+    && value.every((pai) => typeof pai === 'string' && /^f[1-4]$/.test(pai)))) return false;
+  if (!isPlayerRecord(fields.pochiHand, (value) => isRecord(value)
+    && ['blue', 'red', 'green', 'yellow'].every((color) => isNonNegativeInt(value[color])))) return false;
+  if (!isPlayerRecord(fields.pochiMultiplier, (value) => isRecord(value)
+    && isFiniteNumber(value.defen) && isFiniteNumber(value.chip))) return false;
+  if (!isPlayerRecord(fields.kinpeiTarget, (value) => value === null
+    || value === 'haru' || value === 'natsu' || value === 'aki' || value === 'fuyu')) return false;
+
+  if (!isRecord(fields.lastZimoInfo)
+    || (fields.lastZimoInfo.player !== null && !isPlayerId(fields.lastZimoInfo.player))
+    || (fields.lastZimoInfo.pai !== null && !isPhysicalTile(fields.lastZimoInfo.pai))
+    || (fields.lastZimoInfo.pochi !== null
+      && !['blue', 'red', 'green', 'yellow'].includes(fields.lastZimoInfo.pochi))
+    || typeof fields.lastZimoInfo.gold !== 'boolean') return false;
+
+  const firstTurn = fields.firstTurnState;
+  if (!isRecord(firstTurn) || typeof firstTurn.callOccurred !== 'boolean'
+    || !isRecord(firstTurn.players)
+    || !PLAYERS.every((player) => isRecord(firstTurn.players[player])
+      && isNonNegativeInt(firstTurn.players[player].drawCount)
+      && typeof firstTurn.players[player].hasDiscarded === 'boolean')) return false;
+
+  if (typeof fields.qianggangPending !== 'boolean'
+    || typeof fields.tobiChipPaid !== 'boolean'
+    || (fields.feverDeclareDapaiPlayer !== null && !isPlayerId(fields.feverDeclareDapaiPlayer))) return false;
+  if (!isPlayerIdArray(fields.lizhi)
+    || !isPlayerIdArray(fields.doubleLizhi)
+    || !isPlayerIdArray(fields.openLizhi)) return false;
+  if (!isPlayerRecord(fields.feverDeclareTing, (value) =>
+    Array.isArray(value) && value.every(isCoreHandTile))) return false;
+  if (!isPlayerRecord(fields.feverSaiAwarded, isStringArray)) return false;
+
+  if (!Array.isArray(fields.chipBreakdown) || !fields.chipBreakdown.every((entry: unknown) =>
+    isRecord(entry)
+    && typeof entry.label === 'string'
+    && isFiniteNumber(entry.base)
+    && isFiniteNumber(entry.multiplier)
+    && isFiniteNumber(entry.total)
+    && (entry.mode === 'oall' || entry.mode === 'ron')
+    && (entry.multiplierParts === undefined || isStringArray(entry.multiplierParts)))) return false;
+  if (!isPlayerRecord(fields.discardLog, (value) => Array.isArray(value)
+    && value.every((entry) => isRecord(entry)
+      && isPhysicalTile(entry.pai)
+      && (entry.gold === undefined || typeof entry.gold === 'boolean')
+      && (entry.pochi === undefined || ['blue', 'red', 'green', 'yellow'].includes(entry.pochi))
+      && (entry.tsumogiri === undefined || typeof entry.tsumogiri === 'boolean')))) return false;
   return true;
 }
 
 function validateV3Envelope(paifu: any): boolean {
   if (!isRecord(paifu) || !isRecord(paifu.game) || !isRecord(paifu.store)) return false;
+  const init = paifu.game.init;
+  if (!isRecord(init)
+    || !Number.isFinite(init.startingDefen)
+    || Number(init.startingDefen) < 0
+    || !Number.isInteger(init.changshu)
+    || Number(init.changshu) < 0
+    || Number(init.changshu) > 2
+    || !isRecord(init.shanRule)
+    || !['tenhou', 'jansoul', 'anmika'].includes(init.shanRule.tileSet)
+    || typeof init.shanRule.fudora !== 'boolean'
+    || !isRecord(init.shanRule.hongpai)
+    || !['m', 'p', 's'].every((suit) => isNonNegativeInt(init.shanRule.hongpai[suit]))) return false;
   const shan = paifu.game.shan;
   if (!isRecord(shan)) return false;
   for (const key of ['initialPai', 'pai', 'rinshan', 'baopai', 'fuyuRevealed'] as const) {
     if (!isPhysicalTileArray(shan[key] ?? [])) return false;
   }
+  if (!isPhysicalTileArray(shan.lastDrawnHuapai ?? [])) return false;
   if (shan.fubaopai !== null && !isPhysicalTileArray(shan.fubaopai ?? [])) return false;
+  if (!isNonNegativeInt(shan.rinshanUsed) || shan.rinshanUsed > 16
+    || !isNonNegativeInt(shan.kanDoraCount) || shan.kanDoraCount > 4
+    || !isNonNegativeInt(shan.extraSanReduction)
+    || typeof shan.lastZimoGold !== 'boolean'
+    || (shan.lastZimoPochi !== null && !['blue', 'red', 'green', 'yellow'].includes(shan.lastZimoPochi))
+    || typeof shan.weikaigang !== 'boolean'
+    || typeof shan.closed !== 'boolean') return false;
+  if (!Array.isArray(paifu.game.events) || !validateV3GameFields(paifu.game.fields)) return false;
   if (!Array.isArray(paifu.game.shoupai) || paifu.game.shoupai.length !== 3
     || !paifu.game.shoupai.every(validateSerializedHand)) return false;
   if (!Array.isArray(paifu.game.he) || paifu.game.he.length !== 3
@@ -65,9 +187,27 @@ function validateV3Envelope(paifu: any): boolean {
       && river.every((p: unknown) => typeof p === 'string' && /^[mpsz][0-9][+\-=*_]*$/.test(p)))) return false;
   const state = paifu.game.state;
   if (!isRecord(state) || ![0, 1, 2].includes(state.qijia) || ![0, 1, 2].includes(state.lunban)) return false;
+  if (!isNonNegativeInt(state.changbang)
+    || !isNonNegativeInt(state.jushu) || state.jushu > 2
+    || !isNonNegativeInt(state.benbang)
+    || !isNonNegativeInt(state.lizhibang)
+    || typeof state.finished !== 'boolean'
+    || (state.tongaeshi !== undefined && typeof state.tongaeshi !== 'boolean')) return false;
   if (!isRecord(state.defen)
     || !PLAYERS.every((player) => Number.isFinite(state.defen[player]))) return false;
   if (paifu.store.lastZimo !== null && paifu.store.lastZimo !== undefined && !isPhysicalTile(paifu.store.lastZimo)) return false;
+  if (paifu.store.lastDapai !== null && paifu.store.lastDapai !== undefined
+    && (!isRecord(paifu.store.lastDapai)
+      || !isPlayerId(paifu.store.lastDapai.player)
+      || !isPhysicalTile(paifu.store.lastDapai.pai))) return false;
+  if (paifu.store.lastWinner !== null && paifu.store.lastWinner !== undefined
+    && !isPlayerId(paifu.store.lastWinner)) return false;
+  if (paifu.store.lastHuleResult !== null && paifu.store.lastHuleResult !== undefined
+    && !isRecord(paifu.store.lastHuleResult)) return false;
+  if (typeof paifu.store.roundEnded !== 'boolean'
+    || (paifu.store.message !== null && paifu.store.message !== undefined
+      && typeof paifu.store.message !== 'string')
+    || !isPlayerRecord(paifu.store.cpu, (value) => typeof value === 'boolean')) return false;
   return true;
 }
 
@@ -413,7 +553,8 @@ function restorePendingAfterDapai(ng: Game3, restoredLastZimo: string | null): P
 
 /** 牌譜 v2 → StoreState を構築。 invalid なら null 返し、 store 側は message 設定のみ */
 export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false }): StoreState | null {
-  if (paifu.type !== 'anmika-mahjong-paifu' || (paifu.version ?? 1) < 2) return null;
+  try {
+  if (!isRecord(paifu) || paifu.type !== 'anmika-mahjong-paifu' || (paifu.version ?? 1) < 2) return null;
   if (paifu.version === PAIFU_SCHEMA_VERSION) return restoreV3(paifu, preservedCpu);
   if (paifu.version > PAIFU_SCHEMA_VERSION) return null;
   const ng = new Game3();
@@ -563,4 +704,10 @@ export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, b
     cutin: null,
     cutinQueue: [],
   };
+  } catch {
+    // Imported paifu is untrusted user input.  A schema-shaped but truncated
+    // v2 file (or a future malformed v3 field) must be rejected, never escape
+    // as an exception that tears down the UI/store update.
+    return null;
+  }
 }

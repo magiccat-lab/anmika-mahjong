@@ -12,7 +12,22 @@ export function buildDebugState(
   opts: { goldNbei?: boolean; forceShan?: string[] } = {},
 ): StoreState {
   const ng = new Game3();
-  const shanPai = (ng.shan as any)._pai as string[];
+  const shanAny = ng.shan as any;
+  const hasFudora = shanAny._fubaopai !== null;
+  // Shan3 constructor は live wall / 嶺上 / 表裏表示牌を既に物理分離している。
+  // debug 配牌では強制牌を全領域から選べるよう一度だけ同じ物理poolへ戻し、
+  // 最後に改めて分離する。live wall から表示牌を単にコピーすると、同じ牌を
+  // ドラ表示と通常ツモの両方で使える在庫重複になる。
+  const shanPai = [
+    ...(shanAny._pai ?? []),
+    ...(shanAny._rinshan ?? []),
+    ...(shanAny._baopai ?? []),
+    ...(shanAny._fubaopai ?? []),
+  ] as string[];
+  shanAny._pai = shanPai;
+  shanAny._rinshan = [];
+  shanAny._baopai = [];
+  shanAny._fubaopai = hasFudora ? [] : null;
   // shan から target を 1 枚 remove。 target='z5' [normalize 後の白] の場合は z5b/z5r/z5g/z5y のいずれかを消費
   // 戻り値: 削除に成功した場合は実際に消費した raw key [z5b 等]、 失敗時 null
   const removeFromShan = (target: string): string | null => {
@@ -84,21 +99,16 @@ export function buildDebugState(
     const j = Math.floor(Math.random() * (i + 1));
     [shanPai[i], shanPai[j]] = [shanPai[j], shanPai[i]];
   }
-  // baopai / fubaopai を 後 pick で 再構築 [forceP0 / forceHua / goldNbei で除外した牌が ドラ表に混入するのを防ぐ]
   // [リョー指示 2026-05-11: 配牌と抜きだけ先に確定 → 残りでランダム]
-  const pickNonHua = (start: number, count: number): string[] => {
-    const picks: string[] = [];
-    let i = start;
-    while (picks.length < count && i < shanPai.length) {
-      const p = shanPai[i];
-      if (typeof p === 'string' && !p.startsWith('f')) picks.push(p);
-      i++;
-    }
-    return picks;
-  };
-  (ng.shan as any)._baopai = pickNonHua(4, 2);
-  (ng.shan as any)._fubaopai = (ng.shan as any)._fubaopai !== null ? pickNonHua(9, 2) : null;
-  (ng.shan as any)._fuyuRevealed = []; // reset 冬めくり領域
+  // Shan3 constructor と同じ位置・順で表2 / 裏2 / 嶺上16を物理的に切り出す。
+  // 2026-07-15裁定どおり華牌も表示牌になり得るため、華だけ飛ばさない。
+  const removeAt = (start: number, count: number): string[] => (
+    shanPai.splice(start, Math.min(count, Math.max(0, shanPai.length - start)))
+  );
+  shanAny._baopai = removeAt(4, 2);
+  shanAny._fubaopai = hasFudora ? removeAt(4, 2) : null;
+  shanAny._rinshan = shanPai.splice(0, Math.min(16, shanPai.length));
+  shanAny._fuyuRevealed = []; // reset 冬めくり領域
   for (const pl of [1, 2] as (1 | 2)[]) {
     const tiles: string[] = [];
     const huas: string[] = [];

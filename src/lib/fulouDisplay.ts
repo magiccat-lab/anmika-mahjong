@@ -103,8 +103,24 @@ function isPhysicalDisplayPai(p: string | null | undefined): p is string {
   return typeof p === 'string' && isAnmikaExpandedPai(p);
 }
 
-function matchesMianzi(entry: { mianzi?: string } | null | undefined, current: string): boolean {
-  return !!entry?.mianzi && (entry.mianzi === current || current.startsWith(entry.mianzi));
+export function matchesFulouMianzi(
+  entry: { mianzi?: string } | null | undefined,
+  current: string,
+): boolean {
+  if (!entry?.mianzi) return false;
+  if (entry.mianzi === current || current.startsWith(entry.mianzi)) return true;
+
+  // 加槓の4枚目は、鳴き牌位置によって末尾だけでなく方向記号の直前へ
+  // 挿入される表記もある。どちらからも元のポン面子を復元して照合する。
+  if (/^[mpsz]\d{3}[\+\=\-]\d$/.test(current)) {
+    const directionIndex = current.search(/[\+\=\-]/);
+    const withoutTrailingAdded = current.slice(0, -1);
+    const withoutPreDirectionAdded = directionIndex > 1
+      ? current.slice(0, directionIndex - 1) + current.slice(directionIndex)
+      : current;
+    return entry.mianzi === withoutTrailingAdded || entry.mianzi === withoutPreDirectionAdded;
+  }
+  return false;
 }
 
 function isKakanMianzi(mianzi: string | undefined): boolean {
@@ -128,7 +144,7 @@ export function applyAnmikaFulouIdentity(
   const tiles = [...parsed.tiles];
   let kakanTile = parsed.kakanTile;
   const occupied = new Set<number>();
-  const matchedOpen = openMeta.filter((entry) => matchesMianzi(entry, mianzi));
+  const matchedOpen = openMeta.filter((entry) => matchesFulouMianzi(entry, mianzi));
 
   // 鳴かれた牌の位置は、plain z5 でも手牌側の色付き牌で上書きしない。
   if (matchedOpen.length > 0 && rotateIdx !== null && rotateIdx >= 0 && rotateIdx < tiles.length) {
@@ -153,7 +169,7 @@ export function applyAnmikaFulouIdentity(
     return false;
   };
 
-  const matchedPhysical = physicalMeta.filter((entry) => matchesMianzi(entry, mianzi));
+  const matchedPhysical = physicalMeta.filter((entry) => matchesFulouMianzi(entry, mianzi));
   for (const entry of matchedPhysical) {
     const isKakanEntry = isKakanMianzi(entry.mianzi) && entry.mianzi === mianzi;
     for (const physical of entry.consumed ?? []) {
@@ -185,6 +201,26 @@ export function fulouFlatTiles(fulou: string[] | undefined | null): string[] {
   for (const m of parseFulouList(fulou)) {
     out.push(...m.tiles);
     if (m.kakanTile) out.push(m.kakanTile);
+  }
+  return out;
+}
+
+/** ドラ集計・公開表示用に、副露の expanded tile identity まで復元して平坦化する。 */
+export function fulouPhysicalFlatTiles(
+  fulou: string[] | undefined | null,
+  openMeta: FulouOpenMeta[] = [],
+  physicalMeta: FulouPhysicalMeta[] = [],
+): string[] {
+  const out: string[] = [];
+  for (const mianzi of fulou ?? []) {
+    const restored = applyAnmikaFulouIdentity(
+      mianzi,
+      parseMianzi(mianzi),
+      openMeta,
+      physicalMeta,
+    );
+    out.push(...restored.tiles);
+    if (restored.kakanTile) out.push(restored.kakanTile);
   }
   return out;
 }

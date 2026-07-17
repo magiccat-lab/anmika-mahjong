@@ -27,6 +27,17 @@ describe('Game3 xiangting', () => {
     sp.zimo('s8');
     expect(g.xiangting(player)).toBe(-1);
   });
+
+  it('物理 m7 が一萬の役割を担う国士13面待ちを0シャンテンと数える', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = 0 as PlayerId;
+    g.shoupai.set(player, buildShoupai([
+      'm7', 'm9', 'p1', 'p9', 's1', 's9',
+      'z1', 'z2', 'z3', 'z4', 'z5', 'z6', 'z7',
+    ]));
+    expect(g.xiangting(player)).toBe(0);
+  });
 });
 
 describe('Game3 mostCommonPaiInHand', () => {

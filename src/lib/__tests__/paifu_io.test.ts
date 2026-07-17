@@ -1,6 +1,26 @@
 import { describe, it, expect } from 'vitest';
 import { buildStateFromPaifu } from '../store/paifuIo';
 
+describe('buildStateFromPaifu malformed input safety', () => {
+  it('rejects broken v2 envelopes without throwing', () => {
+    const missingBody = { type: 'anmika-mahjong-paifu', version: 2 };
+    const malformedHand = {
+      type: 'anmika-mahjong-paifu',
+      version: 2,
+      shan: {},
+      state: { qijia: 0, lunban: 0 },
+      shoupai: { 0: { bingpai: null } },
+    };
+
+    expect(() => buildStateFromPaifu(null)).not.toThrow();
+    expect(buildStateFromPaifu(null)).toBeNull();
+    expect(() => buildStateFromPaifu(missingBody)).not.toThrow();
+    expect(buildStateFromPaifu(missingBody)).toBeNull();
+    expect(() => buildStateFromPaifu(malformedHand)).not.toThrow();
+    expect(buildStateFromPaifu(malformedHand)).toBeNull();
+  });
+});
+
 describe('buildStateFromPaifu [牌譜 v2 復元]', () => {
   it('type 不一致で null', () => {
     expect(buildStateFromPaifu({ type: 'random', version: 2 })).toBeNull();

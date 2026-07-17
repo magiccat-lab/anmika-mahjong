@@ -56,6 +56,48 @@ describe('canonical paifu v3', () => {
     expect(buildStateFromPaifu(duplicate)).toBeNull();
   });
 
+  it('rejects invalid round and wall counters before they reach gameplay', () => {
+    const invalidJushu = buildCanonicalPaifuSnapshot(get(game));
+    invalidJushu.game.state.jushu = 3;
+    expect(buildStateFromPaifu(invalidJushu)).toBeNull();
+
+    const negativeHonba = buildCanonicalPaifuSnapshot(get(game));
+    negativeHonba.game.state.benbang = -1;
+    expect(buildStateFromPaifu(negativeHonba)).toBeNull();
+
+    const excessiveKan = buildCanonicalPaifuSnapshot(get(game));
+    excessiveKan.game.shan.kanDoraCount = 5;
+    expect(buildStateFromPaifu(excessiveKan)).toBeNull();
+
+    const invalidRinshan = buildCanonicalPaifuSnapshot(get(game));
+    invalidRinshan.game.shan.rinshanUsed = -1;
+    expect(buildStateFromPaifu(invalidRinshan)).toBeNull();
+  });
+
+  it('rejects malformed canonical collections instead of restoring crash-prone state', () => {
+    const invalidEvents = buildCanonicalPaifuSnapshot(get(game));
+    invalidEvents.game.events = 'not-an-event-list';
+    expect(buildStateFromPaifu(invalidEvents)).toBeNull();
+
+    const invalidRule = buildCanonicalPaifuSnapshot(get(game));
+    invalidRule.game.init.shanRule = null;
+    expect(buildStateFromPaifu(invalidRule)).toBeNull();
+
+    const invalidLedger = buildCanonicalPaifuSnapshot(get(game));
+    invalidLedger.game.fields.chipLedger = null;
+    expect(buildStateFromPaifu(invalidLedger)).toBeNull();
+
+    const invalidFever = buildCanonicalPaifuSnapshot(get(game));
+    invalidFever.game.fields.feverActive = { 0: false, 1: 'yes', 2: false };
+    expect(buildStateFromPaifu(invalidFever)).toBeNull();
+  });
+
+  it('keeps the supported one-round changshu value portable', () => {
+    const oneRound = buildCanonicalPaifuSnapshot(get(game));
+    oneRound.game.init.changshu = 0;
+    expect(buildStateFromPaifu(oneRound)).not.toBeNull();
+  });
+
   it('round-trips deferred Fever and double-riichi state', () => {
     const snapshot = buildCanonicalPaifuSnapshot(get(game));
     snapshot.game.fields.doubleLizhi = [1];

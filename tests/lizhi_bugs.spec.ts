@@ -51,8 +51,8 @@ serverAuthTest('bug 1 + 2 自走検査: lizhi button self filter + 河 lizhi-til
     // この時 pA から見て リーチ button は [canLizhi で出る条件があれば] 表示される
     // pB は seat 1 = selfPlayer=1、 currentPlayer=0 で 自分の手番じゃない → リーチ button 表示されない事
     // [canLizhi が true でも、 toolbar の currentPlayer===selfPlayer filter で 非表示]
-    const aLizhiCount = await pA.locator('button.lizhi-btn').count();
-    const bLizhiCount = await pB.locator('button.lizhi-btn').count();
+    const aLizhiCount = await pA.locator('button.lizhi-choice').count();
+    const bLizhiCount = await pB.locator('button.lizhi-choice').count();
     console.log(`[bug1] pA lizhi-btn count=${aLizhiCount}, pB count=${bLizhiCount}`);
     // pB は currentPlayer != selfPlayer なので リーチ button 出ない
     expect(bLizhiCount, 'bug1: pB [非自家] にリーチ button 出てる').toBe(0);

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildDebugState } from '../store/debug';
+import { diffInventory } from '../game3/inventory';
 
 describe('buildDebugState [debug 配牌]', () => {
   it('forceP0 [13 牌] で P0 手牌 set + lastZimo 1 件', () => {
@@ -60,5 +61,20 @@ describe('buildDebugState [debug 配牌]', () => {
     expect(s.awaitingFulou).toBe(false);
     expect(s.ponCandidates).toEqual([]);
     expect(s.kanCandidates).toEqual([]);
+  });
+
+  it('ドラ表示牌をlive wallへ複製せず全物理牌の在庫を保つ', () => {
+    const s = buildDebugState([
+      'p1','p2','p3','p4','p5','p6','p7','p8','p9','s1','s2','s3','s4',
+    ]);
+    const shan = s.game.shan as any;
+    const live = new Set<string>(shan._pai);
+
+    // 値が同じ牌は複数あるので、決定的な検証は全在庫diffで行う。
+    expect(shan._baopai).toHaveLength(2);
+    expect(shan._fubaopai).toHaveLength(2);
+    expect(shan._rinshan).toHaveLength(16);
+    expect(live.size).toBeGreaterThan(0);
+    expect(diffInventory(s.game)).toEqual([]);
   });
 });

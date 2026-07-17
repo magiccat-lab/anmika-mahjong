@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canFeverLizhi, isFeverWaitExhausted } from '../game3/feverLizhi';
+import { canFeverLizhi, feverWaitInfoFromLiveWall, isFeverWaitExhausted } from '../game3/feverLizhi';
 
 // shoupai mock: _bingpai[suit][num] と _fulou
 function mkSp(bingpai: Record<string, number[]>, fulou: string[] = []): any {
@@ -97,5 +97,29 @@ describe('isFeverWaitExhausted [待ち枯渇 → 1 人テンパイ流局]', () =
     p[3] = 4;
     const spMap = new Map<number, any>([[1, mkSp({ p })]]);
     expect(isFeverWaitExhausted(['np3'], spMap, new Map(), [])).toBe(true);
+  });
+
+  it('旧 m1 待ちと現行の物理 m7 を同じ牌として山残数判定する', () => {
+    expect(isFeverWaitExhausted(['m1'], new Map(), new Map(), [], ['m7'])).toBe(false);
+    expect(isFeverWaitExhausted(['m1'], new Map(), new Map(), [], ['m9'])).toBe(true);
+  });
+});
+
+describe('FEVER live-wall wait display', () => {
+  it('宣言待ちは固定しつつ、生牌領域だけから残数と赤金虹の現物を表示する', () => {
+    expect(feverWaitInfoFromLiveWall(
+      ['p5', 'np3', 'z5', 'p5'],
+      ['p5', 'p0', 'gp', 'np3', 'p3', 'z5b'],
+    )).toEqual([
+      { tile: 'p5', remain: 3, hasRed: true, hasGold: true, hasNiji: false },
+      { tile: 'p3', remain: 2, hasRed: false, hasGold: false, hasNiji: true },
+      { tile: 'z5', remain: 0, hasRed: false, hasGold: false, hasNiji: false },
+    ]);
+  });
+
+  it('待ち表示でも旧 m1 は物理 m7 に統一する', () => {
+    expect(feverWaitInfoFromLiveWall(['m1'], ['m7', 'm9'])).toEqual([
+      { tile: 'm7', remain: 1, hasRed: false, hasGold: false, hasNiji: false },
+    ]);
   });
 });

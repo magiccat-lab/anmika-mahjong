@@ -26,13 +26,18 @@
   import StampPallet from './lib/StampPallet.svelte';
   import StampPopup from './lib/StampPopup.svelte';
   import CutinOverlay from './lib/CutinOverlay.svelte';
+  import LizhiControls from './lib/LizhiControls.svelte';
   import { CUTIN_DURATION_MS, game, type StampId } from './lib/store';
   import type { PlayerId } from './lib/types';
-  import { parseFulouList, fulouFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
+  import { parseFulouList, fulouPhysicalFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
   import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint } from './lib/store/paifuIo';
   import { serializeCanonical } from './lib/canonicalJson';
   import { toCorePai } from './lib/helpers';
+  import { feverWaitInfoFromLiveWall } from './lib/game3/feverLizhi';
+  import { computeTileInventory, expectedInventory } from './lib/game3/inventory';
+  import { countDisplayDora } from './lib/doraDisplay';
+  import { isLizhiDiscardableCandidate, lizhiCandidatesForFlags, lizhiChoiceId, lizhiChoiceLabel, type LizhiPendingFlags } from './lib/lizhiUi';
 
   // スタンプ pallet 開閉 [自家「💬」 button 押下時 true]
   let stampPalletOpen = false;
@@ -292,121 +297,10 @@
   // ツモ履歴 [全 zimo event]
   $: zimoHistory = $game.game.events.filter((e: any) => e.type === 'zimo').map((e: any, i: number) => `${i+1}. p${e.player}: ${e.pai}`);
 
-  // 全 116 枚集計 [山 + 手牌 + 副露 + 河 + 王牌 + ドラ + 抜き華]
-  $: tileInventory = (() => {
-    const counts: Record<string, number> = {};
-    const inc = (p: string) => { if (!p) return; counts[p] = (counts[p] ?? 0) + 1; };
-    const g = $game.game;
-    // shan._pai [山 + 王牌込み]、 赤 [p0/s0/m0] / 金 [gp/gs/gN] / 4 色ぽ [z5*] は別 key 維持
-    for (const p of ((g.shan as any)._pai ?? [])) inc(p);
-    // 秋ドラ / カンドラで drawNewDora が _pai 末尾を pop して _baopai / _fubaopai に push してる、
-    // 初期 2 枚 [index 0, 1] は _pai 内 [4, 5] / [9, 10] と重複なので skip、 index 2+ のみ追加カウント
-    const _baopai = ((g.shan as any)._baopai ?? []) as string[];
-    for (let i = 2; i < _baopai.length; i++) inc(_baopai[i]);
-    const _fubaopai = ((g.shan as any)._fubaopai ?? []) as string[];
-    for (let i = 2; i < _fubaopai.length; i++) inc(_fubaopai[i]);
-    // 冬めくり牌 [shan._pai から pop されて 冬専用領域に保管]
-    const _fuyuRevealed = ((g.shan as any)._fuyuRevealed ?? []) as string[];
-    for (const p of _fuyuRevealed) inc(p);
-    // 手牌 + 副露
-    // debug: 各 player の bingpai.p[0]/bingpai.s[0] 集計確認
-    const dbg: any = {};
-    for (const pl of [0, 1, 2] as const) {
-      const sp = g.shoupai.get(pl);
-      if (sp) dbg[`p${pl}`] = { 'p[0]': sp._bingpai.p[0], 'p[5]': sp._bingpai.p[5], 's[0]': sp._bingpai.s[0], 's[5]': sp._bingpai.s[5], 'z[4]': sp._bingpai.z[4], gold: g.goldHand[pl] };
-    }
-    if ((window as any).__ANMIKA_DEBUG__) console.log('[tile inv]', JSON.stringify(dbg));
-    for (const pl of [0, 1, 2] as const) {
-      const sp = g.shoupai.get(pl);
-      if (sp) {
-        for (const s of ['m', 'p', 's', 'z']) {
-          const len = s === 'z' ? 8 : 10;
-          for (let n = 0; n < len; n++) {
-            let cnt = sp._bingpai[s][n] ?? 0;
-            // 0 補正: bingpai[s][0] = 赤 + 金 [両方 's0' / 'p0' で normalize されて bingpai に入る]
-            // 集計で 's0' = 純粋赤、 'gs' = 金 別key にしたいので 金分を控除
-            if (n === 0 && (s === 'p' || s === 's')) cnt -= g.goldHand[pl]?.[s] ?? 0;
-            // 5 補正: bingpai[s][5] には赤 [s][0] + 金 含まれる
-            if (n === 5 && s !== 'z') {
-              cnt -= sp._bingpai[s][0] ?? 0;
-              // 注: bingpai[s][0] には金分含む、 別途 goldHand 控除不要 [既に [s][0] 控除でカバー]
-            }
-            // 北 補正: bingpai.z[4] には金北 [goldHand.z] 含まれる
-            if (n === 4 && s === 'z') cnt -= g.goldHand[pl]?.z ?? 0;
-            if (s === 'z' && n === 5) continue;
-            for (let k = 0; k < cnt; k++) inc(`${s}${n}`);
-          }
-        }
-        // 金牌は別 key
-        for (let k = 0; k < (g.goldHand[pl]?.p ?? 0); k++) inc('gp');
-        for (let k = 0; k < (g.goldHand[pl]?.s ?? 0); k++) inc('gs');
-        for (let k = 0; k < (g.goldHand[pl]?.z ?? 0); k++) inc('gN');
-        // z5 系: pochiHand から 4 色別に inc
-        const ph = g.pochiHand[pl] ?? { blue: 0, red: 0, green: 0, yellow: 0 };
-        for (let k = 0; k < ph.blue; k++) inc('z5b');
-        for (let k = 0; k < ph.red; k++) inc('z5r');
-        for (let k = 0; k < ph.green; k++) inc('z5g');
-        for (let k = 0; k < ph.yellow; k++) inc('z5y');
-        // sp._zimo は _bingpai に既に含まれてる [majiang-core 仕様]、 別途 inc しない
-        // R10 P2 #10 fix: mianzi 実 format は suite + digits [例: 'p333']
-        for (const m of (sp._fulou ?? [])) {
-          const stripped = (m as string).replace(/[\+=\-_*]/g, '');
-          const suite = stripped[0];
-          for (let i = 1; i < stripped.length; i++) {
-            const digit = stripped[i];
-            if (!/[0-9]/.test(digit)) continue;
-            inc(suite + digit);
-          }
-        }
-      }
-      // 河: discardLog の gold/pochi meta を見て 正しい key に inc
-      // [he._pai は plain key で記録されてるが、 金 / pochi 色は discardLog に残ってる]
-      const dlog = g.discardLog[pl] ?? [];
-      const he = g.he.get(pl);
-      if (he?._pai) {
-        const hePai = he._pai as string[];
-        for (let i = 0; i < hePai.length; i++) {
-          const stripped = hePai[i].replace(/[\+=\-_*]/g, '');
-          const meta = dlog[i];
-          // 金牌は gold key、 pochi 色は z5* key、 それ以外は plain
-          if (meta?.gold && stripped === 'p0') inc('gp');
-          else if (meta?.gold && stripped === 's0') inc('gs');
-          else if (meta?.gold && stripped === 'z4') inc('gN');
-          else if (meta?.pochi && stripped === 'z5') {
-            const colorKey = { blue: 'z5b', red: 'z5r', green: 'z5g', yellow: 'z5y' }[meta.pochi];
-            inc(colorKey ?? 'z5');
-          } else inc(stripped);
-        }
-      }
-      // 抜き華
-      for (const hp of (g.huapai[pl] ?? [])) inc(hp);
-      // 抜きドラ [通常 z4 抜き = nukidora、 金北抜き = nukidoraGold で別 inc]
-      const nuki = g.nukidora[pl] ?? 0;
-      const nukiG = (g as any).nukidoraGold?.[pl] ?? 0;
-      for (let k = 0; k < nuki; k++) inc('z4');
-      for (let k = 0; k < nukiG; k++) inc('gN');
-    }
-    return counts;
-  })();
-  $: tileExpected = (() => {
-    const exp: Record<string, number> = {};
-    for (const n of [7, 9]) exp[`m${n}`] = 4;
-    for (const s of ['p', 's']) for (let n = 1; n <= 9; n++) {
-      if (n === 5) exp[`${s}${n}`] = 2; // 5p/5s 通常は 2 枚 [赤 1 + 金 1 + 通常 2 = 4 枚]
-      else exp[`${s}${n}`] = 4;
-    }
-    exp['p0'] = 1; exp['gp'] = 1; // 赤 5p / 金 5p 各 1
-    exp['s0'] = 1; exp['gs'] = 1;
-    for (let n = 1; n <= 7; n++) {
-      if (n === 5) exp[`z${n}`] = 0; // z5 は 4 色別
-      else if (n === 4) exp[`z${n}`] = 3; // 北 通常 3 + 金北 1
-      else exp[`z${n}`] = 4;
-    }
-    exp['gN'] = 1;
-    for (const c of ['z5b', 'z5r', 'z5g', 'z5y']) exp[c] = 1;
-    for (let n = 1; n <= 4; n++) exp[`f${n}`] = 2;
-    return exp;
-  })();
+  // 全116枚集計。live wall・嶺上・固定ドラ・冬公開牌と expanded tile を
+  // 共通の物理在庫ロジックで数え、UIだけ別実装にならないようにする。
+  $: tileInventory = computeTileInventory($game.game);
+  $: tileExpected = expectedInventory();
   $: tileDiff = (() => {
     const diff: Array<{ pai: string; got: number; exp: number }> = [];
     const allKeys = new Set([...Object.keys(tileInventory), ...Object.keys(tileExpected)]);
@@ -913,8 +807,7 @@
     hasNiji?: boolean;
   };
 
-  // フィーバー中 待ち牌の残り枚数 + 赤金虹有無。
-  // 残り = 4 - 全 player の手牌 + 全 player の河 + 全 副露 + 表ドラ表示牌
+  // フィーバー中 待ち牌の live wall 残枚数 + 赤金虹有無。
   function feverWaitInfo(player: number): FeverWaitRow[] {
     // 対戦中の他家の山・手牌はクライアントに存在しない。成立後にサーバーが
     // 公開した裁定済み情報だけを表示し、伏せ牌から推測し直さない。
@@ -932,62 +825,12 @@
     const tings: string[] = $game.game.feverActive[player as 0|1|2]
       ? ($game.game.feverDeclareTing?.[player as 0|1|2] ?? [])
       : (($game.game as any).getTingpaiList?.(player) ?? []);
-    const baseTile = (p: string) => {
-      const stripped = p.replace(/[\+=\-_*]/g, '');
-      const core = toCorePai(stripped);
-      return core[0] + (core[1] === '0' ? '5' : core[1]);
-    };
-    const countVisible = (ss: string, nn: number): number => {
-      const target = ss + nn;
-      let n = 0;
-      for (const p of [0, 1, 2] as const) {
-        const psp = $game.game.shoupai.get(p);
-        if (psp) {
-          n += (psp._bingpai?.[ss]?.[nn] ?? 0);
-          // _bingpai[ss][nn] already includes red/gold physical copies.
-          // 副露の中身も探す
-          // R10 P2 #10 fix: mianzi 実フォーマットは suite + digits [例: 'p333', 'z5555', 'p333+']、
-          // 各 digit を suite と組み合わせて pai に展開
-          for (const m of psp._fulou ?? []) {
-            const stripped = (m as string).replace(/[\+=\-]/g, '');
-            const suite = stripped[0];
-            for (let i = 1; i < stripped.length; i++) {
-              const digit = stripped[i];
-              if (!/[0-9]/.test(digit)) continue;
-              if (baseTile(suite + digit) === target) n++;
-            }
-          }
-        }
-        const phe = $game.game.he.get(p);
-        if (phe?._pai) {
-          for (const d of phe._pai as string[]) {
-            if (baseTile(d) === target) n++;
-          }
-        }
-      }
-      // 表ドラ表示牌
-      for (const b of $game.game.shan.baopai ?? []) {
-        if (baseTile(b) === target) n++;
-      }
-      return n;
-    };
-    return tings
-      .map((t) => {
-        const normalized = baseTile(t);
-        const ss = normalized[0]; const nn = parseInt(normalized[1]);
-        const visible = countVisible(ss, nn);
-        // 白ぽっちだけが山に残っていても FEVER の生存待ちには数えない。
-        const remain = normalized === 'z5' ? 0 : Math.max(0, 4 - visible);
-        const info: any = { tile: normalized, remain };
-        if ((ss === 'p' && nn === 5) || (ss === 's' && nn === 5)) {
-          info.hasRed = remain > 0;
-          info.hasGold = remain > 1;
-        }
-        if ((ss === 'p' || ss === 's' || ss === 'z') && nn === 3) {
-          info.hasNiji = remain > 0;
-        }
-        return info;
-      });
+    // 王牌内の伏せ牌を「残り」と誤表示しないよう、権威側と同じく
+    // live wall の物理牌だけを数える。赤・金・虹の有無も現物から出す。
+    return feverWaitInfoFromLiveWall(
+      tings,
+      [...((($game.game.shan as any)._pai ?? []) as string[])],
+    );
   }
 
   function fuyuWaitRemain(player: PlayerId, tings: string[]): number {
@@ -1044,56 +887,65 @@
   // リーチ宣言牌候補 [リーチ button 押下後に表示、 候補以外を grayout]
   // 2026-07-16 リョー裁定: フィーバー宣言中はフィーバーが成立する宣言牌だけに絞る
   // [7 暗刻を崩す牌は候補に出さない。通常リーチへの自動降格は廃止]
-  $: lizhiCandidates = (() => {
-    if (!$game.game.canLizhi(currentPlayer)) return [];
-    const base = $game.game.getLizhiCandidates(currentPlayer);
-    if (($game as any)._lizhiFever && $game.lizhiPending === currentPlayer) {
-      const feverMap = $game.game.feverCandidatesByDapai(currentPlayer);
-      const norm = (p: string) => p.replace(/_$/, '');
-      return base.filter((c: string) => feverMap.has(norm(c)));
-    }
-    return base;
-  })();
-  function isLizhiCand(pai: string): boolean {
-    if (lizhiCandidates.length === 0) return false;
-    // R8 fix: 表示牌 [gp/gs/gN/bu/br/bg/by] を 内部候補 [p0/s0/z4/z5] に normalize、
-    // リーチ pending 中の 金牌 / 色付き白 が宣言牌候補なのに click 弾かれる bug 解消
-    const normalize = (p: string): string => {
-      if (p === 'gp') return 'p0';
-      if (p === 'gs') return 's0';
-      if (p === 'gN') return 'z4';
-      if (p === 'bu' || p === 'br' || p === 'bg' || p === 'by'
-          || p === 'z5b' || p === 'z5r' || p === 'z5g' || p === 'z5y') return 'z5';
-      if (p === 'np3') return 'p3';
-      if (p === 'ns3') return 's3';
-      if (p === 'nz3') return 'z3';
-      return p;
-    };
-    const target = normalize(pai);
-    return lizhiCandidates.some((c) => normalize(c.replace(/_$/, '')) === target);
-  }
-
-  // [2026-05-16 bug 8 wiring] 打牌候補ごと fever 可否、 「9s 切れば fever、 他は通常リーチ」 表示用
+  $: baseLizhiCandidates = $game.game.canLizhi(currentPlayer)
+    // 北/金北はこのゲームでは河に切れず、北抜き専用。宣言牌として
+    // 出すと押しても nuki gate に止められるため、UIでも候補にしない。
+    ? $game.game.getLizhiCandidates(currentPlayer)
+      .filter(isLizhiDiscardableCandidate)
+    : [];
+  $: pendingLizhiFlags = ($game.lizhiPending === currentPlayer
+    ? ($game.lizhiPendingFlags ?? null)
+    : null) as LizhiPendingFlags | null;
   $: feverDapaiMap = $game.game.canLizhi(currentPlayer)
     ? $game.game.feverCandidatesByDapai(currentPlayer)
-    : new Map();
-  $: feverDapaiTiles = Array.from(feverDapaiMap.keys()) as string[];
-  $: feverAvailable = $game.game.canFeverLizhi(currentPlayer).ok || feverDapaiTiles.length > 0;
-  $: feverIsConditional = feverDapaiTiles.length > 0 && feverDapaiTiles.length < lizhiCandidates.length;
+    : new Map<string, { ok: boolean; tiles: string[]; tier: 1 | 2 | 3 | 4 }>();
+  $: baseLizhiCandidateSet = new Set(
+    baseLizhiCandidates.map((pai) => pai.replace(/[_*]$/, '')),
+  );
+  $: feverDapaiTiles = (Array.from(feverDapaiMap.keys()) as string[])
+    .filter(isLizhiDiscardableCandidate)
+    // FEVER condition alone is insufficient: the same physical discard must
+    // also leave the hand in riichi tenpai.
+    .filter((pai) => baseLizhiCandidateSet.has(pai.replace(/[_*]$/, '')));
+  $: lizhiCandidates = lizhiCandidatesForFlags(
+    baseLizhiCandidates, feverDapaiTiles, pendingLizhiFlags,
+  );
+
+  function physicalLizhiCandidates(candidates: string[]): string[] {
+    const physicalInHand = new Set(handTiles($game.game.shoupai.get(currentPlayer), currentPlayer)
+      .filter((pai) => pai !== 'back').map((pai) => pai.replace(/[_*]$/, '')));
+    // Game3 returns physical identities (gp/np3/z5b...) here.  Exact matching
+    // is required: core-equal p3 and np3 can have different FEVER outcomes.
+    return [...new Set(candidates
+      .map((pai) => pai.replace(/[_*]$/, ''))
+      .filter((pai) => physicalInHand.has(pai)))];
+  }
+  $: normalLizhiPhysicalCandidates = physicalLizhiCandidates(baseLizhiCandidates);
+  $: feverLizhiPhysicalCandidates = physicalLizhiCandidates(feverDapaiTiles);
+  $: selectedLizhiLabel = lizhiChoiceLabel(lizhiChoiceId(pendingLizhiFlags));
+
+  function isLizhiCand(pai: string): boolean {
+    if (lizhiCandidates.length === 0) return false;
+    const target = pai.replace(/[_*]$/, '');
+    return lizhiCandidates.some((candidate) => candidate.replace(/[_*]$/, '') === target);
+  }
+
+  // [2026-05-16 bug 8 wiring] 打牌候補ごと fever 可否。
+  // 宣言は「打牌後の手」で成立する候補がある場合だけ提示する。
+  // 14 枚時点の全体判定だけを使うと、実際には押せない空の選択肢が表示される。
+  $: feverAvailable = feverDapaiTiles.length > 0;
 
   // 手牌中のドラ数 [赤牌 + 表ドラ一致]
   function countDora(sp: any): number {
     if (!sp) return 0;
-    let count = 0;
     const dora = baopai.map(doraFrom);
     const tiles = handTiles(sp);
-    tiles.push(...fulouFlatTiles(sp?._fulou));
-    for (const t of tiles) {
-      if (t[1] === '0') count++; // 赤
-      const norm = t[0] + (t[1] === '0' ? '5' : t[1]);
-      if (dora.some((d) => d === norm || d === t)) count++;
-    }
-    return count;
+    tiles.push(...fulouPhysicalFlatTiles(
+      sp?._fulou,
+      sp?._anmikaFulou ?? [],
+      sp?._anmikaFulouPhysical ?? [],
+    ));
+    return countDisplayDora(tiles, dora);
   }
   $: oyaPlayer = (((state.qijia ?? 0) - (state.jushu ?? 0)) % 3 + 3) % 3;
   $: dora0 = countDora($game.game.shoupai.get(0));
@@ -1884,28 +1736,18 @@
         {/if}
       </div>
     {/if}
-    {#if !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && (!onlineGameStarted || currentPlayer === selfPlayer)}
-      {@const lp = ($game as any).lizhiPendingFlags ?? null}
-      {@const lpActive = $game.lizhiPending === currentPlayer && lp}
+    {#if !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && baseLizhiCandidates.length > 0 && (!onlineGameStarted || currentPlayer === selfPlayer)}
       <div class="action-row">
         <span class="row-label">リーチ:</span>
-        <button class="lizhi-btn" class:active={lpActive && !lp.shuvari && !lp.fever && !lp.open} on:click={() => game.lizhi()}>通常</button>
-        {#if !$game.game.shuvariUsed[currentPlayer]}
-          <button class="lizhi-btn shuvari" class:active={lpActive && lp.shuvari && !lp.fever && !lp.open} on:click={() => game.lizhi({shuvari:true})}>シュバ</button>
-        {/if}
-        {#if feverAvailable}
-          <button class="lizhi-btn fever" class:active={lpActive && lp.fever && !lp.shuvari} on:click={() => game.lizhi({fever:true})}>フィバ</button>
-          {#if !$game.game.shuvariUsed[currentPlayer]}
-            <button class="lizhi-btn shuvari-fever" class:active={lpActive && lp.fever && lp.shuvari} on:click={() => game.lizhi({shuvari:true,fever:true})}>シュバフィバ</button>
-          {/if}
-          {#if feverIsConditional}
-            <span class="fever-cond-hint">[{feverDapaiTiles.join('/')} 切れば fever、 他は通常リーチ]</span>
-          {/if}
-        {/if}
-        <button class="lizhi-btn open" class:active={lpActive && lp.open && !lp.shuvari} on:click={() => game.lizhi({open:true})}>オープン</button>
-        {#if !$game.game.shuvariUsed[currentPlayer]}
-          <button class="lizhi-btn shuvari-open" class:active={lpActive && lp.open && lp.shuvari} on:click={() => game.lizhi({shuvari:true, open:true})}>シュバオープン</button>
-        {/if}
+        <LizhiControls
+          pending={$game.lizhiPending === currentPlayer}
+          flags={pendingLizhiFlags}
+          normalCandidates={normalLizhiPhysicalCandidates}
+          feverCandidates={feverLizhiPhysicalCandidates}
+          {feverAvailable}
+          shuvariUsed={$game.game.shuvariUsed[currentPlayer]}
+          onSelect={(opts) => game.lizhi(opts)}
+        />
       </div>
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: online で 他人手番の 北抜き / カン button が
@@ -2116,7 +1958,7 @@
           <span class="dora-divider">|</span>
         {/if}
         <span class="dora-label">ドラ表</span>
-        {#each baopai.filter((t) => typeof t === 'string' && !t.startsWith('f')) as t}
+        {#each baopai.filter((t) => typeof t === 'string') as t}
           <Tile pai={t} size="md" />
         {/each}
       </div>
@@ -2251,25 +2093,17 @@
             </div>
           {/if}
         {/if}
-        {#if currentPlayer === selfPlayer && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer)}
+        {#if currentPlayer === selfPlayer && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && baseLizhiCandidates.length > 0}
           <div class="tb-row">
-            <button class="lizhi-btn" on:click={() => game.lizhi()}>リーチ</button>
-            {#if !$game.game.shuvariUsed[currentPlayer]}
-              <button class="lizhi-btn shuvari" on:click={() => game.lizhi({shuvari:true})}>シュバ</button>
-            {/if}
-            {#if feverAvailable}
-              <button class="lizhi-btn fever" on:click={() => game.lizhi({fever:true})}>フィバ</button>
-              {#if !$game.game.shuvariUsed[currentPlayer]}
-                <button class="lizhi-btn shuvari-fever" on:click={() => game.lizhi({shuvari:true,fever:true})}>シュバフィバ</button>
-              {/if}
-              {#if feverIsConditional}
-                <span class="fever-cond-hint">[{feverDapaiTiles.join('/')} 切れば fever]</span>
-              {/if}
-            {/if}
-            <button class="lizhi-btn open" on:click={() => game.lizhi({open:true})}>オープン</button>
-            {#if !$game.game.shuvariUsed[currentPlayer]}
-              <button class="lizhi-btn shuvari-open" on:click={() => game.lizhi({shuvari:true, open:true})}>シュバオープン</button>
-            {/if}
+            <LizhiControls
+              pending={$game.lizhiPending === currentPlayer}
+              flags={pendingLizhiFlags}
+              normalCandidates={normalLizhiPhysicalCandidates}
+              feverCandidates={feverLizhiPhysicalCandidates}
+              {feverAvailable}
+              shuvariUsed={$game.game.shuvariUsed[currentPlayer]}
+              onSelect={(opts) => game.lizhi(opts)}
+            />
           </div>
         {/if}
         {#if currentPlayer === selfPlayer && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou}
@@ -2324,6 +2158,7 @@
       lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv0), shoupai0)}
       isLizhiCand={isLizhiCand}
       lizhiPending={$game.lizhiPending === currentPlayer}
+      lizhiKindLabel={selectedLizhiLabel}
       onTileClick={onTileClick}
       disabled={needsZimo}
       shuvariActive={$game.game.shuvariActive[srv0]}
@@ -2368,7 +2203,8 @@
         revealHand={selfPlayer === srv1 || (!onlineGameStarted && revealAll) || $game.game.openLizhi.has(srv1) || $game.game.isFeverConfirmed(srv1)}
         lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv1), shoupai1)}
         isLizhiCand={isLizhiCand}
-      lizhiPending={$game.lizhiPending === currentPlayer}
+        lizhiPending={$game.lizhiPending === currentPlayer}
+        lizhiKindLabel={selectedLizhiLabel}
         onTileClick={onTileClick}
         disabled={needsZimo}
         shuvariActive={$game.game.shuvariActive[srv1]}
@@ -2414,7 +2250,8 @@
         revealHand={selfPlayer === srv2 || (!onlineGameStarted && revealAll) || $game.game.openLizhi.has(srv2) || $game.game.isFeverConfirmed(srv2)}
         lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv2), shoupai2)}
         isLizhiCand={isLizhiCand}
-      lizhiPending={$game.lizhiPending === currentPlayer}
+        lizhiPending={$game.lizhiPending === currentPlayer}
+        lizhiKindLabel={selectedLizhiLabel}
         onTileClick={onTileClick}
         disabled={needsZimo}
         shuvariActive={$game.game.shuvariActive[srv2]}
@@ -2593,7 +2430,12 @@
 
   <section class="debug-log">
     <TileChecker inventory={tileInventory} expected={tileExpected} />
-    <WallPanel wall={(($game.game.shan as any)._pai ?? [])} baopai={[...$game.game.shan.baopai]} fubaopai={[...($game.game.shan.fubaopai ?? [])]} />
+    <WallPanel
+      wall={(($game.game.shan as any)._pai ?? [])}
+      rinshan={(($game.game.shan as any)._rinshan ?? [])}
+      baopai={[...$game.game.shan.baopai]}
+      fubaopai={[...($game.game.shan.fubaopai ?? [])]}
+    />
     <DebugLogPanel logs={debugLogs} onClear={() => { debugLogs = []; }} />
   </section>
 

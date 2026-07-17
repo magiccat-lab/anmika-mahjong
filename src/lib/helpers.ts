@@ -205,7 +205,10 @@ export function patchAnmikaShoupai(sp: any, tiles: string[] = []): any {
     const raw = p?.replace(/_$/, '') ?? p;
     const ret = origZimo(toCorePai(p), check);
     addAnmikaPai(sp, raw, 1);
-    if (isAnmikaExpandedPai(raw)) sp._anmikaZimo = raw;
+    // `_anmikaZimo` identifies this draw, not the most recent expanded draw.
+    // Leaving it untouched on an ordinary draw makes CPU/riichi tsumogiri
+    // resolve a stale rainbow/gold/pochi tile that is no longer the zimo.
+    sp._anmikaZimo = isAnmikaExpandedPai(raw) ? raw : null;
     return ret;
   };
   sp.dapai = (p: string, check = true) => {
@@ -251,8 +254,9 @@ export function patchAnmikaShoupai(sp: any, tiles: string[] = []): any {
     const cloned = patchAnmikaShoupai(origClone());
     cloned._bingpai.__anmika = { ...ensureAnmikaCounts(sp) };
     cloned._anmikaZimo = sp._anmikaZimo ?? null;
+    cloned._anmikaFulou = (sp._anmikaFulou ?? []).map((f: any) => ({ ...f }));
     cloned._anmikaFulouPhysical = (sp._anmikaFulouPhysical ?? []).map((f: any) => ({
-      mianzi: f.mianzi,
+      ...f,
       consumed: [...(f.consumed ?? [])],
     }));
     syncAnmikaBingpai(cloned);

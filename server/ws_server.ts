@@ -99,6 +99,101 @@ function membersForAuthority(room: Room): AuthorityMember[] {
   }));
 }
 
+/** A Shuvari player cannot waive a legal ron, even when their decision is
+ * made by the disconnect/timeout watchdog.  Sending the generic pass here is
+ * rejected by RoomAuthority and otherwise reschedules the same timeout
+ * forever. */
+export function reactionTimeoutAction(
+  authority: RoomAuthority,
+  seat: number,
+): Record<string, unknown> {
+  if (seat === 0 || seat === 1 || seat === 2) {
+    const source = authority.pendingQianggang
+      ? { player: authority.pendingQianggang.player, pai: authority.pendingQianggang.kakanPai }
+      : authority.lastDapai;
+    if (authority.ronCandidates.includes(seat)
+      && source
+      && authority.game.shuvariActive[seat]
+      && authority.game.canRon(seat, source.pai, source.player)) {
+      return { type: 'ron', player: seat };
+    }
+  }
+  return { type: 'pass', player: seat };
+}
+
+/** Pick the same legal action that the acting client is allowed to submit
+ * when its turn deadline expires.  In particular, a generic efficiency
+ * discard is not legal after riichi selection, for an established riichi, or
+ * for a non-declarer during FEVER. */
+export function turnTimeoutAction(
+  authority: RoomAuthority,
+  isCpu = false,
+): Record<string, unknown> | null {
+  const current = authority.currentPlayer();
+  const game = authority.game;
+  const canonical = authority.canonicalState();
+  // Once the player has selected a riichi kind, the only legal continuation
+  // is its exact declaration discard.  A complete 14-tile hand can still have
+  // riichi candidates, so a timeout must not override that committed choice
+  // by auto-tsumoing instead.
+  if (canonical.lizhiPending === current) {
+    const normalCandidates = game.getLizhiCandidates(current);
+    const feverPending = canonical.lizhiPendingFlags?.fever === true
+      || canonical._lizhiFever === true;
+    const candidates = feverPending
+      ? normalCandidates.filter((pai) => game.feverCandidatesByDapai(current).has(pai))
+      : normalCandidates;
+    // getLizhiCandidates() and feverCandidatesByDapai() expose exact physical
+    // faces, so the timeout commits the same gp/np3/z5* choice shown in the UI.
+    if (candidates.length > 0) return { type: 'discard', pai: candidates[0] };
+    return null;
+  }
+
+  // Without a committed two-stage declaration, a legal win takes priority
+  // over every other continuation.
+  if (game.canTsumo(current)) return { type: 'tsumo' };
+
+  // This ruleset makes a wait-preserving post-riichi kan compulsory.  It also
+  // precedes north extraction and the otherwise forced tsumogiri.
+  const forcedKan = game.getForcedLizhiKanCandidates(current);
+  if (forcedKan.length > 0) return { type: 'declareKan', mianzi: forcedKan[0] };
+
+  // North is nuki-only and is resolved before a forced discard.  Preserve the
+  // physical identity so a drawn gN cannot consume an ordinary held north.
+  const sp = game.shoupai.get(current);
+  const drawnNorth = authority.lastZimo && toCorePai(authority.lastZimo) === 'z4';
+  if ((drawnNorth || isCpu) && game.canNukiBei(current)) {
+    const goldNorth = Number(game.goldHand[current]?.z ?? 0);
+    const normalNorth = Math.max(0, Number(sp?._bingpai?.z?.[4] ?? 0) - goldNorth);
+    const useGold = drawnNorth
+      ? authority.lastZimo === 'gN'
+      : normalNorth === 0 && goldNorth > 0;
+    return { type: 'nukiBei', meta: { gold: useGold } };
+  }
+
+  // Human timeouts must never opt into a new riichi.  A server-owned CPU,
+  // however, may not remain dama in this table: declare first and let the next
+  // deadline commit the exact physical candidate through the pending branch.
+  if (isCpu && game.canLizhi(current)) {
+    const normalCandidates = game.getLizhiCandidates(current);
+    const feverCandidates = game.feverCandidatesByDapai(current);
+    const hasLegalFever = normalCandidates.some((pai) => feverCandidates.has(pai));
+    return { type: 'lizhi', opts: hasLegalFever ? { fever: true } : {} };
+  }
+
+  const someoneFever = ([0, 1, 2] as const).some((player) => game.feverActive[player]);
+  if ((game.lizhi.has(current) || (someoneFever && !game.feverActive[current])) && authority.lastZimo) {
+    return { type: 'tsumokiri' };
+  }
+
+  const pai = game.pickBestDiscard(current)
+    ?? (typeof sp?._zimo === 'string' && sp._zimo.length <= 3 ? sp._zimo : null)
+    ?? ((sp?.get_dapai?.(false) ?? []) as string[])
+      .find((candidate) => toCorePai(candidate.replace(/_$/, '')) !== 'z4')
+      ?.replace(/_$/, '');
+  return pai ? { type: 'discard', pai } : null;
+}
+
 export function restoreAuthority(
   snapshot: CanonicalRoomSnapshot,
   commands?: AcceptedRoomCommand[],
@@ -342,15 +437,55 @@ function publicEventForSeat(event: any, recipientSeat: number): Record<string, u
   return structuredClone(event);
 }
 
-function shouldRevealUra(authority: RoomAuthority): boolean {
-  const state = authority.canonicalState();
+function isPostWinState(state: ReturnType<RoomAuthority['canonicalState']>): boolean {
   return !!state.lastHuleResult
+    || state.ronResults.length > 0
     || !!state.pendingFuyu
     || !!state.pendingKinpei
     || !!state.pendingKamiPochi
     || !!state.pendingPochiSwap
     || !!state.pendingSaiKoro
+    || !!state.pendingFeverContinue
     || (state.roundEnded && state.lastWinner !== null);
+}
+
+function postWinWinners(state: ReturnType<RoomAuthority['canonicalState']>): Set<number> {
+  const winners = new Set<number>();
+  const add = (value: unknown) => {
+    if (value === 0 || value === 1 || value === 2) winners.add(value);
+  };
+  add(state.lastWinner);
+  for (const result of state.ronResults) add(result.player);
+  for (const pending of [
+    state.pendingFuyu,
+    state.pendingKinpei,
+    state.pendingKamiPochi,
+    state.pendingPochiSwap,
+    state.pendingFeverContinue,
+  ]) {
+    if (!pending) continue;
+    add(pending.winner);
+    const otherWinners = (pending as { otherWinners?: unknown[] }).otherWinners;
+    if (Array.isArray(otherWinners)) for (const winner of otherWinners) add(winner);
+  }
+  if (state.pendingSaiKoro) {
+    add(state.pendingSaiKoro.winner);
+    for (const chance of state.pendingSaiKoro.chances) add((chance as { winner?: unknown }).winner);
+  }
+  return winners;
+}
+
+/** Ura indicators are public only when at least one actual winner of this hand
+ * had declared riichi.  A losing riichi player must not reveal them for a
+ * non-riichi winner, including while post-win choices are still pending. */
+export function shouldRevealUra(authority: RoomAuthority): boolean {
+  const state = authority.canonicalState();
+  // Do not expose ura while another player still has a ron/pass decision.
+  // In a double-ron window, the first declared winner may already appear in
+  // ronResults, but later responders must decide without seeing hidden dora.
+  if (state.awaitingRonDecision || state.pendingQianggang) return false;
+  if (!isPostWinState(state)) return false;
+  return [...postWinWinners(state)].some((winner) => state.game.lizhi.has(winner as 0 | 1 | 2));
 }
 
 /**
@@ -361,6 +496,13 @@ function shouldRevealUra(authority: RoomAuthority): boolean {
 export function captureSeatProjection(authority: RoomAuthority, recipientSeat: number): OnlineSeatProjection {
   const state = authority.canonicalState();
   const game = state.game;
+  // A first ron declaration can populate ronResults while another seat is
+  // still deciding.  Treat that as an unresolved reaction window, not as a
+  // public post-win state: private pochi/payment fields could otherwise help
+  // the remaining player decide whether to ron or pass.
+  const revealPostWinPrivateState = isPostWinState(state)
+    && !state.awaitingRonDecision
+    && !state.pendingQianggang;
   const revealUra = shouldRevealUra(authority);
   const emptyGold = () => ({ p: 0, s: 0, z: 0 });
   const emptyPochi = () => ({ blue: 0, red: 0, green: 0, yellow: 0 });
@@ -418,14 +560,14 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
   };
   const neutralMultiplier = { defen: 1, chip: 1 };
   const pochiMultiplier = {
-    0: own === 0 || revealUra ? { ...game.pochiMultiplier[0] } : { ...neutralMultiplier },
-    1: own === 1 || revealUra ? { ...game.pochiMultiplier[1] } : { ...neutralMultiplier },
-    2: own === 2 || revealUra ? { ...game.pochiMultiplier[2] } : { ...neutralMultiplier },
+    0: own === 0 || revealPostWinPrivateState ? { ...game.pochiMultiplier[0] } : { ...neutralMultiplier },
+    1: own === 1 || revealPostWinPrivateState ? { ...game.pochiMultiplier[1] } : { ...neutralMultiplier },
+    2: own === 2 || revealPostWinPrivateState ? { ...game.pochiMultiplier[2] } : { ...neutralMultiplier },
   };
   const maskPrivateRecord = <T>(record: Record<0 | 1 | 2, T>, fallback: T): Record<number, T> => ({
-    0: own === 0 || revealUra ? structuredClone(record[0]) : structuredClone(fallback),
-    1: own === 1 || revealUra ? structuredClone(record[1]) : structuredClone(fallback),
-    2: own === 2 || revealUra ? structuredClone(record[2]) : structuredClone(fallback),
+    0: own === 0 || revealPostWinPrivateState ? structuredClone(record[0]) : structuredClone(fallback),
+    1: own === 1 || revealPostWinPrivateState ? structuredClone(record[1]) : structuredClone(fallback),
+    2: own === 2 || revealPostWinPrivateState ? structuredClone(record[2]) : structuredClone(fallback),
   });
   const shan: any = game.shan;
   return {
@@ -518,6 +660,16 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       message: state.message,
       cpu: structuredClone(state.cpu),
       lizhiPending: state.lizhiPending === own ? own : null,
+      // The two-stage declaration choice is private to the acting seat until
+      // the discard is made, but that seat must receive it on every ack and
+      // reconnect.  Without these fields the UI forgets FEVER/open/Shuvari
+      // and can highlight declaration tiles that the authority will reject.
+      lizhiPendingFlags: state.lizhiPending === own
+        ? structuredClone(state.lizhiPendingFlags ?? null)
+        : null,
+      _lizhiOpen: state.lizhiPending === own && state._lizhiOpen === true,
+      _lizhiShuvari: state.lizhiPending === own && state._lizhiShuvari === true,
+      _lizhiFever: state.lizhiPending === own && state._lizhiFever === true,
       pendingKinpei: structuredClone(state.pendingKinpei),
       pendingFuyu: structuredClone(state.pendingFuyu),
       pendingKamiPochi: structuredClone(state.pendingKamiPochi),
@@ -542,7 +694,7 @@ function captureBeforeAction(authority: RoomAuthority): ActionCapture {
   };
 }
 
-function captureActionEffects(authority: RoomAuthority, before: ActionCapture): Record<string, unknown> | null {
+export function captureActionEffects(authority: RoomAuthority, before: ActionCapture): Record<string, unknown> | null {
   const g = authority.game;
   const postBaopai = [...g.shan.baopai];
   const postFubaopai = g.shan.fubaopai ? [...g.shan.fubaopai] : null;
@@ -554,14 +706,7 @@ function captureActionEffects(authority: RoomAuthority, before: ActionCapture): 
   const drawEvent = newEvents.findLast((event: any) => event.type === 'zimo') as any;
   const fuyuAll = (((g.shan as any)._fuyuRevealed ?? []) as string[]);
   const fuyuRevealed = fuyuAll.slice(before.fuyuRevealedLength);
-  const state = authority.canonicalState();
-  const revealUra = !!state.lastHuleResult
-    || !!state.pendingFuyu
-    || !!state.pendingKinpei
-    || !!state.pendingKamiPochi
-    || !!state.pendingPochiSwap
-    || !!state.pendingSaiKoro
-    || (state.roundEnded && state.lastWinner !== null);
+  const revealUra = shouldRevealUra(authority);
   if (!drawEvent && newBaopai.length === 0 && newFubaopai.length === 0
     && fuyuRevealed.length === 0 && !revealUra) return null;
   const doraDraws: Array<{ tile: string; isFu: boolean }> = [];
@@ -1065,7 +1210,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
               room,
               seat,
               member?.user_id ?? `deadline-seat-${seat}`,
-              { type: 'pass', player: seat },
+              reactionTimeoutAction(room.authority!, seat),
               `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
             );
             if (result.command) broadcastAction(room, result.command);
@@ -1083,19 +1228,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       room.queue = room.queue.then(async () => {
         const live = room.authority;
         if (!live || live.roundEnded || live.currentPlayer() !== current) return;
-        let action: Record<string, unknown>;
-        if (live.game.canTsumo(current)) action = { type: 'tsumo' };
-        else if (live.game.getForcedLizhiKanCandidates(current).length > 0) {
-          action = { type: 'declareKan', mianzi: live.game.getForcedLizhiKanCandidates(current)[0] };
-        }
-        else if (live.lastZimo && toCorePai(live.lastZimo) === 'z4' && live.game.canNukiBei(current)) action = { type: 'nukiBei' };
-        else {
-          const sp = live.game.shoupai.get(current);
-          const pai = live.game.pickBestDiscard(current)
-            ?? (typeof sp?._zimo === 'string' && sp._zimo.length <= 3 ? sp._zimo : null)
-            ?? ((sp?.get_dapai?.(false) ?? []) as string[]).find((candidate) => toCorePai(candidate.replace(/_$/, '')) !== 'z4')?.replace(/_$/, '');
-          if (!pai) return;
-          action = { type: 'discard', pai };
+        const action = turnTimeoutAction(live, member?.is_cpu === true);
+        if (!action) {
+          scheduleRoomDeadline(room);
+          return;
         }
         const result = acceptAction(
           room,

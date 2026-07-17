@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Game3 } from '../game3';
+import { Game3, buildShoupai } from '../game3';
 import type { PlayerId } from '../types';
 
 // 北抜き [canNukiBei / declareNukiBei] の挙動 verify。
@@ -138,5 +138,90 @@ describe('Game3 nuki bei', () => {
     expect(g.nukidoraGold[player]).toBe(beforeGold + 1);
     expect(g.nukidora[player]).toBe(beforeNormal); // 通常は incr ナシ
     expect(g.goldHand[player].z).toBe(0);
+  });
+
+  it('存在しない金北を明示して通常北を代用できない', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    const sp = g.shoupai.get(player) as any;
+    sp._bingpai.z[4] = 1;
+    sp._bingpai.__anmika.gN = 0;
+    sp._bingpai.gN = 0;
+    sp._zimo = 'z4';
+    g.goldHand[player].z = 0;
+    g.lastZimoInfo = { player, pai: 'z4', pochi: null, gold: false };
+
+    expect(() => g.dapai('gN')).toThrow(/physical tile is not in hand/);
+    expect(g.declareNukiBei(player, { gold: true })).toBeNull();
+    expect(sp._bingpai.z[4]).toBe(1);
+    expect(g.nukidora[player]).toBe(0);
+    expect(g.nukidoraGold[player]).toBe(0);
+  });
+
+  it('通常北を明示した時に金北へすり替えない', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    const sp = g.shoupai.get(player) as any;
+    sp._bingpai.z[4] = 1;
+    sp._bingpai.__anmika.gN = 1;
+    sp._bingpai.gN = 1;
+    sp._zimo = 'z4';
+    g.goldHand[player].z = 1;
+    g.lastZimoInfo = { player, pai: 'gN', pochi: null, gold: true };
+
+    expect(g.declareNukiBei(player, { gold: false })).toBeNull();
+    expect(sp._bingpai.z[4]).toBe(1);
+    expect(g.goldHand[player].z).toBe(1);
+    expect(g.nukidora[player]).toBe(0);
+    expect(g.nukidoraGold[player]).toBe(0);
+  });
+
+  it('金北の補充ツモ失敗時に物理identityを含む手牌全体を戻す', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    const sp = buildShoupai([
+      'p1', 'p1', 'p1', 'p1',
+      'p2', 'p3', 'p4', 's2', 's3', 's4', 'm7', 'm9', 'z1',
+    ]);
+    sp.zimo('gN');
+    g.shoupai.set(player, sp);
+    g.goldHand[player].z = 1;
+    g.lastZimoInfo = { player, pai: 'gN', pochi: null, gold: true };
+    (g.shan as any)._pai = ['s9'];
+    // p1 is already four copies in hand, so this replacement cannot enter.
+    (g.shan as any)._rinshan = ['p1'];
+
+    expect(g.declareNukiBei(player, { gold: true })).toBeNull();
+    expect(sp._bingpai.z[4]).toBe(1);
+    expect(sp._bingpai.__anmika.gN).toBe(1);
+    expect(sp._anmikaZimo).toBe('gN');
+    expect(sp._zimo).toBe('z4');
+    expect(g.goldHand[player].z).toBe(1);
+    expect(g.nukidoraGold[player]).toBe(0);
+    expect((g.shan as any)._rinshan).toEqual(['p1']);
+  });
+
+  it('extracts a north drawn from the last live tile and keeps live wall exhausted', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = g.lunbanToPlayerId(g.state.lunban);
+    const sp = buildShoupai([
+      'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7',
+      's1', 's2', 's3', 's4', 's5', 'z1',
+    ]);
+    sp.zimo('z4');
+    g.shoupai.set(player, sp);
+    g.lastZimoInfo = { player, pai: 'z4', pochi: null, gold: false };
+    (g.shan as any)._pai = [];
+    (g.shan as any)._rinshan = ['s9'];
+
+    expect(g.canNukiBei(player)).toBe(true);
+    expect(g.declareNukiBei(player, { gold: false })).toBe('s9');
+    expect(g.shan.paishu).toBe(0);
+    expect(sp._zimo).toBe('s9');
+    expect(g.lingshangActive[player]).toBe(true);
   });
 });

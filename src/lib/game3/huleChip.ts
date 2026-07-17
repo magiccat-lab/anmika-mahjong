@@ -28,6 +28,8 @@ export type FuyuRevealState = {
   hasKinpei: boolean;
   totalHits: number;
   nextOccurrence: number;
+  /** 通常アリス/チューリップで、残した下段を飛ばして次の上段を指す index。 */
+  nextUpperIndex: number;
   currentPair: FuyuRevealSlot[] | null;
   fuyuLog: Array<{ pai: string; tier: 'upper' | 'lower'; hit: number }>;
   pendingChoice: { occurrenceKey: string; pai: string; tier: 'upper' | 'lower' } | null;
@@ -93,6 +95,7 @@ export function applyFuyuChip(
     hasKinpei,
     totalHits: 0,
     nextOccurrence: 0,
+    nextUpperIndex: 0,
     currentPair: null,
     fuyuLog: [],
     pendingChoice: null,
@@ -241,12 +244,24 @@ export function applyFuyuChip(
 
   while (!state.complete) {
     if (!state.currentPair) {
-      if (shanPai.length === 0) {
+      const upperIndex = enableLowerDeck ? 0 : (state.nextUpperIndex ?? 0);
+      if (upperIndex >= shanPai.length) {
         state.complete = true;
         break;
       }
-      const pair: FuyuRevealSlot[] = [{ pai: shanPai.pop()!, tier: 'upper' }];
-      if (enableLowerDeck && shanPai.length > 0) pair.push({ pai: shanPai.pop()!, tier: 'lower' });
+      // live wall の深い側は [上1, 下1, 上2, 下2, ...]。
+      // 通常アリス/チューリップは上段だけを開き、下段を山に残したまま
+      // 次の上段 index へ進む。金北強化時だけ同じ組の下段も開く。
+      const upper = shanPai.splice(upperIndex, 1)[0];
+      const pair: FuyuRevealSlot[] = [{ pai: upper, tier: 'upper' }];
+      if (enableLowerDeck) {
+        if (upperIndex < shanPai.length) {
+          pair.push({ pai: shanPai.splice(upperIndex, 1)[0], tier: 'lower' });
+        }
+      } else {
+        // 上段を除いた後、同じ index に下1、その次に上2が来る。
+        state.nextUpperIndex = upperIndex + 1;
+      }
       for (const slot of pair) {
         fuyuRevealed.push(slot.pai);
         if (slot.pai === 'z5b' || slot.pai === 'z5g') {

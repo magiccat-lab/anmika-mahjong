@@ -2,32 +2,27 @@
 <script lang="ts">
   // 山構成 panel [debug 用]
   import Tile from './Tile.svelte';
-  export let wall: string[];
+  export let wall: string[];     // live wall のみ [末尾から通常ツモ]
+  export let rinshan: string[] = [];
   export let baopai: string[];
   export let fubaopai: string[];
-  function wpaiLabel(i: number): string {
-    if (i < 4) return `嶺${i}`;
-    if (i === 4 || i === 5) return `表${i - 4}`;
-    if (i === 9 || i === 10) return `裏${i - 9}`;
-    return `予${i}`;
-  }
 </script>
 
-<h2>🗻 山構成 [全 {wall.length} 枚]</h2>
+<h2>🗻 山構成 [生牌 {wall.length} 枚 / 王牌 {rinshan.length + baopai.length + fubaopai.length} 枚]</h2>
 <div class="wall-panel">
   <div class="row">
     <strong>ツモ順 [末尾→先頭]:</strong>
     <span class="inline-tiles">
-      {#each [...wall].slice(16).reverse() as t}<Tile pai={t} size="sm" />{/each}
+      {#each [...wall].reverse() as t}<Tile pai={t} size="sm" />{/each}
     </span>
   </div>
   <div class="row">
-    <strong>王牌 [先頭 16 枚: リンシャン 16 + 表ドラ {baopai.length} + 裏ドラ {fubaopai.length}]:</strong>
+    <strong>嶺上牌 [{rinshan.length} 枚]:</strong>
     <span class="inline-tiles wangpai">
-      {#each wall.slice(0, 16) as t, i}
+      {#each rinshan as t, i}
         <span class="wp-tile">
           <Tile pai={t} size="sm" />
-          <div class="wp-tag">{wpaiLabel(i)}</div>
+          <div class="wp-tag">嶺{i}</div>
         </span>
       {/each}
     </span>

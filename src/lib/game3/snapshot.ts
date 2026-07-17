@@ -132,7 +132,8 @@ export function saveSnapshot(refs: SnapshotRefs): PreHuleSnapshot {
   };
 }
 
-/** snap を refs に書き戻し [shan の baopai / fubaopai 末尾を pop して山末尾に戻す] */
+/** snap を refs に書き戻し [shan の baopai / fubaopai 末尾を pop して、
+ *  配牌時に固定された山の深い側へ戻す] */
 export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null): void {
   if (!snap) return;
   // mutate in-place [refs は state 上の参照]
@@ -165,14 +166,26 @@ export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null
   if (snap.shanSnapshot && typeof refs.shan?.restore === 'function') {
     refs.shan.restore(snap.shanSnapshot);
   } else {
+    const addedFubaopai: string[] = [];
     while ((refs.shan.fubaopai ?? []).length > snap.fubaopaiLen) {
       const popped = (refs.shan._fubaopai ?? []).pop();
-      if (popped) refs.shan._pai.push(popped);
+      if (popped) addedFubaopai.unshift(popped);
     }
+    const addedBaopai: string[] = [];
     while (refs.shan.baopai.length > snap.baopaiLen) {
       const popped = refs.shan._baopai.pop();
-      if (popped) refs.shan._pai.push(popped);
+      if (popped) addedBaopai.unshift(popped);
     }
+    // 秋の物理開示順 [表1→裏1→表2→裏2] を保ったまま深い側へ戻す。
+    // 種別ごとに unshift すると [表1→表2→裏1→裏2] へ並び替わり、
+    // 次の候補計算で固定位置と異なる表示牌を開いてしまう。
+    const restoredIndicators: string[] = [];
+    const maxAdded = Math.max(addedBaopai.length, addedFubaopai.length);
+    for (let index = 0; index < maxAdded; index += 1) {
+      if (addedBaopai[index]) restoredIndicators.push(addedBaopai[index]);
+      if (addedFubaopai[index]) restoredIndicators.push(addedFubaopai[index]);
+    }
+    refs.shan._pai.unshift(...restoredIndicators);
   }
   // 2026-05-14 codex review fix: lizhibang / qianggangPending / events / chipBreakdown も復元
   if (refs.state) refs.state.lizhibang = snap.lizhibang;
