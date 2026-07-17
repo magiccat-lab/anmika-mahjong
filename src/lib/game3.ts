@@ -1686,31 +1686,29 @@ export class Game3 {
   canUseBeiMaterialForAgari(player: PlayerId, ronpai: Pai | null = null, fromPlayer: PlayerId | null = null): boolean {
     const sp = this.shoupai.get(player);
     if (!handUsesBeiMaterial(sp, ronpai)) return true;
-    const prevSnapshot = this.preHuleSnapshot;
-    this.saveSnapshot();
-    let fakeRes: any = null;
-    try {
-      fakeRes = this.hule(player, ronpai, fromPlayer);
-    } catch {
-      fakeRes = null;
-    }
-    this.restoreSnapshot();
-    this.preHuleSnapshot = prevSnapshot;
+    const fakeRes = this.evaluateHuleDry(player, ronpai, fromPlayer);
     return resultAllowsBeiMaterial(fakeRes);
   }
 
-  private canTsumoByHuleResult(player: PlayerId): boolean {
-    const prevSnapshot = this.preHuleSnapshot;
-    this.saveSnapshot();
-    let fakeRes: any = null;
+  /** 投機評価用に hule() を安全に呼ぶ [判定のみ、状態は完全に巻き戻す]。
+   *  従来の saveSnapshot()/restoreSnapshot() ペアは snapshotLocked 中に save が
+   *  黙ってスキップされ、restore が古い/空の preHuleSnapshot を書き戻すため、
+   *  秋カスケードの物理ドラめくり [hule() 内 drawNewDora] が漏れてドラ表が
+   *  増殖したり、stale 復元で局が進行不能になる [2026-07-17 リョー報告 根治]。
+   *  ロックに関係なくローカル snapshot で必ず巻き戻す。 */
+  private evaluateHuleDry(player: PlayerId, ronpai: Pai | null = null, fromPlayer: PlayerId | null = null): any {
+    const localSnap = saveSnapshotHelper(this._snapshotRefs());
     try {
-      fakeRes = this.hule(player);
+      return this.hule(player, ronpai, fromPlayer);
     } catch {
-      fakeRes = null;
+      return null;
+    } finally {
+      restoreSnapshotHelper(this._snapshotRefs(), localSnap);
     }
-    this.restoreSnapshot();
-    this.preHuleSnapshot = prevSnapshot;
-    return !!fakeRes;
+  }
+
+  private canTsumoByHuleResult(player: PlayerId): boolean {
+    return !!this.evaluateHuleDry(player);
   }
 
   /** ツモ和了判定 [現家がツモった牌で和了可能か]
@@ -1752,12 +1750,7 @@ export class Game3 {
         if (toCorePai(sp._zimo) === 'z4') {
           const tingBefore = this.getTingpaiListBeforeZimo(player);
           if (tingBefore.length === 1 && tingBefore[0] === 'z4') {
-            const _prevSnap = this.preHuleSnapshot;
-            this.saveSnapshot();
-            let fakeRes: any = null;
-            try { fakeRes = this.hule(player); } catch { /* ignore */ }
-            this.restoreSnapshot();
-            this.preHuleSnapshot = _prevSnap;
+            const fakeRes = this.evaluateHuleDry(player);
             if (!fakeRes) return false;
             const isYakuman = (fakeRes.damanguan ?? 0) > 0
               || (fakeRes.hupai ?? []).some((h: any) => h.fanshu === '*' || h.fanshu === '**');
@@ -1771,23 +1764,13 @@ export class Game3 {
         // WSA: 暗槓のみは門前扱い [isMenzenHand] — hasFulou 直比較だと暗槓手がダマ禁止をバイパス
         const hasFulou = !isMenzenHand(sp);
         if (hasFulou) {
-          const _prevSnapshot = this.preHuleSnapshot;
-          this.saveSnapshot();
-          let fakeRes: any = null;
-          try { fakeRes = this.hule(player); } catch { /* ignore */ }
-          this.restoreSnapshot();
-          this.preHuleSnapshot = _prevSnapshot;
+          const fakeRes = this.evaluateHuleDry(player);
           if (!fakeRes) return false;
         }
         if (!hasFulou && !this.lizhi.has(player)) {
           // R7 P1 #5 fix: 判定 reactive 呼出で preHuleSnapshot を上書きする bug 解消、
           // 既存 snapshot を退避 → saveSnapshot → restoreSnapshot → 退避を書き戻す
-          const _prevSnapshot = this.preHuleSnapshot;
-          this.saveSnapshot();
-          let fakeRes: any = null;
-          try { fakeRes = this.hule(player); } catch { /* ignore */ }
-          this.restoreSnapshot();
-          this.preHuleSnapshot = _prevSnapshot;
+          const fakeRes = this.evaluateHuleDry(player);
           if (!fakeRes) return false;
           const isYakuman = (fakeRes.damanguan ?? 0) > 0
             || (fakeRes.hupai ?? []).some((h: any) => h.fanshu === '*' || h.fanshu === '**');
@@ -1975,13 +1958,8 @@ export class Game3 {
           return core[0] + (core[1] === '0' ? '5' : core[1]);
         }));
         if (normalizedWaits.size !== 1 || !normalizedWaits.has('z4')) return false;
-        const _prevSnap = this.preHuleSnapshot;
-        this.saveSnapshot();
-        let fakeRes: any = null;
         const fakeFromPlayer = fromPlayer !== null ? fromPlayer : (((player + 1) % 3) as PlayerId);
-        try { fakeRes = this.hule(player, pai, fakeFromPlayer); } catch { /* ignore */ }
-        this.restoreSnapshot();
-        this.preHuleSnapshot = _prevSnap;
+        const fakeRes = this.evaluateHuleDry(player, pai, fakeFromPlayer);
         if (!fakeRes || !resultAllowsBeiMaterial(fakeRes)) return false;
       }
       const beiFromPlayer = fromPlayer !== null ? fromPlayer : (((player + 1) % 3) as PlayerId);
@@ -1993,24 +1971,14 @@ export class Game3 {
       const hasFulou = !isMenzenHand(sp);
       // R9 P2 #11 fix: 副露手も fake hule() で 役なし check
       if (hasFulou) {
-        const _prevSnapshot = this.preHuleSnapshot;
-        this.saveSnapshot();
-        let fakeRes: any = null;
         const fakeFromPlayer = fromPlayer !== null ? fromPlayer : (((player + 1) % 3) as PlayerId);
-        try { fakeRes = this.hule(player, pai, fakeFromPlayer); } catch { /* ignore */ }
-        this.restoreSnapshot();
-        this.preHuleSnapshot = _prevSnapshot;
+        const fakeRes = this.evaluateHuleDry(player, pai, fakeFromPlayer);
         if (!fakeRes) return false;
       }
       if (!hasFulou && !this.lizhi.has(player)) {
         // R7 P1 #5 fix: 既存 snapshot 退避、 判定後 書き戻す
-        const _prevSnapshot = this.preHuleSnapshot;
-        this.saveSnapshot();
-        let fakeRes: any = null;
         const fakeFromPlayer = fromPlayer !== null ? fromPlayer : (((player + 1) % 3) as PlayerId);
-        try { fakeRes = this.hule(player, pai, fakeFromPlayer); } catch { /* ignore */ }
-        this.restoreSnapshot();
-        this.preHuleSnapshot = _prevSnapshot;
+        const fakeRes = this.evaluateHuleDry(player, pai, fakeFromPlayer);
         if (!fakeRes) return false;
         // R6 P1 #5 fix: canTsumo の R4 #22 と同じく fanshu === undefined を削除、
         // damanguan>0 / 明示 ** のみで yakuman 判定
@@ -2478,26 +2446,17 @@ export class Game3 {
         : -Infinity;
       const topCandidates = validCandidates.filter((candidate) => candidate._pochiExpectedChip === maxExpected);
       const explicit = this.pochiSwapChoice[player];
+      // 高目は常に自動選択 [リョー裁定 2026-07-17: 協議モーダルは出さない]。
+      // 祝儀期待値タイの時は打点 [役満数→翻数] で自動タイブレーク
       const best = (explicit ? topCandidates.find((candidate) => candidate._allmightyPochi === explicit) : null)
-        ?? topCandidates[0]
+        ?? topCandidates.slice().sort((a, b) =>
+          ((b.damanguan ?? 0) - (a.damanguan ?? 0))
+          || ((typeof b.fanshu === 'number' ? b.fanshu : 0) - (typeof a.fanshu === 'number' ? a.fanshu : 0)))[0]
         ?? null;
       if (best) {
         result = best;
         result.hupai = result.hupai ?? [];
         result.hupai.push({ name: `白ぽっち オールマイティ [${best._allmightyPochi}]${ronpai ? ' [ロン]' : ''}`, fanshu: 0 });
-        if (topCandidates.length > 1 && !explicit) {
-          result._pochiSwapPending = {
-            winner: player,
-            kind: 'white',
-            candidates: topCandidates.map((candidate) => ({
-              target: candidate._allmightyPochi,
-              expectedChip: candidate._pochiExpectedChip,
-              fanshu: typeof candidate.fanshu === 'number' ? candidate.fanshu : null,
-              damanguan: candidate.damanguan ?? 0,
-            })),
-            decisionOwners: this.pochiDecisionOwners(player),
-          } satisfies PochiSwapPendingChoice;
-        }
       }
     }
     // でかぽっち オールマイティ: リーチ一発 + ツモ牌 p1/p2 → swap 試行 [高め取り]
@@ -3588,6 +3547,16 @@ export class Game3 {
    *  子ツモ = 親 base*2 + 他子 base*1。 100 の位切り上げ。 */
   applyHule(result: any, winner: PlayerId, loser: PlayerId | null): void {
     if (!result) return;
+    // シュバリー宣言牌への放銃はリーチ不成立と同じ扱いで、シュバ権を消費しない
+    // [リョー指摘 2026-07-17: 宣言牌放銃でシュバ棒が消える]。
+    // lizhiDeclareDapai は宣言者の次の自打牌まで true のため、コレが立ったまま
+    // 放銃 = 宣言牌そのものへのロンと判定できる。lateシュバは宣言牌通過後にしか
+    // 宣言できないので誤返金はない
+    if (loser !== null && this.lizhiDeclareDapai[loser] && this.shuvariActive[loser]) {
+      this.shuvariActive[loser] = false;
+      this.shuvariUsed[loser] = false;
+      this.events.push({ type: 'shuvariRefund', player: loser } as any);
+    }
     // R4 P2 #21 fix: snapshot 漏れ path でも トビ賞 判定が走るよう、 applyHule 冒頭で
     // 常に beforeDefen を snapshot。 preHuleSnapshot?.defen の fallback では「現在 defen」 を
     // 参照してしまい preDefen[p] >= 0 が成立しない bug を解消
