@@ -58,7 +58,7 @@ describe('south round fanpai regression 2026-05-21', () => {
   it('hule uses the hule-time changbang, not a later top-level paifu state', () => {
     const g = buildSouthAnkanRonState(0);
     expect(g.changfengZ).toBe(1);
-    expect(g.zifengZ(0)).toBe(3);
+    expect(g.zifengZ(0)).toBe(2); // 風回転修正 2026-07-17: oya=1 で P0 は南家
     expect(g.shoupai.get(0)?._fulou).toContain('z2222');
 
     const result = g.hule(0, 'p3', 1);
@@ -90,7 +90,7 @@ describe('south round fanpai regression 2026-05-21', () => {
       changbang: 0,
       jushu: 2,
       zhuangfeng: 0,
-      menfeng: 2,
+      menfeng: 1, // 風回転修正 2026-07-17: oya=1 で P0 は南家 [0-indexed 1]
     });
     expect(ev.hupai.map((h: any) => h.name)).not.toContain('場風 南');
   });

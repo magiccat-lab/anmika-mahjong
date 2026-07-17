@@ -4362,7 +4362,11 @@ export class Game3 {
   /** player の自風 [現親からの相対位置] を z 牌番号で返す [1=東, 2=南, 3=西]
    *  2026-05-14 codex review fix: state.qijia 固定だと 子アガリ後の自風がズレる、 currentOya 参照に変更 */
   zifengZ(player: PlayerId): number {
-    const relative = (player - this.currentOya + 3) % 3;
+    // 自風は手番の回転と同じ向きで振る [リョー指摘 2026-07-17]。
+    // この game の回転は index 降順 [手番 lunbanToPlayerId = oya - lunban、
+    // 親流れも oya-1] なので、東=親、南=親-1 [下家]、西=親-2 [上家]。
+    // 旧式 (player - oya) は逆回転で、下家の表示風と自風役が両方ズレていた
+    const relative = (this.currentOya - player + 3) % 3;
     return relative + 1;
   }
 

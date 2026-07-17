@@ -24,23 +24,25 @@ describe('Game3 changfengZ', () => {
   });
 });
 
-describe('Game3 zifengZ [起家からの 反時計回り]', () => {
-  it('qijia=0 で zifengZ(0)=1 [東]、 zifengZ(1)=2 [南]、 zifengZ(2)=3 [西]', () => {
+describe('Game3 zifengZ [手番と同回転: 東=親、南=親-1=下家、西=親-2=上家]', () => {
+  // 2026-07-17 リョー指摘で修正: 旧式 (player - oya) は手番回転
+  // [oya → oya-1 → oya-2] と逆向きで、下家の風表示と自風役がズレていた
+  it('qijia=0 で zifengZ(0)=1 [東]、 zifengZ(2)=2 [南]、 zifengZ(1)=3 [西]', () => {
     const g = new Game3({ qijia: 0 });
     expect(g.zifengZ(0 as PlayerId)).toBe(1);
-    expect(g.zifengZ(1 as PlayerId)).toBe(2);
-    expect(g.zifengZ(2 as PlayerId)).toBe(3);
+    expect(g.zifengZ(2 as PlayerId)).toBe(2);
+    expect(g.zifengZ(1 as PlayerId)).toBe(3);
   });
-  it('qijia=1 で zifengZ(1)=1、 zifengZ(2)=2、 zifengZ(0)=3', () => {
+  it('qijia=1 で zifengZ(1)=1、 zifengZ(0)=2、 zifengZ(2)=3', () => {
     const g = new Game3({ qijia: 1 });
     expect(g.zifengZ(1 as PlayerId)).toBe(1);
-    expect(g.zifengZ(2 as PlayerId)).toBe(2);
-    expect(g.zifengZ(0 as PlayerId)).toBe(3);
+    expect(g.zifengZ(0 as PlayerId)).toBe(2);
+    expect(g.zifengZ(2 as PlayerId)).toBe(3);
   });
-  it('qijia=2 で zifengZ(2)=1、 zifengZ(0)=2、 zifengZ(1)=3', () => {
+  it('qijia=2 で zifengZ(2)=1、 zifengZ(1)=2、 zifengZ(0)=3', () => {
     const g = new Game3({ qijia: 2 });
     expect(g.zifengZ(2 as PlayerId)).toBe(1);
-    expect(g.zifengZ(0 as PlayerId)).toBe(2);
-    expect(g.zifengZ(1 as PlayerId)).toBe(3);
+    expect(g.zifengZ(1 as PlayerId)).toBe(2);
+    expect(g.zifengZ(0 as PlayerId)).toBe(3);
   });
 });
