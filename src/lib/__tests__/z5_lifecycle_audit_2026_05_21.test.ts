@@ -3,9 +3,10 @@ import { Game3, buildShoupai } from '../game3';
 import type { PlayerId } from '../types';
 
 // ぽっちサイコロ 2 系統 [リョー裁定 2026-07-17]:
-//  A) ぽっちツモ + 祝儀 0 枚 → base70 [一発不要]
-//  B) 即ぽっちツモ [一発] → base140 [祝儀と無関係]
-// 符号は色で決まる: 青/緑=+、赤/黄=-。でかぽっちは 即1p=+35 / 即2p=-35
+//  A) ぽっちツモ + 祝儀 0 枚 [一発不要]
+//  B) 即ぽっちツモ [一発] [祝儀と無関係]
+// 額は base70 × 色倍率: 青=+140 / 赤=-140 / 緑=+70 / 黄=-70
+// でかぽっちは 即1p=+35 / 即2p=-35
 
 function rigPochiTsumo(pai: string, color: 'blue' | 'red' | 'green' | 'yellow' | null, opts: { yifa?: boolean; lizhi?: boolean } = {}) {
   const winner = 0 as PlayerId;
@@ -26,14 +27,14 @@ function rigPochiTsumo(pai: string, color: 'blue' | 'red' | 'green' | 'yellow' |
 }
 
 describe('z5 lifecycle audit 2026-05-21 (2026-07-17 裁定反映)', () => {
-  it('z5b 即ツモ + 祝儀 0 枚 → 祝儀0サイコロ[+70] と 即ツモサイコロ[+140] の両方が出る', () => {
+  it('z5b 即ツモ + 祝儀 0 枚 → 祝儀0サイコロ[+140] と 即ツモサイコロ[+140] の両方が出る', () => {
     const { g, winner } = rigPochiTsumo('z5b', 'blue');
     const result: any = { fanshu: 1, fu: 30, hupai: [] };
     g.applyHule(result, winner, null);
 
     expect(result.saiKoroChances).toContainEqual(expect.objectContaining({
       awardKey: '白ぽっちツモ祝儀0',
-      baseChip: 70,
+      baseChip: 140,
       plusMinus: '+',
       mode: 'tsumo',
     }));
@@ -56,7 +57,18 @@ describe('z5 lifecycle audit 2026-05-21 (2026-07-17 裁定反映)', () => {
     expect(sokuTsumo.plusMinus).toBe('-');
   });
 
-  it('後巡 [一発切れ] の z5g ツモ + 祝儀 0 枚 → 祝儀0サイコロ[70]のみ、即ツモサイコロは出ない', () => {
+  it('z5y [黄・逆] 即ツモ → 即ツモサイコロは -70 [x1 マイナス]', () => {
+    const { g, winner } = rigPochiTsumo('z5y', 'yellow');
+    const result: any = { fanshu: 1, fu: 30, hupai: [] };
+    g.applyHule(result, winner, null);
+
+    const sokuTsumo = (result.saiKoroChances ?? []).find((c: any) => c.awardKey === '白ぽっち即ツモ');
+    expect(sokuTsumo).toBeTruthy();
+    expect(sokuTsumo.baseChip).toBe(70);
+    expect(sokuTsumo.plusMinus).toBe('-');
+  });
+
+  it('後巡 [一発切れ] の z5g ツモ + 祝儀 0 枚 → 祝儀0サイコロ[+70]のみ、即ツモサイコロは出ない', () => {
     const { g, winner } = rigPochiTsumo('z5g', 'green', { yifa: false });
     const result: any = { fanshu: 1, fu: 30, hupai: [] };
     g.applyHule(result, winner, null);
