@@ -3668,8 +3668,10 @@ export class Game3 {
     result.chipBreakdown = [..._preBreakdown, ...this.chipBreakdown];
     result.chipTotal = this.chipLedger[winner] - chipBefore;
     const chipDelta = this.chipLedger[winner] - chipBefore;
-    // 白ぽっち即ツモ + 祝儀 0 枚 → サイコロ。
-    // yifaActive が残っている時だけを「即ツモ」とし、後巡の白ぽっちツモは対象外。
+    // ぽっちツモのサイコロは 2 系統が独立して存在する [リョー裁定 2026-07-17]:
+    //  A) ぽっちツモ + その和了の祝儀 0 枚 → 救済サイコロ base70 [一発は不要]
+    //  B) 即ぽっちツモ [一発中] → サイコロ base140 [祝儀の有無と無関係]
+    // 両立時は 2 セッション。符号は色で決まる: 青/緑=+、赤/黄=- [逆払いと同じ向き]
     // [2026-05-21 fix] commit 4d1f476f で z5b/z5r/z5g/z5y を 独立 牌化したため、
     // _zimo / lastZimoInfo.pai は z5b 等 raw 文字列で入る。 toCorePai で z5 正規化して比較。
     const sp_w = this.shoupai.get(winner);
@@ -3677,18 +3679,23 @@ export class Game3 {
     const lastZimoIsZ5 = this.lastZimoInfo.pai
       ? toCorePai(this.lastZimoInfo.pai as string) === 'z5'
       : false;
-    const isImmediatePochiTsumo =
+    const isPochiTsumo =
       loser === null
       && zimoIsZ5
-      && this.yifaActive[winner]
       && this.lastZimoInfo.player === winner
       && lastZimoIsZ5
       && !!this.lastZimoInfo.pochi;
-    if (isImmediatePochiTsumo && chipDelta === 0) {
+    const pochiSaiSign: '+' | '-' =
+      this.lastZimoInfo.pochi === 'red' || this.lastZimoInfo.pochi === 'yellow' ? '-' : '+';
+    if (isPochiTsumo && chipDelta === 0) {
       result.saiKoroChances = result.saiKoroChances ?? [];
-      result.saiKoroChances.push({ awardKey: '白ぽっち即ツモ祝儀0', name: '白ぽっち即ツモ祝儀 0 枚', baseChip: 70, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
+      result.saiKoroChances.push({ awardKey: '白ぽっちツモ祝儀0', name: '白ぽっちツモ祝儀 0 枚', baseChip: 70, shuvariApplicable: true, count: 1, plusMinus: pochiSaiSign, mode: 'tsumo' });
     }
-    // でかぽっち即ツモ → サイコロ base 35
+    if (isPochiTsumo && this.yifaActive[winner]) {
+      result.saiKoroChances = result.saiKoroChances ?? [];
+      result.saiKoroChances.push({ awardKey: '白ぽっち即ツモ', name: `白ぽっち即ツモ [${pochiSaiSign}140]`, baseChip: 140, shuvariApplicable: true, count: 1, plusMinus: pochiSaiSign, mode: 'tsumo' });
+    }
+    // でかぽっち即ツモ → サイコロ base 35。即 1p=+35 / 即 2p=-35 [リョー裁定 2026-07-17]
     const zimoCoreDeka = sp_w?._zimo ? toCorePai(sp_w._zimo) : null;
     const isDekapochiTsumo =
       loser === null
@@ -3697,8 +3704,9 @@ export class Game3 {
       && (zimoCoreDeka === 'p1' || zimoCoreDeka === 'p2')
       && (result.hupai ?? []).some((h: any) => h.name?.includes('でかぽっち'));
     if (isDekapochiTsumo) {
+      const dekaSign: '+' | '-' = zimoCoreDeka === 'p2' ? '-' : '+';
       result.saiKoroChances = result.saiKoroChances ?? [];
-      result.saiKoroChances.push({ awardKey: 'でかぽっち', name: 'でかぽっち', baseChip: 35, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
+      result.saiKoroChances.push({ awardKey: 'でかぽっち', name: `でかぽっち [${dekaSign}35]`, baseChip: 35, shuvariApplicable: true, count: 1, plusMinus: dekaSign, mode: 'tsumo' });
     }
     // 3 麻実点を defen / defen3 両方に書き戻し [古い majiang-core の 4 麻 defen を上書き]
     // winnerGain は 逆ぽっち反転時に既に -値 になってる
