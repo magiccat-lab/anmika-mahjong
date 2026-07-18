@@ -2555,6 +2555,9 @@ export class Game3 {
         const spClone7 = sp.clone();
         spClone7._bingpai.m[1] = (spClone7._bingpai.m[1] ?? 0) + m7Count;
         spClone7._bingpai.m[7] = 0;
+        // m7 ツモ和了は _zimo も m1 化しないと hule_mianzi の和了牌 marker が付かず
+        // 置換判定ごと全滅する [tingpai 側 1746 行と同じ swap、 2026-07-19 混老頭適用漏れ fix]
+        if (spClone7._zimo === 'm7') spClone7._zimo = 'm1';
         if (spClone7._fulou) {
           spClone7._fulou = spClone7._fulou.map((m: string) =>
             m.startsWith('m') && m.includes('7') ? m.replace(/7/g, '1') : m
@@ -2563,7 +2566,7 @@ export class Game3 {
         const ronpaiSub = ronpaiIsM7 ? ('m1' + ronpaiWithDir!.slice(2)) : ronpaiWithDir;
         const r7 = Majiang.Util.hule(spClone7, ronpaiSub, param);
         if (r7 && r7.hupai) {
-          const upgradeNames = ['全帯幺', '純全帯幺', '清老頭'];
+          const upgradeNames = ['全帯幺', '純全帯幺', '清老頭', '混老頭'];
           const hasUpgrade = r7.hupai.some((h: any) => upgradeNames.some(n => h.name?.includes(n)));
           if (hasUpgrade) {
             const baseFan = result ? (typeof result.fanshu === 'number' ? result.fanshu : 99) : -1;
