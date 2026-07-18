@@ -401,6 +401,11 @@ export class Game3 {
    *  zimo (通常) で false に戻す */
   lingshangActive: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false };
 
+  /** 補充牌の出どころがカンか。北抜き・華抜きの補充は lingshangActive のみ true で
+   *  本 flag は false → 海底摸月の抑制だけ効き、嶺上開花は付かない
+   *  [2026-07-18 リョー裁定: 北・華抜きの補充ツモに嶺上開花ナシ、カンのみ] */
+  lingshangFromKan: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false };
+
   /** 席別の第一巡状態。天和・地和・人和を他家の打牌から独立して判定する。 */
   firstTurnState: FirstTurnState = createFirstTurnState();
 
@@ -897,6 +902,7 @@ export class Game3 {
       for (const hp of this.shan.lastDrawnHuapai) this.huapai[player].push(hp);
       this.lastZimoInfo = { player: null, pai: null, pochi: null, gold: false };
       this.lingshangActive[player] = false;
+      this.lingshangFromKan[player] = false;
       return null;
     }
     const replacement = rawReplacement as Pai;
@@ -927,6 +933,8 @@ export class Game3 {
     // R10 P0 #5 #6 fix: 北抜き代替ツモ でも ぽっち効果 + lastZimoInfo 反映
     this.applyRinshanZimoEffects(player, replacement, rawReplacement);
     this.lingshangActive[player] = true;
+    // 北抜き補充はカン由来ではない [カン補充→打牌せず北抜きの上書きも含む]
+    this.lingshangFromKan[player] = false;
     // P0-6b 検出 [2026-05-12]: nukibei rinshan で 既に ankan 済の牌が混入してないか
     const fulouCounts = countTileInFulou(sp, coreReplacement);
     if (fulouCounts >= 4) {
@@ -1189,6 +1197,7 @@ export class Game3 {
       // 華を抜いた補充牌は北抜きと同じ嶺上牌。海底の華でも補充牌を
       // ツモ和了でき、打牌した場合だけその後の河底/流局へ進む。
       this.lingshangActive[player] = true;
+      this.lingshangFromKan[player] = false;
     }
     if (this.shan.lastZimoGold) {
       if (pai === 'gp') this.goldHand[player].p += 1;
@@ -1437,6 +1446,7 @@ export class Game3 {
     }
     // 嶺上消失: 普通の dapai 後は嶺上開花対象外
     this.lingshangActive[player] = false;
+    this.lingshangFromKan[player] = false;
     // 第一打終了 [天和 / 地和 失効]
     markFirstTurnDiscard(this.firstTurnState, player);
     // 次の lunban に [3 麻なので mod 3]
@@ -2007,8 +2017,10 @@ export class Game3 {
     const isLizhi = this.doubleLizhi.has(player) ? 2 : (this.lizhi.has(player) ? 1 : 0);
     const isYifa = this.yifaActive[player];
     const isLingshang = this.lingshangActive[player];
+    // 嶺上開花はカン補充のみ。北・華抜きの補充ツモには付かない [2026-07-18 リョー裁定]
+    const isLingshangKaihua = isLingshang && this.lingshangFromKan[player];
     // 海底 / 河底: 山切れ後の最終アガリ、 ロン=2 / ツモ=1。
-    // 北・華の補充牌ツモは嶺上であり、海底摸月とは複合しない。
+    // 北・華の補充牌ツモは嶺上であり、海底摸月とは複合しない [嶺上開花の有無と独立]。
     // その補充牌を切って他家がロンする時点では lingshang=false なので河底になる。
     const isHaidi = this.shan.paishu === 0 && !isLingshang ? (ronpai ? 2 : 1) : 0;
     // 天和 / 地和: 配牌直後 [diyizimo true]、 ツモアガリで親=天和 / 子=地和
@@ -2037,7 +2049,7 @@ export class Game3 {
       lizhi: isLizhi,
       yifa: isYifa,
       qianggang: this.qianggangPending && ronpai ? true : false,
-      lingshang: isLingshang,
+      lingshang: isLingshangKaihua,
       haidi: isHaidi,
       tianhu: isTianhu,
       // majiang-core は 'z5' のみ認識、 z5* [色付き] は 'z5' に正規化、 f1-4 [華牌] は indicator として無効なので除外
@@ -2159,7 +2171,7 @@ export class Game3 {
         result.hupai.push({ name: '一発', fanshu: 1 });
         result.fanshu += 1;
       }
-      if (isLingshang) {
+      if (isLingshangKaihua) {
         result.hupai.push({ name: '嶺上開花', fanshu: 1 });
         result.fanshu += 1;
       }
@@ -3962,6 +3974,7 @@ export class Game3 {
     this.yifaActive = { 0: false, 1: false, 2: false };
     this.lizhiDeclareDapai = { 0: false, 1: false, 2: false };
     this.lingshangActive = { 0: false, 1: false, 2: false };
+    this.lingshangFromKan = { 0: false, 1: false, 2: false };
     this.qianggangPending = false;
     this.snapshotLocked = false;
     this.firstTurnState = createFirstTurnState();
@@ -4134,6 +4147,7 @@ export class Game3 {
     if (replacement !== null) {
       this.yifaActive = { 0: false, 1: false, 2: false };
       this.lingshangActive[player] = true;
+      this.lingshangFromKan[player] = true;
       this.events.push({ type: 'gang', player, mianzi });
       // [2026-05-15 fix bug B] 大明槓 [鳴き派生] でも シュバ倍率 強制 解除。
       // 副露 と 同様 ゾロ目連続 シュバ宣言 と両立しない。
@@ -4328,6 +4342,7 @@ export class Game3 {
         }
       }
       this.lingshangActive[player] = true;
+      this.lingshangFromKan[player] = true;
       // 加槓判定: format が 'XXX+/=/-X' なら加槓、 他家ロン受け window
       if (mianzi.match(/\d{3}[\+\=\-]\d$/)) {
         // 槍槓 window は store 側が嶺上前に管理する。嶺上ツモ後まで true を残すと

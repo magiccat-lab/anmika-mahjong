@@ -1974,14 +1974,12 @@ export function createGameStore() {
         // R4 P1 #8 fix: current chance の winner で applyChipOall、 ダブロン後勝者 chip 喪失防止
         const curChance = ps.chances[ps.currentIdx];
         const chanceWinner: 0|1|2 = ((curChance as any)?.winner ?? ps.winner) as 0|1|2;
-        // シュバサイは実際にシュバリーを宣言した勝者、または役固有の
-        // 「常時シュバサイ」にだけ発動する。
         let zoroBonusThisRoll = 0;
-        // シュバリー中は発生源を問わず全ての出目当てがシュバサイコロになる。
-        // alwaysShuvari は天和系・流し役満など、宣言なしでも同じ振り方をする役用。
-        const shuvariSai = curChance?.alwaysShuvari === true
-          || s.game.shuvariActive[chanceWinner];
-        if (zoro && shuvariSai) {
+        // 連続ゾロ目特典 [2026-07-18 リョー裁定]: シュバ宣言・ぽっち等の状態に
+        // 関係なく全サイコロチャンスで発動する。額も固定で、2回目以降の
+        // ゾロ目の出目に応じて 1→111 / n→n*11 [22/33/44/55/66] 枚オール。
+        // シュバリー・ぽっち・FEVER の倍率は乗せない。
+        if (zoro) {
           let consec = 1;
           for (let i = ps.rolls.length - 2; i >= 0; i--) {
             if (ps.rolls[i].zoro) consec++;
@@ -1990,22 +1988,26 @@ export function createGameStore() {
           if (consec >= 2) {
             const n = d1;
             zoroBonusThisRoll = n === 1 ? 111 : n * 11;
-            // 通常の出目当て的中はシュバリー非適用だが、連続ゾロ目祝儀は
-            // ルール4本文どおりシュバリー・ぽっち・FEVERの全倍率を受ける。
             const chanceMode = (curChance as any)?.mode ?? 'tsumo';
-            s.game.applyChipOall(chanceWinner, zoroBonusThisRoll, {
-              bypassShuvari: curChance?.alwaysShuvari === true && !s.game.shuvariActive[chanceWinner],
-              bypassPochi: chanceMode === 'ron' && !s.game.feverActive[chanceWinner],
-              bypassFever: false,
-              label: `🎲 シュバゾロ連続特典 [${n},${n}] ×${consec}`,
+            // 払いサイコロ [赤/黄=逆ぽっち] では額は同じまま払い扱い [2026-07-18 リョー裁定]。
+            // 倍率は掛けず符号だけ反転する [-2倍で-44にはしない]。
+            // ron 由来は非フィーバー時ぽっち無効 [engine 慣例 ronBypassPochi と同じ]
+            const pochiEffective = !(chanceMode === 'ron' && !s.game.feverActive[chanceWinner]);
+            const isPayDice = pochiEffective
+              && ((s.game.pochiMultiplier[chanceWinner]?.chip ?? 1) < 0);
+            s.game.applyChipOall(chanceWinner, isPayDice ? -zoroBonusThisRoll : zoroBonusThisRoll, {
+              bypassShuvari: true,
+              bypassPochi: true,
+              bypassFever: true,
+              label: `🎲 ゾロ目連続特典 [${n},${n}] ×${consec}${isPayDice ? ' 払い' : ''}`,
               mode: chanceMode,
             });
-            // 累積 zoroBonus [倍率込み actual chip] を summary 表示用に store
+            // 累積 zoroBonus [固定額、払いは負値] を summary 表示用に store
             // applyChipOall 直後の chipBreakdown 末尾 entry が今回 push 分
             const lastEntry = s.game.chipBreakdown[s.game.chipBreakdown.length - 1];
             const actualThisRoll = lastEntry?.total ?? zoroBonusThisRoll;
             (ps as any)._zoroBonusAcc = ((ps as any)._zoroBonusAcc ?? 0) + actualThisRoll;
-            s.message = `🎲 シュバゾロ目連続特典 [${n},${n}] × ${consec}: chip ${zoroBonusThisRoll} オール`;
+            s.message = `🎲 ゾロ目連続特典 [${n},${n}] × ${consec}: chip ${zoroBonusThisRoll} オール${isPayDice ? ' 払い' : ''}`;
           }
         }
         // ゾロ目はリプレイ扱い [回数外]。虹All-Star等は5〜7投になる。

@@ -98,6 +98,8 @@ describe('Game3 nuki bei', () => {
 
     expect(replacement).toBeTruthy();
     expect(g.lingshangActive[player]).toBe(true);
+    // 2026-07-18 リョー裁定: 北抜き補充はカン由来ではない [嶺上開花の対象外]
+    expect(g.lingshangFromKan[player]).toBe(false);
     expect(g.justNukidBei[player]).toBe(false);
   });
 
@@ -223,5 +225,7 @@ describe('Game3 nuki bei', () => {
     expect(g.shan.paishu).toBe(0);
     expect(sp._zimo).toBe('s9');
     expect(g.lingshangActive[player]).toBe(true);
+    // 2026-07-18 リョー裁定: 北抜き補充はカン由来ではない [嶺上開花の対象外]
+    expect(g.lingshangFromKan[player]).toBe(false);
   });
 });

@@ -600,6 +600,7 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       yifaActive: structuredClone(game.yifaActive),
       lizhiDeclareDapai: structuredClone(game.lizhiDeclareDapai),
       lingshangActive: structuredClone(game.lingshangActive),
+      lingshangFromKan: structuredClone(game.lingshangFromKan),
       firstTurnState: structuredClone(game.firstTurnState),
       qianggangPending: game.qianggangPending,
       feverWinCount: structuredClone(game.feverWinCount),

@@ -86,7 +86,7 @@
     startSpin(() => onRoll());
   }
 
-  // 新規 roll 検出 → hit / ゾロ目 2 連続目以降 [シュバゾロ連続特典] で ファンファーレ
+  // 新規 roll 検出 → hit / ゾロ目 2 連続目以降 [ゾロ目連続特典] で ファンファーレ
   // 非 canOperate side [オンライン非 winner] では 視覚動画も WS sync で発火 [リョー指示 2026-05-13]
   // 物理 sim の land 値は捨てて text result は WS の `rolls` 配列の値で表示する [diceBox.roll は value 強制注入 path 無し]
   $: {
@@ -153,8 +153,8 @@
         <div class="result">
           <div class="result-row">✅ 確定: <strong>{summary?.hits ?? hits} hit</strong> / base {chance.baseChip} × {chance.count} 回</div>
           <div class="result-row">📦 加算 chip: <strong>{summary?.chipN ?? 0} オール</strong></div>
-          {#if (summary?.zoroBonusTotal ?? 0) > 0}
-            <div class="result-row">🎲 シュバゾロ連続特典: <strong>+{summary?.zoroBonusTotal ?? 0} オール</strong></div>
+          {#if (summary?.zoroBonusTotal ?? 0) !== 0}
+            <div class="result-row">🎲 ゾロ目連続特典: <strong>{(summary?.zoroBonusTotal ?? 0) > 0 ? '+' : ''}{summary?.zoroBonusTotal ?? 0} オール{(summary?.zoroBonusTotal ?? 0) < 0 ? ' [払い]' : ''}</strong></div>
           {/if}
           {#if !chance.shuvariApplicable && !chance.alwaysShuvari}
             <div class="result-row note">[シュバ非適用]</div>

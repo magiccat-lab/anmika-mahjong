@@ -142,6 +142,8 @@ describe('canonical flow-rule regressions', () => {
     expect(game.huapai[player]).toEqual(['f1']);
     expect(game.shan.paishu).toBe(0);
     expect(game.lingshangActive[player]).toBe(true);
+    // 2026-07-18 リョー裁定: 華抜き補充もカン由来ではない [嶺上開花の対象外]
+    expect(game.lingshangFromKan[player]).toBe(false);
   });
 
   it('北抜きロンは列挙役満でも北単騎だけに限定する', () => {

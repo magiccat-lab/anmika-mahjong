@@ -307,6 +307,7 @@ export function buildCanonicalPaifuSnapshot(state: StoreState, timestamp = new D
         yifaActive: g.yifaActive,
         lizhiDeclareDapai: g.lizhiDeclareDapai,
         lingshangActive: g.lingshangActive,
+        lingshangFromKan: g.lingshangFromKan,
         firstTurnState: g.firstTurnState,
         qianggangPending: g.qianggangPending,
         feverWinCount: g.feverWinCount,
@@ -425,6 +426,7 @@ function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreSt
   const fields = paifu.game.fields ?? {};
   const recordFields = [
     'nukidora', 'nukidoraGold', 'yifaActive', 'lizhiDeclareDapai', 'lingshangActive',
+    'lingshangFromKan',
     'feverWinCount', 'goldHand', 'huapai', 'pochiHand', 'lastZimoInfo',
     'pochiMultiplier', 'pochiPaymentMode', 'pochiChipReverse', 'pochiChipDouble',
     'chipLedger', 'haruActive', 'fuyuSkip', 'fuyuConsumed', 'akiUsedCount',
@@ -435,6 +437,10 @@ function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreSt
   ];
   for (const field of recordFields) {
     if (fields[field] !== undefined) (ng as any)[field] = cloneCanonical(fields[field]);
+  }
+  // 旧牌譜互換: lingshangFromKan の無い保存は旧 semantics [嶺上 active なら開花対象] を引き継ぐ
+  if (fields.lingshangFromKan === undefined) {
+    ng.lingshangFromKan = cloneCanonical(ng.lingshangActive);
   }
   ng.restoreFirstTurnState(fields.firstTurnState);
   ng.qianggangPending = !!fields.qianggangPending;
@@ -645,6 +651,8 @@ export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, b
   ng.yifaActive = paifu.yifaActive ?? { 0: false, 1: false, 2: false };
   ng.lizhiDeclareDapai = paifu.lizhiDeclareDapai ?? { 0: false, 1: false, 2: false };
   ng.lingshangActive = paifu.lingshangActive ?? { 0: false, 1: false, 2: false };
+  // v2 牌譜に lingshangFromKan は無い。旧 semantics [嶺上 active なら開花対象] を引き継ぐ
+  ng.lingshangFromKan = paifu.lingshangFromKan ?? { ...ng.lingshangActive };
   // 嶺上牌を既にツモっている局面で qianggangPending=true が残っている古い牌譜は、
   // 加槓 window が閉じた後の stale flag とみなして落とす。
   const anyLingshangActive = Object.values(ng.lingshangActive).some(Boolean);
