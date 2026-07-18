@@ -1864,7 +1864,10 @@
       </div>
     {/if}
     <!-- 2026-07-16 リョー指示: solo の CPU 和了サイコロは人間の確認までモーダルも進行も止める -->
-    {#if viewMode === 'single' && $game.pendingSaiKoro && !$game.cpuWinAck}
+    <!-- 2026-07-19 codex指摘: cpuWinAck=false は cpuStepImpl 経由 [dev 含む全ローカルモード] で立つのに
+         ack ボタンが single 限定表示だと、dev では CPU サイコロ driver [cpuWinAck 必須] が永久停止する。
+         オンライン中は server authority が駆動するので出さない -->
+    {#if !onlineGameStarted && $game.pendingSaiKoro && !$game.cpuWinAck}
       <div class="cpu-sai-ack">
         <button class="cpu-sai-ack-btn" on:click={() => { saiKoroOpened = true; game.ackCpuWin(); }}>
           🎲 CPU のサイコロチャンスを見る
