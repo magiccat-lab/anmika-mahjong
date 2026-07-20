@@ -152,10 +152,14 @@
       pochiReveal = null;
     }
     if (zimoEvents.length > lastSeenZimoEventCount) {
+      const someoneFeverNow = ([0, 1, 2] as const).some((p) => $game.game.feverActive[p]);
       for (let i = lastSeenZimoEventCount; i < zimoEvents.length; i++) {
         const ev = zimoEvents[i];
         const color = ev?.pai ? POCHI_COLOR_MAP[ev.pai] : undefined;
-        if (color && $game.game.lizhi.has(ev.player)) {
+        // [2026-07-21 リョー裁定] フィーバー中の非フィーバー家は強制ツモ切りなので、
+        // ぽっちを引いても開示演出 [ツモ！めくり] を出さない。牌はそのまま河へ
+        if (color && $game.game.lizhi.has(ev.player)
+            && !(someoneFeverNow && !$game.game.feverActive[ev.player])) {
           pochiRevealQueue.push({ player: ev.player, color, isCpu: $game.cpu[ev.player] === true });
         }
       }

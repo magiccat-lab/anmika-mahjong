@@ -9,7 +9,6 @@
   import { onMount, onDestroy } from 'svelte';
   import Tile from './Tile.svelte';
   export let player: number;
-  $: void player; // 内部未使用 [将来 player 別演出用に予約、 svelte warn 抑止]
   export let color: 'blue' | 'red' | 'green' | 'yellow';
   export let isCpu: boolean = false;
   export let onClose: () => void = () => {};
@@ -79,6 +78,8 @@
   <div class="radial-lines"></div>
   <!-- 中央 main panel -->
   <div class="cutin-panel" style="--accent: {currentAccent}">
+    <!-- 2026-07-21: 誰の引き牌か表示 [リョーが P1 の演出を自分のツモと誤認した] -->
+    <div class="seat-label">player {player} の引き牌</div>
     <div class="big-label">白ぽっち</div>
     <div class="tile-bay">
       <div class="tile-mega" class:revealed>
@@ -175,6 +176,13 @@
     0%   { transform: translate(-150%, -50%) rotate(-15deg) scale(2); opacity: 0; }
     60%  { transform: translate(-50%, -50%) rotate(2deg) scale(1.15); opacity: 1; }
     100% { transform: translate(-50%, -50%) rotate(-3deg) scale(1); opacity: 1; }
+  }
+  .seat-label {
+    font-size: 15px;
+    font-weight: 700;
+    color: #d8d4c8;
+    letter-spacing: 2px;
+    margin-bottom: 2px;
   }
   .big-label {
     font-size: 36px;
