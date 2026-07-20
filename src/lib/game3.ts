@@ -17,6 +17,10 @@ function isMenzenHand(sp: any): boolean {
     || sp._fulou.every((m: string) => /^[mpsz]\d{4}$/.test(m));
 }
 
+/** 他家リーチ中、自分がこのシャンテン以上ならベタオリへ切り替える
+ *  [0 = テンパイ、1 = 1 シャンテンまでは押す] */
+const PICK_FOLD_XIANGTING = 2;
+
 /** Shared riichi shanten, including this ruleset's m7-as-m1 fallback. */
 function lizhiXiangting(sp: any): number {
   if (!sp) return 99;
@@ -522,6 +526,19 @@ export class Game3 {
   }
   restoreSnapshot(): void {
     restoreSnapshotHelper(this._snapshotRefs(), this.preHuleSnapshot);
+  }
+
+  /** ロック非依存のローカル snapshot [2026-07-20 リョー報告: 秋のドラ表が漏れる 再発]
+   *  saveSnapshot() は snapshotLocked 中に黙ってスキップされるのに restoreSnapshot() は
+   *  実行されるので、ダブロン評価中に hule() が失敗すると秋カスケードの物理ドラめくりが
+   *  巻き戻らず、ドラ表示牌の 3 枚目 4 枚目が局中に見えてしまう。
+   *  投機的に hule() を呼ぶ側はこのペアで自前に巻き戻すこと。 */
+  captureSnapshot(): any {
+    return saveSnapshotHelper(this._snapshotRefs());
+  }
+  applySnapshot(snap: any): void {
+    if (!snap) return;
+    restoreSnapshotHelper(this._snapshotRefs(), snap);
   }
 
   /**
@@ -1489,7 +1506,8 @@ export class Game3 {
   }
 
   /** AI 用: シャンテン最小化する打牌候補を返す。
-   *  同シャンテン候補内では: 全リーチ家の現物 [+10] > 字牌 [+3] > 端牌 [+2] > 2/8 [+1] > 中央 */
+   *  同シャンテン候補内では: 全リーチ家の現物 [+10] > 字牌 [+3] > 端牌 [+2] > 2/8 [+1] > 中央
+   *  他家リーチ中に自分がこのシャンテン以上 [遠い] なら安全度優先へ切り替える */
   pickBestDiscard(player: PlayerId): Pai | null {
     const sp = this.shoupai.get(player);
     if (!sp) return null;
@@ -1614,10 +1632,21 @@ export class Game3 {
       return false;
     };
 
+    // [2026-07-20 リョー指示] 押し引き。旧実装は比較順が
+    // 「シャンテン最小 → 受け入れ最大 → 安全度」で、安全度は同シャンテン同受け入れ
+    // の時しか出番が無かった。つまり他家リーチ中でも 1 シャンテン縮むなら無筋を切る。
+    // 自分がリーチ済 [降りられない] でも テンパイ / 1 シャンテン [押す価値がある]
+    // でもない時だけ、安全度優先へ切り替える。
+    const myXiangtingNow = lizhiXiangting(sp);
+    const foldMode = lizhiOpponents.length > 0
+      && !this.lizhi.has(player)
+      && myXiangtingNow >= PICK_FOLD_XIANGTING;
+
     let bestPai: string | null = null;
     let bestShanten = 99;
     let bestUkeire = -1;
     let bestPriority = -1;
+    let bestSafety = -99;
     for (const c of candidates) {
       const basePai = c.replace(/_$/, '');
       const sp_clone = sp.clone();
@@ -1665,27 +1694,38 @@ export class Game3 {
       if ((basePai === 'p0' || basePai === 's0') && prio > -3) prio -= 1;
       // リーチ家への 安牌評価 [現物 +10 > スジ +4 > カベ +2 > 危険 -5]
       // [2026-05-21 ゆーま 自走 CPU 教育: スジ / カベ 評価追加で 守備強化]
+      // [2026-07-20] safety を prio と分けて持つ。prio には祝儀温存の減点
+      // [金 -3 / ぽっち -4 / 7 牌 -5 等] が混ざっているので、ベタオリで prio を
+      // 最優先にすると「危険でも祝儀牌以外を切る」挙動になり放銃が増える。
+      let safety = 0;
       if (lizhiOpponents.length > 0) {
         const isGenbutsuAll = lizhiOpponents.every((lp) => {
           const he = this.he.get(lp);
           return he?._pai?.some((d: string) => baseTile(d) === baseTile(basePai));
         });
-        if (isGenbutsuAll) prio += 10;
+        if (isGenbutsuAll) safety = 10;
         else {
           const isSujiAll = lizhiOpponents.every((lp) => isSujiSafe(lp, basePai));
-          if (isSujiAll) prio += 4;
-          else if (isKabeSafe(basePai)) prio += 2;
-          else prio -= 5;
+          if (isSujiAll) safety = 4;
+          else if (isKabeSafe(basePai)) safety = 2;
+          else safety = -5;
         }
+        prio += safety;
       }
-      // 比較順: xt 最小 > ukeire 最大 > priority 最大
-      const better = xt < bestShanten
-        || (xt === bestShanten && ukeire > bestUkeire)
-        || (xt === bestShanten && ukeire === bestUkeire && prio > bestPriority);
+      // 通常は xt 最小 > ukeire 最大 > priority 最大。
+      // ベタオリ中は safety [純粋な安全度] を最優先し、同安全度の中で手を進める
+      const better = foldMode
+        ? (safety > bestSafety
+          || (safety === bestSafety && xt < bestShanten)
+          || (safety === bestSafety && xt === bestShanten && ukeire > bestUkeire))
+        : (xt < bestShanten
+          || (xt === bestShanten && ukeire > bestUkeire)
+          || (xt === bestShanten && ukeire === bestUkeire && prio > bestPriority));
       if (better) {
         bestShanten = xt;
         bestUkeire = ukeire;
         bestPriority = prio;
+        bestSafety = safety;
         bestPai = c;
       }
     }

@@ -31,7 +31,7 @@
   import type { PlayerId } from './lib/types';
   import { parseFulouList, fulouPhysicalFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
-  import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint } from './lib/store/paifuIo';
+  import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint, buildDiagnosticDump } from './lib/store/paifuIo';
   import { serializeCanonical } from './lib/canonicalJson';
   import { toCorePai } from './lib/helpers';
   import { feverWaitInfoFromLiveWall } from './lib/game3/feverLizhi';
@@ -439,19 +439,29 @@
     return e.type;
   }
 
+  function downloadJson(data: any, name: string) {
+    const blob = new Blob([serializeCanonical(data, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function exportPaifu() {
     if (!canSavePaifu) {
       alert('牌譜は、選択待ちのない安全な手番開始時か半荘終了時に保存できます。');
       return;
     }
-    const data = buildCanonicalPaifuSnapshot($game);
-    const blob = new Blob([serializeCanonical(data, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `paifu_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadJson(buildCanonicalPaifuSnapshot($game), `paifu_${Date.now()}.json`);
+  }
+
+  // [2026-07-20 リョー報告: 「次に進めなくなった、牌譜保存して見せたいのに」]
+  // 牌譜保存は安全な保存ポイント限定なので、詰まった局面ではまさに落とせない。
+  // 復元用ではなく「どこで止まったか」を渡すためのダンプは常に落とせるようにする。
+  function exportDiagnostics() {
+    downloadJson(buildDiagnosticDump($game), `stuck_${Date.now()}.json`);
   }
 
   // ポッチ開封演出中は自家手牌のツモ牌 [末尾] の色を伏せる [2026-07-16 リョー報告:
@@ -1939,6 +1949,7 @@
       <span class="row-label">システム:</span>
       <button on:click={() => game.reset()}>初期化</button>
       <button on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : '安全な手番開始時に保存できます'}>牌譜保存</button>
+      <button on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]">状態ダンプ</button>
       <label class="paifu-load-btn">
         <input type="file" accept="application/json" on:change={onPaifuFile} style="display:none" />
         📂 牌譜ロード
@@ -2000,6 +2011,7 @@
           <label title="CPU の操作を2.5秒遅らせる"><input type="checkbox" bind:checked={cpuSlowMode}>CPU ラグ</label>
           <button class="table-setting-btn online" on:click={() => { viewMode = 'online'; }} title="オンライン対戦へ" aria-label="オンライン対戦へ">🌐 <span class="settings-label">オンライン対戦</span></button>
           <button class="table-setting-btn save" on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : '安全な手番開始時に保存できます'} aria-label="牌譜保存">📂 <span class="settings-label">牌譜保存</span></button>
+          <button class="table-setting-btn save" on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ">🩺 <span class="settings-label">状態ダンプ</span></button>
         {:else}
           <button class="table-setting-btn leave" on:click={() => { disconnectOnline(); viewMode = 'online'; }} title="対局から退出" aria-label="対局から退出">× <span class="settings-label">退出</span></button>
         {/if}
@@ -2413,6 +2425,7 @@
             <button on:click={() => game.continueFever()}>▶ フィーバー継続</button>
           {:else if state.finished}
             <button on:click={exportPaifu} disabled={!canSavePaifu}>📂 牌譜保存</button>
+            <button on:click={exportDiagnostics}>🩺 状態ダンプ</button>
             <label style="display:inline-flex; align-items:center; gap:4px; font-size:14px;">
               <input type="checkbox" bind:checked={resetChipOnNextMatch}>チップリセット
             </label>

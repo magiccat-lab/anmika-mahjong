@@ -247,6 +247,82 @@ export function isSafePaifuSavePoint(state: StoreState): boolean {
   }
 }
 
+/**
+ * 進行不能時の診断ダンプ [2026-07-20 リョー報告: 「次に進めなくなった、牌譜保存して見せたいのに」]
+ *
+ * 牌譜保存は isSafePaifuSavePoint で守られていて、詰まった局面ではまさに保存できない。
+ * 復元用ではなく「どこで止まったか」を渡すためのスナップショットなので、
+ * ガードを掛けず、いつでも落とせるようにする。
+ */
+export function buildDiagnosticDump(state: StoreState): any {
+  const g: any = state.game;
+  const safeSeat = (fn: (p: PlayerId) => any) => {
+    const out: Record<string, any> = {};
+    for (const p of [0, 1, 2] as PlayerId[]) {
+      try { out[p] = fn(p); } catch (e: any) { out[p] = `ERR:${e?.message ?? e}`; }
+    }
+    return out;
+  };
+  let currentPlayer: any = null;
+  try { currentPlayer = g.lunbanToPlayerId(g.state.lunban); } catch (e: any) { currentPlayer = `ERR:${e?.message ?? e}`; }
+  return {
+    kind: 'anmika-diagnostic-dump',
+    version: 1,
+    savedAt: new Date().toISOString(),
+    reason: 'stuck-state',
+    blocking: {
+      awaitingRonDecision: state.awaitingRonDecision,
+      awaitingFulou: state.awaitingFulou,
+      lizhiPending: state.lizhiPending,
+      pendingKinpei: state.pendingKinpei,
+      pendingFuyu: state.pendingFuyu,
+      pendingKamiPochi: state.pendingKamiPochi,
+      pendingPochiSwap: state.pendingPochiSwap,
+      pendingFeverContinue: state.pendingFeverContinue,
+      pendingPingju: state.pendingPingju,
+      pendingQianggang: state.pendingQianggang,
+      pendingSaiKoro: state.pendingSaiKoro,
+      pendingNukiBei: state.pendingNukiBei,
+      cpuWinAck: state.cpuWinAck,
+      roundEnded: state.roundEnded,
+      cutin: state.cutin,
+      cutinQueueLength: state.cutinQueue?.length ?? 0,
+    },
+    flow: {
+      message: state.message,
+      lastZimo: state.lastZimo,
+      lastDapai: state.lastDapai,
+      lastWinner: state.lastWinner,
+      currentPlayer,
+      cpu: state.cpu,
+      ronCandidatesPassed: state.ronPassedPlayers,
+      ronDeclared: state.ronDeclaredPlayers,
+      ponCandidates: state.ponCandidates,
+      kanCandidates: state.kanCandidates,
+    },
+    game: {
+      state: cloneCanonical(g.state ?? {}),
+      paishu: (() => { try { return g.shan.paishu; } catch { return null; } })(),
+      baopai: (() => { try { return [...(g.shan.baopai ?? [])]; } catch { return null; } })(),
+      fubaopai: (() => { try { return g.shan.fubaopai ? [...g.shan.fubaopai] : null; } catch { return null; } })(),
+      lizhi: [...(g.lizhi ?? [])],
+      shuvariActive: cloneCanonical(g.shuvariActive ?? {}),
+      shuvariUsed: cloneCanonical(g.shuvariUsed ?? {}),
+      feverActive: cloneCanonical(g.feverActive ?? {}),
+      feverTier: cloneCanonical(g.feverTier ?? {}),
+      kinpeiTarget: cloneCanonical(g.kinpeiTarget ?? {}),
+      huapai: cloneCanonical(g.huapai ?? {}),
+      nukidora: cloneCanonical(g.nukidora ?? {}),
+      nukidoraGold: cloneCanonical(g.nukidoraGold ?? {}),
+      akiUsedCount: cloneCanonical(g.akiUsedCount ?? {}),
+      chipLedger: cloneCanonical(g.chipLedger ?? {}),
+      shoupai: safeSeat((p) => serializeHand(g.shoupai.get(p))),
+      he: safeSeat((p) => [...((g.he.get(p) as any)?._pai ?? [])]),
+      events: cloneCanonical(g.events ?? []),
+    },
+  };
+}
+
 function serializeHand(sp: any): any {
   if (!sp?._bingpai) return null;
   const bp = sp._bingpai;

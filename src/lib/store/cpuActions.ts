@@ -46,6 +46,11 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     if (!s.cpu[cur as 0 | 1 | 2]) break;
     if (s.game.canTsumo(cur)) {
       // R4 P1 #12 fix: saveSnapshot は hule() より 先
+      // [2026-07-20 リョー報告] 巻き戻しは restoreSnapshot ではなくローカル snapshot で行う。
+      // saveSnapshot は snapshotLocked [ダブロン評価中] にスキップされるのに
+      // restoreSnapshot は走るため、hule 失敗時に秋カスケードの物理ドラめくりが残り、
+      // ドラ表示牌の 3 枚目 4 枚目が局中に見えてしまっていた。
+      const localSnap = s.game.captureSnapshot();
       s.game.saveSnapshot();
       let result = s.game.hule(cur);
       // 秋で今回初めて表示された華も、CPU の金北自動選択候補に含める。
@@ -54,7 +59,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         && (s.game.goldHand[cur].z > 0 || (s.game.nukidoraGold[cur] ?? 0) > 0)
         && s.game.kinpeiTarget[cur] === null
         && resolvedHuapai.length > 0) {
-        s.game.restoreSnapshot();
+        s.game.applySnapshot(localSnap);
         s.game.autoResolveKinpei(cur as any, resolvedHuapai);
         // Subsequent pochi-choice rewinds must retain the chosen Kinpei target.
         s.game.saveSnapshot();
@@ -64,7 +69,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       // 通常進行へ fallback。 旧 code は null result で lastWinner / roundEnded を進めて局破壊
       if (!result) {
         s.message = `[CPU] player ${cur} ツモ和了 失敗 [hule null]、 通常打牌 へ`;
-        s.game.restoreSnapshot();
+        s.game.applySnapshot(localSnap);
         // 続行 = ループ脱出せず 通常 cpuStep へ進む [break しない]
       } else {
         const choice = resolvePreSettlementPochiChoices(
