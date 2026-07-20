@@ -206,11 +206,16 @@ export function applyFuyuChip(
     if (isTulip) {
       const s = norm[0]; const n = parseInt(norm[1] === '0' ? '5' : norm[1]);
       if (s === 'm') {
-        if (n === 7) { matches.add('z5'); matches.add('m9'); }
-        else if (n === 9) { matches.add('z5'); matches.add('m7'); }
+        // 萬子は 7m / 9m の 2 種だけ [isValidAnmikaTile] なので互いに隣。
+        // [2026-07-20 リョー裁定] 7m9m と白は無関係、旧実装の z5 連結は撤去
+        if (n === 7) matches.add('m9');
+        else if (n === 9) matches.add('m7');
       } else if (s === 'z' && n === 5) {
-        // z5 ↔ m7 / m9
-        matches.add('m7'); matches.add('m9');
+        // [2026-07-20 リョー裁定] 白めくりは發・中
+        matches.add('z6'); matches.add('z7');
+      } else if (s === 'z' && n === 4) {
+        // [2026-07-20 リョー裁定] 北めくりは西・東
+        matches.add('z3'); matches.add('z1');
       } else if (s === 'z' && n === 3) {
         // 字牌チューリップの裁定例: 西なら東・北。
         matches.add('z1'); matches.add('z4');

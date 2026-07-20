@@ -1066,6 +1066,17 @@ export function createGameStore() {
       if (sendOnlineAction({ type: 'discard', pai, meta })) return;
       update((s) => {
         if (isLiveTurnActionBlocked(s, true)) return { ...s };
+        // シュバリ中は見逃し不可 [リョー指示 2026-05-11]。ロンだけでなくツモも同じ扱いで、
+        // ツモ和了できる状態の打牌 [= シュバポツモのキャンセル] を reject する
+        // [2026-07-20 リョー報告: シュバポツモがキャンセルできてしまっている]。
+        // 通常リーチのツモは従来どおり見逃せる [自動ツモ切りが止まるだけ]。
+        {
+          const turnPlayer = s.game.lunbanToPlayerId(s.game.state.lunban);
+          if (s.game.shuvariActive[turnPlayer] && s.game.canTsumo(turnPlayer)) {
+            s.message = `p${turnPlayer} はシュバリ中、 見逃し不可。 ツモ宣言してください`;
+            return { ...s };
+          }
+        }
         // リーチ pending 中なら 宣言牌候補チェック + リーチ確定
         if (s.lizhiPending !== null) {
           const player = s.game.lunbanToPlayerId(s.game.state.lunban);
@@ -1975,11 +1986,16 @@ export function createGameStore() {
         const curChance = ps.chances[ps.currentIdx];
         const chanceWinner: 0|1|2 = ((curChance as any)?.winner ?? ps.winner) as 0|1|2;
         let zoroBonusThisRoll = 0;
-        // 連続ゾロ目特典 [2026-07-18 リョー裁定]: シュバ宣言・ぽっち等の状態に
-        // 関係なく全サイコロチャンスで発動する。額も固定で、2回目以降の
-        // ゾロ目の出目に応じて 1→111 / n→n*11 [22/33/44/55/66] 枚オール。
-        // シュバリー・ぽっち・FEVER の倍率は乗せない。
-        if (zoro) {
+        // 連続ゾロ目特典 [2026-07-20 リョー裁定]: シュバサイのときだけ発動する
+        // [2026-07-18 の「シュバ不問で全サイコロチャンス」は撤回]。
+        // シュバサイ = 役固有の常時シュバサイ、または シュバ適用サイコロ × シュバ宣言中
+        // [SaiKoroModal のシュバ表示と同じ判定]。
+        // 額は従来どおり固定で、2回目以降のゾロ目の出目に応じて
+        // 1→111 / n→n*11 [22/33/44/55/66] 枚オール。
+        // シュバリー・ぽっち・FEVER の倍率は乗せない [リョー裁定: 倍率は上がらない]。
+        const isShuvariSai = (curChance as any)?.alwaysShuvari === true
+          || ((curChance as any)?.shuvariApplicable === true && s.game.shuvariActive[chanceWinner]);
+        if (zoro && isShuvariSai) {
           let consec = 1;
           for (let i = ps.rolls.length - 2; i >= 0; i--) {
             if (ps.rolls[i].zoro) consec++;

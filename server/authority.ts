@@ -511,6 +511,11 @@ export class RoomAuthority {
     if (currentErr) return currentErr;
     const pendingErr = this.requireNoReactionPending('discard');
     if (pendingErr) return pendingErr;
+    // Shuvari forbids declining a win.  applyPass already blocks the ron side;
+    // a discard while tsumo is available is the tsumo-side equivalent.
+    if (this.game.shuvariActive[actor] && this.game.canTsumo(actor)) {
+      return `discard: player ${actor} is in shuvari and must declare tsumo`;
+    }
     if (!paiValue) return 'discard: missing pai';
 
     const pai = paiValue as Pai;

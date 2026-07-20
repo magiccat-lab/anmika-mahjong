@@ -92,9 +92,45 @@ describe('saiKoro actions [no-op / 基本進行]', () => {
     expect(entry?.multiplier).toBe(1);
   });
 
-  it('シュバ未宣言でも連続ゾロ目特典が付く [2026-07-18 リョー裁定: シュバ不問]', () => {
+  it('シュバ未宣言なら連続ゾロ目特典は付かない [2026-07-20 リョー裁定: シュバサイ限定]', () => {
     const s = get(game);
     s.game.shuvariActive[0] = false;
+    s.pendingSaiKoro = {
+      winner: 0 as PlayerId,
+      chances: [{ name: 'shuvari dice', baseChip: 1, shuvariApplicable: true, count: 1, plusMinus: '+' as const }],
+      currentIdx: 0,
+      selectedCombo: [1, 2],
+      rolls: [],
+      finalized: false,
+      summary: null,
+    } as any;
+    game.rollSaiKoroDice([2, 2]);
+    game.rollSaiKoroDice([2, 2]);
+    const after = get(game);
+    expect(after.game.chipBreakdown.some((e) => e.label?.includes('ゾロ目'))).toBe(false);
+  });
+
+  it('シュバ非適用サイコロはシュバ宣言中でも連続ゾロ目特典が付かない', () => {
+    const s = get(game);
+    s.game.shuvariActive[0] = true;
+    s.pendingSaiKoro = {
+      winner: 0 as PlayerId,
+      chances: [{ name: 'non shuvari dice', baseChip: 1, shuvariApplicable: false, count: 1, plusMinus: '+' as const }],
+      currentIdx: 0,
+      selectedCombo: [1, 2],
+      rolls: [],
+      finalized: false,
+      summary: null,
+    } as any;
+    game.rollSaiKoroDice([2, 2]);
+    game.rollSaiKoroDice([2, 2]);
+    const after = get(game);
+    expect(after.game.chipBreakdown.some((e) => e.label?.includes('ゾロ目'))).toBe(false);
+  });
+
+  it('シュバ宣言中のシュバ適用サイコロには連続ゾロ目特典が付く', () => {
+    const s = get(game);
+    s.game.shuvariActive[0] = true;
     s.pendingSaiKoro = {
       winner: 0 as PlayerId,
       chances: [{ name: 'shuvari dice', baseChip: 1, shuvariApplicable: true, count: 1, plusMinus: '+' as const }],
@@ -115,7 +151,9 @@ describe('saiKoro actions [no-op / 基本進行]', () => {
 
   it('払いサイコロ [逆ぽっち] の連続ゾロ目特典は同額のまま払い扱い [2026-07-18 リョー裁定]', () => {
     const s = get(game);
-    s.game.shuvariActive[0] = false;
+    // 2026-07-20 裁定でゾロ目特典はシュバサイ限定になったので、払い挙動の検証も
+    // シュバ宣言中で行う [額と符号の仕様自体は 07-18 のまま]
+    s.game.shuvariActive[0] = true;
     s.game.pochiMultiplier[0] = { defen: -1, chip: -2 };
     s.pendingSaiKoro = {
       winner: 0 as PlayerId,
@@ -144,7 +182,7 @@ describe('saiKoro actions [no-op / 基本進行]', () => {
 
   it('連続ゾロ目特典は2回目の出目で額が決まる [1→111 / n→n*11]', () => {
     const s = get(game);
-    s.game.shuvariActive[0] = false;
+    s.game.shuvariActive[0] = true;
     s.pendingSaiKoro = {
       winner: 0 as PlayerId,
       chances: [{ name: 'ones dice', baseChip: 1, shuvariApplicable: true, count: 1, plusMinus: '+' as const }],
@@ -179,12 +217,12 @@ describe('saiKoro actions [no-op / 基本進行]', () => {
     expect(get(game).game.chipBreakdown.at(-1)?.base).toBe(22);
   });
 
-  it('シュバリー中でも連続ゾロ目祝儀は固定額 [2026-07-18 リョー裁定: 倍率なし]', () => {
+  it('シュバリー中でも連続ゾロ目祝儀は固定額 [リョー裁定: 倍率は上がらない]', () => {
     const s = get(game);
     s.game.shuvariActive[0] = true;
     s.pendingSaiKoro = {
       winner: 0 as PlayerId,
-      chances: [{ name: 'fixed dice', baseChip: 1, shuvariApplicable: false, count: 1, plusMinus: '+' as const }],
+      chances: [{ name: 'fixed dice', baseChip: 1, shuvariApplicable: true, count: 1, plusMinus: '+' as const }],
       currentIdx: 0,
       selectedCombo: [1, 2],
       rolls: [],

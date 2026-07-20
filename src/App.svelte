@@ -782,6 +782,9 @@
       }
       return;
     }
+    // シュバリ中はツモ和了を見逃せない [ロン見逃し不可と同じ扱い]。
+    // ツモ可の状態で手牌を触っても打牌させず、ツモ宣言 button へ誘導する。
+    if ($game.game.shuvariActive[player as PlayerId] && canTsumo) return;
     // リーチ中は物理的なツモ牌そのものだけを切れる。core 化後に比較すると
     // gp→p0 等で正しい金牌ツモ切りを拒否し、逆に別物の赤牌を許してしまう。
     const selectedPhysicalPai = pai.replace(/[_*]$/, '');
@@ -1837,6 +1840,24 @@
             P{$game.pendingKamiPochi.winner}・{$game.pendingKamiPochi.context === 'fuyu' ? `冬 ${$game.pendingKamiPochi.tier === 'lower' ? '下段' : '上段'}` : 'ドラ表示'}
             の正ぽっちを取る牌を選択
           </p>
+          <!-- 2026-07-20 リョー報告: どの牌に取るかは手牌を見ないと決められないのに
+               modal が手牌を覆っていた。裏に透かすだけだと小さいので手牌を modal 内に出す -->
+          <div class="pochi-choice-hand">
+            <span class="pochi-choice-hand-label">自分の手牌</span>
+            <div class="pochi-choice-hand-tiles">
+              {#each shoupai0 as pai}
+                <Tile {pai} size="sm" />
+              {/each}
+            </div>
+            {#if fulou0.length > 0}
+              <span class="pochi-choice-hand-label">副露</span>
+              <div class="pochi-choice-hand-tiles">
+                {#each fulou0.flatMap((m) => m.tiles) as pai}
+                  <Tile {pai} size="sm" />
+                {/each}
+              </div>
+            {/if}
+          </div>
           <div class="pochi-choice-grid">
             {#each $game.pendingKamiPochi.candidates as pai}
               <button type="button" class="pochi-choice-tile" aria-label={`${pai} に取る`} on:click={() => game.selectKamiPochi(pai, $game.pendingKamiPochi?.occurrenceKey)}>
@@ -1890,6 +1911,7 @@
         finalized={$game.pendingSaiKoro.finalized}
         summary={$game.pendingSaiKoro.summary}
         chipMultiplier={$game.game.computeChipMultiplier(_chanceOwner, { bypassShuvari: true, bypassFever: false, bypassPochi: (_curChance as any)?.mode === 'ron', mode: (_curChance as any)?.mode ?? 'tsumo' })}
+        ownerShuvariActive={$game.game.shuvariActive[_chanceOwner]}
         onSelectCombo={(a, b) => game.selectSaiKoroCombo(a, b)}
         onRoll={(override?: [number, number]) => game.rollSaiKoroDice(override)}
         onAdvance={() => game.advanceSaiKoro()}
@@ -3999,18 +4021,26 @@
     margin-left: 4px;
   }
 
+  /* 2026-07-20 リョー要望: 神ぽっち等の選択中も手牌を確認できるようにする。
+     modal を上寄せ + 高さを抑え、暗幕は下側を薄くして卓の手牌を透かす */
   .pochi-choice-backdrop {
     position: fixed;
     inset: 0;
     z-index: 9400;
     display: grid;
-    place-items: center;
-    padding: 16px;
-    background: rgba(5, 17, 12, 0.72);
+    place-items: start center;
+    padding: 12px 16px;
+    background: linear-gradient(
+      to bottom,
+      rgba(5, 17, 12, 0.72) 0%,
+      rgba(5, 17, 12, 0.72) 58%,
+      rgba(5, 17, 12, 0.20) 76%,
+      rgba(5, 17, 12, 0.06) 100%
+    );
   }
   .pochi-choice-modal {
     width: min(720px, calc(100vw - 32px));
-    max-height: min(82vh, 760px);
+    max-height: min(62vh, 560px);
     overflow: auto;
     box-sizing: border-box;
     padding: 18px;
@@ -4029,6 +4059,27 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
     gap: 8px;
+  }
+  /* modal 内に出す手牌参照 [どの牌に取るか決めるのに必要] */
+  .pochi-choice-hand {
+    margin: 0 0 10px;
+    padding: 6px 8px;
+    border: 1px solid #cbb87a;
+    border-radius: 8px;
+    background: #fffdf5;
+  }
+  .pochi-choice-hand-label {
+    display: block;
+    font-size: 10px;
+    color: #584b20;
+    text-align: left;
+    margin-bottom: 2px;
+  }
+  .pochi-choice-hand-tiles {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 2px;
   }
   .pochi-choice-tile {
     min-height: 74px;

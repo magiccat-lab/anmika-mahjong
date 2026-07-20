@@ -7,6 +7,8 @@
   export let chances: Array<{ name: string; baseChip: number; shuvariApplicable: boolean; alwaysShuvari?: boolean; rollCount?: number; count: number; plusMinus: '+' | '-' }>;
   /** chip 倍率 [pochi / shuvari / fever 合成]、 表示に反映 */
   export let chipMultiplier: number = 1;
+  /** この chance の持ち主が シュバリー宣言中か [2026-07-20 リョー要望: シュバ状態を画面で確認したい] */
+  export let ownerShuvariActive: boolean = false;
   export let currentIdx: number;
   export let selectedCombo: [number, number] | null;
   export let rolls: Array<{ dice: [number, number]; hit: boolean; zoro: boolean }>;
@@ -115,7 +117,21 @@
     <div class="title">🎲 サイコロチャンス [player {winner}] - {chance.name}</div>
     <div class="info">
       {currentIdx + 1} / {chances.length} 件目 | base {chance.baseChip} × {chance.count} 回 × 倍率 {chipMultiplier} = {chance.baseChip * chance.count * chipMultiplier} オール / hit
-      {#if chance.alwaysShuvari}<span>[常時シュバサイ]</span>{:else if !chance.shuvariApplicable}<span class="non-shuvari">[シュバ非適用]</span>{/if}
+    </div>
+    <!-- 2026-07-20 リョー要望: このサイコロがシュバかどうかを常に明示する。
+         祝儀計算自体は仕様どおりシュバ ×2 非適用、ゾロ目連続特典はシュバ不問の固定額 -->
+    <div class="shuvari-row">
+      🎯 このサイコロ:
+      {#if chance.alwaysShuvari}
+        <strong class="shuvari-yes">常時シュバサイ</strong>
+      {:else if chance.shuvariApplicable && ownerShuvariActive}
+        <strong class="shuvari-yes">シュバサイ</strong> <span class="shuvari-note">[シュバ宣言中]</span>
+      {:else if chance.shuvariApplicable}
+        <strong class="shuvari-no">非シュバサイ</strong> <span class="shuvari-note">[シュバ未宣言]</span>
+      {:else}
+        <strong class="non-shuvari">シュバ非適用</strong>
+      {/if}
+      <div class="shuvari-note">サイコロ祝儀にシュバ ×2 は乗らない / ゾロ目連続特典はシュバサイのみ・固定額</div>
     </div>
 
     {#if !selectedCombo}
@@ -209,6 +225,17 @@
   }
   .info { font-size: 11px; opacity: 0.85; margin-bottom: 8px; }
   .non-shuvari { color: #f88; }
+  .shuvari-row {
+    font-size: 12px;
+    margin: 0 0 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    background: #262130;
+    border-left: 3px solid #a06fd8;
+  }
+  .shuvari-yes { color: #c79bf0; }
+  .shuvari-no { color: #999; }
+  .shuvari-note { font-size: 10px; opacity: 0.7; }
   .step { font-size: 12px; margin: 8px 0 6px; }
   .combos {
     display: grid;
