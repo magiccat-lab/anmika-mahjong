@@ -95,6 +95,27 @@ export class RoomPersistence {
     }
   }
 
+  /**
+   * 事故復帰用の巻き戻し [2026-07-20 リョー要望]。
+   * keepThroughRevision より後の受理コマンドを捨て、巻き戻した snapshot を保存する。
+   * コマンド削除と snapshot 更新は同一トランザクションで行う。片方だけ成功すると
+   * 次回 restoreAuthority が食い違った revision を replay して復元不能になるため。
+   */
+  rewindRoom(snapshot: CanonicalRoomSnapshot, keepThroughRevision: number): number {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = this.db.prepare(
+        'DELETE FROM room_accepted_commands WHERE room_id=? AND revision > ?',
+      ).run(snapshot.roomId, keepThroughRevision);
+      this.saveSnapshot(snapshot);
+      this.db.exec('COMMIT');
+      return Number((result as any)?.changes ?? 0);
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   loadCommands(roomId: string): AcceptedRoomCommand[] {
     const rows = this.db.prepare(
       'SELECT command_id, revision, actor_seat, action_json, ack_json, accepted_at FROM room_accepted_commands WHERE room_id=? ORDER BY revision ASC',
