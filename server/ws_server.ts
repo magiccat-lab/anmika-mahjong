@@ -1535,6 +1535,69 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       } catch (_) { res.writeHead(400); res.end('bad request'); }
       return;
     }
+    // 事故復帰 [2026-07-20 リョー裁定: 落ちた局の冒頭から / PW は 1 個]
+    // room は snapshot + 受理コマンド列で保持されているので、現局のコマンドを捨てて
+    // replay し直せば局頭へ戻せる。局の境目は最後の nextRound コマンドで判る
+    // [受理コマンドテーブルに roundId 列が無いため、action.type で辿る]。
+    if (req.method === 'POST' && req.url === '/internal/rewind-room') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        const { room_id } = body;
+        if (typeof room_id !== 'string') { res.writeHead(400); res.end('bad request'); return; }
+        const room = rooms.get(room_id);
+        const snapshot = room?.snapshot ?? persistence.loadSnapshot(room_id);
+        if (!snapshot?.started) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, reason: 'room not started' }));
+          return;
+        }
+        const commands = persistence.loadCommands(room_id);
+        let keepThrough = 0;
+        for (const command of commands) {
+          if ((command.action as any)?.type === 'nextRound') keepThrough = command.revision;
+        }
+        const kept = commands.filter((command) => command.revision <= keepThrough);
+        if (kept.length === commands.length) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, reason: 'already at round head', revision: keepThrough }));
+          return;
+        }
+        let authority: RoomAuthority | null = null;
+        try {
+          authority = restoreAuthority(snapshot, kept);
+        } catch (error: any) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, reason: `replay failed: ${error?.message ?? error}` }));
+          return;
+        }
+        if (!authority) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, reason: 'cannot rebuild authority' }));
+          return;
+        }
+        const rewound: CanonicalRoomSnapshot = {
+          ...snapshot,
+          revision: keepThrough,
+          commands: kept,
+          updatedAt: new Date().toISOString(),
+        };
+        const dropped = persistence.rewindRoom(rewound, keepThrough);
+        if (room) {
+          room.authority = authority;
+          room.snapshot = rewound;
+          if (room.nextRoundTimer) { clearTimeout(room.nextRoundTimer); room.nextRoundTimer = null; }
+          for (const member of room.members.values()) {
+            sendSync(member.ws, rewound, member.seat, authority, kept);
+          }
+        }
+        log(`[anmika-ws] rewind room=${room_id} -> revision ${keepThrough} [dropped ${dropped}]`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, revision: keepThrough, dropped }));
+      } catch (_) { res.writeHead(400); res.end('bad request'); }
+      return;
+    }
     if (req.method === 'POST' && req.url === '/internal/purge-room') {
       const chunks: Buffer[] = [];
       for await (const chunk of req) chunks.push(chunk as Buffer);

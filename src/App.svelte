@@ -1350,6 +1350,34 @@
   });
   onDestroy(() => autoTsumokiriScheduler.cancel());
 
+  // 事故復帰 [2026-07-20 リョー要望]: オンラインで詰まった時、落ちた局の冒頭へ戻す。
+  // 巻き戻しは全員の進行に影響するので PW [サーバー側の環境変数 1 個] で保護する。
+  let rewindBusy = false;
+  async function requestRewind() {
+    if (!currentRoomId || rewindBusy) return;
+    const password = prompt('復帰パスワードを入力してくれ [この局の冒頭まで巻き戻す]');
+    if (!password) return;
+    rewindBusy = true;
+    try {
+      const response = await fetch(`/api/rooms/${encodeURIComponent(currentRoomId)}/rewind`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      if (response.status === 403) { alert('パスワードが違う'); return; }
+      if (response.status === 503) { alert('サーバー側で復帰パスワードが設定されてない'); return; }
+      if (!response.ok) { alert(`復帰に失敗した [${response.status}]`); return; }
+      const result = await response.json();
+      if (result?.ok) alert(`局の冒頭まで戻した [取り消した操作 ${result.dropped} 件]`);
+      else alert(`戻せなかった: ${result?.reason ?? '不明'}`);
+    } catch (error) {
+      alert('復帰リクエストが届かなかった');
+    } finally {
+      rewindBusy = false;
+    }
+  }
+
   // [2026-07-20 リョー報告: 「次に進めなくなった」] カットイン中は CPU 進行が止まる
   // [cpuActions / autoAdvance が cutin で break する]。CutinOverlay 側のタイマーが
   // 何かの拍子に失われると cutin が消えず、局が永久に止まる。
@@ -1970,6 +1998,9 @@
       <button on:click={() => game.reset()}>初期化</button>
       <button on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : '安全な手番開始時に保存できます'}>牌譜保存</button>
       <button on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]">状態ダンプ</button>
+      {#if onlineGameStarted && currentRoomId}
+        <button on:click={requestRewind} disabled={rewindBusy} title="オンラインで事故った時、この局の冒頭まで巻き戻す [PW 必要]">🔧 局頭に戻す</button>
+      {/if}
       <label class="paifu-load-btn">
         <input type="file" accept="application/json" on:change={onPaifuFile} style="display:none" />
         📂 牌譜ロード

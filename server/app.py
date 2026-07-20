@@ -632,6 +632,45 @@ async def _notify_ws_purge(room_id: str) -> None:
         log.warning("ws purge notify failed room=%s", room_id)
 
 
+# 事故復帰 [2026-07-20 リョー要望]: 落ちた局の冒頭へ巻き戻す。
+# 内部 API は 127.0.0.1 のみ listening でブラウザから直接叩けないため、ここで中継する。
+# パスワードは環境変数 1 個 [リョー裁定]。未設定なら機能ごと無効。
+RECOVERY_PASSWORD = os.environ.get("ANMIKA_RECOVERY_PASSWORD", "")
+
+
+@app.post("/api/rooms/{room_id}/rewind")
+async def rewind_room(room_id: str, request: Request):
+    """Rewind a stuck room to the head of its current round (password gated)."""
+    if not RECOVERY_PASSWORD:
+        raise HTTPException(status_code=503, detail="recovery password not configured")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad request")
+    supplied = body.get("password")
+    if not isinstance(supplied, str):
+        raise HTTPException(status_code=400, detail="missing password")
+    # 文字数の違いだけでも早期 return しないよう compare_digest で比較する
+    if not _secrets.compare_digest(supplied, RECOVERY_PASSWORD):
+        log.warning("rewind rejected: bad password room=%s", room_id)
+        raise HTTPException(status_code=403, detail="bad password")
+    try:
+        async with httpx.AsyncClient(timeout=10) as cli:
+            resp = await cli.post(
+                f"{WS_INTERNAL_BASE}/internal/rewind-room",
+                json={"room_id": room_id},
+                headers={"x-anmika-internal-secret": INTERNAL_API_SECRET},
+            )
+    except Exception:
+        log.warning("rewind relay failed room=%s", room_id)
+        raise HTTPException(status_code=502, detail="ws server unreachable")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="ws server rejected rewind")
+    result = resp.json()
+    log.info("rewind room=%s result=%s", room_id, result)
+    return JSONResponse(result)
+
+
 @app.post("/api/rooms/{room_id}/delete")
 async def delete_room(room_id: str, request: Request):
     """R11 user 報告: 部屋を消すボタン用、 host のみ削除可"""
