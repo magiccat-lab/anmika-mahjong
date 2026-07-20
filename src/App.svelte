@@ -3728,7 +3728,9 @@
     grid-column: 1 / -1;
     overflow: auto;
   }
-  /* SaiKoroModal を agari panel と同じ領域に [リョー指示 2026-05-12] */
+  /* SaiKoroModal を agari panel と同じ領域に [リョー指示 2026-05-12]。
+     2026-07-21 リョー指摘 [演出ダサい]: ベージュ塗り潰し override をやめ、
+     コンポーネント本来の暗色設計を活かした金彩の賭場ステージへ */
   main.mode-single :global(.modal.sai) {
     position: fixed !important;
     top: 11vh !important;
@@ -3741,57 +3743,97 @@
     max-width: none !important;
     max-height: none !important;
     z-index: 1001 !important;
-    background: rgba(245, 240, 220, 0.97) !important;
-    color: #1a1820 !important;
-    border: 2px solid #c0a040 !important;
-    border-radius: 10px !important;
-    padding: 20px !important;
+    background:
+      radial-gradient(ellipse at 50% 18%, rgba(212, 175, 55, 0.12), transparent 55%),
+      linear-gradient(165deg, #15251b 0%, #0d1b12 100%) !important;
+    color: #e8e4d6 !important;
+    border: 2px solid #d4af37 !important;
+    box-shadow:
+      0 0 0 4px rgba(212, 175, 55, 0.18),
+      0 24px 60px rgba(0, 0, 0, 0.55) !important;
+    border-radius: 12px !important;
+    padding: 22px 26px !important;
     overflow: auto;
-  }
-  main.mode-single :global(.modal.sai *) {
-    color: #1a1820 !important;
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-align: center;
   }
   main.mode-single :global(.modal.sai .title) {
-    font-size: 24px !important;
-    font-weight: 700;
+    font-size: 26px !important;
+    font-weight: 800;
+    color: #ffd870 !important;
+    letter-spacing: 2px;
   }
   main.mode-single :global(.modal.sai .info) {
-    font-size: 18px !important;
+    font-size: 15px !important;
+    color: #b9c4b2 !important;
     opacity: 1 !important;
   }
   main.mode-single :global(.modal.sai .step) {
-    font-size: 20px !important;
+    font-size: 19px !important;
     font-weight: 700;
+    color: #e8e4d6 !important;
   }
-  main.mode-single :global(.modal.sai .combos button),
-  main.mode-single :global(.modal.sai .roll-btn) {
-    background: #d4af37 !important;
-    color: #1a1820 !important;
+  main.mode-single :global(.modal.sai .combos) {
+    grid-template-columns: repeat(5, minmax(58px, 76px)) !important;
+    gap: 8px !important;
+    justify-content: center;
+  }
+  main.mode-single :global(.modal.sai .combos button) {
+    background: rgba(255, 255, 255, 0.05) !important;
+    color: #f0ead2 !important;
+    border: 1px solid rgba(212, 175, 55, 0.55) !important;
+    border-radius: 8px;
+    padding: 12px 0 !important;
+    font-size: 17px !important;
     font-weight: 700;
-    padding: 12px 24px !important;
-    font-size: 20px !important;
-    border-radius: 6px;
-    border: 0;
     cursor: pointer;
   }
+  main.mode-single :global(.modal.sai .combos button:hover) {
+    background: rgba(212, 175, 55, 0.28) !important;
+  }
+  main.mode-single :global(.modal.sai .roll-btn) {
+    background: linear-gradient(180deg, #ecc964, #c69a2c) !important;
+    color: #1c1508 !important;
+    font-weight: 800;
+    padding: 14px 36px !important;
+    font-size: 20px !important;
+    border-radius: 8px;
+    border: 0;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  }
   main.mode-single :global(.modal.sai .rolls) {
-    font-size: 22px !important;
+    font-size: 16px !important;
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 14px !important;
   }
   main.mode-single :global(.modal.sai .roll) {
     background: transparent !important;
-    padding: 4px 8px !important;
+    padding: 2px 6px !important;
     font-weight: 700;
   }
-  main.mode-single :global(.modal.sai .roll.hit) { color: #2c8040 !important; }
-  main.mode-single :global(.modal.sai .roll.miss) { color: #c04040 !important; }
-  main.mode-single :global(.modal.sai .roll.zoro) { color: #a06010 !important; }
+  main.mode-single :global(.modal.sai .roll.hit) { color: #7fd98c !important; }
+  main.mode-single :global(.modal.sai .roll.miss) { color: #86928a !important; }
+  main.mode-single :global(.modal.sai .roll.zoro) { color: #ffd870 !important; }
+  main.mode-single :global(.modal.sai .dice-stage) {
+    height: 175px !important;
+    max-width: 560px !important;
+    border-color: rgba(212, 175, 55, 0.45) !important;
+  }
   main.mode-single :global(.modal.sai .result) {
-    background: rgba(212, 175, 55, 0.15) !important;
-    border: 1px solid #c0a040 !important;
-    padding: 12px 16px !important;
+    background: rgba(212, 175, 55, 0.10) !important;
+    border: 1px solid #d4af37 !important;
+    padding: 14px 22px !important;
+    border-radius: 8px;
   }
   main.mode-single :global(.modal.sai .result-row) {
-    font-size: 20px !important;
+    font-size: 19px !important;
     margin: 4px 0;
   }
   /* kinpei inline 選択 [agari panel 下部に embed、 リョー指示 2026-05-12] */
@@ -4082,36 +4124,40 @@
       padding: 10px 12px !important;
       gap: 8px !important;
     }
+    /* [2026-07-21 リョー実機報告] 旧 118px 正方 + 列min 62/66/62 [計190px] は
+       列が箱からあふれて P1 と中央が重なり P2 が見切れていた。
+       列は minmax(0,1fr) で必ず箱に収め、箱は横長にして文字を収める */
     main.mode-single .score-box {
-      grid-template-columns: minmax(62px, 1fr) minmax(66px, 0.9fr) minmax(62px, 1fr);
-      grid-template-rows: 28px minmax(0, 1fr) minmax(68px, 0.9fr);
-      width: max(34vmin, 118px);
-      height: max(34vmin, 118px);
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
+      grid-template-rows: 20px minmax(0, 1fr) minmax(46px, 0.9fr);
+      width: max(46vmin, 196px);
+      height: max(34vmin, 138px);
       min-width: 0;
       min-height: 0;
     }
     main.mode-single .score-box .score-side.score-top {
-      padding: 3px 0;
-      font-size: 14px;
+      padding: 2px 0;
+      font-size: 11px;
     }
     main.mode-single .score-box .score-side.score-left,
-    main.mode-single .score-box .score-side.score-right { padding: 2px; }
+    main.mode-single .score-box .score-side.score-right { padding: 1px; overflow: hidden; }
     main.mode-single .score-box .score-side.score-bottom {
       align-self: stretch;
       display: flex;
       flex-direction: column;
       justify-content: center;
       padding: 1px 3px;
+      overflow: hidden;
     }
-    main.mode-single .score-box .sname { font-size: 13px; letter-spacing: 0; }
-    main.mode-single .score-box .sval { font-size: 18px; letter-spacing: 0; }
-    main.mode-single .score-box .ssub { margin-top: 1px; font-size: 10px; line-height: 1.05; }
+    main.mode-single .score-box .sname { font-size: 10px; letter-spacing: 0; white-space: nowrap; }
+    main.mode-single .score-box .sval { font-size: 14px; letter-spacing: 0; }
+    main.mode-single .score-box .ssub { margin-top: 0; font-size: 8px; line-height: 1.1; }
     main.mode-single .score-box .score-side.is-oya .sname::before {
       margin-bottom: 0;
-      font-size: 12px;
+      font-size: 9px;
     }
-    main.mode-single .score-box .benbang { font-size: 14px; }
-    main.mode-single .score-box .paishu { font-size: 17px; }
+    main.mode-single .score-box .benbang { font-size: 11px; }
+    main.mode-single .score-box .paishu { font-size: 13px; }
     main.mode-single .seat-bottom { gap: 2px; }
     main.mode-single .seat-bottom > :global(section.player) { padding: 2px 4px !important; }
   }

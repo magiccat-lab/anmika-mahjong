@@ -121,7 +121,7 @@
     <!-- 2026-07-20 リョー要望: このサイコロがシュバかどうかを常に明示する。
          祝儀計算自体は仕様どおりシュバ ×2 非適用、ゾロ目連続特典はシュバ不問の固定額 -->
     <div class="shuvari-row">
-      🎯 このサイコロ:
+      このサイコロ:
       {#if chance.alwaysShuvari}
         <strong class="shuvari-yes">常時シュバサイ</strong>
       {:else if chance.shuvariApplicable && ownerShuvariActive}
@@ -135,7 +135,7 @@
     </div>
 
     {#if !selectedCombo}
-      <div class="step">📌 出目宣言: 順序なし 15 通りから 1 つ選択 [ゾロ目は無効]</div>
+      <div class="step">出目宣言: 順序なし 15 通りから 1 つ選択 [ゾロ目は無効]</div>
       <div class="combos">
         {#each allCombos as [a, b]}
           <button class="combo" on:click={() => onSelectCombo(a, b)} disabled={!canOperate}>{a},{b}</button>
@@ -143,7 +143,7 @@
       </div>
       {#if !canOperate}<div class="step" style="color:#888">上がり者の出目宣言待ち…</div>{/if}
     {:else}
-      <div class="step">🎯 宣言出目: <strong>{selectedCombo[0]}, {selectedCombo[1]}</strong></div>
+      <div class="step">宣言出目: <strong>{selectedCombo[0]}, {selectedCombo[1]}</strong></div>
       <div class="rolls">
         {#each rolls as r, i}
           <span class="roll {r.zoro ? 'zoro' : r.hit ? 'hit' : 'miss'}">
@@ -167,10 +167,10 @@
         </div>
       {:else}
         <div class="result">
-          <div class="result-row">✅ 確定: <strong>{summary?.hits ?? hits} hit</strong> / base {chance.baseChip} × {chance.count} 回</div>
-          <div class="result-row">📦 加算 chip: <strong>{summary?.chipN ?? 0} オール</strong></div>
+          <div class="result-row">確定: <strong>{summary?.hits ?? hits} hit</strong> / base {chance.baseChip} × {chance.count} 回</div>
+          <div class="result-row">加算チップ: <strong>{summary?.chipN ?? 0} オール</strong></div>
           {#if (summary?.zoroBonusTotal ?? 0) !== 0}
-            <div class="result-row">🎲 ゾロ目連続特典: <strong>{(summary?.zoroBonusTotal ?? 0) > 0 ? '+' : ''}{summary?.zoroBonusTotal ?? 0} オール{(summary?.zoroBonusTotal ?? 0) < 0 ? ' [払い]' : ''}</strong></div>
+            <div class="result-row">ゾロ目連続特典: <strong>{(summary?.zoroBonusTotal ?? 0) > 0 ? '+' : ''}{summary?.zoroBonusTotal ?? 0} オール{(summary?.zoroBonusTotal ?? 0) < 0 ? ' [払い]' : ''}</strong></div>
           {/if}
           {#if !chance.shuvariApplicable && !chance.alwaysShuvari}
             <div class="result-row note">[シュバ非適用]</div>

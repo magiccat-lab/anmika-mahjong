@@ -11,7 +11,11 @@ test('screenshot audit: menu / table / cutin / round end', async ({ page }) => {
   test.skip(!OUT, 'SHOT_DIR 指定時のみ実行する視覚 audit');
   test.setTimeout(240_000);
   fs.mkdirSync(OUT, { recursive: true });
-  await page.setViewportSize({ width: 1440, height: 900 });
+  // SHOT_VIEWPORT=852x393 のように指定するとスマホ横向き等の実寸で撮れる
+  const vp = /^(\d+)x(\d+)$/.exec(process.env.SHOT_VIEWPORT ?? '');
+  await page.setViewportSize(vp
+    ? { width: Number(vp[1]), height: Number(vp[2]) }
+    : { width: 1440, height: 900 });
   await page.goto('/', { waitUntil: 'networkidle' });
   await page.screenshot({ path: `${OUT}/01_menu.png` });
 
@@ -77,7 +81,37 @@ test('screenshot audit: menu / table / cutin / round end', async ({ page }) => {
     } else if (st.pendingFever) {
       await page.evaluate(() => (window as any).__gameStore.continueFever());
     } else if (st.pendingSaiKoro) {
-      await page.screenshot({ path: `${OUT}/07_saikoro_modal.png` });
+      // サイコロはUI経由で開いて各フェーズを撮る [演出確認用]
+      const ackBtn = page.locator('.cpu-sai-ack-btn');
+      if ((await ackBtn.count()) > 0) {
+        await page.screenshot({ path: `${OUT}/07a_saikoro_ack.png` });
+        await ackBtn.click();
+        await page.waitForTimeout(400);
+      }
+      const openBtn = page.locator('button', { hasText: 'サイコロへ' });
+      if ((await openBtn.count()) > 0) {
+        await openBtn.first().click();
+        await page.waitForTimeout(400);
+      }
+      const modal = page.locator('.modal.sai');
+      if ((await modal.count()) > 0) {
+        await page.screenshot({ path: `${OUT}/07b_saikoro_select.png` });
+        const combo = page.locator('.modal.sai .combos button');
+        if ((await combo.count()) > 0) {
+          await combo.first().click();
+          await page.waitForTimeout(300);
+        }
+        const rollBtn = page.locator('.modal.sai .roll-btn');
+        for (let r = 0; r < 8; r++) {
+          if ((await rollBtn.count()) === 0) break;
+          const st2 = await page.evaluate(() => !!(window as any).__game.pendingSaiKoro?.finalized);
+          if (st2) break;
+          await rollBtn.first().click();
+          await page.waitForTimeout(1700);
+          if (r === 0) await page.screenshot({ path: `${OUT}/07c_saikoro_rolled.png` });
+        }
+        await page.screenshot({ path: `${OUT}/07d_saikoro_result.png` });
+      }
       await page.evaluate(() => {
         const store = (window as any).__gameStore;
         const g = (window as any).__game;

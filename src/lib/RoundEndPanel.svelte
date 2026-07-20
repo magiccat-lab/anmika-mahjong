@@ -180,8 +180,13 @@
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
     animation: kindStamp 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) both;
   }
-  .kind-ron { background: linear-gradient(135deg, #a01828, #d82840); }
-  .kind-tsumo { background: linear-gradient(135deg, #10508c, #2078c8); }
+  /* 2026-07-21 リョー指摘: ロン/ツモを赤青で塗り分けるのはきもい → 金縁の共通バッジ */
+  .kind-ron,
+  .kind-tsumo {
+    background: linear-gradient(135deg, #243c2e, #16281e);
+    border: 1px solid #d4af37;
+    color: #f0e6c8;
+  }
   .winner { font-weight: 800; color: #7c1620; font-size: 20px; }
   .score { color: #555; font-size: 15px; font-weight: 600; }
   .tier-chip {

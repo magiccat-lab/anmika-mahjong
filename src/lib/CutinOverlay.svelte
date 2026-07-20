@@ -70,10 +70,12 @@
     animation: cutinFade 1.8s ease-in-out forwards;
   }
 
+  /* 2026-07-21 リョー指摘 [ロン/ツモの青赤きもい]: 種別の色分けをやめ金一色に統一。
+     区別は文字だけで足りる。フィーバーだけ僅かに暖色寄り */
   .cutin-reach { --accent: #d9b453; }
-  .cutin-ron { --accent: #d24054; }
-  .cutin-tsumo { --accent: #5b9bd5; }
-  .cutin-fever { --accent: #e09a3e; }
+  .cutin-ron { --accent: #d9b453; }
+  .cutin-tsumo { --accent: #d9b453; }
+  .cutin-fever { --accent: #e0a53e; }
 
   .cutin-band {
     position: relative;

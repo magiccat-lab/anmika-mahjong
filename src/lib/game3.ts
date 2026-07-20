@@ -1642,11 +1642,31 @@ export class Game3 {
       && !this.lizhi.has(player)
       && myXiangtingNow >= PICK_FOLD_XIANGTING;
 
+    // [2026-07-21 リョー指摘] CPU が第一打で虹 [7 枚祝儀] を平気で切っていた。
+    // その打牌が物理虹を実際に手放すか [素牌の盾が無い時だけ虹が河へ出る、
+    // tileIdentity.resolvePhysicalDiscardPai と同じ判定] を見て温存する。
+    const expandedCounts = (sp._bingpai?.__anmika ?? {}) as Record<string, number>;
+    const nijiByCore: Record<string, string> = { p3: 'np3', s3: 'ns3', z3: 'nz3' };
+    const releasesNiji = (base: string): boolean => {
+      const nijiKey = nijiByCore[base];
+      if (!nijiKey) return false;
+      const held = Number(expandedCounts[nijiKey] ?? 0);
+      if (held <= 0) return false;
+      const coreCount = Number(sp._bingpai?.[base[0]]?.[Number(base[1])] ?? 0);
+      return coreCount <= held;
+    };
+
     let bestPai: string | null = null;
     let bestShanten = 99;
     let bestUkeire = -1;
     let bestPriority = -1;
     let bestSafety = -99;
+    let bestDropsNiji = false;
+    let keepPai: string | null = null;
+    let keepShanten = 99;
+    let keepUkeire = -1;
+    let keepPriority = -1;
+    let keepSafety = -99;
     for (const c of candidates) {
       const basePai = c.replace(/_$/, '');
       const sp_clone = sp.clone();
@@ -1712,22 +1732,37 @@ export class Game3 {
         }
         prio += safety;
       }
+      const dropsNiji = releasesNiji(baseTile(basePai));
+      if (dropsNiji) prio -= 6;
       // 通常は xt 最小 > ukeire 最大 > priority 最大。
       // ベタオリ中は safety [純粋な安全度] を最優先し、同安全度の中で手を進める
-      const better = foldMode
-        ? (safety > bestSafety
-          || (safety === bestSafety && xt < bestShanten)
-          || (safety === bestSafety && xt === bestShanten && ukeire > bestUkeire))
-        : (xt < bestShanten
-          || (xt === bestShanten && ukeire > bestUkeire)
-          || (xt === bestShanten && ukeire === bestUkeire && prio > bestPriority));
-      if (better) {
+      const isBetter = (bs: number, bu: number, bp: number, bsf: number) => foldMode
+        ? (safety > bsf
+          || (safety === bsf && xt < bs)
+          || (safety === bsf && xt === bs && ukeire > bu))
+        : (xt < bs
+          || (xt === bs && ukeire > bu)
+          || (xt === bs && ukeire === bu && prio > bp));
+      if (isBetter(bestShanten, bestUkeire, bestPriority, bestSafety)) {
         bestShanten = xt;
         bestUkeire = ukeire;
         bestPriority = prio;
         bestSafety = safety;
         bestPai = c;
+        bestDropsNiji = dropsNiji;
       }
+      if (!dropsNiji && isBetter(keepShanten, keepUkeire, keepPriority, keepSafety)) {
+        keepShanten = xt;
+        keepUkeire = ukeire;
+        keepPriority = prio;
+        keepSafety = safety;
+        keepPai = c;
+      }
+    }
+    // 押し引き平常時: 同シャンテンで虹を守れる代替打があるなら、受け入れ損は
+    // 呑んで虹 [7 枚] を引っ張る。シャンテンが戻る場合だけ手なりで虹を放す
+    if (!foldMode && bestDropsNiji && keepPai && keepShanten === bestShanten) {
+      return keepPai;
     }
     return bestPai;
   }

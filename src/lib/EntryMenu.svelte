@@ -27,11 +27,14 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-height: 70vh;
+    /* 2026-07-21 リョー指摘: 70vh + 角丸だと下に body の白帯が見えてヘン。
+       全画面に敷いて縁も消す */
+    min-height: 100vh;
+    min-height: 100dvh;
     gap: 1.5rem;
     padding: 32px 16px;
     box-sizing: border-box;
-    border-radius: 16px;
+    border-radius: 0;
     background:
       radial-gradient(ellipse at 50% -10%, rgba(255, 224, 128, 0.14), transparent 55%),
       radial-gradient(ellipse at 50% 115%, rgba(0, 0, 0, 0.45), transparent 60%),
