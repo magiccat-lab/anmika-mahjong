@@ -223,27 +223,14 @@ export function resolvePreSettlementPochiChoices(
       .find((candidate) => candidate.target === null);
     if (occurrence) {
       const candidates = s.game.getKamiPochiCandidates('dora');
-      const decisionOwners = s.game.pochiDecisionOwners(context.winner);
-      const needsHumanDecision = decisionOwners.some((owner) => !s.cpu[owner]);
       s.game.restoreSnapshot();
-      if (needsHumanDecision) {
-        s.pendingKamiPochi = {
-          winner: context.winner,
-          context: 'dora',
-          occurrenceKey: occurrence.key,
-          rawPai: occurrence.raw,
-          candidates,
-          decisionOwners,
-          decisionOwnerIndex: 0,
-          isRon: context.isRon,
-          ronfrom: context.ronfrom,
-        };
-        prepareWinChoiceReplay(s, context);
-        s.message = `✨ 神ぽっち ${occurrence.key}: 任意牌を選択してください`;
-        return { result, pending: true };
-      }
-      // CPU-only decision. 神ぽっちは任意牌なので、安定した候補順の先頭を採る。
-      s.game.kamiPochiDoraChoices[context.winner][occurrence.key] = candidates[0];
+      // リョー裁定 2026-07-20: 神ぽっちは選択モーダルを出さず常に自動高め取り。
+      // 勝者手牌の最多牌をドラに取るのが最高打点 [indicator は scoring 側が
+      // doraIndicatorOf で逆引きする]。人間/CPU で分岐しない。
+      const sp = s.game.shoupai.get(context.winner);
+      const most = sp ? s.game.mostCommonPaiInHand(sp, { player: context.winner }) : null;
+      const target = most && candidates.includes(most) ? most : candidates[0];
+      s.game.kamiPochiDoraChoices[context.winner][occurrence.key] = target;
       saveHuleSnapshot(s.game);
       result = recalculate();
       if (!result) return { result: null, pending: false };
@@ -293,8 +280,9 @@ function syncFuyuResult(s: StoreState, winner: PlayerId): void {
   result.fuyuKamiPochiPending = reveal.pendingChoice ? { ...reveal.pendingChoice } : null;
 }
 
-/** Pause on each physical positive pochi revealed by Winter. CPU-only owners
- * make a deterministic legal choice; a human owner receives the modal. */
+/** Resolve each physical positive pochi revealed by Winter automatically.
+ * リョー裁定 2026-07-20: 神ぽっちは人間にもモーダルを出さず自動高め取り
+ * [現物で一番多い牌に取る。華込み]。 */
 export function enterFuyuKamiPochiStage(s: StoreState, context: WinChoiceContext): boolean {
   const winners = context.isRon && s.ronResults.length > 0
     ? s.ronResults.map((entry) => entry.player as PlayerId)
@@ -303,30 +291,9 @@ export function enterFuyuKamiPochiStage(s: StoreState, context: WinChoiceContext
     for (let guard = 0; guard < 64; guard++) {
       const pending = s.game.getPendingFuyuKamiPochi(winner);
       if (!pending?.occurrenceKey) break;
-      const decisionOwners = pending.decisionOwners.length > 0
-        ? [...pending.decisionOwners]
-        : s.game.pochiDecisionOwners(winner);
-      const revealChoice = s.game.fuyuRevealState[winner]?.pendingChoice;
-      const needsHumanDecision = decisionOwners.some((owner) => !s.cpu[owner]);
-      if (needsHumanDecision) {
-        s.pendingKamiPochi = {
-          winner,
-          context: 'fuyu',
-          occurrenceKey: pending.occurrenceKey,
-          rawPai: revealChoice?.pai,
-          tier: revealChoice?.tier,
-          candidates: [...pending.candidates],
-          decisionOwners,
-          decisionOwnerIndex: 0,
-          isRon: context.isRon,
-          ronfrom: context.ronfrom,
-        };
-        syncFuyuResult(s, winner);
-        s.roundEnded = false;
-        s.message = `✨ 冬の神ぽっち ${revealChoice?.tier === 'lower' ? '下段' : '上段'}: 任意牌を選択してください`;
-        return true;
-      }
-      const advance = s.game.resumeFuyuKamiPochi(winner, pending.occurrenceKey, pending.candidates[0]);
+      const best = s.game.bestFuyuKamiPochiTarget(winner);
+      const pick = pending.candidates.includes(best) ? best : pending.candidates[0];
+      const advance = s.game.resumeFuyuKamiPochi(winner, pending.occurrenceKey, pick);
       if (!advance) throw new Error('冬の神ぽっち自動選択に失敗しました');
       syncFuyuResult(s, winner);
       if (advance.status === 'complete') break;

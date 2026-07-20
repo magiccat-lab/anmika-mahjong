@@ -16,27 +16,18 @@ function basicResult(extra: Record<string, unknown> = {}) {
 }
 
 describe('store kami-pochi decision pipeline', () => {
-  it('pauses a tsumo for every unselected positive dora indicator and resumes after selection', () => {
+  it('auto-assigns every unselected positive dora indicator to the most common hand tile without a modal', () => {
+    // リョー裁定 2026-07-20: 神ぽっちは人間にも選択モーダルを出さず自動高め取り
     const store = createGameStore();
     const state = get(store);
     const player = state.game.lunbanToPlayerId(state.game.state.lunban);
+    state.game.shoupai.set(player, buildShoupai(['p5', 'p5', 'p5', 's1', 's2']));
     (state.game.shan as any)._baopai = ['z5b'];
     vi.spyOn(state.game, 'canTsumo').mockReturnValue(true);
     vi.spyOn(state.game, 'hule').mockImplementation(() => basicResult());
     vi.spyOn(state.game, 'applyHule').mockImplementation(() => undefined);
 
     store.tsumo();
-
-    const pending = get(store).pendingKamiPochi;
-    expect(pending).toMatchObject({
-      winner: player,
-      context: 'dora',
-      occurrenceKey: 'baopai:0',
-      isRon: false,
-    });
-    expect(get(store).roundEnded).toBe(false);
-
-    store.selectKamiPochi('p5', pending!.occurrenceKey);
 
     const completed = get(store);
     expect(completed.pendingKamiPochi).toBeNull();
@@ -79,7 +70,9 @@ describe('store kami-pochi decision pipeline', () => {
     expect(completed.roundEnded).toBe(true);
   });
 
-  it('keeps Winter settlement blocked until a physical positive pochi is assigned', () => {
+  it('resolves a Winter positive pochi automatically without pausing settlement', () => {
+    // リョー裁定 2026-07-20: 冬の神ぽっちも自動高め取り。
+    // 空手牌では華 candidate [常に華総数+1 hit] が最大なので f1 相当が選ばれる
     const store = createGameStore();
     const state = get(store);
     const winner = 0 as const;
@@ -92,17 +85,9 @@ describe('store kami-pochi decision pipeline', () => {
     state.ronResults = [];
     state.roundEnded = false;
 
-    expect(enterFuyuKamiPochiStage(state, { winner, isRon: false, ronfrom: null })).toBe(true);
-    const pending = state.pendingKamiPochi!;
-    expect(pending.context).toBe('fuyu');
-    expect(state.game.chipLedger[winner]).toBe(0);
-
-    store.selectKamiPochi('f1', pending.occurrenceKey);
-
-    const completed = get(store);
-    expect(completed.pendingKamiPochi).toBeNull();
-    expect(completed.lastHuleResult.fuyuLog).toEqual([{ pai: 'z5b', tier: 'upper', hit: 1 }]);
-    expect(completed.game.chipLedger).toEqual({ 0: 4, 1: -2, 2: -2 });
-    expect(completed.roundEnded).toBe(true);
+    expect(enterFuyuKamiPochiStage(state, { winner, isRon: false, ronfrom: null })).toBe(false);
+    expect(state.pendingKamiPochi).toBeNull();
+    expect(state.lastHuleResult.fuyuLog).toEqual([{ pai: 'z5b', tier: 'upper', hit: 1 }]);
+    expect(state.game.chipLedger).toEqual({ 0: 4, 1: -2, 2: -2 });
   });
 });

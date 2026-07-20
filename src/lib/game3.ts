@@ -3885,6 +3885,16 @@ export class Game3 {
    *  opts.includeHua=true なら huapai [抜き華] も候補 [冬めくり時]
    */
   mostCommonPaiInHand(sp: any, opts: { player?: PlayerId; includeHua?: boolean } = {}): string | null {
+    const counts = this.paiCountsInHand(sp, opts);
+    let best: { pai: string; n: number } | null = null;
+    for (const [pai, n] of Object.entries(counts)) {
+      if (!best || n > best.n) best = { pai, n };
+    }
+    return best?.pai ?? null;
+  }
+
+  /** 神ぽっち target 判定用の現物 count [mostCommonPaiInHand の数え方そのもの] */
+  paiCountsInHand(sp: any, opts: { player?: PlayerId; includeHua?: boolean } = {}): Record<string, number> {
     const counts: Record<string, number> = {};
     // 赤 / 金 5 は _bingpai[p/s][5] 側に含まれるので 5 として count。
     // 副露内の 0 も 5 に正規化して、神ぽっち target の最多牌判定に含める。
@@ -3920,11 +3930,24 @@ export class Game3 {
         counts[key] = (counts[key] ?? 0) + 1;
       }
     }
-    let best: { pai: string; n: number } | null = null;
-    for (const [pai, n] of Object.entries(counts)) {
-      if (!best || n > best.n) best = { pai, n };
+    return counts;
+  }
+
+  /** 冬の神ぽっち自動高め取り [リョー裁定 2026-07-20: モーダルを出さない]。
+   *  華 candidate は常に「華総数 + 1」hit [applyFuyuChip の華規則]、
+   *  通常牌は現物 count。チューリップ隣接ボーナスまでは見ない近似。 */
+  bestFuyuKamiPochiTarget(winner: PlayerId): string {
+    const candidates = this.getKamiPochiCandidates('fuyu');
+    const sp = this.shoupai.get(winner);
+    const counts = sp ? this.paiCountsInHand(sp, { player: winner }) : {};
+    const flowerValue = this.effectiveHuapaiAtHule(winner).length + 1;
+    let best = candidates[0];
+    let bestN = -1;
+    for (const candidate of candidates) {
+      const n = candidate.startsWith('f') ? flowerValue : (counts[candidate] ?? 0);
+      if (n > bestN) { best = candidate; bestN = n; }
     }
-    return best?.pai ?? null;
+    return best;
   }
 
   /** ドラ表示牌 → ドラ牌 [helper に委譲] */

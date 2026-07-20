@@ -41,9 +41,11 @@
 {#if cutin}
   {#key cutin.ts}
     <div class="cutin-overlay cutin-{cutin.id} {seatClass(cutin.seat)}" aria-hidden="true">
-      <div class="cutin-stripes"></div>
       <div class="cutin-band">
+        <div class="cutin-line line-top"></div>
         <div class="cutin-text">{LABELS[cutin.id]}</div>
+        <div class="cutin-line line-bottom"></div>
+        <div class="cutin-sheen"></div>
       </div>
       {#if cutin.id === 'fever'}
         <div class="cutin-flash"></div>
@@ -53,6 +55,9 @@
 {/if}
 
 <style>
+  /* 2026-07-20 リョー指摘 [ダサい/カラフル過ぎ] で刷新:
+     原色グラデ帯+白ストライプ → 黒帯+差し色1色の静かな作りへ。
+     表示時間 1.8s は App/store のタイマー [1850ms] と対なので変えない */
   .cutin-overlay {
     position: fixed;
     inset: 0;
@@ -65,116 +70,114 @@
     animation: cutinFade 1.8s ease-in-out forwards;
   }
 
+  .cutin-reach { --accent: #d9b453; }
+  .cutin-ron { --accent: #d24054; }
+  .cutin-tsumo { --accent: #5b9bd5; }
+  .cutin-fever { --accent: #e09a3e; }
+
   .cutin-band {
     position: relative;
-    width: min(100vw, 980px);
-    min-height: clamp(120px, 23vh, 230px);
+    width: 100vw;
+    min-height: clamp(110px, 18vh, 170px);
     display: grid;
+    grid-template-rows: auto 1fr auto;
     place-items: center;
-    transform: skew(-9deg);
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
-    animation: bandHit 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    padding: 10px 0;
+    overflow: hidden;
+    background: linear-gradient(
+      180deg,
+      rgba(6, 8, 12, 0) 0%,
+      rgba(6, 8, 12, 0.88) 16%,
+      rgba(6, 8, 12, 0.88) 84%,
+      rgba(6, 8, 12, 0) 100%
+    );
+    animation: bandIn 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  .cutin-line {
+    width: min(66vw, 640px);
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0.85;
+    animation: lineGrow 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   }
 
   .cutin-text {
-    transform: skew(9deg);
-    color: #fff;
-    font-weight: 900;
-    font-size: clamp(58px, 13vw, 172px);
-    line-height: 1;
-    text-shadow:
-      0 5px 0 rgba(0, 0, 0, 0.34),
-      0 0 18px rgba(255, 255, 255, 0.55),
-      -4px -4px 0 rgba(0, 0, 0, 0.65),
-      4px -4px 0 rgba(0, 0, 0, 0.65),
-      -4px 4px 0 rgba(0, 0, 0, 0.65),
-      4px 4px 0 rgba(0, 0, 0, 0.65);
-    letter-spacing: 0;
+    color: #f4f2ec;
+    font-weight: 800;
+    font-size: clamp(46px, 8.5vw, 110px);
+    line-height: 1.2;
+    letter-spacing: 0.22em;
+    padding-left: 0.22em;
     white-space: nowrap;
-    animation: textPop 1.8s ease-out forwards;
+    text-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.8),
+      0 0 26px color-mix(in srgb, var(--accent) 45%, transparent);
+    animation: textIn 1.8s ease-out forwards;
   }
 
-  .cutin-stripes {
+  /* 一度だけ通る控えめな光沢 */
+  .cutin-sheen {
     position: absolute;
-    inset: -20%;
-    opacity: 0.52;
-    background:
-      repeating-linear-gradient(
-        115deg,
-        rgba(255, 255, 255, 0),
-        rgba(255, 255, 255, 0) 18px,
-        rgba(255, 255, 255, 0.42) 19px,
-        rgba(255, 255, 255, 0.42) 23px
-      );
-    animation: stripeRun 1.8s linear forwards;
-  }
-
-  .cutin-reach .cutin-band {
-    background: linear-gradient(90deg, rgba(160, 108, 0, 0.92), rgba(255, 209, 44, 0.96), rgba(238, 134, 24, 0.92));
-  }
-
-  .cutin-ron .cutin-band {
-    background: linear-gradient(90deg, rgba(103, 12, 24, 0.96), rgba(224, 33, 54, 0.97), rgba(105, 0, 26, 0.96));
-  }
-
-  .cutin-tsumo .cutin-band {
-    background: linear-gradient(90deg, rgba(11, 63, 121, 0.96), rgba(17, 151, 211, 0.97), rgba(18, 83, 181, 0.96));
-  }
-
-  .cutin-fever {
-    background: radial-gradient(circle at center, rgba(255, 255, 255, 0.36), rgba(255, 69, 104, 0.22) 28%, rgba(255, 174, 0, 0.18) 52%, transparent 74%);
-  }
-
-  .cutin-fever .cutin-band {
-    background: linear-gradient(90deg, rgba(225, 31, 116, 0.95), rgba(255, 123, 35, 0.98), rgba(255, 225, 61, 0.95));
+    inset: 0;
+    background: linear-gradient(
+      100deg,
+      transparent 42%,
+      rgba(255, 255, 255, 0.09) 50%,
+      transparent 58%
+    );
+    transform: translateX(-120%);
+    animation: sheenSweep 1.0s ease-out 0.3s forwards;
   }
 
   .cutin-flash {
     position: absolute;
     inset: 0;
-    background: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.22);
     mix-blend-mode: screen;
     animation: feverFlash 1.8s ease-out forwards;
   }
 
-  .from-left .cutin-band { --slide-x: -42vw; --slide-y: 0; }
-  .from-right .cutin-band { --slide-x: 42vw; --slide-y: 0; }
-  .from-bottom .cutin-band { --slide-x: 0; --slide-y: 28vh; }
+  .from-left .cutin-band { --slide-x: -34vw; --slide-y: 0; }
+  .from-right .cutin-band { --slide-x: 34vw; --slide-y: 0; }
+  .from-bottom .cutin-band { --slide-x: 0; --slide-y: 22vh; }
   .cutin-fever .cutin-band { --slide-x: 0; --slide-y: 0; }
 
   @keyframes cutinFade {
     0% { opacity: 0; }
     8% { opacity: 1; }
-    78% { opacity: 1; }
+    80% { opacity: 1; }
     100% { opacity: 0; }
   }
 
-  @keyframes bandHit {
-    0% { transform: translate(var(--slide-x, 0), var(--slide-y, 0)) skew(-9deg) scale(0.86); }
-    13% { transform: translate(0, 0) skew(-9deg) scale(1.04); }
-    22% { transform: translate(0, 0) skew(-9deg) scale(1); }
-    78% { transform: translate(0, 0) skew(-9deg) scale(1); }
-    100% { transform: translate(calc(var(--slide-x, 0) * -0.22), calc(var(--slide-y, 0) * -0.18)) skew(-9deg) scale(0.96); }
+  @keyframes bandIn {
+    0% { transform: translate(var(--slide-x, 0), var(--slide-y, 0)); }
+    16% { transform: translate(0, 0); }
+    82% { transform: translate(0, 0); }
+    100% { transform: translate(calc(var(--slide-x, 0) * -0.12), calc(var(--slide-y, 0) * -0.1)); }
   }
 
-  @keyframes textPop {
-    0% { transform: skew(9deg) scale(0.74); filter: blur(3px); }
-    12% { transform: skew(9deg) scale(1.08); filter: blur(0); }
-    24% { transform: skew(9deg) scale(1); }
-    100% { transform: skew(9deg) scale(1); }
+  @keyframes textIn {
+    0% { opacity: 0; letter-spacing: 0.34em; }
+    14% { opacity: 1; letter-spacing: 0.22em; }
+    100% { opacity: 1; letter-spacing: 0.22em; }
   }
 
-  @keyframes stripeRun {
-    0% { transform: translateX(-8%); }
-    100% { transform: translateX(12%); }
+  @keyframes lineGrow {
+    0% { transform: scaleX(0); }
+    18% { transform: scaleX(1); }
+    100% { transform: scaleX(1); }
+  }
+
+  @keyframes sheenSweep {
+    0% { transform: translateX(-120%); }
+    100% { transform: translateX(120%); }
   }
 
   @keyframes feverFlash {
     0% { opacity: 0; }
-    8% { opacity: 0.8; }
-    18% { opacity: 0; }
-    32% { opacity: 0.42; }
-    48% { opacity: 0; }
+    10% { opacity: 0.5; }
+    24% { opacity: 0; }
     100% { opacity: 0; }
   }
 </style>
