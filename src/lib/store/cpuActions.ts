@@ -18,7 +18,7 @@ import {
 import { toCorePai } from '../helpers';
 import { enterFeverContinueStage } from './winPipeline';
 import { decideCpuShuvari } from './cpuShuvari';
-import { pickLizhiDapai } from './cpuLizhi';
+import { pickLizhiDapai, decideFever } from './cpuLizhi';
 
 function hasBlockingDecision(s: StoreState): boolean {
   return s.roundEnded
@@ -165,7 +165,11 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       let shuvariNote: string | null = null;
       if (feverDapai) {
         const fc = feverMap.get(feverDapai);
-        if (fc) {
+        // [2026-07-20 リョー裁定] フィーバーは待ちが固定される。細い待ちなら
+        // 1 シャンテン戻す手もあるが、それが成立するのは戻す時間がある序盤だけ。
+        // 全虹 / 高 tier / 暗刻の厚い手は待ちを問わず取る
+        const fd = fc ? decideFever(s.game, cur, feverDapai, fc.tier, { rainbow: fc.rainbow }) : null;
+        if (fc && fd?.takeFever) {
           const sd = decideCpuShuvari(s.game, cur, { discardPai: feverDapai, feverTier: fc.tier });
           declared = s.game.declareLizhi({ fever: true, feverCheck: fc, feverDapai, shuvari: sd.shuvari });
           declaredFever = declared;

@@ -5,12 +5,23 @@
 import { describe, it, expect } from 'vitest';
 import { Game3, buildShoupai } from '../game3';
 import { evaluateFeverPotential, shouldSkipPonForFever } from '../store/cpuFever';
-import { pickLizhiDapai, feverWaitKinds } from '../store/cpuLizhi';
+import {
+  pickLizhiDapai,
+  decideFever,
+  dangerOf,
+  currentTurn,
+  FEVER_FORCE_TIER,
+  FEVER_LATE_TURN,
+} from '../store/cpuLizhi';
 import type { PlayerId } from '../types';
 
 function buildG(hand: string[]): Game3 {
   const g = new Game3({ qijia: 0, changshu: 1 });
   for (const p of [0, 1, 2] as PlayerId[]) g.shoupai.set(p, buildShoupai(hand));
+  const dummy = new Game3();
+  dummy.qipai();
+  const HeCtor = dummy.he.get(0).constructor as any;
+  for (const p of [0, 1, 2] as PlayerId[]) g.he.set(p, new HeCtor());
   const shanAny = g.shan as any;
   shanAny._pai = [];
   shanAny._baopai = ['z2', 'z2'];
@@ -88,8 +99,47 @@ describe('cpuLizhi: 宣言牌とフィーバーの選択', () => {
     expect(picked.waitKinds).toBe(0);
   });
 
-  it('feverWaitKinds は切れない牌なら 0 を返す', () => {
+  it('他家リーチが無ければ危険度は 0', () => {
     const g = buildG([...FILLER, 'z1', 'z1', 'z6', 'z6']);
-    expect(feverWaitKinds(g, 0, 'm1')).toBe(0);
+    expect(dangerOf(g, 0, 'p9')).toBe(0);
+  });
+
+  it('他家リーチ中の無筋は危険、現物は安全', () => {
+    const g = buildG([...FILLER, 'z1', 'z1', 'z6', 'z6']);
+    g.lizhi.add(1);
+    const he = g.he.get(1) as any;
+    he._pai = ['p9'];
+    expect(dangerOf(g, 0, 'p9')).toBe(0);   // 現物
+    expect(dangerOf(g, 0, 'p8')).toBe(1);   // 無筋
+  });
+
+  it('巡目は自分の河の枚数で数える', () => {
+    const g = buildG([...FILLER, 'z1', 'z1', 'z6', 'z6']);
+    expect(currentTurn(g, 0)).toBe(0);
+    (g.he.get(0) as any)._pai = ['p1', 'p2', 'p3'];
+    expect(currentTurn(g, 0)).toBe(3);
+  });
+
+  it('tier が高ければ待ちを問わずフィーバーを取る', () => {
+    const g = buildG([...FILLER, 'z1', 'z1', 'z6', 'z6']);
+    const d = decideFever(g, 0, 'z6', FEVER_FORCE_TIER);
+    expect(d.takeFever).toBe(true);
+    expect(d.reason).toContain(`tier ${FEVER_FORCE_TIER}`);
+  });
+
+  it('全虹は tier 1 でも取る', () => {
+    const g = buildG([...FILLER, 'z1', 'z1', 'z6', 'z6']);
+    const d = decideFever(g, 0, 'z6', 1, { rainbow: true });
+    expect(d.takeFever).toBe(true);
+    expect(d.reason).toContain('全虹');
+  });
+
+  it('終盤は戻す余裕が無いので細い待ちでも取る', () => {
+    const g = buildG([...FILLER, 'z1', 'z1', 'z6', 'z6']);
+    (g.he.get(0) as any)._pai = new Array(FEVER_LATE_TURN).fill('p9');
+    const d = decideFever(g, 0, 'z6', 1);
+    expect(d.turn).toBe(FEVER_LATE_TURN);
+    expect(d.takeFever).toBe(true);
+    expect(d.reason).toContain('戻す余裕が無い');
   });
 });

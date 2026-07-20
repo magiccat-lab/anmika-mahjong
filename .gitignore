@@ -13,6 +13,9 @@ __pycache__/
 .npm-cache/
 .tmp/
 .venv-online-e2e/
+# python venv 全般 [tools/.venv-ai の torch を誤ってコミットした 2026-07-20]
+.venv*/
+server/.venv/
 .playwright-browsers/
 dist
 dist-ssr
