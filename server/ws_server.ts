@@ -146,6 +146,10 @@ export function turnTimeoutAction(
     // getLizhiCandidates() and feverCandidatesByDapai() expose exact physical
     // faces, so the timeout commits the same gp/np3/z5* choice shown in the UI.
     if (candidates.length > 0) return { type: 'discard', pai: candidates[0] };
+    // [2026-07-20] フィーバーを選んだ後にカン等で成立牌が消えると候補が空になる。
+    // ここで null を返すと呼び出し側が同じ期限を張り直すだけなので、局が
+    // 永久に止まる。フィーバーは諦めて通常のリーチ宣言牌へ落とし、進行を優先する。
+    if (normalCandidates.length > 0) return { type: 'discard', pai: normalCandidates[0] };
     return null;
   }
 
@@ -1587,10 +1591,15 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         if (room) {
           room.authority = authority;
           room.snapshot = rewound;
+          // 巻き戻し前に張られた期限タイマーは、巻き戻し後の局面に対しては無効。
+          // 止めずに残すと古い手番の自動打牌が走りかねないし、張り直さないと
+          // 誰も動かない限り永久に待つことになる。
           if (room.nextRoundTimer) { clearTimeout(room.nextRoundTimer); room.nextRoundTimer = null; }
+          if (room.deadlineTimer) { clearTimeout(room.deadlineTimer); room.deadlineTimer = null; }
           for (const member of room.members.values()) {
             sendSync(member.ws, rewound, member.seat, authority, kept);
           }
+          scheduleRoomDeadline(room);
         }
         log(`[anmika-ws] rewind room=${room_id} -> revision ${keepThrough} [dropped ${dropped}]`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
