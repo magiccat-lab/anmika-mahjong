@@ -1349,6 +1349,25 @@
     fire: (expectedPlayer) => game.tsumokiri(expectedPlayer),
   });
   onDestroy(() => autoTsumokiriScheduler.cancel());
+
+  // [2026-07-20 リョー報告: 「次に進めなくなった」] カットイン中は CPU 進行が止まる
+  // [cpuActions / autoAdvance が cutin で break する]。CutinOverlay 側のタイマーが
+  // 何かの拍子に失われると cutin が消えず、局が永久に止まる。
+  // 牌譜保存の安全判定も cutin を見ていないため、詰んだまま保存できてしまっていた。
+  // 演出尺の 3 倍を超えて残っていたら強制解除する保険。
+  // finishCutin は ts 一致でしか消さないので、既に進んでいれば no-op。
+  let cutinWatchdogTimer: ReturnType<typeof setTimeout> | undefined;
+  $: {
+    const stuckCutin = $game.cutin;
+    if (cutinWatchdogTimer) clearTimeout(cutinWatchdogTimer);
+    if (stuckCutin) {
+      cutinWatchdogTimer = setTimeout(() => {
+        game.finishCutin(stuckCutin.ts);
+        game.playNextCutin();
+      }, CUTIN_DURATION_MS * 3);
+    }
+  }
+  onDestroy(() => { if (cutinWatchdogTimer) clearTimeout(cutinWatchdogTimer); });
   // 次の試合へ時 chip リセット option [リョー指示、 default 持越し]
   let resetChipOnNextMatch = false;
   let __matchPostInflight = false;

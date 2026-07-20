@@ -236,6 +236,11 @@ function hasPendingDecision(state: Pick<StoreState,
  */
 export function isSafePaifuSavePoint(state: StoreState): boolean {
   if (hasPendingDecision(state)) return false;
+  // [2026-07-20] カットイン再生中は CPU 進行が止まっている最中で、
+  // 復元しても演出状態は再現されない。安全な保存点ではない
+  if (state.cutin || (state.cutinQueue?.length ?? 0) > 0) return false;
+  // CPU 和了のサイコロ確認待ちも同様に進行が止まっている
+  if (state.cpuWinAck === false) return false;
   if (state.game.state.finished) return state.roundEnded;
   if (state.roundEnded || state.lastDapai !== null || typeof state.lastZimo !== 'string') return false;
   try {
