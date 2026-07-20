@@ -2098,7 +2098,7 @@
         <div class="score-side score-top">場 {['東','南','西','北'][state.changbang] ?? '東'}{state.jushu + 1}局{state.tongaeshi ? ' [返り東]' : ''}</div>
         <div class="score-side score-left lizhi-{$game.game.lizhi.has(srv1)} {$game.game.shuvariActive[srv1] ? 'shuvari' : ''} {$game.game.feverActive[srv1] ? 'fever' : ''} {oyaPlayer === srv1 ? 'is-oya' : ''}">
           <div class="sname">{onlineGameStarted ? seatName(srv1) : 'P1'}{$game.game.lizhi.has(srv1) ? ' リーチ' : ''}{$game.game.shuvariActive[srv1] ? ' [シュバ]' : ''}{$game.game.feverActive[srv1] ? ' [フィバ]' : ''}</div>
-          <div class="sval">{$game.game.state.defen[srv1].toLocaleString()}</div>
+          {#key $game.game.state.defen[srv1]}<div class="sval">{$game.game.state.defen[srv1].toLocaleString()}</div>{/key}
           <div class="ssub">
             {#if revealAll || selfPlayer === srv1}シャンテン {xt1} / {/if}チップ {$game.game.chipLedger[srv1] ?? 0}<br>{$game.game.shuvariUsed[srv1] ? 'シュバ済' : 'シュバ未'}
           </div>
@@ -2109,14 +2109,14 @@
         </div>
         <div class="score-side score-right lizhi-{$game.game.lizhi.has(srv2)} {$game.game.shuvariActive[srv2] ? 'shuvari' : ''} {$game.game.feverActive[srv2] ? 'fever' : ''} {oyaPlayer === srv2 ? 'is-oya' : ''}">
           <div class="sname">{onlineGameStarted ? seatName(srv2) : 'P2'}{$game.game.lizhi.has(srv2) ? ' リーチ' : ''}{$game.game.shuvariActive[srv2] ? ' [シュバ]' : ''}{$game.game.feverActive[srv2] ? ' [フィバ]' : ''}</div>
-          <div class="sval">{$game.game.state.defen[srv2].toLocaleString()}</div>
+          {#key $game.game.state.defen[srv2]}<div class="sval">{$game.game.state.defen[srv2].toLocaleString()}</div>{/key}
           <div class="ssub">
             {#if revealAll || selfPlayer === srv2}シャンテン {xt2} / {/if}チップ {$game.game.chipLedger[srv2] ?? 0}<br>{$game.game.shuvariUsed[srv2] ? 'シュバ済' : 'シュバ未'}
           </div>
         </div>
         <div class="score-side score-bottom lizhi-{$game.game.lizhi.has(srv0)} {$game.game.shuvariActive[srv0] ? 'shuvari' : ''} {$game.game.feverActive[srv0] ? 'fever' : ''} {oyaPlayer === srv0 ? 'is-oya' : ''}">
           <div class="sname">{onlineGameStarted ? seatName(srv0) : 'P0'} [自]{$game.game.lizhi.has(srv0) ? ' リーチ' : ''}{$game.game.shuvariActive[srv0] ? ' [シュバ]' : ''}{$game.game.feverActive[srv0] ? ' [フィバ]' : ''}</div>
-          <div class="sval">{$game.game.state.defen[srv0].toLocaleString()}</div>
+          {#key $game.game.state.defen[srv0]}<div class="sval">{$game.game.state.defen[srv0].toLocaleString()}</div>{/key}
           <div class="ssub">シャンテン {xt0} / チップ {$game.game.chipLedger[srv0] ?? 0} / {$game.game.shuvariUsed[srv0] ? 'シュバ済' : 'シュバ未'}</div>
         </div>
       </div>
@@ -2376,25 +2376,28 @@
   {/if}
 
   {#if ($game.lastHuleResult || state.finished || $game.pendingPingju) && viewMode === 'single'}
-    <div class="agari-unified-panel">
-      <div class="agari-left">
+    <div class="agari-unified-panel" class:appear-after-cutin={!!$game.lastHuleResult && !state.finished}>
+      <div class="agari-left" class:pingju-only={$game.pendingPingju && !$game.lastHuleResult && !state.finished}>
         {#if state.finished}
           <GameEndPanel ranking={$game.game.getRanking()} zifengZ={(p) => $game.game.zifengZ(p as any)} chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)} finalScore={$game.game.getFinalScore()} />
         {/if}
         {#if $game.pendingPingju && !$game.lastHuleResult}
-          <div class="top-line" style="display:flex; gap:16px; align-items:baseline;">
-            <h2 style="margin:0; font-size:26px;">流局</h2>
-            <span style="font-size:18px;">{$game.message ?? '🌀 山切れ'}</span>
+          <div class="pingju-head">
+            <h2 class="pingju-title">流局</h2>
+            <span class="pingju-note">{$game.message ?? '🌀 山切れ'}</span>
           </div>
           {#if $game.game.preHuleSnapshot}
             {@const pdelta = [0,1,2].map(p => state.defen[p as PlayerId] - (($game.game.preHuleSnapshot as any).defen[p] ?? 0))}
-            <div class="payment-row" style="display:flex; gap:10px; align-items:center; margin-top:12px; flex-wrap:wrap;">
+            <div class="payment-row" style="display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap;">
               <span style="font-weight:700; font-size:16px;">点数移動:</span>
               {#each pdelta as v, p}
-                <span style="padding:5px 14px; border-radius:4px; font-weight:700; font-size:18px;
-                  background: {v > 0 ? 'rgba(80,180,100,0.18)' : v < 0 ? 'rgba(220,80,80,0.18)' : 'rgba(0,0,0,0.08)'};
-                  color: {v > 0 ? '#2c8040' : v < 0 ? '#c04040' : '#888'};">
-                  P{p}: {v > 0 ? '+' : ''}{v.toLocaleString()} → {state.defen[p as PlayerId].toLocaleString()}
+                <span style="display:inline-flex; align-items:baseline; gap:6px; padding:6px 14px; border-radius:6px; font-weight:700; font-variant-numeric:tabular-nums;
+                  border: 1px solid {v > 0 ? 'rgba(60,150,80,0.4)' : v < 0 ? 'rgba(190,70,70,0.4)' : 'rgba(0,0,0,0.12)'};
+                  background: {v > 0 ? 'rgba(80,180,100,0.16)' : v < 0 ? 'rgba(220,80,80,0.14)' : 'rgba(0,0,0,0.06)'};
+                  color: {v > 0 ? '#1e7a38' : v < 0 ? '#b23030' : '#888'};">
+                  <span style="font-size:12px; color:#666; font-weight:800;">P{p}</span>
+                  <span style="font-size:18px;">{v > 0 ? '+' : (v === 0 ? '±' : '')}{v.toLocaleString()}</span>
+                  <span style="font-size:13px; color:#555;">→ {state.defen[p as PlayerId].toLocaleString()}</span>
                 </span>
               {/each}
             </div>
@@ -2764,7 +2767,13 @@
   main.mode-single {
     position: fixed;
     inset: 0;
-    background: #2a5040;
+    /* フェルト卓: 平坦な単色をやめ、中央を明るく外周を沈ませる + 微細な布目 */
+    background:
+      radial-gradient(ellipse 120% 90% at 50% 42%, rgba(255, 255, 255, 0.07), transparent 60%),
+      radial-gradient(ellipse 140% 120% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.38) 100%),
+      repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.012) 0 2px, transparent 2px 4px),
+      repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.015) 0 2px, transparent 2px 4px),
+      linear-gradient(180deg, #2d5645, #24493a);
     color: #e8e8e8;
     width: 100vw;
     max-width: none;
@@ -3027,9 +3036,15 @@
       'top    top    top'
       'left   center right'
       'bottom bottom bottom';
-    background: rgba(0, 0, 0, 0.55);
+    background:
+      radial-gradient(ellipse at 50% 30%, rgba(255, 255, 255, 0.05), transparent 65%),
+      linear-gradient(180deg, rgba(10, 18, 14, 0.72), rgba(0, 0, 0, 0.58));
     border: 2px solid #d4af37;
-    border-radius: 8px;
+    border-radius: 10px;
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.4),
+      0 0 22px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
     color: #fff;
     z-index: 3;
   }
@@ -3038,7 +3053,19 @@
   main.mode-single .score-box .score-side.score-right { grid-area: right; text-align: center; align-self: center; padding: 4px; }
   main.mode-single .score-box .score-side.score-bottom { grid-area: bottom; text-align: center; padding: 0 4px; border-top: 0; align-self: start; line-height: 1.15; }
   main.mode-single .score-box .sname { font-size: 16px; color: #f0f0f0; font-weight: 700; letter-spacing: 0.5px; }
-  main.mode-single .score-box .sval { font-size: 22px; font-weight: 700; color: #ffe080; letter-spacing: 0.5px; }
+  main.mode-single .score-box .sval {
+    font-size: 22px;
+    font-weight: 700;
+    color: #ffe080;
+    letter-spacing: 0.5px;
+    font-variant-numeric: tabular-nums;
+    /* 点数が動いた時のパルス [{#key defen} で再マウントして発火] */
+    animation: svalPulse 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes svalPulse {
+    0% { transform: scale(1.28); text-shadow: 0 0 14px rgba(255, 224, 128, 0.9); }
+    100% { transform: scale(1); text-shadow: none; }
+  }
   main.mode-single .score-box .ssub { font-size: 13px; color: #d8e4f0; margin-top: 2px; line-height: 1.2; font-weight: 500; }
   /* 親プレイヤー: score-box の該当辺だけ赤太線 [枠と完全一致、 リョー指示 2026-05-12] */
   main.mode-single .score-box.oya-bottom { border-bottom: 5px solid #ff8060 !important; }
@@ -3150,7 +3177,10 @@
   main.mode-single .dora-row {
     grid-area: dora;
     display: grid;
-    grid-template-columns: minmax(150px, 1fr) auto minmax(150px, 1fr);
+    /* status / settings は content 幅を確保し、ドラ牌側 [中央] だけ縮む。
+       旧 minmax(150px,1fr) x2 は settings が cell を溢れてドラ牌の下に
+       潜り込み、checkbox が牌に隠れていた [2026-07-20 リョー指摘の見づらさ] */
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 6px;
     padding: 4px 8px;
@@ -3199,6 +3229,8 @@
     justify-content: center;
     gap: 6px;
     min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
   }
   main.mode-single .dora-row .dora-label { color: #ffe080; font-weight: 700; }
   main.mode-single .dora-row .fever-inline-label { color: #ff80c0; font-weight: 700; }
@@ -3645,11 +3677,51 @@
     grid-template-columns: 1fr auto;
     gap: 16px;
     overflow: auto;
-    background: rgba(245, 240, 220, 0.97);
+    background:
+      linear-gradient(160deg, rgba(255, 253, 246, 0.99), rgba(243, 235, 213, 0.99));
     border: 2px solid #c0a040;
-    border-radius: 10px;
+    box-shadow:
+      0 0 0 4px rgba(212, 175, 55, 0.22),
+      0 24px 60px rgba(0, 0, 0, 0.5);
+    border-radius: 12px;
     padding: 22px;
     color: #1a1820;
+    animation: agariPanelIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  /* 和了時はロン/ツモ cutin [1.85s] を先に見せ、被って濁らないよう遅らせて登場 */
+  main.mode-single .agari-unified-panel.appear-after-cutin {
+    animation-delay: 1.35s;
+  }
+  @keyframes agariPanelIn {
+    0% { opacity: 0; transform: translateY(26px) scale(0.97); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  /* 流局は内容が少なくパネルが空白の壁になる [2026-07-20 スクショ検分]。
+     内容を縦中央に寄せ、文字を大きくして「小さい情報が隅に落ちてる」感を消す */
+  main.mode-single .agari-unified-panel .agari-left.pingju-only {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 18px;
+    text-align: center;
+  }
+  main.mode-single .agari-unified-panel .agari-left.pingju-only .pingju-title {
+    font-size: 44px;
+    font-weight: 900;
+    letter-spacing: 10px;
+    color: #6c5200;
+    margin: 0;
+  }
+  main.mode-single .agari-unified-panel .agari-left.pingju-only .pingju-note {
+    font-size: 18px;
+    color: #555;
+  }
+  main.mode-single .agari-unified-panel .agari-left.pingju-only .pingju-head {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
   }
   main.mode-single .agari-unified-panel .agari-left {
     grid-row: 1;

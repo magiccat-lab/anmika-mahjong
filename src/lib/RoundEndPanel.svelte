@@ -25,14 +25,38 @@
   export let agariType: 'ron' | 'tsumo' | null = null;
   /** ロン時の振込者 [tsumo の時は無視] */
   export let agariFrom: number | null = null;
+
+  import { tweened } from 'svelte/motion';
+  import { cubicOut } from 'svelte/easing';
+
+  // 打点のカウントアップ [パネル登場後に回す]
+  const defenTween = tweened(0, { duration: 900, easing: cubicOut });
+  $: finalDefen = huleResult.defen3 ?? huleResult.defen ?? 0;
+  $: defenTween.set(finalDefen);
+
+  // 満貫級ラベル [総翻数ベース]
+  function tierLabel(fanshu: number): string | null {
+    if (fanshu >= 13) return '役満';
+    if (fanshu >= 11) return '三倍満';
+    if (fanshu >= 8) return '倍満';
+    if (fanshu >= 6) return '跳満';
+    if (fanshu >= 5) return '満貫';
+    return null;
+  }
+  $: tier = tierLabel(Number(huleResult.fanshu) || 0);
 </script>
 
 <section class="hule-panel">
   <div class="top-line">
-    <h2>局結果</h2>
+    {#if agariType}
+      <span class="agari-kind {agariType === 'ron' ? 'kind-ron' : 'kind-tsumo'}">
+        {agariType === 'ron' ? 'ロン' : 'ツモ'}
+      </span>
+    {/if}
     <span class="winner">player {lastWinner} 和了</span>
     <span class="score">{huleResult.fu ?? 0}符 {huleResult.fanshu ?? 0}翻</span>
-    <span class="defen">{(huleResult.defen3 ?? huleResult.defen ?? 0).toLocaleString()}点</span>
+    {#if tier}<span class="tier-chip tier-{tier === '役満' ? 'yakuman' : 'big'}">{tier}</span>{/if}
+    <span class="defen">{Math.round($defenTween).toLocaleString()}<span class="defen-unit">点</span></span>
   </div>
 
   <div class="section-divider"><span class="section-title">打点計算</span></div>
@@ -42,7 +66,9 @@
         <span class="payment-label">点数移動:</span>
         {#each defenDelta as v, p}
           <span class="payment-cell {v > 0 ? 'gain' : (v < 0 ? 'loss' : 'zero')}">
-            P{p}: {v > 0 ? '+' : ''}{v.toLocaleString()}{#if defenAfter} → {defenAfter[p].toLocaleString()}{/if}
+            <span class="payment-player">P{p}</span>
+            <span class="payment-delta">{v > 0 ? '+' : (v === 0 ? '±' : '')}{v.toLocaleString()}</span>
+            {#if defenAfter}<span class="payment-after">→ {defenAfter[p].toLocaleString()}</span>{/if}
           </span>
         {/each}
       </div>
@@ -137,18 +163,64 @@
     border-radius: 6px;
     margin: 12px 0;
   }
-  h2 { font-size: 14px; margin: 0 0 6px; color: #c04040; }
-  .winner { font-weight: bold; color: #c04040; }
-  .score { color: #555; font-size: 12px; }
-  .defen { font-weight: bold; color: #806000; }
-  .yaku-list { margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px; }
+  .top-line {
+    padding: 6px 10px 10px;
+    border-bottom: 3px double #d4af37;
+    margin-bottom: 4px;
+  }
+  .agari-kind {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 14px;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: 4px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+    animation: kindStamp 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+  }
+  .kind-ron { background: linear-gradient(135deg, #a01828, #d82840); }
+  .kind-tsumo { background: linear-gradient(135deg, #10508c, #2078c8); }
+  .winner { font-weight: 800; color: #7c1620; font-size: 20px; }
+  .score { color: #555; font-size: 15px; font-weight: 600; }
+  .tier-chip {
+    padding: 3px 12px;
+    border-radius: 14px;
+    font-size: 15px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    color: #fff;
+    animation: kindStamp 0.45s 0.25s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+  }
+  .tier-big { background: linear-gradient(135deg, #b06010, #e09020); box-shadow: 0 0 10px rgba(224, 144, 32, 0.5); }
+  .tier-yakuman {
+    background: linear-gradient(120deg, #8c1020, #d02840 40%, #f0a000 100%);
+    box-shadow: 0 0 14px rgba(208, 40, 64, 0.6);
+  }
+  .defen {
+    margin-left: auto;
+    font-weight: 900;
+    font-size: 30px;
+    color: #8a6400;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 0 #fff;
+  }
+  .defen-unit { font-size: 15px; font-weight: 700; margin-left: 2px; }
+  @keyframes kindStamp {
+    0% { transform: scale(1.9); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .yaku-list { margin: 8px 0 2px; display: flex; flex-wrap: wrap; gap: 6px; }
   .yaku-chip {
-    background: #fff;
+    background: linear-gradient(180deg, #fffdf6, #f7edd2);
     border: 1px solid #c8a020;
-    padding: 2px 6px;
-    border-radius: 12px;
-    font-size: 11px;
-    color: #806000;
+    padding: 4px 12px;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #6c5200;
+    box-shadow: 0 1px 2px rgba(120, 90, 0, 0.15);
   }
   .dora-row {
     display: flex;
@@ -167,14 +239,26 @@
   .fuyu-mark { font-size: 18px; font-weight: bold; }
   .fuyu-mark.miss { font-size: 22px; }
   .fuyu-sum { font-size: 11px; color: #4060c0; font-weight: bold; margin-left: 8px; }
-  .payment-row { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; font-size: 14px; }
+  .payment-row { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; font-size: 15px; }
   .payment-label { color: #888; font-size: 12px; font-weight: bold; }
-  .payment-cell { padding: 3px 10px; border-radius: 4px; background: rgba(0, 0, 0, 0.08); font-weight: 700; }
-  .payment-cell.gain { color: #2c8040; background: rgba(80, 180, 100, 0.18); }
-  .payment-cell.loss { color: #c04040; background: rgba(220, 80, 80, 0.18); }
+  .payment-cell {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .payment-cell .payment-player { font-size: 12px; color: #666; font-weight: 800; }
+  .payment-cell .payment-delta { font-size: 17px; }
+  .payment-cell .payment-after { font-size: 13px; color: #555; font-weight: 600; }
+  .payment-cell.gain { color: #1e7a38; background: rgba(80, 180, 100, 0.16); border-color: rgba(60, 150, 80, 0.4); }
+  .payment-cell.loss { color: #b23030; background: rgba(220, 80, 80, 0.14); border-color: rgba(190, 70, 70, 0.4); }
   .payment-cell.zero { color: #888; }
-  .top-line { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
-  .top-line h2 { margin: 0; }
+  .top-line { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .winner-hand { display: flex; gap: 3px; align-items: center; margin-top: 12px; flex-wrap: wrap; padding: 6px; background: rgba(0,0,0,0.04); border-radius: 4px; }
   .winner-hand-label { font-size: 14px; color: #333; font-weight: 700; margin-right: 8px; }
   .fulou-mianzi { display: inline-flex; gap: 1px; padding: 0 4px; border-left: 1px dashed #aaa; align-items: flex-end; }
