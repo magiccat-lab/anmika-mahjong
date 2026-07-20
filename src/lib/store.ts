@@ -9,6 +9,7 @@ import { resolveNukiBeiMeta } from './game3/bei';
 import { buildStateFromPaifu } from './store/paifuIo';
 import { buildDebugState } from './store/debug';
 import { cpuStepImpl, autoAdvanceImpl } from './store/cpuActions';
+import { shouldSkipPonForFever } from './store/cpuFever';
 import { Shan3, generateTilePool, defaultSanmaRule } from './shan3';
 import { declareKanImpl, ponImpl, damingangImpl } from './store/fulouActions';
 import { hasGoldKita } from './game3/gold';
@@ -3506,6 +3507,13 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     };
     for (const cand of ponCands) {
       if (!s.cpu[cand.player as 0 | 1 | 2] || cand.mianzi.length === 0) continue;
+      // [2026-07-20 リョー指摘] フィーバー成立条件は「暗槓以外の副露ゼロ」で牌種を問わない。
+      // 7 のポンを禁じるだけでは足りず、7 対子や全虹の芽がある手では
+      // 役牌ポンでもフィーバー権が飛ぶ。芽が残っている間は丸ごと見送る
+      if (shouldSkipPonForFever(s.game, cand.player as 0|1|2)) {
+        dlog('[cpu pon skip] フィーバー権保護', { player: cand.player, pai: committedCore });
+        continue;
+      }
       let shouldPon = false;
       if (isSanyuanpai) shouldPon = true;
       else if (isFengpai) {
@@ -3537,6 +3545,11 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     //   - それ以外 [萬筒索] は スルー [形崩れ + 嶺上負け リスク回避]
     for (const cand of kanCands) {
       if (!s.cpu[cand.player as 0 | 1 | 2] || cand.mianzi.length === 0) continue;
+      // 大明槓も暗槓ではない副露なので、ポンと同じくフィーバー権を潰す
+      if (shouldSkipPonForFever(s.game, cand.player as 0|1|2)) {
+        dlog('[cpu damingang skip] フィーバー権保護', { player: cand.player, pai: committedCore });
+        continue;
+      }
       let shouldKan = false;
       if (isSanyuanpai) shouldKan = true;
       else if (isFengpai) {

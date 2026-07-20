@@ -18,6 +18,7 @@ import {
 import { toCorePai } from '../helpers';
 import { enterFeverContinueStage } from './winPipeline';
 import { decideCpuShuvari } from './cpuShuvari';
+import { pickLizhiDapai } from './cpuLizhi';
 
 function hasBlockingDecision(s: StoreState): boolean {
   return s.roundEnded
@@ -175,7 +176,9 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         }
       }
       if (!declared) {
-        const plainDapai = lizhiCandidates[0] ?? null;
+        // [2026-07-20] 宣言牌は待ちの広い方を選ぶ。旧実装は候補の先頭固定だった
+        const picked = pickLizhiDapai(s.game, cur, lizhiCandidates);
+        const plainDapai = picked.pai;
         const sd = decideCpuShuvari(s.game, cur, { discardPai: plainDapai });
         declared = s.game.declareLizhi({ shuvari: sd.shuvari });
         if (declared) {
