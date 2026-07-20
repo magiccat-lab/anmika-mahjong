@@ -17,6 +17,7 @@ import {
 } from '../store';
 import { toCorePai } from '../helpers';
 import { enterFeverContinueStage } from './winPipeline';
+import { decideCpuShuvari } from './cpuShuvari';
 
 function hasBlockingDecision(s: StoreState): boolean {
   return s.roundEnded
@@ -158,17 +159,32 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       const feverDapai = zimoPai && legalFeverCandidates.includes(zimoPai)
         ? zimoPai
         : (legalFeverCandidates[0] ?? null);
+      // [2026-07-20 リョー指示] 高い手はシュバる。シュバは半荘 1 回の切り札なので、
+      // 見込み祝儀が基準を超えた時だけ切る [decideCpuShuvari]
+      let shuvariNote: string | null = null;
       if (feverDapai) {
         const fc = feverMap.get(feverDapai);
         if (fc) {
-          declared = s.game.declareLizhi({ fever: true, feverCheck: fc, feverDapai });
+          const sd = decideCpuShuvari(s.game, cur, { discardPai: feverDapai, feverTier: fc.tier });
+          declared = s.game.declareLizhi({ fever: true, feverCheck: fc, feverDapai, shuvari: sd.shuvari });
           declaredFever = declared;
-          if (declared) declaredLizhiDapai = feverDapai;
+          if (declared) {
+            declaredLizhiDapai = feverDapai;
+            if (sd.shuvari) shuvariNote = `シュバ [見込み ${sd.score} 枚]`;
+          }
         }
       }
       if (!declared) {
-        declared = s.game.declareLizhi({});
-        if (declared) declaredLizhiDapai = lizhiCandidates[0] ?? null;
+        const plainDapai = lizhiCandidates[0] ?? null;
+        const sd = decideCpuShuvari(s.game, cur, { discardPai: plainDapai });
+        declared = s.game.declareLizhi({ shuvari: sd.shuvari });
+        if (declared) {
+          declaredLizhiDapai = plainDapai;
+          if (sd.shuvari) shuvariNote = `シュバ [見込み ${sd.score} 枚]`;
+        }
+      }
+      if (declared && shuvariNote) {
+        s.message = `[CPU リーチ] player ${cur} ${shuvariNote}`;
       }
       if (declared) {
         s = enqueueCutinState(s, declaredFever ? 'fever' : 'reach', cur as 0 | 1 | 2);
