@@ -16,6 +16,9 @@ __pycache__/
 # python venv 全般 [tools/.venv-ai の torch を誤ってコミットした 2026-07-20]
 .venv*/
 server/.venv/
+# 学習済み checkpoint [1 個 4.5MB。ckpt_v4.pt は既に tracked なので影響なし]
+ai/ckpt_v1[0-9]*.pt
+ai/policy*.pt
 .playwright-browsers/
 dist
 dist-ssr
