@@ -11,6 +11,8 @@
   export let dora: string[]; // baopai を doraFrom した結果
   export let currentPlayer: number;
   export let lastZimo: string | null;
+  /** 返り東中か [changbang / jushu が 0 に巻き戻るので場名だけでは判別できない] */
+  export let tongaeshi: boolean = false;
   $: ba = ['東', '南', '西'][changbang] ?? '?';
   // [2026-05-15 bug A fix + bug 5 fix] ぽっち色 [z5b/r/g/y] / 金牌 [gp/gs/gN] は ツモ時点で
   // UI 露出すると あがる前に 色 / 金 が バレる。 直ツモ表示は plain key にマスク。
@@ -29,7 +31,7 @@
 </script>
 
 <div class="header-info">
-  <span class="ba">{ba}場 {jushu + 1}局</span>
+  <span class="ba">{ba}場 {jushu + 1}局{tongaeshi ? ' [返り東]' : ''}</span>
   <span class="seg">本場 {benbang}</span>
   <span class="seg">供託 {lizhibang}</span>
   <span class="seg">山 {paishu}枚</span>

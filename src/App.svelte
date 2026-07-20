@@ -1711,6 +1711,7 @@
     <HeaderInfo
       changbang={state.changbang}
       jushu={state.jushu}
+      tongaeshi={!!state.tongaeshi}
       benbang={state.benbang}
       lizhibang={state.lizhibang}
       paishu={paishu}
@@ -2060,7 +2061,10 @@
       <!-- 2026-05-14 codex review #3 fix: oyaPlayer は real player id、 視覚座 srv0/srv1/srv2 への
            mapping で direction 決める。 online で selfPlayer != 0 の時に親枠方向 ズレを防ぐ -->
       <div class="score-box oya-{oyaPlayer === srv0 ? 'bottom' : (oyaPlayer === srv1 ? 'left' : (oyaPlayer === srv2 ? 'right' : 'bottom'))}">
-        <div class="score-side score-top">場 {['東','南','西','北'][state.changbang] ?? '東'}{state.jushu + 1}局</div>
+        <!-- [2026-07-20 リョー指摘: 「いつの間にか回り親になってる？」]
+             返り東は changbang / jushu を 0 に巻き戻すので、画面上は東 1 局に戻り
+             何周目か分からなくなる。返り東中である事を明示する -->
+        <div class="score-side score-top">場 {['東','南','西','北'][state.changbang] ?? '東'}{state.jushu + 1}局{state.tongaeshi ? ' [返り東]' : ''}</div>
         <div class="score-side score-left lizhi-{$game.game.lizhi.has(srv1)} {$game.game.shuvariActive[srv1] ? 'shuvari' : ''} {$game.game.feverActive[srv1] ? 'fever' : ''} {oyaPlayer === srv1 ? 'is-oya' : ''}">
           <div class="sname">{onlineGameStarted ? seatName(srv1) : 'P1'}{$game.game.lizhi.has(srv1) ? ' リーチ' : ''}{$game.game.shuvariActive[srv1] ? ' [シュバ]' : ''}{$game.game.feverActive[srv1] ? ' [フィバ]' : ''}</div>
           <div class="sval">{$game.game.state.defen[srv1].toLocaleString()}</div>
