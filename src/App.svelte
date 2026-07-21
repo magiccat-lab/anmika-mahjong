@@ -1375,7 +1375,14 @@
       && !snap.pendingPochiSwap
       && !snap.pendingSaiKoro
       && !snap.pendingFeverContinue
-      && !snap.lizhiPending
+      // [2026-07-21 監査 L-01 fix] cutin 再生中は自動ツモ切りを予約・発火しない。
+      // scheduler は発火時に readCurrent を再検証するため、ここに入れるだけで
+      // 予約済み timer も演出中は止まり、演出裏で局面が進まない
+      && !snap.cutin
+      && ((snap.cutinQueue?.length ?? 0) === 0)
+      // [2026-07-21 監査 L-02 fix] lizhiPending は seat 番号で P0 の宣言待ちは数値 0。
+      // falsy 判定だと P0 の宣言牌選択中に無効な自動ツモ切り timer を張っていた
+      && snap.lizhiPending === null
       && player === selfPlayer
       && !!snap.lastZimo
       && !snap.game.canTsumo(player);

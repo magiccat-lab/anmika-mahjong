@@ -21,6 +21,17 @@ function ronScenario(declareShuvari: boolean) {
   g.shoupai.set(0, buildShoupai(WINNER_TANYAO));
   g.lizhi.add(0); // アンミカは完全ダマ禁止 [面前はリーチ必須]。両ケース同条件で供託は積まない
   g.diyizimo = false;
+  // [2026-07-21 flaky fix] plain/declared は別々の reset でランダム山を引くため、
+  // 表示牌のドラ・正ぽっち・秋や、配牌由来の華 [秋のドラ表追加/夏ランクアップ/春] と
+  // 金牌 [金北] で両ケースの和了点がズレて落ちていた。表示牌と華・金を完全固定する
+  (g.shan as any)._baopai = ['z1'];
+  (g.shan as any)._fubaopai = ['z2'];
+  for (const p of [0, 1, 2] as const) {
+    g.huapai[p] = [];
+    g.goldHand[p] = { p: 0, s: 0, z: 0 };
+    g.nukidora[p] = 0;
+    g.nukidoraGold[p] = 0;
+  }
   if (declareShuvari) {
     // loser=1 がシュバ宣言牌 [s7] を打った状態を再現
     g.shuvariActive[1] = true;
