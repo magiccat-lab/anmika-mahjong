@@ -149,10 +149,12 @@ describe('saiKoro actions [no-op / 基本進行]', () => {
     expect(entry?.total).toBe(22);
   });
 
-  it('払いサイコロ [逆ぽっち] の連続ゾロ目特典は同額のまま払い扱い [2026-07-18 リョー裁定]', () => {
+  it('払いサイコロ [逆ぽっち] の連続ゾロ目特典は倍率適用で払いになる [2026-07-21 リョー裁定]', () => {
     const s = get(game);
-    // 2026-07-20 裁定でゾロ目特典はシュバサイ限定になったので、払い挙動の検証も
-    // シュバ宣言中で行う [額と符号の仕様自体は 07-18 のまま]
+    // 2026-07-20 裁定でゾロ目特典はシュバサイ限定 [発動条件は維持]。
+    // 2026-07-21 裁定 [Google Doc 準拠] で額は出目当てと同じ倍率を受ける:
+    // シュバは chip 倍率に乗らず [bypass]、ぽっち -2 が乗って 22 → -44 オール
+    // [旧 2026-07-18 の「同額のまま符号だけ反転」は上書き]
     s.game.shuvariActive[0] = true;
     s.game.pochiMultiplier[0] = { defen: -1, chip: -2 };
     s.pendingSaiKoro = {
@@ -169,15 +171,13 @@ describe('saiKoro actions [no-op / 基本進行]', () => {
     game.rollSaiKoroDice([2, 2]);
     const after = get(game);
     const entry = after.game.chipBreakdown.at(-1);
-    // 額は 22 のまま、方向だけ払い [倍率 -2 で -44 にはしない]
-    expect(entry?.base).toBe(-22);
-    expect(entry?.multiplier).toBe(1);
-    expect(entry?.total).toBe(-22);
-    expect(entry?.label).toContain('払い');
-    // winner が 22 オール払い → 本人 -44、他家 +22 ずつ
-    expect(after.game.chipLedger[0] - ledgerBefore[0]).toBe(-44);
-    expect(after.game.chipLedger[1] - ledgerBefore[1]).toBe(22);
-    expect(after.game.chipLedger[2] - ledgerBefore[2]).toBe(22);
+    expect(entry?.base).toBe(22);
+    expect(entry?.multiplier).toBe(-2);
+    expect(entry?.total).toBe(-44);
+    // winner が 44 オール払い → 本人 -88、他家 +44 ずつ
+    expect(after.game.chipLedger[0] - ledgerBefore[0]).toBe(-88);
+    expect(after.game.chipLedger[1] - ledgerBefore[1]).toBe(44);
+    expect(after.game.chipLedger[2] - ledgerBefore[2]).toBe(44);
   });
 
   it('連続ゾロ目特典は2回目の出目で額が決まる [1→111 / n→n*11]', () => {
