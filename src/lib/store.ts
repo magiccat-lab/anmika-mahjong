@@ -218,10 +218,19 @@ export function resolvePreSettlementPochiChoices(
   recalculate: () => any,
 ): PreSettlementChoiceResolution {
   let result = initialResult;
-  for (let guard = 0; guard < 16; guard++) {
+  // リョー裁定 2026-07-21: 神ぽっち target は局中固定せず和了ごとに現手牌から再計算する。
+  // 旧実装は target===null の occurrence だけ選んでいた [=一度確定したら次局まで固定]。
+  // 前回和了 [同一 FEVER 続行] の確定値や snapshot 復元で戻った残骸が残っていても、
+  // この和了で見えている全 occurrence を毎回選び直す。今回の処理済みは resolvedKeys で
+  // 追跡する [restoreSnapshot が旧 choice を復活させるため choice 側の null では判定しない]。
+  const resolvedKeys = new Set<string>();
+  // guard: 旧 16。全 occurrence を毎回選び直す方式で iteration が occurrence 総数
+  // [表+裏+秋追加表示] に比例するようになったため余裕を持たせる
+  for (let guard = 0; guard < 32; guard++) {
     const occurrence = s.game.getKamiPochiDoraOccurrences(context.winner)
-      .find((candidate) => candidate.target === null);
+      .find((candidate) => !resolvedKeys.has(candidate.key));
     if (occurrence) {
+      resolvedKeys.add(occurrence.key);
       const candidates = s.game.getKamiPochiCandidates('dora');
       s.game.restoreSnapshot();
       // リョー裁定 2026-07-20: 神ぽっちは選択モーダルを出さず常に自動高め取り。
@@ -642,6 +651,7 @@ export function createGameStore() {
     settleAfterWin(s, {
       winner: (s.lastWinner ?? context.winner) as PlayerId,
       isRon: context.isRon,
+      ronfrom: context.ronfrom,
     });
     s.message = `${s.message ?? ''} [神ぽっち選択確定]`.trim();
     return s;
@@ -1413,7 +1423,7 @@ export function createGameStore() {
           s.roundEnded = true;
           s.message += ` [❄️ 冬自動実行、 局終了]`;
         }
-        settleAfterWin(s, { winner: player as PlayerId, isRon: true });
+        settleAfterWin(s, { winner: player as PlayerId, isRon: true, ronfrom: s.lastDapai?.player ?? null });
         return { ...s };
       });
     },
@@ -1620,7 +1630,7 @@ export function createGameStore() {
           if (!fuyuCutinQueued) s = enqueueCutinState(s, isRon ? 'ron' : 'tsumo', rr.player as PlayerId);
           s = triggerSaiKoroIfAny(s, rr.result, rr.player);
         }
-        settleAfterWin(s, { winner: (s.lastWinner ?? winner) as PlayerId, isRon });
+        settleAfterWin(s, { winner: (s.lastWinner ?? winner) as PlayerId, isRon, ronfrom });
         return { ...s };
       });
     },
@@ -1826,7 +1836,7 @@ export function createGameStore() {
         s.game.snapshotLocked = false;
         finishRonDecisionStage(s);
         // fever 継続: 次家へ advance、 selectKinpei が ron/tsumo を兼ねるので両 path 対応
-        settleAfterWin(s, { winner: (s.lastWinner ?? winner) as PlayerId, isRon });
+        settleAfterWin(s, { winner: (s.lastWinner ?? winner) as PlayerId, isRon, ronfrom });
         return { ...s };
       });
     },
@@ -1967,9 +1977,11 @@ export function createGameStore() {
         // [2026-07-18 の「シュバ不問で全サイコロチャンス」は撤回]。
         // シュバサイ = 役固有の常時シュバサイ、または シュバ適用サイコロ × シュバ宣言中
         // [SaiKoroModal のシュバ表示と同じ判定]。
-        // 額は従来どおり固定で、2回目以降のゾロ目の出目に応じて
-        // 1→111 / n→n*11 [22/33/44/55/66] 枚オール。
-        // シュバリー・ぽっち・FEVER の倍率は乗せない [リョー裁定: 倍率は上がらない]。
+        // 基本額は 2 回目以降のゾロ目の出目に応じて 1→111 / n→n*11 [22/33/44/55/66] 枚オール。
+        // リョー裁定 2026-07-21 [Google Doc 準拠]: 連続特典も出目当てと同じ倍率を受ける。
+        // 出目当て本体 [finalize 側] と同一 opts = シュバ非適用 [サイコロ chip はシュバに
+        // 乗らない 2026-05-12]、FEVER tier 倍率適用、ぽっち倍率適用 [ron 由来×非フィーバーは
+        // bypass、逆ぽっちの払いは負倍率で自動反転]。
         const isShuvariSai = (curChance as any)?.alwaysShuvari === true
           || ((curChance as any)?.shuvariApplicable === true && s.game.shuvariActive[chanceWinner]);
         if (zoro && isShuvariSai) {
@@ -1982,25 +1994,19 @@ export function createGameStore() {
             const n = d1;
             zoroBonusThisRoll = n === 1 ? 111 : n * 11;
             const chanceMode = (curChance as any)?.mode ?? 'tsumo';
-            // 払いサイコロ [赤/黄=逆ぽっち] では額は同じまま払い扱い [2026-07-18 リョー裁定]。
-            // 倍率は掛けず符号だけ反転する [-2倍で-44にはしない]。
-            // ron 由来は非フィーバー時ぽっち無効 [engine 慣例 ronBypassPochi と同じ]
-            const pochiEffective = !(chanceMode === 'ron' && !s.game.feverActive[chanceWinner]);
-            const isPayDice = pochiEffective
-              && ((s.game.pochiMultiplier[chanceWinner]?.chip ?? 1) < 0);
-            s.game.applyChipOall(chanceWinner, isPayDice ? -zoroBonusThisRoll : zoroBonusThisRoll, {
+            s.game.applyChipOall(chanceWinner, zoroBonusThisRoll, {
               bypassShuvari: true,
-              bypassPochi: true,
-              bypassFever: true,
-              label: `🎲 ゾロ目連続特典 [${n},${n}] ×${consec}${isPayDice ? ' 払い' : ''}`,
+              bypassPochi: chanceMode === 'ron' && !s.game.feverActive[chanceWinner],
+              bypassFever: false,
+              label: `🎲 ゾロ目連続特典 [${n},${n}] ×${consec}`,
               mode: chanceMode,
             });
-            // 累積 zoroBonus [固定額、払いは負値] を summary 表示用に store
+            // 累積 zoroBonus [倍率込み実額、払いは負値] を summary 表示用に store
             // applyChipOall 直後の chipBreakdown 末尾 entry が今回 push 分
             const lastEntry = s.game.chipBreakdown[s.game.chipBreakdown.length - 1];
             const actualThisRoll = lastEntry?.total ?? zoroBonusThisRoll;
             (ps as any)._zoroBonusAcc = ((ps as any)._zoroBonusAcc ?? 0) + actualThisRoll;
-            s.message = `🎲 ゾロ目連続特典 [${n},${n}] × ${consec}: chip ${zoroBonusThisRoll} オール${isPayDice ? ' 払い' : ''}`;
+            s.message = `🎲 ゾロ目連続特典 [${n},${n}] × ${consec}: chip ${actualThisRoll} オール`;
           }
         }
         // ゾロ目はリプレイ扱い [回数外]。虹All-Star等は5〜7投になる。
@@ -2094,16 +2100,20 @@ export function createGameStore() {
       if (sendOnlineAction({ type: 'continueFever' })) return;
       update((s) => {
         if (!s.pendingFeverContinue) return { ...s };
-        const { winner, isRon } = s.pendingFeverContinue;
+        const { winner, isRon, ronfrom } = s.pendingFeverContinue;
         clearFeverContinueStage(s);
         if (isRon) {
-          // ron 経路: winner は hand 14 [applyHule で ron pai 込み]、 skip して winner+1 へ
-          // 反時計周り: 次プレイヤー = winnerPid - 1 [2026-05-13 fix]
+          // ron 経路: winner は hand 14 [applyHule で ron pai 込み]
+          // リョー裁定 2026-07-21 [裁定6]: 再開席は放銃者の次 [「とにかく順番に山を
+          // めくっていくだけだから、順番はズレないよ」]。ronfrom 未保持の旧 state
+          // [牌譜/保存データ] だけ従来の winner 基準で進める。
+          // 反時計周り: 次プレイヤー = basePid - 1 [2026-05-13 fix]
           // 2026-05-14 fix [user 報告]: lunban 逆算で qijia 固定じゃなく currentOya 基準に。
           // 親流れ後 currentOya !== qijia な局で 別の席に ツモが渡る = 「親番より下家の捨て牌多い」
           // 「ツモ順 一個ズレ」 bug の原因。 lunbanToPlayerId が currentOya 基準なので 逆も統一
           const winnerPid = winner as 0|1|2;
-          const nextPlayer = ((winnerPid - 1) + 3) % 3;
+          const basePid = (typeof ronfrom === 'number' ? ronfrom : winnerPid) as 0|1|2;
+          const nextPlayer = ((basePid - 1) + 3) % 3;
           s.game.state.lunban = (((s.game.currentOya - nextPlayer) % 3 + 3) % 3) as any;
           s = confirmPendingFeverBeforeDraw(s);
           if (s.pendingPingju || s.roundEnded) return { ...s };
@@ -2305,7 +2315,7 @@ export function createGameStore() {
               // R18 #4 fix: pass 後 CPU ロンで fever 継続抜けてた、 winner が fever 中なら
               // pendingFeverContinue にして 通常 ロンと揃える
               const winnerSeat = s.lastWinner as PlayerId;
-              settleAfterWin(s, { winner: winnerSeat, isRon: true });
+              settleAfterWin(s, { winner: winnerSeat, isRon: true, ronfrom: s.lastDapai?.player ?? null });
               s.ronPassedPlayers = [];
               for (const rr of allRonResults) {
                 s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
@@ -2385,7 +2395,7 @@ export function createGameStore() {
               s = triggerSaiKoroIfAny(s, rr.result, rr.player);
               rr.result._anmikaRonEffectsQueued = true;
             }
-            settleAfterWin(s, { winner: lastWinner as PlayerId, isRon: true });
+            settleAfterWin(s, { winner: lastWinner as PlayerId, isRon: true, ronfrom: s.lastDapai?.player ?? null });
           } else {
             s.roundEnded = true;
           }
@@ -2642,7 +2652,7 @@ export function createGameStore() {
               }
               // R18 #4 fix: CPU 槍槓 ロンも fever 継続対応 [旧 roundEnded=true 固定で fever 抜け]
               const winnerSeatQ = s.lastWinner as PlayerId;
-              settleAfterWin(s, { winner: winnerSeatQ, isRon: true });
+              settleAfterWin(s, { winner: winnerSeatQ, isRon: true, ronfrom: player as PlayerId });
               s.message = `🎉 CPU 槍槓 ron: ${settledRonResults.map(r => `p${r.player}`).join('/')}`;
               for (const rr of settledRonResults) {
                 s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
@@ -3269,7 +3279,7 @@ export function beginNukiBei(s: StoreState, player: PlayerId, meta?: { gold?: bo
         ronfrom: player,
       })) return s;
       for (const rr of s.ronResults) s = triggerSaiKoroIfAny(s, rr.result, rr.player);
-      settleAfterWin(s, { winner: s.lastWinner as PlayerId, isRon: true });
+      settleAfterWin(s, { winner: s.lastWinner as PlayerId, isRon: true, ronfrom: player });
       s.message = `北抜きロン: ${formatRonResults(s.ronResults)}`;
       return s;
     }
@@ -3440,7 +3450,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
         // CPU ロン経路でも ack gate を設定 [tsumo 側 cpuActions.ts:60 と同等]
         if (s.pendingSaiKoro) s.cpuWinAck = false;
       }
-      settleAfterWin(s, { winner: winner as PlayerId, isRon: true });
+      settleAfterWin(s, { winner: winner as PlayerId, isRon: true, ronfrom: player as PlayerId });
       s.game.snapshotLocked = false;
       return { ...s };
     }

@@ -61,7 +61,7 @@ describe('winPipeline state machine helper', () => {
     s.pendingKinpei = null;
     settleAfterWin(s, { winner: 0, isRon: true });
     expect(s.roundEnded).toBe(false);
-    expect(s.pendingFeverContinue).toEqual({ winner: 0, isRon: true });
+    expect(s.pendingFeverContinue).toEqual({ winner: 0, isRon: true, ronfrom: null });
     expect(s.game.feverWinCount[0]).toBe(1);
 
     settleAfterWin(s, { winner: 0, isRon: true });

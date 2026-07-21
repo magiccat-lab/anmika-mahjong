@@ -76,6 +76,9 @@ export type PendingPochiSwap = {
 export type PendingFeverContinue = {
   winner: number;
   isRon: boolean;
+  /** ron 継続の再開席基準 [リョー裁定 2026-07-21 裁定6: 放銃者の次から]。
+   * 未保持 [旧保存データ等] は winner 基準の旧挙動で進める。 */
+  ronfrom?: number | null;
 };
 
 export type ReactionCandidate = {
@@ -378,7 +381,7 @@ export function replaceSaiKoroChances(
 
 export function settleAfterWin(
   s: WinPipelineLike,
-  opts: { winner: PlayerId; isRon: boolean },
+  opts: { winner: PlayerId; isRon: boolean; ronfrom?: number | null },
 ): void {
   if (s.pendingFuyu || s.pendingKinpei || s.pendingKamiPochi || s.pendingPochiSwap) {
     s.roundEnded = false;
@@ -393,7 +396,11 @@ export function settleAfterWin(
     }
     if (!s.pendingFeverContinue) {
       s.game.feverWinCount[opts.winner] += 1;
-      enterFeverContinueStage(s, { winner: opts.winner, isRon: opts.isRon });
+      enterFeverContinueStage(s, {
+        winner: opts.winner,
+        isRon: opts.isRon,
+        ronfrom: opts.ronfrom ?? null,
+      });
     }
     s.roundEnded = false;
     return;
