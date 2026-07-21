@@ -461,6 +461,12 @@ export function applyChipsOnHule(
   const fuyuCount = hua.filter((p) => p === 'f4').length;
   const isFuyuKinpei = ctx.kinpeiTarget[winner] === 'fuyu';
   const inFever = ctx.feverActive[winner];
+  // [2026-07-21 監査 D-09 fix] 冬完了による FEVER 終了を、この関数の途中では
+  // 反映せず遅延フラグに退避する。旧実装は冬完了時点で ctx.feverActive を false に
+  // 落とし、後続の役満・面前チップが非 FEVER 倍率で計算され、一和了内で倍率が
+  // 混ざっていた [めくり途中に正ぽっちで pending になる経路とで挙動も分岐]。
+  // 全チップを和了時点の FEVER 倍率で一貫させ、状態遷移は関数末尾で一度だけ行う
+  let fuyuEndedFever = false;
   if (fuyuCount >= 1) {
     if (!inFever || ctx.fuyuConsumed[winner]) {
       const fuyuAdvance = applyFuyuChip(ctx, winner, loser, fuyuCount, isFuyuKinpei);
@@ -472,7 +478,7 @@ export function applyChipsOnHule(
         result.fuyuLog = (ctx as any)._lastFuyuLog;
         (ctx as any)._lastFuyuLog = null;
       }
-      if (inFever && fuyuAdvance.status === 'complete') ctx.feverActive[winner] = false;
+      if (inFever && fuyuAdvance.status === 'complete') fuyuEndedFever = true;
     }
   }
 
@@ -634,4 +640,8 @@ export function applyChipsOnHule(
   }
   ctx.applyChipOall = origOall;
   ctx.applyChipFromLoser = origFromLoser;
+  // [2026-07-21 監査 D-09 fix] 全チップ計算が和了時点の FEVER 倍率で終わった後に、
+  // 冬完了による FEVER 終了を一度だけ反映する [downstream の triggerSaiKoro dedup /
+  // settleAfterWin は旧実装と同じ値を見る]
+  if (fuyuEndedFever) ctx.feverActive[winner] = false;
 }
