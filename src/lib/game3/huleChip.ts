@@ -9,6 +9,7 @@
 // 関数自体は this 依存ナシの pure 形、 class 側は wrap method で互換維持。
 
 import { dlog, fanshuLevel, isNijiPai, toCorePai } from '../helpers';
+import { tulipNeighbors } from './tulip';
 import type { PlayerId } from './chip';
 import { hasGoldKita as hasGoldKitaTile, type GoldHand } from './gold';
 import type { PochiHand } from './pochi';
@@ -203,30 +204,9 @@ export function applyFuyuChip(
     const norm = core === 'p0' ? 'p5' : core === 's0' ? 's5' : core;
     const matches = new Set<string>();
     matches.add(norm);
-    if (isTulip) {
-      const s = norm[0]; const n = parseInt(norm[1] === '0' ? '5' : norm[1]);
-      if (s === 'm') {
-        // 萬子は 7m / 9m の 2 種だけ [isValidAnmikaTile] なので互いに隣。
-        // [2026-07-20 リョー裁定] 7m9m と白は無関係、旧実装の z5 連結は撤去
-        if (n === 7) matches.add('m9');
-        else if (n === 9) matches.add('m7');
-      } else if (s === 'z' && n === 5) {
-        // [2026-07-20 リョー裁定] 白めくりは發・中
-        matches.add('z6'); matches.add('z7');
-      } else if (s === 'z' && n === 4) {
-        // [2026-07-20 リョー裁定] 北めくりは西・東
-        matches.add('z3'); matches.add('z1');
-      } else if (s === 'z' && n === 3) {
-        // 字牌チューリップの裁定例: 西なら東・北。
-        matches.add('z1'); matches.add('z4');
-      } else if (s !== 'z') {
-        // チューリップ ±1 隣接 [循環: 1↔9 も対象、 リョー指示 2026-05-11]
-        if (n > 1) matches.add(`${s}${n - 1}`);
-        else matches.add(`${s}9`); // n===1 → s9 循環
-        if (n < 9) matches.add(`${s}${n + 1}`);
-        else matches.add(`${s}1`); // n===9 → s1 循環
-      }
-    }
+    // チューリップ隣接は game3/tulip.ts の単一 helper を使う [estimator と同一集合]。
+    // [2026-07-20 リョー裁定] m7↔m9 / 白→發中 / 北→西東 / 西→東北 / 数牌±1循環。
+    if (isTulip) for (const t of tulipNeighbors(norm)) matches.add(t);
     let count = 0;
     for (const m of matches) count += genbutsuCount[m] ?? 0;
     return count;

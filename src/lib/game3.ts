@@ -158,6 +158,7 @@ function countPhysicalRedDora(sp: any, ronpai: string | null): number {
 }
 import { canFeverLizhi as canFeverLizhiHelper, isFeverWaitExhausted as isFeverWaitExhaustedHelper, feverCandidatesByDapai as feverCandidatesByDapaiHelper, rainbowKanUpgradeTier, type FeverCheck } from './game3/feverLizhi';
 import { isKanpaman as isKanpamanHelper, doraIndicatorOf as doraIndicatorOfHelper } from './game3/yaku';
+import { tulipNeighbors } from './game3/tulip';
 import { computeChipMultiplier as computeChipMultiplierHelper, applyChipOall as applyChipOallHelper, applyChipFromLoser as applyChipFromLoserHelper, type ChipState as ChipStateT, type ChipBreakdownEntry } from './game3/chip';
 import { getTingpaiList as getTingpaiListHelper, getTingpaiListBeforeZimo as getTingpaiListBeforeZimoHelper, canTsumoWithPochiSwap as canTsumoWithPochiSwapHelper, americanChitoiXiangting, americanChitoiComplete, countAmericanChitoiQuads } from './game3/tingpai';
 import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotHelper, type PreHuleSnapshot } from './game3/snapshot';
@@ -4003,18 +4004,9 @@ export class Game3 {
       if (/^f[1-4]$/.test(raw)) return hua.length + (kamiHua ? 1 : 0);
       const norm = toCorePai(raw).replace(/0$/, '5');
       const matches = new Set<string>([norm]);
-      if (tulip) {
-        const s = norm[0];
-        const n = Number(norm[1]);
-        if (s === 'm' && n === 7) { matches.add('m9'); matches.add('z5'); }
-        else if (s === 'm' && n === 9) { matches.add('m7'); matches.add('z5'); }
-        else if (s === 'z' && n === 5) { matches.add('m7'); matches.add('m9'); }
-        else if (s === 'z' && n === 3) { matches.add('z1'); matches.add('z4'); }
-        else if (s !== 'z') {
-          matches.add(`${s}${n > 1 ? n - 1 : 9}`);
-          matches.add(`${s}${n < 9 ? n + 1 : 1}`);
-        }
-      }
+      // [2026-07-21 裁定9 / D-13] 実精算 [huleChip.checkHit] と同一の隣接集合を
+      // 共有 helper で使う。旧 estimator は m7m9↔z5 連結・z4/z5 欠落で高目がズレていた。
+      if (tulip) for (const t of tulipNeighbors(norm)) matches.add(t);
       return [...matches].reduce((sum, tile) => sum + (genbutsu[tile] ?? 0), 0);
     };
     const kamiBest = (): number => Math.max(...this.getKamiPochiCandidates('fuyu').map(
