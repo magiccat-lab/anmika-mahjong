@@ -212,6 +212,10 @@ describe('authoritative websocket runtime', () => {
     expect(sync.snapshot.state.privateHand).toBeTruthy();
     await waitUntil(() => runtime.rooms.get(roomId)?.members.get('u0')?.connected ? true : undefined);
     expect(runtime.rooms.get(roomId)?.members.get('u0')?.generation).toBeGreaterThan(previousGeneration);
+    // [2026-07-21 監査 D-15] 再接続で手番 deadline が現在時刻から張り直される。
+    // 旧世代の timer で復帰直後に auto-discard される事故を防ぐ
+    await waitUntil(() => runtime.rooms.get(roomId)?.deadlineTimer ? true : undefined);
+    expect(runtime.rooms.get(roomId)?.deadlineTimer).toBeTruthy();
 
     // Put the in-memory authority at a post-win dice decision. This isolates
     // transport behavior: the client-provided roll is replaced by one server

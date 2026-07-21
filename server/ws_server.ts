@@ -1271,11 +1271,17 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
 
     const current = authority.currentPlayer();
     const member = Array.from(room.members.values()).find((item) => item.seat === current);
+    // [2026-07-21 監査 D-15 fix] この timer を張った時点の接続世代を控える。
+    // 発火までに切断→再接続で generation が上がっていたら、この timer は旧世代の
+    // 期限なので無効化し、再接続時に張り直した新 timer に任せる
+    const scheduledGeneration = member?.generation ?? 0;
     const delay = member?.is_cpu ? 750 : member?.connected ? turnTimeoutMs : disconnectGraceMs;
     room.deadlineTimer = setTimeout(() => {
       room.queue = room.queue.then(async () => {
         const live = room.authority;
         if (!live || live.roundEnded || live.currentPlayer() !== current) return;
+        const liveMember = Array.from(room.members.values()).find((item) => item.seat === current);
+        if (liveMember && !liveMember.is_cpu && liveMember.generation !== scheduledGeneration) return;
         const action = turnTimeoutAction(live, member?.is_cpu === true);
         if (!action) {
           scheduleRoomDeadline(room);
@@ -1514,6 +1520,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     broadcast(room, lobbyPayload(room));
     if (room.snapshot.started) {
       sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId));
+      // [2026-07-21 監査 D-15 fix] 再接続時は手番 deadline を現在時刻から張り直す。
+      // scheduleRoomDeadline は冒頭で旧 timer を clearTimeout するので、切断前の
+      // 残り期限で復帰直後に auto-discard される事故を防ぐ [新世代で rebase]
+      scheduleRoomDeadline(room);
     }
     if (!room.snapshot.started && room.pendingStart && room.members.size >= 3) {
       startRoom(room, room.pendingStart.qijia);

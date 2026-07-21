@@ -563,7 +563,13 @@ export function createGameStore() {
       }));
       return true;
     } catch (e) {
-      return false;
+      // [2026-07-21 監査 D-16 fix] 送信失敗 [WebSocket.send / JSON 化例外] でも
+      // online action は consume する [return true]。false を返すと呼び出し側が
+      // ローカル Game3 にだけ適用してサーバーと desync するため。best-effort で
+      // resync を要求し、届かなくても次の再接続 sendSync で権威 state に復元する
+      dlog('[sendOnlineAction] send failed, consume + request resync', e);
+      try { onlineWs.send(JSON.stringify({ type: 'resync' })); } catch { /* ignore */ }
+      return true;
     }
   }
 
