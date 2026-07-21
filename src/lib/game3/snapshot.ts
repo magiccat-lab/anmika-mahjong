@@ -17,6 +17,8 @@ export type PreHuleSnapshot = {
   defen: Record<PlayerId, number>;
   chipLedger: Record<PlayerId, number>;
   akiUsedCount: Record<PlayerId, number>;
+  /** [D-01] 表示の秋 f3 の消費済み occurrence [`baopai:i`/`fubaopai:i`]。旧 snapshot 互換で optional */
+  akiUsedIndicators?: Record<PlayerId, string[]>;
   feverActive: Record<PlayerId, boolean>;
   feverSaiAwarded?: Record<PlayerId, string[]>;
   lateShuvariWindow?: Record<PlayerId, boolean>;
@@ -41,6 +43,7 @@ export type SnapshotRefs = {
   defen: Record<PlayerId, number>;
   chipLedger: Record<PlayerId, number>;
   akiUsedCount: Record<PlayerId, number>;
+  akiUsedIndicators?: Record<PlayerId, string[]>;
   feverActive: Record<PlayerId, boolean>;
   feverSaiAwarded: Record<PlayerId, string[]>;
   lateShuvariWindow: Record<PlayerId, boolean>;
@@ -101,6 +104,11 @@ export function saveSnapshot(refs: SnapshotRefs): PreHuleSnapshot {
     defen: { ...refs.defen },
     chipLedger: { ...refs.chipLedger },
     akiUsedCount: { ...refs.akiUsedCount },
+    akiUsedIndicators: {
+      0: [...(refs.akiUsedIndicators?.[0] ?? [])],
+      1: [...(refs.akiUsedIndicators?.[1] ?? [])],
+      2: [...(refs.akiUsedIndicators?.[2] ?? [])],
+    },
     feverActive: { ...refs.feverActive },
     feverSaiAwarded: {
       0: [...(refs.feverSaiAwarded?.[0] ?? [])],
@@ -140,6 +148,11 @@ export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null
   Object.assign(refs.defen, snap.defen);
   Object.assign(refs.chipLedger, snap.chipLedger);
   Object.assign(refs.akiUsedCount, snap.akiUsedCount);
+  if (refs.akiUsedIndicators) {
+    for (const p of PLAYERS) {
+      refs.akiUsedIndicators[p] = [...(snap.akiUsedIndicators?.[p] ?? [])];
+    }
+  }
   Object.assign(refs.feverActive, snap.feverActive);
   if (refs.feverSaiAwarded) {
     for (const p of PLAYERS) {

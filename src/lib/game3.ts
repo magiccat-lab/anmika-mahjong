@@ -515,6 +515,7 @@ export class Game3 {
   private readonly _huleRevealStateByResult = new WeakMap<object, {
     shan: ReturnType<Shan3['snapshot']>;
     akiUsedCount: Record<PlayerId, number>;
+    akiUsedIndicators?: Record<PlayerId, string[]>;
     effectiveHuapai: string[];
   }>();
   private _snapshotRefs() {
@@ -522,6 +523,7 @@ export class Game3 {
       defen: this.state.defen,
       chipLedger: this.chipLedger,
       akiUsedCount: this.akiUsedCount,
+      akiUsedIndicators: this.akiUsedIndicators,
       feverActive: this.feverActive,
       feverSaiAwarded: this.feverSaiAwarded,
       lateShuvariWindow: this.lateShuvariWindow,
@@ -617,6 +619,14 @@ export class Game3 {
           this.akiUsedCount[entry.player] ?? 0,
           entry.state.akiUsedCount[entry.player] ?? 0,
         );
+        // [D-01 fix] 表示の秋の消費 occurrence も評価時の記録を union で取り込む
+        const evaluatedIndicators = (entry.state as any).akiUsedIndicators?.[entry.player] ?? [];
+        if (evaluatedIndicators.length > 0) {
+          this.akiUsedIndicators[entry.player] = Array.from(new Set([
+            ...(this.akiUsedIndicators[entry.player] ?? []),
+            ...evaluatedIndicators,
+          ]));
+        }
       }
     } catch {
       // 旧牌譜等で対応する in-memory state が不完全でも、通常の和了精算は止めない。
@@ -632,6 +642,12 @@ export class Game3 {
 
   /** 秋効果使用済枚数 [使い切ると huapai は残るが effect は発動しない] */
   akiUsedCount: Record<PlayerId, number> = { 0: 0, 1: 0, 2: 0 };
+
+  /** [2026-07-21 監査 D-01 fix] 表示 [表/裏ドラ表] の秋 f3 を player が消費した物理
+   * occurrence [`baopai:i` / `fubaopai:i`]。akiUsedCount [手牌ぶん] と対。旧実装は
+   * 表示中の f3 を和了のたびフルカウントし、同一 FEVER の再和了で同じ物理秋が
+   * 毎回表裏 1 組を追加表示していた */
+  akiUsedIndicators: Record<PlayerId, string[]> = { 0: [], 1: [], 2: [] };
 
   /** 金北強化選択 [局中固定、 1 回選んだら変更不可、 null=未選択 / 保留] */
   kinpeiTarget: Record<PlayerId, 'haru' | 'natsu' | 'aki' | 'fuyu' | null> = { 0: null, 1: null, 2: null };
@@ -1915,9 +1931,10 @@ export class Game3 {
   canTsumo(player: PlayerId): boolean {
     const sp = this.shoupai.get(player);
     if (!sp) return false;
-    // 立直後の合法暗槓は強制。槓をツモ和了で回避することはできない。
-    if (this.lizhi.has(player) && !this.lizhiDeclareDapai[player]
-      && this.getForcedLizhiKanCandidates(player).length > 0) return false;
+    // [2026-07-21 監査 D-05 fix] 旧実装は「立直後の合法暗槓は強制、ツモ和了で回避不可」
+    // として強制カン候補があると和了形でも false にしていたが、2026-07-15 裁定は
+    // 「ツモ和了は優先できる」。和了成立を先に判定し、強制カン gate [dapai throw /
+    // canNukiBei / CPU driver の forcedKan 分岐] は和了しない場合だけ効かせる
     const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => this.feverActive[p]);
     if (someoneFever && !this.feverActive[player]) return false;
     const dbg = { player, zimo: sp?._zimo, lizhi: this.lizhi.has(player), fever: this.feverActive[player] };
@@ -2250,8 +2267,20 @@ export class Game3 {
     const akiHandTotal = this.huapai[player].filter((p) => p === 'f3').length;
     const akiHandRemaining = Math.max(0, akiHandTotal - this.akiUsedCount[player]);
     const isLizhiAgari = this.lizhi.has(player);
-    const baopaiAki = (this.shan.baopai ?? []).filter((p: any) => p === 'f3').length;
-    const fubaopaiAki = isLizhiAgari ? ((this.shan.fubaopai ?? []).filter((p: any) => p === 'f3').length) : 0;
+    // [2026-07-21 監査 D-01 fix] 表示の秋は akiUsedIndicators に消費済み occurrence を
+    // 記録し、未消費の物理 f3 だけを数える。同一 FEVER の再和了で再発動させない
+    const usedIndicators = this.akiUsedIndicators[player] ?? [];
+    const consumedIndicatorKeys: string[] = [];
+    (this.shan.baopai ?? []).forEach((p: any, i: number) => {
+      if (p === 'f3' && !usedIndicators.includes(`baopai:${i}`)) consumedIndicatorKeys.push(`baopai:${i}`);
+    });
+    if (isLizhiAgari) {
+      (this.shan.fubaopai ?? []).forEach((p: any, i: number) => {
+        if (p === 'f3' && !usedIndicators.includes(`fubaopai:${i}`)) consumedIndicatorKeys.push(`fubaopai:${i}`);
+      });
+    }
+    const baopaiAki = consumedIndicatorKeys.filter((key) => key.startsWith('baopai:')).length;
+    const fubaopaiAki = consumedIndicatorKeys.filter((key) => key.startsWith('fubaopai:')).length;
     const baseAkiCount = akiHandRemaining + baopaiAki + fubaopaiAki;
     let aki = baseAkiCount;
     // 秋金北は「秋がちょうど1枚」の時だけ秋秋相当へ強化する。
@@ -2292,13 +2321,21 @@ export class Game3 {
         akiRemaining -= 1;
         // 秋金北でめくった牌が2枚目の秋なら、秋秋金北へ移行し、
         // その秋による「3枚目」の追加ドラは発生させない。
-        if (!akiKinpeiSingleBoost) akiRemaining += newlyRevealedAki;
+        if (!akiKinpeiSingleBoost) {
+          akiRemaining += newlyRevealedAki;
+          // [D-01 fix] 連鎖で開いてこの和了内で発動した秋も消費済みに記録する
+          if (visible === 'f3') consumedIndicatorKeys.push(`baopai:${this.shan.baopai.length - 1}`);
+          if (isLizhi && hidden === 'f3') consumedIndicatorKeys.push(`fubaopai:${(this.shan.fubaopai ?? []).length - 1}`);
+        }
         if (this.shan.paishu === 0) break;
       }
       param.baopai = (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
       if (isLizhi) param.fubaopai = (this.shan.fubaopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
       // 秋使い切り flag [huapai は残す、 春チップ計算等で抜き枚数に含める]
       this.akiUsedCount[player] += akiHandRemaining;
+      // [D-01 fix] 発動対象になった表示 occurrence を消費済みへ [山切れ break 時も
+      // 既存の手牌ぶん akiUsedCount と同じく全額消費扱い]
+      this.akiUsedIndicators[player] = [...usedIndicators, ...consumedIndicatorKeys];
     }
 
     let result: any;
@@ -2577,6 +2614,12 @@ export class Game3 {
       dryCtx.applyChipOall = dryOall;
       dryCtx.applyChipFromLoser = dryRon;
       applyChipsOnHuleHelper(dryCtx, dryResult, player, null);
+
+      // [2026-07-21 監査 D-03 fix 追随] 直接祝儀 [オールオールスター等] は hule 評価中に
+      // ledger を触らず result 積みへ変わったため、dry 期待値には明示的に反映する
+      for (const award of dryResult._directChipAwards ?? []) {
+        dryOall(player, award.n, { ...(award.opts ?? {}) });
+      }
 
       let expected = Math.abs(dryState.chipLedger[player]);
       const fuyuExpected = this.estimateFuyuChipForSwap(player, null, null, from, target);
@@ -2952,6 +2995,11 @@ export class Game3 {
       this._huleRevealStateByResult.set(result, {
         shan: this.shan.snapshot(),
         akiUsedCount: { ...this.akiUsedCount },
+        akiUsedIndicators: {
+          0: [...(this.akiUsedIndicators[0] ?? [])],
+          1: [...(this.akiUsedIndicators[1] ?? [])],
+          2: [...(this.akiUsedIndicators[2] ?? [])],
+        },
         effectiveHuapai: this.effectiveHuapaiAtHule(player),
       });
     }
@@ -3365,8 +3413,10 @@ export class Game3 {
       addSai('オールスター', 'オールスター', 70, true, 1);
       if (totalNiji === 3) {
         // オールオールスター: 赤2+金2+虹3 → 77枚オール追加 (全倍率適用)
+        // [2026-07-21 監査 D-03 fix] hule() 評価中は ledger を直接触らず result に積む。
+        // ダブロンの snapshot restore で先評価者の直接祝儀が消えていた
         result.hupai.push({ name: 'オールオールスター [赤金虹 全揃い]', fanshu: 0 });
-        this.applyChipOall(player, 77, { label: 'オールオールスター 77枚' });
+        (result._directChipAwards ??= []).push({ n: 77, opts: { label: 'オールオールスター 77枚' } });
       } else {
         result.hupai.push({ name: `オールスター [赤金 4 枚揃い${totalNiji > 0 ? ` + 虹${totalNiji}` : ''}]`, fanshu: 0 });
       }
@@ -3641,17 +3691,18 @@ export class Game3 {
     const hasAll4Hua = hasHaru && hasNatsu && hasAki && hasFuyu;
     if (huaCount >= 8 && nukiTotal >= 4) {
       // 複合時は八華100+追加200ではなく、八華四北300を一度だけ記録する。
-      this.applyChipOall(player, 300, { bypassShuvari: true, label: '八華四北 300枚オール' });
+      // [D-03 fix] 直接祝儀は result 積み → applyHule で一度だけ適用
+      (result._directChipAwards ??= []).push({ n: 300, opts: { bypassShuvari: true, label: '八華四北 300枚オール' } });
       result.hupai.push({ name: '八華四北 [+300オール]', fanshu: 0 });
       for (let i = 1; i <= 3; i++) addSai(`八華四北:${i}`, `八華四北 ${i}/3`, 70, false, 1);
     } else if (huaCount >= 8) {
-      this.applyChipOall(player, 100, { bypassShuvari: true, label: '八華 100枚オール' });
+      (result._directChipAwards ??= []).push({ n: 100, opts: { bypassShuvari: true, label: '八華 100枚オール' } });
       result.hupai.push({ name: '八華 [+100オール]', fanshu: 0 });
       // 鳴いていても八華は70枚を独立2回。
       addSai('八華:1', '八華 1/2', 70, true, 1);
       addSai('八華:2', '八華 2/2', 70, true, 1);
     } else if (hasAll4Hua && nukiTotal >= 4) {
-      this.applyChipOall(player, 100, { bypassShuvari: true, label: '四華四北 100枚オール' });
+      (result._directChipAwards ??= []).push({ n: 100, opts: { bypassShuvari: true, label: '四華四北 100枚オール' } });
       result.hupai.push({ name: '四華四北 [+100オール]', fanshu: 0 });
       // 鳴き四華四北は35枚と70枚を各1回。面前なら70枚を独立2回。
       addSai('四華四北:1', '四華四北 1/2', hasFulou ? 35 : 70, false, 1);
@@ -3849,6 +3900,17 @@ export class Game3 {
       }
     }
     this.applyChipsOnHule(result, winner, loser, beforeDefen);
+    // [2026-07-21 監査 D-03 fix] hule() 評価中に積まれた直接祝儀 [オールオールスター/
+    // 八華/四華四北等] を settle 確定時に一度だけ適用する。旧実装は hule() が ledger を
+    // 直接動かし、ダブロンの次候補評価前 snapshot restore で先評価者の分が消えていた。
+    // result.chipBreakdown 合成と chipTotal 確定より前 [= この位置] で適用しないと
+    // 表示内訳・chip 合計・祝儀 0 判定 [救済サイコロ] から漏れる
+    if (Array.isArray(result._directChipAwards) && !result._directChipAwardsApplied) {
+      for (const award of result._directChipAwards) {
+        this.applyChipOall(winner, award.n, { ...(award.opts ?? {}) });
+      }
+      result._directChipAwardsApplied = true;
+    }
     // R10 P0 #9: pre-reset 分 [post-process applyChipOall] を prepend して 完全な breakdown に
     result.chipBreakdown = [..._preBreakdown, ...this.chipBreakdown];
     result.chipTotal = this.chipLedger[winner] - chipBefore;
@@ -4277,6 +4339,7 @@ export class Game3 {
     this.kinpeiTarget = { 0: null, 1: null, 2: null };
     this.kamiPochiDoraChoices = { 0: {}, 1: {}, 2: {} };
     this.akiUsedCount = { 0: 0, 1: 0, 2: 0 };
+    this.akiUsedIndicators = { 0: [], 1: [], 2: [] };
     // WSA: justNukidBei を次局で持ち越さない [北抜き→ツモ和了で flag 残留する path]
     this.justNukidBei = { 0: false, 1: false, 2: false };
     // chipLedger は半荘累積、 reset しない

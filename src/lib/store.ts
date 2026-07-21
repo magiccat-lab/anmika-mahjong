@@ -1186,7 +1186,15 @@ export function createGameStore() {
         const isFeverPayAuto_ron = reversePochiDecisionRon
           && reverseDecisionOwnersRon.every((p) => s.cpu[p]);
         // snapshot 保存 [後で金北変更時に巻き戻し]
-        saveHuleSnapshot(s.game);
+        // [2026-07-21 監査 D-02 fix] snapshotLocked = 先に宣言した claimant の評価が済んで
+        // いる再入。この場合は保存 [no-op] ではなく pre-discard snapshot へ巻き戻してから
+        // 評価する。旧実装は巻き戻さず、1 人目の秋処理で開いた baopai の上で 2 人目を
+        // 採点し、宣言順で翻数・ドラが変わっていた
+        if (s.game.snapshotLocked) {
+          s.game.restoreSnapshot();
+        } else {
+          saveHuleSnapshot(s.game);
+        }
         // ダブロン対応
         // R6 P0 #2 fix: ronDeclaredPlayers も除外、 P2 ロン後 P1 [既宣言済] が humanOthers に
         // 再投入されて 「P1 判断待ち」 で詰む bug 解消

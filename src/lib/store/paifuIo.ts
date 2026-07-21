@@ -324,6 +324,7 @@ export function buildDiagnosticDump(state: StoreState): any {
       nukidora: cloneCanonical(g.nukidora ?? {}),
       nukidoraGold: cloneCanonical(g.nukidoraGold ?? {}),
       akiUsedCount: cloneCanonical(g.akiUsedCount ?? {}),
+      akiUsedIndicators: cloneCanonical(g.akiUsedIndicators ?? {}),
       chipLedger: cloneCanonical(g.chipLedger ?? {}),
       shoupai: safeSeat((p) => serializeHand(g.shoupai.get(p))),
       he: safeSeat((p) => [...((g.he.get(p) as any)?._pai ?? [])]),
@@ -409,6 +410,7 @@ export function buildCanonicalPaifuSnapshot(state: StoreState, timestamp = new D
         fuyuSkip: g.fuyuSkip,
         fuyuConsumed: g.fuyuConsumed,
         akiUsedCount: g.akiUsedCount,
+        akiUsedIndicators: g.akiUsedIndicators,
         kinpeiTarget: g.kinpeiTarget,
         chipBreakdown: g.chipBreakdown,
         discardLog: g.discardLog,
@@ -515,6 +517,7 @@ function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreSt
     'feverWinCount', 'goldHand', 'huapai', 'pochiHand', 'lastZimoInfo',
     'pochiMultiplier', 'pochiPaymentMode', 'pochiChipReverse', 'pochiChipDouble',
     'chipLedger', 'haruActive', 'fuyuSkip', 'fuyuConsumed', 'akiUsedCount',
+    'akiUsedIndicators',
     'kinpeiTarget', 'chipBreakdown', 'discardLog', 'justNukidBei', 'feverActive',
     'feverDeclareTing', 'feverTier', 'feverPendingShuvari', 'feverSaiAwarded',
     'shuvariActive', 'shuvariUsed',
@@ -733,6 +736,7 @@ export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, b
   ng.shuvariActive = paifu.shuvariActive ?? { 0: false, 1: false, 2: false };
   ng.chipLedger = paifu.chipLedger ?? { 0: 0, 1: 0, 2: 0 };
   ng.akiUsedCount = paifu.akiUsedCount ?? { 0: 0, 1: 0, 2: 0 };
+  ng.akiUsedIndicators = paifu.akiUsedIndicators ?? { 0: [], 1: [], 2: [] };
   ng.yifaActive = paifu.yifaActive ?? { 0: false, 1: false, 2: false };
   ng.lizhiDeclareDapai = paifu.lizhiDeclareDapai ?? { 0: false, 1: false, 2: false };
   ng.lingshangActive = paifu.lingshangActive ?? { 0: false, 1: false, 2: false };
