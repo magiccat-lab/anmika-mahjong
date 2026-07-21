@@ -4190,8 +4190,26 @@ export class Game3 {
         }
       }
     } else {
-      // 流局 [winner null/undefined]: 親維持 + 本場+1
-      this.state.benbang += 1;
+      // 流局 [winner null/undefined]: 原則 親維持 + 本場+1。
+      // [2026-07-21 裁定7 リョー: アガリがあれば流れます] ただし今局に子の
+      // FEVER 和了があった局の山切れは親を流す [FEVER 続行で和了後も局が続き、
+      // 最終的に山切れ流局した場合]。親のみ和了・無和了流局は従来どおり親維持。
+      // feverWinCount は本メソッド末尾でリセットされるため、この時点では今局の
+      // 和了記録が残っている。
+      const oya = (((this.state.qijia - this.state.jushu) % 3 + 3) % 3) as PlayerId;
+      const childFeverWon = ([0, 1, 2] as PlayerId[]).some(
+        (p) => p !== oya && this.feverWinCount[p] > 0,
+      );
+      if (childFeverWon) {
+        this.state.jushu += 1;
+        this.state.benbang = 0;
+        if (this.state.jushu >= 3) {
+          this.state.jushu = 0;
+          this.state.changbang += 1;
+        }
+      } else {
+        this.state.benbang += 1;
+      }
     }
     // 返り東: changshu 完了 + 全員 40000 未達 → changbang を巻き戻して東 1 から再スタート
     if (this.state.changbang > this.changshu - 1) {
