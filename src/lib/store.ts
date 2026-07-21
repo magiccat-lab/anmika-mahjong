@@ -307,6 +307,15 @@ function hasPostWinDecision(s: StoreState): boolean {
     || s.pendingSaiKoro || s.pendingFeverContinue);
 }
 
+/** 誰かのフィーバー中で、自分がフィーバー宣言者でない [= ツモ切り強制] か。
+ *  App 側の自動ツモ切り token と操作ガイド表示が共用する
+ *  [2026-07-21 リョー報告 stuck dump: フィーバー中の人間手番が手動ツモ切り待ちで
+ *   止まって見える。他の牌タップは強制ルールで無言無視のため実質進行不能に見えた]。 */
+export function isFeverForcedTsumogiri(s: StoreState, player: PlayerId): boolean {
+  const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => s.game.feverActive[p]);
+  return someoneFever && !s.game.feverActive[player];
+}
+
 function isLiveTurnActionBlocked(s: StoreState, allowLizhiDiscard = false): boolean {
   return s.roundEnded
     || s.pendingPingju

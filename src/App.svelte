@@ -27,7 +27,7 @@
   import StampPopup from './lib/StampPopup.svelte';
   import CutinOverlay from './lib/CutinOverlay.svelte';
   import LizhiControls from './lib/LizhiControls.svelte';
-  import { CUTIN_DURATION_MS, game, type StampId } from './lib/store';
+  import { CUTIN_DURATION_MS, game, isFeverForcedTsumogiri, type StampId } from './lib/store';
   import type { PlayerId } from './lib/types';
   import { parseFulouList, fulouPhysicalFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
@@ -287,9 +287,16 @@
     }
     if (activePlayer === myself) {
       if (waitingForDraw) return { text: 'ツモを進めてください', tone: 'action' };
-      return tsumoAvailable
-        ? { text: 'ツモ和了／打牌を選択', tone: 'action' }
-        : { text: '打牌を選んでください', tone: 'action' };
+      if (tsumoAvailable) return { text: 'ツモ和了／打牌を選択', tone: 'action' };
+      // [2026-07-21 リョー報告 stuck dump] フィーバー強制中は他の牌タップが無言で
+      // 無視されるため、何をすればいいか明示する [通常は自動ツモ切りが進めるが、
+      // 北ツモ時とオンライン時は手動が残る]
+      if (isFeverForcedTsumogiri(snapshot, myself as PlayerId)) {
+        return snapshot.game.canNukiBei(myself as PlayerId)
+          ? { text: 'フィーバー中: 北を抜くか、ツモ牌をタップ', tone: 'action' }
+          : { text: 'フィーバー中: ツモ切りのみ [ツモ牌をタップ]', tone: 'action' };
+      }
+      return { text: '打牌を選んでください', tone: 'action' };
     }
     return { text: `P${activePlayer} の手番`, tone: 'waiting' };
   }
@@ -1334,7 +1341,13 @@
       && player === selfPlayer
       && !!snap.lastZimo
       && !snap.game.canTsumo(player);
-    const enabled = autoTsumoKiri || snap.game.lizhi.has(player);
+    // [2026-07-21 リョー報告 stuck dump] フィーバー強制ツモ切りの人間手番は選択の
+    // 余地が無いのに手動待ちで、進行が止まって見えた。リーチ中と同じ扱いで自動対象に
+    // 含める。北ツモ [canNukiBei] の時だけ抜き/ツモ切りの選択が残るため自動しない
+    // [status 行が操作を案内する]
+    const feverForced = isFeverForcedTsumogiri(snap, player as PlayerId)
+      && !snap.game.canNukiBei(player as PlayerId);
+    const enabled = autoTsumoKiri || snap.game.lizhi.has(player) || feverForced;
     if (!phaseReady || !enabled) return null;
     const stateNow = snap.game.state;
     const revision = [
