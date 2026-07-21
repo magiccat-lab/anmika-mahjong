@@ -894,6 +894,18 @@ export class Game3 {
   declareNukiBei(player: PlayerId, meta?: { gold?: boolean }): Pai | null {
     const sp = this.shoupai.get(player);
     if (!sp || !this.canNukiBei(player)) return null;
+    // [2026-07-21 監査 S-03 fix] 他家 FEVER 中の非 FEVER 者はツモ牌 z4 しか抜けない
+    // [canNukiBei]。抜く物理属性もそのツモ牌に固定する。旧実装は meta.gold の指定で
+    // ツモった金北の代わりに手持ちの通常北 [逆も] を消費でき、強制ツモ切り制約と
+    // 物理牌祝儀を回避できた。client/server どちらの経路もここを通るため根元で塞ぐ
+    {
+      const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => this.feverActive[p]);
+      if (someoneFever && !this.feverActive[player]) {
+        const zimoIsGold = sp._zimo === 'gN' || (this.shan as any).lastZimoGold === true;
+        if (meta?.gold !== undefined && meta.gold !== zimoIsGold) return null;
+        meta = { ...(meta ?? {}), gold: zimoIsGold };
+      }
+    }
     // rollback 用 snapshot [partial mutate 防止]
     const _origZ4 = sp._bingpai.z[4];
     const _origZimo = sp._zimo;

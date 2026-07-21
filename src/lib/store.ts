@@ -3276,10 +3276,21 @@ export function beginNukiBei(s: StoreState, player: PlayerId, meta?: { gold?: bo
 /** FEVER宣言牌の反応窓が閉じた直後に成立を確定し、次ツモより先に待ち枯れを判定する。 */
 export function confirmPendingFeverBeforeDraw(s: StoreState): StoreState {
   const player = s.game.feverDeclareDapaiPlayer;
-  if (player === null) return s;
-  s.game.confirmFeverDeclaration(player);
-  if (s.game.isFeverWaitExhausted(player)) {
-    return applyPingjuTransition(s, '🔥 フィーバー立直成立、待ち牌全消失で1人テンパイ流局:');
+  if (player !== null) {
+    s.game.confirmFeverDeclaration(player);
+    if (s.game.isFeverWaitExhausted(player)) {
+      return applyPingjuTransition(s, '🔥 フィーバー立直成立、待ち牌全消失で1人テンパイ流局:');
+    }
+  }
+  // [2026-07-21 監査 D-12 fix] 宣言直後だけでなく、打牌が確定して次ツモへ進む直前
+  // [この関数の全呼び出し点] でも成立済み FEVER 全員の待ち枯れを判定する。
+  // 旧実装は最後の待ち牌の見逃し [ロン pass で河に確定] を検知せず、待ち 0 の
+  // FEVER が流局にならないまま進行していた
+  for (const p of [0, 1, 2] as const) {
+    if (!s.game.feverActive[p]) continue;
+    if (s.game.isFeverWaitExhausted(p)) {
+      return applyPingjuTransition(s, `🔥 FEVER 待ち牌全消失 [p${p}]、1人テンパイ流局:`);
+    }
   }
   return s;
 }
