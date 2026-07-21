@@ -510,6 +510,11 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
   const revealPostWinPrivateState = isPostWinState(state)
     && !state.awaitingRonDecision
     && !state.pendingQianggang;
+  // [2026-07-21 監査 S-02 fix] ダブロンの反応窓が開いている間は、先に宣言した和了者の
+  // 評価結果 [lastWinner / lastHuleResult / ronResults / message] と評価中の秋処理で
+  // 増えた追加表示牌が broadcast に乗り、残りのプレイヤーが結果を見てロン/パスを
+  // 選べた。窓が閉じるまで result 系を neutral にし、確定後に一括公開する。
+  const reactionWindowOpen = state.awaitingRonDecision || !!state.pendingQianggang;
   const revealUra = shouldRevealUra(authority);
   const emptyGold = () => ({ p: 0, s: 0, z: 0 });
   const emptyPochi = () => ({ blue: 0, red: 0, green: 0, yellow: 0 });
@@ -583,7 +588,10 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
     gameState: structuredClone(game.state),
     shan: {
       paishu: game.shan.paishu,
-      baopai: [...game.shan.baopai],
+      // S-02: 反応窓中は先の claimant 評価 [秋] で開いた追加表示牌を隠す
+      baopai: reactionWindowOpen && game.preHuleSnapshot
+        ? [...game.shan.baopai].slice(0, (game.preHuleSnapshot as any).baopaiLen ?? game.shan.baopai.length)
+        : [...game.shan.baopai],
       fubaopai: revealUra && game.shan.fubaopai ? [...game.shan.fubaopai] : null,
       kanDoraCount: game.shan.kanDoraCount,
       rinshanUsed: game.shan.rinshanUsed,
@@ -655,18 +663,22 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       matchStartChipLedger: authority.currentMatchStartChipLedger(),
       lastZimo: game.lastZimoInfo.player === own ? state.lastZimo : null,
       lastDapai: structuredClone(state.lastDapai),
-      lastWinner: state.lastWinner,
-      lastHuleResult: structuredClone(state.lastHuleResult),
+      // S-02: 反応窓中は先に宣言した和了者の結果を neutral 化 [宣言の発声
+      // = ronDeclaredPlayers はパブリックのまま]
+      lastWinner: reactionWindowOpen ? null : state.lastWinner,
+      lastHuleResult: reactionWindowOpen ? null : structuredClone(state.lastHuleResult),
       awaitingRonDecision: state.awaitingRonDecision,
       ronCandidates: ownRonCandidates,
       ronPassedPlayers: own === null ? [] : state.ronPassedPlayers.filter((player) => player === own),
       ronDeclaredPlayers: structuredClone(state.ronDeclaredPlayers),
-      ronResults: structuredClone(state.ronResults),
+      ronResults: reactionWindowOpen ? [] : structuredClone(state.ronResults),
       awaitingFulou: state.awaitingFulou,
       ponCandidates: structuredClone(ownPonCandidates),
       kanCandidates: structuredClone(ownKanCandidates),
       roundEnded: state.roundEnded,
-      message: state.message,
+      message: reactionWindowOpen && isPostWinState(state)
+        ? 'ロン宣言 受付中 [他家の判断待ち]'
+        : state.message,
       cpu: structuredClone(state.cpu),
       lizhiPending: state.lizhiPending === own ? own : null,
       // The two-stage declaration choice is private to the acting seat until
@@ -848,16 +860,14 @@ function lobbyPayload(room: Room) {
   };
 }
 
-function resolveActorSeat(room: Room, uid: string, seat: number, action: Record<string, unknown>) {
-  let actorSeat = seat;
+export function resolveActorSeat(room: Room, uid: string, seat: number, action: Record<string, unknown>) {
+  const actorSeat = seat;
+  // [2026-07-21 監査 S-01 fix] client 起点の cpuRelay [host が CPU action を代理送信] を廃止。
+  // host は「その CPU が選んだ action か」を証明できず、不正候補が revision を消費しない性質と
+  // 合わせて隠し手牌の oracle 探索・CPU 直接操作に使えた。CPU action は権威サーバーの
+  // deadline driver [turnTimeoutAction、CPU 席は 750ms] だけが生成する。
   if (action.cpuRelay === true) {
-    if (uid !== room.hostUserId) return { actorSeat, reason: 'cpuRelay requires host' };
-    if (typeof action.cpuSeat !== 'number') return { actorSeat, reason: 'cpuRelay requires cpuSeat' };
-    const cpu = Array.from(room.members.values()).find(
-      (member) => member.seat === action.cpuSeat && member.is_cpu,
-    );
-    if (!cpu) return { actorSeat, reason: `cpuRelay seat ${String(action.cpuSeat)} is not a CPU member` };
-    actorSeat = action.cpuSeat;
+    return { actorSeat, reason: 'cpuRelay is no longer accepted; CPU actions are server-driven' };
   }
   return { actorSeat, reason: null };
 }
@@ -1215,9 +1225,12 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       room.deadlineTimer = setTimeout(() => {
         room.queue = room.queue.then(async () => {
           if (room.snapshot.revision !== revision || !room.authority?.isPostWinResolved()) return;
+          // client 側検証は「和了局 nextRound は winner か host、流局は host のみ」。
+          // 和了局は winner、流局 [lastWinner null] は host を actor にして整合させる
+          const hostSeat = room.members.get(room.hostUserId)?.seat;
           const accepted = acceptAction(
             room,
-            room.authority.lastWinner ?? 0,
+            room.authority.lastWinner ?? hostSeat ?? 0,
             '__server_next_round_fallback__',
             { type: 'nextRound', from_role: 'server-fallback' },
             `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,

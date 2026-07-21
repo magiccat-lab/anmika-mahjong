@@ -818,7 +818,9 @@ export function createGameStore() {
         switch (action.type) {
           // 現手番 action: discard / lizhi / tsumo / declareKan / nukiBei / tsumokiri は
           // sender が現在手番でない 限り reject
-          // 2026-05-14 Round 2 codex fix P0 #2: cpuRelay=true なら host から CPU 代理、 from_seat 検証緩和
+          // [2026-07-21 監査 S-01 fix] cpuRelay の from_seat 検証緩和を撤去。server が
+          // cpuRelay 受付を廃止し、CPU action は server deadline driver が CPU 席
+          // そのものを from_seat にして流すため、通常検証 [from_seat === currentPlayer] で足りる
           case 'discard':
           case 'lizhi':
           case 'tsumo':
@@ -826,17 +828,6 @@ export function createGameStore() {
           case 'nukiBei':
           case 'tsumokiri':
           case 'drawNext': {
-            // 2026-05-14 R3 P0 #1 fix: cpuRelay は host から の CPU 代理 限定。
-            // (1) cpuSeat と currentPlayer 整合、 (2) cpuSeat が CPU member [s.cpu]、
-            // (3) from_seat が host seat [hostSeat] の 3 条件全部 満たすこと。
-            // server 側 でも cpuRelay は host のみ pass する gate を持つが、 client も二重防御
-            if (action.cpuRelay === true && action.cpuSeat !== undefined) {
-              const cpuSeatOk = action.cpuSeat === currentPlayer
-                && s.cpu[action.cpuSeat as 0 | 1 | 2] === true
-                && (hostSeat === null || from_seat === hostSeat);
-              if (!cpuSeatOk) return reject(`${action.type}: cpuRelay invalid [cpuSeat=${action.cpuSeat} cur=${currentPlayer} from=${from_seat} hostSeat=${hostSeat}]`);
-              break;
-            }
             if (from_seat !== currentPlayer) return reject(`${action.type}: from_seat ${from_seat} ≠ currentPlayer ${currentPlayer}`);
             break;
           }
@@ -2938,45 +2929,11 @@ export function createGameStore() {
     },
     /** CPU 自動進行: 現家が CPU なら ツモ切り、 ループ [store/cpuActions.ts 委譲] */
     cpuStep() {
-      // オンライン時は host だけが CPU 代理 discard を sendOnlineAction で送る、 local 直接 apply は禁止
-      // [リョー指示 2026-05-13: host CPU 駆動が WS に乗らないと magiccat.lab 側で advance せず止まる]
-      // 2026-05-14 codex review P0: 非 host は cpuStep 発火 禁止、 host 以外 client が
-      // 並列 send で WS に CPU discard を多重 inject するのを防止
+      // [2026-07-21 監査 S-01 fix] オンラインの CPU は権威サーバーの deadline driver
+      // [CPU 席 750ms の turnTimeoutAction] だけが進める。旧 host cpuRelay 代理送信は
+      // 隠し手牌の oracle 探索・CPU 直接操作に使えたため server 側で受付廃止済み。
       if (onlineMode && !isApplyingRemote) {
-        if (!iAmHost && !(window as any).__anmikaIsHost) {
-          dlog('[gate-block]', { type: 'cpuStep', reason: 'not host' });
-          return;
-        }
-        // R6 P1 #3 fix: online CPU でも ツモ和了 / 北抜き を 適切に relay。
-        // 旧 code は pickBestDiscard だけ relay してて canTsumo の局面でも打牌してた
-        const s = get(store) as StoreState;
-        const cur = s.game.lunbanToPlayerId(s.game.state.lunban);
-        if (isLiveTurnActionBlocked(s)) return;
-        const sp = s.game.shoupai.get(cur);
-        if (!sp?._zimo) return;
-        // ツモ和了 [CPU]: tsumo action を cpuRelay で送る
-        if (s.game.canTsumo(cur)) {
-          sendOnlineAction({ type: 'tsumo', cpuRelay: true, cpuSeat: cur });
-          return;
-        }
-        const forcedKan = s.game.getForcedLizhiKanCandidates(cur);
-        if (forcedKan.length > 0) {
-          sendOnlineAction({ type: 'declareKan', mianzi: forcedKan[0], cpuRelay: true, cpuSeat: cur });
-          return;
-        }
-        // z4 ツモ → 北抜き [人間 path と同様の優先順]
-        if (toCorePai(sp._zimo) === 'z4' && s.game.canNukiBei(cur)) {
-          sendOnlineAction({ type: 'nukiBei', cpuRelay: true, cpuSeat: cur });
-          return;
-        }
-        // 通常打牌
-        let pai: string | null = null;
-        try { pai = s.game.pickBestDiscard(cur) ?? (sp._zimo as string); } catch (_e) { pai = sp._zimo as string; }
-        if (typeof (import.meta as any)?.env?.DEV === 'boolean' && (import.meta as any).env.DEV) dlog('[cpuStep-online] cur=', cur, 'pai=', pai);
-        if (pai) {
-          const sent = sendOnlineAction({ type: 'discard', pai, cpuRelay: true, cpuSeat: cur });
-          if (typeof (import.meta as any)?.env?.DEV === 'boolean' && (import.meta as any).env.DEV) dlog('[cpuStep-online] sendOnlineAction returned=', sent);
-        }
+        dlog('[cpuStep] online は server driver 駆動、 client からは送らない');
         return;
       }
       update((s) => cpuStepImpl(s));
