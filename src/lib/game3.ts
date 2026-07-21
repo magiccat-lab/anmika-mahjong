@@ -2387,17 +2387,32 @@ export class Game3 {
         result.fanshu += redDora;
       }
       // WSA: 通常ドラ・裏ドラ [majiang-core bypass のため手動カウント]
-      const acBaopai = (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
+      // [2026-07-21 リョー報告: アメリカ七対子で裏の正ぽっちが神ぽっち扱いされず裏0]
+      // この path は後段の神ぽっち再計算 [Majiang.Util.hule 再実行] が牌姿非対応で
+      // 必ず失敗するため、神ぽっち選択 [kamiPochiDoraChoices] をここで表示列に
+      // 直接反映してから数える
+      const acBaopai = this.kamiPochiEffectiveIndicators_(player, 'baopai', [...(this.shan.baopai ?? [])])
+        .filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
       for (const indicator of acBaopai) {
         const cnt = this.countDoraFromIndicator(sp, indicator, ronpai);
         if (cnt > 0) { result.hupai.push({ name: 'ドラ', fanshu: cnt }); result.fanshu += cnt; }
       }
       if (isLizhi) {
-        const acFubaopai = (this.shan.fubaopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
+        const acFubaopai = this.kamiPochiEffectiveIndicators_(player, 'fubaopai', [...(this.shan.fubaopai ?? [])])
+          .filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
         for (const indicator of acFubaopai) {
           const cnt = this.countDoraFromIndicator(sp, indicator, ronpai);
           if (cnt > 0) { result.hupai.push({ name: '裏ドラ', fanshu: cnt }); result.fanshu += cnt; }
         }
+      }
+      const acKamiApplied = this.getKamiPochiDoraOccurrences(player)
+        .filter((occurrence) => occurrence.target !== null
+          && (occurrence.source === 'baopai' || isLizhi));
+      if (acKamiApplied.length > 0) {
+        result.hupai.push({
+          name: `神ぽっち [${acKamiApplied.map((occurrence) => `${occurrence.key}→${occurrence.target}`).join(', ')}]`,
+          fanshu: 0,
+        });
       }
       // This fallback has already counted every physical 5 (normal/red/gold).
       // The later majiang-core zero-tile deficit repair must not run again.
@@ -2456,15 +2471,10 @@ export class Game3 {
     const kamiDoraOccurrences = this.getKamiPochiDoraOccurrences(player);
     const selectedKamiDora = kamiDoraOccurrences.filter((occurrence) => occurrence.target !== null);
     if (selectedKamiDora.length > 0) {
-        const replaceIndicators = (source: KamiPochiDoraSource, list: unknown[]): string[] => list.map((raw, index) => {
-          const normalizedRaw = normalizeBaopaiForMajiang(String(raw));
-          if (!isPositiveZ5(String(raw))) return normalizedRaw;
-          const target = this.kamiPochiDoraChoices[player][`${source}:${index}`];
-          if (!target) return normalizedRaw;
-          return normalizeBaopaiForMajiang(this.doraIndicatorOf(target));
-        });
-        const newBaopai = replaceIndicators('baopai', [...(this.shan.baopai ?? [])]);
-        const newFubaopai = replaceIndicators('fubaopai', [...(this.shan.fubaopai ?? [])]);
+        const newBaopai = this.kamiPochiEffectiveIndicators_(player, 'baopai', [...(this.shan.baopai ?? [])])
+          .map(normalizeBaopaiForMajiang);
+        const newFubaopai = this.kamiPochiEffectiveIndicators_(player, 'fubaopai', [...(this.shan.fubaopai ?? [])])
+          .map(normalizeBaopaiForMajiang);
         const newParam = { ...param, baopai: newBaopai, fubaopai: this.lizhi.has(player) ? newFubaopai : param.fubaopai };
         try {
           const spForHule = sp.clone();
@@ -4099,6 +4109,21 @@ export class Game3 {
   /** ドラ表示牌 → ドラ牌 [helper に委譲] */
   doraIndicatorOf(pai: string): string {
     return doraIndicatorOfHelper(pai);
+  }
+
+  /** 神ぽっち選択を反映した実効ドラ表示列 [生の表示列を返す、正規化は呼び出し側]。
+   *  正ぽ [緑/青 z5] のスロットは選択牌の表示牌に置換、未選択なら素のまま。
+   *  index は生列基準 [華牌込み] で kamiPochiDoraChoices のキーと一致する。
+   *  通常 path [Majiang.Util.hule 再実行] とアメリカ七対子 fallback [手動カウント]
+   *  の両方がこれを使う [2026-07-21: fallback が選択を無視して裏0になる bug 修正]。 */
+  private kamiPochiEffectiveIndicators_(player: PlayerId, source: KamiPochiDoraSource, rawList: unknown[]): string[] {
+    return rawList.map((raw, index) => {
+      const s = String(raw);
+      if (!isPositiveZ5(s)) return s;
+      const target = this.kamiPochiDoraChoices[player][`${source}:${index}`];
+      if (!target) return s;
+      return this.doraIndicatorOf(target);
+    });
   }
 
   /** baopai / fubaopai の z5 の色判定は牌 key [z5b/z5r/z5g/z5y] 自体で済む、

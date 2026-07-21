@@ -1802,43 +1802,6 @@
         />
       {/each}
     </div>
-    <!-- 打牌アドバイス [2026-07-21 リョー要望]: CPU戦のみ、ボタンを押した時だけ表示 -->
-    {#if !onlineGameStarted && viewMode === 'single'}
-      <div class="action-row">
-        <button class:advice-on={adviceOpen} on:click={() => adviceOpen = !adviceOpen}>💡 助言</button>
-        {#if adviceOpen}
-          <span class="advice-note">CPUと同じ目線の目安。山と他家の伏せ牌は見てない</span>
-        {/if}
-      </div>
-      {#if adviceOpen}
-        <div class="advice-panel">
-          {#if !adviceAvailable}
-            <div class="advice-hint">自分の手番 [ツモ後] に候補が出る</div>
-          {:else if adviceRows.length === 0}
-            <div class="advice-hint">この局面では候補を出せない</div>
-          {:else if adviceRows[0].forced}
-            <div class="advice-hint">
-              {adviceRows[0].forced === 'fever' ? 'フィーバー中はツモ切り強制:' : 'リーチ中はツモ切り:'}
-              <Tile pai={adviceRows[0].base} size="sm" /> を切る
-            </div>
-          {:else}
-            {#each adviceRows as row (row.pai)}
-              <div class="advice-row" class:advice-best={row.recommended}>
-                <Tile pai={row.base} size="sm" />
-                <span class="advice-cell">{row.xiangting === 0 ? 'テンパイ' : `${row.xiangting}向聴`}</span>
-                <span class="advice-cell">受け{row.ukeire}枚</span>
-                {#if row.hasLizhiOpponent}
-                  <span class="advice-chip" class:advice-danger={row.safety < 2}>{adviceSafetyLabel(row.safety)}</span>
-                {/if}
-                {#if adviceIsDora(row)}<span class="advice-chip advice-dora">ドラ</span>{/if}
-                {#if row.dropsNiji}<span class="advice-chip advice-danger">虹が出る</span>{/if}
-                {#if row.recommended}<span class="advice-chip advice-best-chip">CPU推し</span>{/if}
-              </div>
-            {/each}
-          {/if}
-        </div>
-      {/if}
-    {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: 進行 row は debug 寄り、 オンライン中は
          ツモ切り / 自動 / CPU button が 他人手番でも代理 action になるので非表示。
          CPU toggle は local 状態 [single mode 用]、 単独表示にする -->
@@ -2136,11 +2099,46 @@
           <button class="table-setting-btn online" on:click={() => { viewMode = 'online'; }} title="オンライン対戦へ" aria-label="オンライン対戦へ">🌐 <span class="settings-label">オンライン対戦</span></button>
           <button class="table-setting-btn save" on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : '安全な手番開始時に保存できます'} aria-label="牌譜保存">📂 <span class="settings-label">牌譜保存</span></button>
           <button class="table-setting-btn save" on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ">🩺 <span class="settings-label">状態ダンプ</span></button>
+          <!-- 打牌アドバイス [2026-07-21 リョー要望]: CPU戦のみ。初版は header 内 action-row に
+               置いて single モードの display:none で丸ごと消えていた -->
+          <button class="table-setting-btn" class:advice-on={adviceOpen} on:click={() => adviceOpen = !adviceOpen} title="CPUと同じ評価で候補打牌を表示" aria-label="打牌の助言">💡 <span class="settings-label">助言</span></button>
         {:else}
           <button class="table-setting-btn leave" on:click={() => { disconnectOnline(); viewMode = 'online'; }} title="対局から退出" aria-label="対局から退出">× <span class="settings-label">退出</span></button>
         {/if}
       </div>
     </div>
+    {#if adviceOpen && !onlineGameStarted}
+      <div class="advice-panel advice-float">
+        <div class="advice-head">
+          <span class="advice-note">CPUと同じ目線の目安。山と他家の伏せ牌は見てない</span>
+          <button class="advice-close" on:click={() => adviceOpen = false} aria-label="閉じる">×</button>
+        </div>
+        {#if !adviceAvailable}
+          <div class="advice-hint">自分の手番 [ツモ後] に候補が出る</div>
+        {:else if adviceRows.length === 0}
+          <div class="advice-hint">この局面では候補を出せない</div>
+        {:else if adviceRows[0].forced}
+          <div class="advice-hint">
+            {adviceRows[0].forced === 'fever' ? 'フィーバー中はツモ切り強制:' : 'リーチ中はツモ切り:'}
+            <Tile pai={adviceRows[0].base} size="sm" /> を切る
+          </div>
+        {:else}
+          {#each adviceRows as row (row.pai)}
+            <div class="advice-row" class:advice-best={row.recommended}>
+              <Tile pai={row.base} size="sm" />
+              <span class="advice-cell">{row.xiangting === 0 ? 'テンパイ' : `${row.xiangting}向聴`}</span>
+              <span class="advice-cell">受け{row.ukeire}枚</span>
+              {#if row.hasLizhiOpponent}
+                <span class="advice-chip" class:advice-danger={row.safety < 2}>{adviceSafetyLabel(row.safety)}</span>
+              {/if}
+              {#if adviceIsDora(row)}<span class="advice-chip advice-dora">ドラ</span>{/if}
+              {#if row.dropsNiji}<span class="advice-chip advice-danger">虹が出る</span>{/if}
+              {#if row.recommended}<span class="advice-chip advice-best-chip">CPU推し</span>{/if}
+            </div>
+          {/each}
+        {/if}
+      </div>
+    {/if}
     <div class="center-board">
       <!-- ロン / ツモ 中央 overlay button [score-box の上に重ねる]
            2026-05-14 ゆーま 自走 bug fix: hardcoded 0 を selfPlayer 参照に、 オンライン
@@ -2799,6 +2797,18 @@
   .tile-btn:not(:disabled):hover { background: #ffe; border-radius: 4px; }
   /* 打牌アドバイス [2026-07-21] */
   button.advice-on { background: #2e5c48; color: #ffd54f; }
+  .advice-float {
+    position: fixed; right: 8px; top: 52px; z-index: 80;
+    max-width: min(92vw, 400px);
+    background: rgba(18, 32, 26, 0.94);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+    color: #e8e8e8;
+  }
+  .advice-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .advice-close {
+    background: transparent; border: none; color: #e8e8e8;
+    font-size: 16px; cursor: pointer; padding: 0 4px;
+  }
   .advice-note { font-size: 11px; opacity: 0.75; }
   .advice-panel {
     display: flex; flex-direction: column; gap: 3px;
