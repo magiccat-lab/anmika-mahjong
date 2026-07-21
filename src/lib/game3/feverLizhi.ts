@@ -190,25 +190,29 @@ export function canFeverLizhi(shoupai: any): FeverCheck {
             continue;
           }
         } catch { /* 通常形の厳密判定へ */ }
-        // 4枚の7は、七対子で二対子に取れる完成/聴牌形でない限り、
-        // 順子に1枚使っても3枚残るため確定暗刻。
-        ok = true;
-        tiles.push(s + '7');
-        continue;
       }
-      // handCount >= 3 必須。 majiang-core 厳密判定を試行
+      // [2026-07-21 リョー報告] handCount===4 を無条件で確定暗刻扱いしていたが、
+      // 677889+77頭 [= 678+789 の順子2つに7を2枚振り、残り2枚を頭] のように
+      // 7 が暗刻にならない解がある形は確定暗刻でない。3枚・4枚とも majiang-core の
+      // 全和了解挙で「全解で7が暗刻」を厳密判定する [isAlwaysAnkanByHule が false を返す]
       const strict = isAlwaysAnkanByHule(shoupai, s);
       if (strict === true) {
         ok = true;
-      } else if (strict === null) {
-        // fallback: 5/6/0 不在なら OK [簡易判定、 mock test や ting 取れない state 用]
-        const has5or6InHand =
-          (shoupai._bingpai?.[s]?.[5] ?? 0) > 0 ||
-          (shoupai._bingpai?.[s]?.[6] ?? 0) > 0 ||
-          (shoupai._bingpai?.[s]?.[0] ?? 0) > 0;
-        if (!has5or6InHand) ok = true;
+      } else if (strict === false) {
+        // 厳密 reject [順子2本に振れて暗刻確定でない]。ok=false 維持
+      } else {
+        // strict === null [clone 不能 / ting 取れない mock 等]: 厳密判定できないので
+        // pre-fix の fallback に戻す。4枚は確定暗刻扱い、3枚は 5/6/0 不在なら OK。
+        // 実 shoupai は必ず clone を持ち strict が true/false を返すため、この分岐は
+        // mock test 専用 [p7×4+p4p5p6 の確定 OK 等を維持]
+        if (handCount === 4) {
+          ok = true;
+        } else {
+          const b = shoupai._bingpai?.[s] ?? [];
+          const has5or6InHand = (b[5] ?? 0) > 0 || (b[6] ?? 0) > 0 || (b[0] ?? 0) > 0;
+          if (!has5or6InHand) ok = true;
+        }
       }
-      // strict === false なら ok=false 維持 [厳密 reject]
     }
     if (ok) tiles.push(s + '7');
   }

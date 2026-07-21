@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { canFeverLizhi, feverWaitInfoFromLiveWall, isFeverWaitExhausted } from '../game3/feverLizhi';
+import { buildShoupai } from '../game3';
 
 // shoupai mock: _bingpai[suit][num] と _fulou
 function mkSp(bingpai: Record<string, number[]>, fulou: string[] = []): any {
@@ -121,5 +122,26 @@ describe('FEVER live-wall wait display', () => {
     expect(feverWaitInfoFromLiveWall(['m1'], ['m7', 'm9'])).toEqual([
       { tile: 'm7', remain: 1, hasRed: false, hasGold: false, hasNiji: false },
     ]);
+  });
+});
+
+// [2026-07-21 リョー報告] 7 が 4 枚あっても暗刻が確定しない形はフィーバー不可。
+// 677889+77頭 = 678+789 の順子2つに7を2枚振り、残り2枚を頭にできる。
+describe('canFeverLizhi 7×4 の確定暗刻判定 [順子振り分け]', () => {
+  it('s677889 + s7s7頭 [678+789+77] は7暗刻確定でない → 不可', () => {
+    // s7×4 + s6 s8×2 s9 [順子2本に7を2枚+頭77] + m123 + z1z1
+    const sp = buildShoupai(['s6', 's7', 's7', 's7', 's7', 's8', 's8', 's9', 'm1', 'm2', 'm3', 'z1', 'z1']);
+    expect(canFeverLizhi(sp).ok).toBe(false);
+  });
+
+  it('s789789 + s7s7頭 [789+789+77] も7暗刻確定でない → 不可', () => {
+    const sp = buildShoupai(['s7', 's7', 's7', 's7', 's8', 's8', 's9', 's9', 'm1', 'm2', 'm3', 'z1', 'z1']);
+    expect(canFeverLizhi(sp).ok).toBe(false);
+  });
+
+  it('隣接がなく7が全解で暗刻になる形は可', () => {
+    // s7×3 [隣接 5/6/8/9 なし] + 独立面子 → 確定暗刻
+    const sp = buildShoupai(['s7', 's7', 's7', 'm1', 'm2', 'm3', 'p4', 'p5', 'p6', 's1', 's2', 's3', 'z1']);
+    expect(canFeverLizhi(sp).ok).toBe(true);
   });
 });
