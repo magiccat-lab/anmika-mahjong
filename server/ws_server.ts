@@ -701,6 +701,11 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       pendingNukiBei: structuredClone(state.pendingNukiBei ?? null),
       pendingSaiKoro: structuredClone(state.pendingSaiKoro),
       cpuWinAck: state.cpuWinAck,
+      // [2026-07-21 監査 L-03] 演出 cutin を権威イベントとして seat 共通で送る。
+      // client は ts で dedup し未再生のものだけ再生する。broadcastAction 後に
+      // canonical から drain されるので、この projection には「この action 分」だけ載る
+      cutin: structuredClone((state as any).cutin ?? null),
+      cutinQueue: structuredClone((state as any).cutinQueue ?? []),
     },
   } as unknown as OnlineSeatProjection;
 }
@@ -813,6 +818,9 @@ function broadcastAction(room: Room, command: AcceptedRoomCommand): void {
   for (const member of room.members.values()) {
     sendJson(member.ws, actionRelay(command, room.snapshot, member.seat, room.authority));
   }
+  // [2026-07-21 監査 L-03] 各 seat の projection に cutin を載せて配り終えたので、
+  // canonical から drain して cutinQueue の無限蓄積を防ぐ [server は pop しないため]
+  room.authority?.takePendingCutins();
 }
 
 function sendSync(

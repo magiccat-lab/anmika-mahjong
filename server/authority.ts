@@ -128,6 +128,12 @@ export class RoomAuthority {
     return get(this.canonicalStore);
   }
 
+  /** [2026-07-21 監査 L-03] 権威 store が action ごとに積んだ演出 cutin を取り出して
+   * クリアする。ws_server が seat projection に載せて配った後に呼び、蓄積を防ぐ。 */
+  takePendingCutins(): unknown[] {
+    return (this.canonicalStore as any).takeCutins();
+  }
+
   isPostWinResolved(): boolean {
     const state = this.canonicalState();
     return state.roundEnded

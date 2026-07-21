@@ -511,6 +511,9 @@ export function createGameStore() {
   let onlineMatchId = 1;
   let onlineRoundId = 1;
   let commandSequence = 0;
+  // [2026-07-21 監査 L-03] server projection 経由で届いた cutin を ts で dedup する。
+  // hydrate は state を丸ごと置換するため、既再生の cutin を覚えて未再生分だけ enqueue する
+  const seenCutinTs = new Set<number>();
   /** send 前 gate: online で 自席が action 主体 [現手番 or 候補] かを check、 不正は false で send 抑止 */
   function checkOnlineGate(action: any, requiredSeat: 'currentPlayer' | 'me' | 'winner' | 'host' | 'lastWinner' | 'oya'): boolean {
     if (!onlineMode) return true; // single mode は通す
@@ -738,6 +741,22 @@ export function createGameStore() {
       // Candidate identity remains private, but tests/debug views may consume
       // this self-only list when supplied by the projection.
       (next as any).ronCandidates = cloneWire(wireStore.ronCandidates ?? []);
+      // [2026-07-21 監査 L-03] server が権威イベントとして送った演出 cutin を、
+      // ts で dedup して未再生分だけ client 再生列へ積む。next は `...current` で
+      // 現在の cutin/cutinQueue を継承しているので、その上に足す
+      const incomingCutins: CutinPayload[] = [
+        ...(wireStore.cutin ? [wireStore.cutin as CutinPayload] : []),
+        ...(Array.isArray(wireStore.cutinQueue) ? (wireStore.cutinQueue as CutinPayload[]) : []),
+      ];
+      for (const c of incomingCutins) {
+        if (!c || typeof (c as any).ts !== 'number' || seenCutinTs.has((c as any).ts)) continue;
+        seenCutinTs.add((c as any).ts);
+        next.cutinQueue = [...(next.cutinQueue ?? []), c];
+        if (!next.cutin) {
+          next.cutin = next.cutinQueue[0] ?? null;
+          next.cutinQueue = next.cutinQueue.slice(1);
+        }
+      }
       set(next);
       return true;
     } catch (error) {
@@ -861,6 +880,17 @@ export function createGameStore() {
     },
     setOnlineReplayMode(enabled: boolean) {
       update((st) => ({ ...st, _onlineMode: enabled }));
+    },
+    /** [2026-07-21 監査 L-03] 権威 store が action ごとに積んだ演出 cutin を取り出して
+     * クリアする。server は cutin を pop しないため、projection に載せて配った後に
+     * これで drain し、canonical の cutinQueue 肥大を防ぐ。 */
+    takeCutins(): CutinPayload[] {
+      let taken: CutinPayload[] = [];
+      update((st) => {
+        taken = [...(st.cutin ? [st.cutin] : []), ...(st.cutinQueue ?? [])];
+        return { ...st, cutin: null, cutinQueue: [] };
+      });
+      return taken;
     },
     /** Server-side canonical replay can update CPU ownership without rebuilding the game. */
     setCpuSeats(cpuSeats: number[]) {
