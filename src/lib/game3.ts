@@ -3755,6 +3755,19 @@ export class Game3 {
     // 放銃 = 宣言牌そのものへのロンと判定できる。lateシュバは宣言牌通過後にしか
     // 宣言できないので誤返金はない
     if (loser !== null && this.lizhiDeclareDapai[loser] && this.shuvariActive[loser]) {
+      // シュバリ宣言牌への放銃はシュバ不成立。シュバ権に加えて、宣言で供託した
+      // リーチ棒 [通常 1000 / オープン 2000] も宣言者へ戻す。
+      // [リョー報告 2026-07-21 再発: シュバ宣言牌ロンでシュバ棒が消える]
+      // 旧実装は shuvariActive を落とすだけで defen/lizhibang を戻さず、
+      // 宣言者が払った棒を下段の供託総取り [defen[winner] += lizhibang*1000]
+      // で winner が持っていっていた。
+      const wasOpen = this.openLizhi.has(loser);
+      this.state.defen[loser] += wasOpen ? 2000 : 1000;
+      this.state.lizhibang = Math.max(0, this.state.lizhibang - (wasOpen ? 2 : 1));
+      this.lizhi.delete(loser);
+      this.openLizhi.delete(loser);
+      this.doubleLizhi.delete(loser);
+      this.yifaActive[loser] = false;
       this.shuvariActive[loser] = false;
       this.shuvariUsed[loser] = false;
       this.events.push({ type: 'shuvariRefund', player: loser } as any);
