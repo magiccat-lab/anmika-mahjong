@@ -1283,7 +1283,19 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     // 発火までに切断→再接続で generation が上がっていたら、この timer は旧世代の
     // 期限なので無効化し、再接続時に張り直した新 timer に任せる
     const scheduledGeneration = member?.generation ?? 0;
-    const delay = member?.is_cpu ? 750 : member?.connected ? turnTimeoutMs : disconnectGraceMs;
+    let delay = member?.is_cpu ? 750 : member?.connected ? turnTimeoutMs : disconnectGraceMs;
+    // [2026-07-21 監査 L-04 fix] 他家 FEVER 中の非 FEVER 者は強制ツモ切りしか選択肢が
+    // 無いのに、online だけ通常手番 deadline [60s] まで手動待ちだった。single の
+    // 800ms 自動進行と揃えて、強制ツモ切り確定時は権威が短い専用 deadline で発行する
+    // [client は表示追従のみ]。tsumo/カン/北抜き/リーチが可能なら turnTimeoutAction が
+    // tsumokiri 以外を返すので、この短縮は選択肢ゼロの局面だけに効く
+    if (member && !member.is_cpu && member.connected) {
+      const someoneFever = ([0, 1, 2] as const).some((p) => authority.game.feverActive[p]);
+      if (someoneFever && !authority.game.feverActive[current] && authority.lastZimo
+        && turnTimeoutAction(authority, false)?.type === 'tsumokiri') {
+        delay = 800;
+      }
+    }
     room.deadlineTimer = setTimeout(() => {
       room.queue = room.queue.then(async () => {
         const live = room.authority;
