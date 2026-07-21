@@ -146,7 +146,7 @@
   $: he1 = handHe($game.game.he.get(srvSeat(1)), srvSeat(1));
   $: he2 = handHe($game.game.he.get(srvSeat(2)), srvSeat(2));
   $: paishu = $game.game.shan.paishu;
-  $: baopai = $game.game.shan.baopai;
+  $: baopai = $game.game.shan.displayBaopai;
   $: lastZimo = $game.lastZimo;
   $: currentPlayer = $game.game.lunbanToPlayerId(state.lunban);
 
@@ -2472,8 +2472,8 @@
     <RoundEndPanel
       lastWinner={$game.lastWinner}
       huleResult={$game.lastHuleResult}
-      baopai={[...$game.game.shan.baopai]}
-      fubaopai={$game.game.shan.fubaopai ? [...$game.game.shan.fubaopai] : null}
+      baopai={[...$game.game.shan.displayBaopai]}
+      fubaopai={$game.game.shan.displayFubaopai ? [...$game.game.shan.displayFubaopai] : null}
       winnerLizhi={$game.lastWinner !== null && $game.game.lizhi.has($game.lastWinner as PlayerId)}
       agariType={$game.lastDapai && $game.lastWinner !== null && $game.lastDapai.player !== $game.lastWinner ? 'ron' : ($game.lastWinner !== null ? 'tsumo' : null)}
       agariPai={$game.lastDapai && $game.lastWinner !== null && $game.lastDapai.player !== $game.lastWinner
@@ -2524,8 +2524,8 @@
             <RoundEndPanel
               lastWinner={hw.player}
               huleResult={hw.result}
-              baopai={[...$game.game.shan.baopai]}
-              fubaopai={$game.game.shan.fubaopai ? [...$game.game.shan.fubaopai] : null}
+              baopai={[...$game.game.shan.displayBaopai]}
+              fubaopai={$game.game.shan.displayFubaopai ? [...$game.game.shan.displayFubaopai] : null}
               winnerLizhi={$game.game.lizhi.has(hwPid)}
               defenDelta={huleEntries.length > 1 ? huleDefenDeltaFor(hw.player) : latestHuleDefenDelta()}
               defenAfter={[state.defen[0], state.defen[1], state.defen[2]] as [number, number, number]}
@@ -2643,8 +2643,8 @@
     <WallPanel
       wall={(($game.game.shan as any)._pai ?? [])}
       rinshan={(($game.game.shan as any)._rinshan ?? [])}
-      baopai={[...$game.game.shan.baopai]}
-      fubaopai={[...($game.game.shan.fubaopai ?? [])]}
+      baopai={[...$game.game.shan.displayBaopai]}
+      fubaopai={[...($game.game.shan.displayFubaopai ?? [])]}
     />
     <DebugLogPanel logs={debugLogs} onClear={() => { debugLogs = []; }} />
   </section>

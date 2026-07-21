@@ -633,11 +633,13 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
     gameState: structuredClone(game.state),
     shan: {
       paishu: game.shan.paishu,
-      // S-02: 反応窓中は先の claimant 評価 [秋] で開いた追加表示牌を隠す
-      baopai: reactionWindowOpen && game.preHuleSnapshot
-        ? [...game.shan.baopai].slice(0, (game.preHuleSnapshot as any).baopaiLen ?? game.shan.baopai.length)
-        : [...game.shan.baopai],
-      fubaopai: revealUra && game.shan.fubaopai ? [...game.shan.fubaopai] : null,
+      // [2026-07-21 秋ドラ表示漏れ 根治] 確定表示分 [displayBaopai] だけを配信する。
+      // hule() の秋カスケードが評価中/modal中に伸ばした未 commit めくりは含めない
+      // [applyHule / kan で commit されるまで表示しない]。S-02 の反応窓スライスも
+      // committed が pre-win に据え置かれるため subsume される
+      baopai: [...game.shan.displayBaopai],
+      // 裏ドラは committed かつ revealUra [リーチ和了確定] の時だけ現物を送る
+      fubaopai: revealUra && game.shan.displayFubaopai ? [...game.shan.displayFubaopai] : null,
       kanDoraCount: game.shan.kanDoraCount,
       rinshanUsed: game.shan.rinshanUsed,
       canDrawRinshan: game.shan.canDrawRinshan,
@@ -759,16 +761,19 @@ function captureBeforeAction(authority: RoomAuthority): ActionCapture {
   const g = authority.game;
   return {
     eventsLength: g.events.length,
-    baopai: [...g.shan.baopai],
-    fubaopai: g.shan.fubaopai ? [...g.shan.fubaopai] : null,
+    // [2026-07-21 秋ドラ表示漏れ 根治] 確定表示分でめくり差分を取る。未 commit の
+    // 秋カスケードめくりは newBaopai/doraDraws 化されない [applyHule/kan で commit
+    // された時のみ差分が出て演出が発火する = 上がりまで表示増えない]
+    baopai: [...g.shan.displayBaopai],
+    fubaopai: g.shan.displayFubaopai ? [...g.shan.displayFubaopai] : null,
     fuyuRevealedLength: (((g.shan as any)._fuyuRevealed ?? []) as string[]).length,
   };
 }
 
 export function captureActionEffects(authority: RoomAuthority, before: ActionCapture): Record<string, unknown> | null {
   const g = authority.game;
-  const postBaopai = [...g.shan.baopai];
-  const postFubaopai = g.shan.fubaopai ? [...g.shan.fubaopai] : null;
+  const postBaopai = [...g.shan.displayBaopai];
+  const postFubaopai = g.shan.displayFubaopai ? [...g.shan.displayFubaopai] : null;
   const newBaopai = postBaopai.slice(before.baopai.length);
   const newFubaopai = before.fubaopai && postFubaopai
     ? postFubaopai.slice(before.fubaopai.length)

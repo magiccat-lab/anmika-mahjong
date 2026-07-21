@@ -3818,6 +3818,11 @@ export class Game3 {
    *  子ツモ = 親 base*2 + 他子 base*1。 100 の位切り上げ。 */
   applyHule(result: any, winner: PlayerId, loser: PlayerId | null): void {
     if (!result) return;
+    // [2026-07-21 リョー報告 秋ドラ表示漏れ 根治] 和了確定。hule() の秋カスケードが
+    // 評価中にめくった物理ドラ表を、ここで初めて確定表示に反映する [上がりまで表示増えない]。
+    // 評価用の投機 hule や金北/冬 modal 中は commit されないので表示は増えない。
+    // 採点は _baopai [全量] を使い続けるため点数計算には無影響。
+    this.shan.commitDoraReveal();
     // シュバリー宣言牌への放銃はリーチ不成立と同じ扱いで、シュバ権を消費しない
     // [リョー指摘 2026-07-17: 宣言牌放銃でシュバ棒が消える]。
     // lizhiDeclareDapai は宣言者の次の自打牌まで true のため、コレが立ったまま

@@ -76,12 +76,16 @@ describe('S-02: ダブロン反応窓中の結果マスク', () => {
     expect(projection.shan.baopai).not.toContain('p5');
   });
 
-  it('反応窓が閉じれば結果と表示牌を公開する', () => {
+  it('反応窓が閉じて和了が確定[commit]すれば結果と表示牌を公開する', () => {
     const a = authority();
     openReactionWindowWithFirstClaim(a);
     const state = a.canonicalState();
     state.awaitingRonDecision = false; // 窓が閉じた
     state.roundEnded = true;
+    // [2026-07-21 秋ドラ根治] 表示クランプ導入後、追加表示牌は commit [実 flow の
+    // applyHule 相当] されて初めて displayBaopai に載る。テストは applyHule を通さず
+    // state を直接操作しているので、commitDoraReveal で和了確定を再現する
+    state.game.shan.commitDoraReveal();
     const projection: any = captureSeatProjection(a, 2);
     expect(projection.store.lastWinner).toBe(1);
     expect(projection.store.ronResults.length).toBe(1);

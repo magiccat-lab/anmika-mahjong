@@ -92,6 +92,10 @@ export class Shan3 {
     shan._rinshan = [];
     shan._baopai = [...opts.baopai];
     shan._fubaopai = opts.fubaopai ? [...opts.fubaopai] : null;
+    // blind [オンライン] は server projection の baopai を丸ごと受け取る。
+    // server 側で displayBaopai 相当を送るため、ここは全量を確定扱いにする
+    shan._committedBaopaiLen = shan._baopai.length;
+    shan._committedFubaopaiLen = shan._fubaopai?.length ?? 0;
     shan._initialPai = [];
     shan._blind = true;
     shan._blindPaishu = opts.paishu;
@@ -110,6 +114,9 @@ export class Shan3 {
   setBaopai(baopai: Pai[], fubaopai: Pai[] | null): void {
     this._baopai = [...baopai];
     this._fubaopai = fubaopai ? [...fubaopai] : null;
+    // setBaopai で差し替えた分は全量確定表示扱い
+    this._committedBaopaiLen = this._baopai.length;
+    this._committedFubaopaiLen = this._fubaopai?.length ?? 0;
   }
 
   /** A kan needs one new front indicator and, when ura-dora is enabled, its
@@ -156,6 +163,9 @@ export class Shan3 {
     // 金牌は牌 key 自体 [gp/gs/gN] で識別、 _gold 配列は撤去済 [リョー指示 2026-05-10]
     this._weikaigang = false;
     this._closed = false;
+    // 初期表示ドラは全量が確定 [局開始時点で見えている分]
+    this._committedBaopaiLen = this._baopai.length;
+    this._committedFubaopaiLen = this._fubaopai?.length ?? 0;
   }
 
   /** 山 index → 金フラグ参照 [配牌時に goldHand 集計用、 player 側に渡す] */
@@ -179,6 +189,8 @@ export class Shan3 {
     weikaigang: boolean;
     baopai: Pai[];
     fubaopai: Pai[] | null;
+    committedBaopaiLen: number;
+    committedFubaopaiLen: number;
     blindQueue: BlindDrawEntry[];
     blindDoraQueue: Pai[];
     blindPaishu: number;
@@ -195,6 +207,8 @@ export class Shan3 {
       weikaigang: this._weikaigang,
       baopai: [...this._baopai],
       fubaopai: this._fubaopai ? [...this._fubaopai] : null,
+      committedBaopaiLen: this._committedBaopaiLen,
+      committedFubaopaiLen: this._committedFubaopaiLen,
       blindQueue: this._blindQueue.map((d) => ({ ...d, huapai: [...d.huapai] })),
       blindDoraQueue: [...this._blindDoraQueue],
       blindPaishu: this._blindPaishu,
@@ -212,6 +226,9 @@ export class Shan3 {
     this._weikaigang = snap.weikaigang;
     this._baopai = [...snap.baopai];
     this._fubaopai = snap.fubaopai ? [...snap.fubaopai] : null;
+    // 確定表示枚数も戻す。無い旧 snapshot は現 baopai 全量を確定扱い [後方互換]
+    this._committedBaopaiLen = snap.committedBaopaiLen ?? this._baopai.length;
+    this._committedFubaopaiLen = snap.committedFubaopaiLen ?? (this._fubaopai?.length ?? 0);
     this._blindQueue = (snap.blindQueue ?? []).map((d) => ({ ...d, huapai: [...d.huapai] }));
     this._blindDoraQueue = [...(snap.blindDoraQueue ?? [])];
     this._blindPaishu = snap.blindPaishu ?? this._blindPaishu;
@@ -265,6 +282,25 @@ export class Shan3 {
    *  hule 呼ぶ時点でアガリ確定なので常に開示する。 「リーチアガリ時のみ集計」 は
    *  呼び出し側 [Game3.hule の isLizhi] が判断する */
   get fubaopai(): Pai[] | null { return this._fubaopai; }
+
+  /** [2026-07-21 リョー報告 秋ドラ表示漏れ 根治] 表示してよいドラ表の枚数。
+   *  hule() の秋カスケードは評価中に物理的に _baopai を伸ばすが、和了が確定
+   *  [applyHule] するまで、あるいはカン [kaigang] するまでは表示に反映してはいけない
+   *  [上がりまで表示増えない]。commitDoraReveal() で確定枚数を現在長に進め、
+   *  displayBaopai / displayFubaopai は確定枚数までを返す。採点は _baopai [全量] を
+   *  使い続けるため点数計算には一切影響しない。 */
+  private _committedBaopaiLen: number = 0;
+  private _committedFubaopaiLen: number = 0;
+  /** 現在の _baopai / _fubaopai 全量を確定表示扱いにする [局開始 / カン / 和了確定で呼ぶ] */
+  commitDoraReveal(): void {
+    this._committedBaopaiLen = this._baopai.length;
+    this._committedFubaopaiLen = this._fubaopai?.length ?? 0;
+  }
+  /** 表示用ドラ表 [確定枚数まで]。評価中/modal中の未確定めくりは含めない */
+  get displayBaopai(): Pai[] { return this._baopai.slice(0, this._committedBaopaiLen); }
+  get displayFubaopai(): Pai[] | null {
+    return this._fubaopai ? this._fubaopai.slice(0, this._committedFubaopaiLen) : null;
+  }
 
   /** 直前の zimo で引いた華牌 [f1-f4]、 空配列なら華牌引かなかった */
   lastDrawnHuapai: Pai[] = [];
@@ -404,6 +440,8 @@ export class Shan3 {
     if (this._fubaopai) this.drawNewDora(true);
     this.kanDoraCount += 1;
     this._weikaigang = false;
+    // カンドラは即公開 [秋カスケードと違い上がり待ちしない] なので確定表示に進める
+    this.commitDoraReveal();
   }
 
   close(): void { this._closed = true; }
