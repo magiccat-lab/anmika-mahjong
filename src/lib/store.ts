@@ -1643,7 +1643,10 @@ export function createGameStore() {
               p !== winner && p !== ld.player && s.cpu[p as 0|1|2] && s.game.canRon(p as any, ld.pai, ld.player as any)
             );
           }
-          s.lastHuleResult = result;
+          // [2026-07-21 リョー報告] 冬選択後の再 hule で秋カスケードがめくった物理ドラ表を、
+          // 人間金北 modal を出す前に巻き戻す [tsumo 2673 / CPU 経路 1665 と同じ]。
+          // selectKinpei が選択後に再 hule でめくり直すので、上がり確定まで表示は増えない
+          s.game.restoreSnapshot();
           s.lastWinner = winner;
           enterKinpeiStage(s, {
             winner,
@@ -2665,7 +2668,12 @@ export function createGameStore() {
           && resolvedHuapai.length > 0
           && (!s.cpu[player] || reverseTsumoHasHumanOwner)
           && !isFeverPayAuto_tsumo) {
-          s.lastHuleResult = result;
+          // [2026-07-21 リョー報告: 秋抜いたときにドラ表示出る、上がりまで増えない]
+          // hule() の秋カスケードでめくった物理ドラ表を、金北 modal を出す前に巻き戻す。
+          // 冬 modal [上の restoreSnapshot] / CPU 経路 [autoResolveKinpei 前] は既に
+          // 巻き戻していたが、人間の金北 modal だけ抜けていて modal 表示中 [上がり未確定]
+          // にドラ表示が増えて見えていた。selectKinpei が選択後に再 hule でめくり直す
+          s.game.restoreSnapshot();
           s.lastWinner = player;
           enterKinpeiStage(s, {
             winner: player,
