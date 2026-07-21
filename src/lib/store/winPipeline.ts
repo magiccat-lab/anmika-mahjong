@@ -140,6 +140,20 @@ export function settleRonResultsInKamichaOrder(
   for (const claim of sorted) {
     if (claim.result?._anmikaRonSettlementApplied) continue;
     game.applyHule(claim.result, claim.player as PlayerId, discarder);
+    // [2026-07-21 監査 D-10 fix] この claimant の冬 [正ぽっちで pending 停止] を、
+    // 次 claimant の applyHule より前に完了させる。旧実装は 1 人目の冬が pending の
+    // まま一括 loop が 2 人目を評価し、同じ牌山を先に消費して上家順の牌山順・支払額が
+    // ずれていた。神ぽっちは常に自動高目取り [モーダルなし] なので同期で解決できる。
+    // pending が無い通常ケースは while が即 break するため挙動は変わらない
+    let guard = 0;
+    while (guard++ < 64) {
+      const pending = game.getPendingFuyuKamiPochi(claim.player as PlayerId);
+      if (!pending?.occurrenceKey) break;
+      const best = game.bestFuyuKamiPochiTarget(claim.player as PlayerId);
+      const pick = pending.candidates.includes(best) ? best : pending.candidates[0];
+      const advance = game.resumeFuyuKamiPochi(claim.player as PlayerId, pending.occurrenceKey, pick);
+      if (!advance || advance.status === 'complete') break;
+    }
     claim.result._anmikaRonSettlementApplied = true;
   }
   return sorted;

@@ -307,6 +307,10 @@ export function enterFuyuKamiPochiStage(s: StoreState, context: WinChoiceContext
       syncFuyuResult(s, winner);
       if (advance.status === 'complete') break;
     }
+    // [2026-07-21 監査 D-10 fix] settle 側 [settleRonResultsInKamichaOrder] で既に冬を
+    // 完了させた場合、上の loop は pending なしで即抜けるため fuyuLog が result に
+    // 付かない。表示用に winner ごと一度は sync する [完了済みの reveal state を読む]
+    syncFuyuResult(s, winner);
   }
   return false;
 }
