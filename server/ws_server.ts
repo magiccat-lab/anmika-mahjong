@@ -8,6 +8,10 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import jwt from 'jsonwebtoken';
 import { defaultSanmaRule, generateTilePool } from '../src/lib/shan3';
 import { toCorePai } from '../src/lib/helpers';
+// [2026-07-21 監査 L-05 fix] online CPU の判断を single mode [cpuStepImpl] と同じ
+// 隠し情報ベースのヘルパーに揃える。旧実装は先頭候補と簡易 fever 判定で分岐していた
+import { decideFever, pickLizhiDapai } from '../src/lib/store/cpuLizhi';
+import { decideCpuShuvari } from '../src/lib/store/cpuShuvari';
 import { createRoomAuthority, type AuthorityMember, type RoomAuthority } from './authority';
 import { RoomPersistence } from './persistence';
 import {
@@ -145,11 +149,19 @@ export function turnTimeoutAction(
       : normalCandidates;
     // getLizhiCandidates() and feverCandidatesByDapai() expose exact physical
     // faces, so the timeout commits the same gp/np3/z5* choice shown in the UI.
-    if (candidates.length > 0) return { type: 'discard', pai: candidates[0] };
+    // [2026-07-21 監査 L-05 fix] CPU の宣言牌は single mode と同じ pickLizhiDapai で
+    // 待ちの広い方を選ぶ [旧実装は候補先頭固定]。human timeout は先頭のままでよい
+    if (candidates.length > 0) {
+      const pai = isCpu ? pickLizhiDapai(game, current, candidates).pai : candidates[0];
+      return { type: 'discard', pai };
+    }
     // [2026-07-20] フィーバーを選んだ後にカン等で成立牌が消えると候補が空になる。
     // ここで null を返すと呼び出し側が同じ期限を張り直すだけなので、局が
     // 永久に止まる。フィーバーは諦めて通常のリーチ宣言牌へ落とし、進行を優先する。
-    if (normalCandidates.length > 0) return { type: 'discard', pai: normalCandidates[0] };
+    if (normalCandidates.length > 0) {
+      const pai = isCpu ? pickLizhiDapai(game, current, normalCandidates).pai : normalCandidates[0];
+      return { type: 'discard', pai };
+    }
     return null;
   }
 
@@ -161,6 +173,22 @@ export function turnTimeoutAction(
   // precedes north extraction and the otherwise forced tsumogiri.
   const forcedKan = game.getForcedLizhiKanCandidates(current);
   if (forcedKan.length > 0) return { type: 'declareKan', mianzi: forcedKan[0] };
+
+  // [2026-07-21 監査 L-05 fix] CPU の三元牌自動暗槓 [z5-z7 の 4 枚揃い] を single mode
+  // [cpuStepImpl] と揃える。役牌 1 役 + 新ドラ確定で正収益。旧 online path はこれを
+  // 通らず、single とだけ挙動が分岐していた
+  if (isCpu && !game.lizhi.has(current)) {
+    const spKan = game.shoupai.get(current);
+    const zimoLen = typeof spKan?._zimo === 'string' ? spKan._zimo.length : 0;
+    if (zimoLen > 0 && zimoLen <= 3) {
+      const kanMianzis = game.getKanCandidates(current);
+      const sanyuanKan = kanMianzis.find((m) => {
+        const head = `${m[0]}${m[1]}`;
+        return head === 'z5' || head === 'z6' || head === 'z7';
+      });
+      if (sanyuanKan) return { type: 'declareKan', mianzi: sanyuanKan };
+    }
+  }
 
   // North is nuki-only and is resolved before a forced discard.  Preserve the
   // physical identity so a drawn gN cannot consume an ordinary held north.
@@ -178,11 +206,28 @@ export function turnTimeoutAction(
   // Human timeouts must never opt into a new riichi.  A server-owned CPU,
   // however, may not remain dama in this table: declare first and let the next
   // deadline commit the exact physical candidate through the pending branch.
+  // [2026-07-21 監査 L-05 fix] fever を取るか / シュバるかを single mode と同じ
+  // decideFever / decideCpuShuvari で判定する [旧実装は「合法 fever があれば必ず取る」
+  // 「シュバ一切なし」だった]。宣言牌の physical 確定は pending 分岐が担う
   if (isCpu && game.canLizhi(current)) {
     const normalCandidates = game.getLizhiCandidates(current);
-    const feverCandidates = game.feverCandidatesByDapai(current);
-    const hasLegalFever = normalCandidates.some((pai) => feverCandidates.has(pai));
-    return { type: 'lizhi', opts: hasLegalFever ? { fever: true } : {} };
+    const lizhiCandidateSet = new Set(normalCandidates.map((pai) => pai.replace(/[_*]$/, '')));
+    const feverMap = game.feverCandidatesByDapai(current);
+    const rawZimo = typeof sp?._zimo === 'string' ? sp._zimo.replace(/[_*]$/, '') : null;
+    const zimoPai = rawZimo && rawZimo.length <= 3 ? rawZimo : null;
+    const legalFever = [...feverMap.keys()].filter((pai) => lizhiCandidateSet.has(pai.replace(/[_*]$/, '')));
+    const feverDapai = zimoPai && legalFever.includes(zimoPai) ? zimoPai : (legalFever[0] ?? null);
+    if (feverDapai) {
+      const fc = feverMap.get(feverDapai);
+      const fd = fc ? decideFever(game, current, feverDapai, fc.tier, { rainbow: fc.rainbow }) : null;
+      if (fc && fd?.takeFever) {
+        const sd = decideCpuShuvari(game, current, { discardPai: feverDapai, feverTier: fc.tier });
+        return { type: 'lizhi', opts: { fever: true, shuvari: sd.shuvari } };
+      }
+    }
+    const picked = pickLizhiDapai(game, current, normalCandidates);
+    const sd = decideCpuShuvari(game, current, { discardPai: picked.pai });
+    return { type: 'lizhi', opts: { shuvari: sd.shuvari } };
   }
 
   const someoneFever = ([0, 1, 2] as const).some((player) => game.feverActive[player]);

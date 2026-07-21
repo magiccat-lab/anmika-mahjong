@@ -390,11 +390,20 @@ describe('server RoomAuthority', () => {
     const feverCandidates = vi.spyOn(a.game, 'feverCandidatesByDapai')
       .mockReturnValue(new Map([['p3', { ok: true, tiles: ['p3'], tier: 1 as const }]]));
 
+    // human timeout はリーチしない [そのまま打牌]
     expect(turnTimeoutAction(a, false)).toEqual({ type: 'discard', pai: 's9' });
-    expect(turnTimeoutAction(a, true)).toEqual({ type: 'lizhi', opts: { fever: true } });
+    // [2026-07-21 監査 L-05] CPU はリーチを宣言する。fever を取るか/シュバるかは
+    // single mode と同じ decideFever/decideCpuShuvari が実手牌から決めるため、
+    // ここでは「lizhi を宣言する」構造契約だけ検証する [精度は cpu_fever_lizhi 等が担保]
+    const cpuLizhi: any = turnTimeoutAction(a, true);
+    expect(cpuLizhi?.type).toBe('lizhi');
+    expect(typeof cpuLizhi?.opts).toBe('object');
 
+    // fever 候補が無くても通常リーチを宣言する
     feverCandidates.mockReturnValue(new Map());
-    expect(turnTimeoutAction(a, true)).toEqual({ type: 'lizhi', opts: {} });
+    const cpuNormalLizhi: any = turnTimeoutAction(a, true);
+    expect(cpuNormalLizhi?.type).toBe('lizhi');
+    expect(cpuNormalLizhi?.opts?.fever).not.toBe(true);
   });
 
   it('keeps ura hidden for a non-riichi winner even when a loser had riichi', () => {
