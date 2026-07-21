@@ -339,6 +339,17 @@ export function appendSaiKoroChances(
 
 export function clearSaiKoroStage(s: WinPipelineLike): void {
   s.pendingSaiKoro = null;
+  // [2026-07-21 監査 D-07 fix] サイコロ完了 [全消化/置換空] まで遅延していた
+  // FEVER 終了をここで実行する。倍率は最後の chance まで snapshot どおり生きる
+  const pendingEnd = (s.game as any).feverEndPendingAfterEffects as Record<number, boolean> | undefined;
+  if (pendingEnd) {
+    for (const p of [0, 1, 2] as const) {
+      if (pendingEnd[p]) {
+        pendingEnd[p] = false;
+        s.game.endFever(p as PlayerId);
+      }
+    }
+  }
 }
 
 export function advanceSaiKoroStage(s: WinPipelineLike): void {
@@ -390,7 +401,14 @@ export function settleAfterWin(
   if (s.game.feverActive[opts.winner]) {
     // 最後に生存していた待ち牌で和了した場合、FEVERはその和了で終了する。
     if (s.game.isFeverWaitExhausted(opts.winner)) {
-      s.game.endFever(opts.winner);
+      // [2026-07-21 監査 D-07 fix] この和了で発生したサイコロ chance が残っている間は
+      // endFever を遅延する [clearSaiKoroStage が発火]。旧実装は queue 直後に終了し、
+      // 実際に振る時だけ tier 1 扱いで倍率が消えていた
+      if (s.pendingSaiKoro) {
+        s.game.feverEndPendingAfterEffects[opts.winner] = true;
+      } else {
+        s.game.endFever(opts.winner);
+      }
       s.roundEnded = true;
       return;
     }

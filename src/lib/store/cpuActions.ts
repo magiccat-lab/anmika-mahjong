@@ -15,9 +15,10 @@ import {
   enterFuyuKamiPochiStage,
   resolvePreSettlementPochiChoices,
   processKakanQianggangWindow,
+  autoConsumeFuyuIfFeverExhausted,
 } from '../store';
 import { toCorePai } from '../helpers';
-import { enterFeverContinueStage } from './winPipeline';
+import { settleAfterWin } from './winPipeline';
 import { decideCpuShuvari } from './cpuShuvari';
 import { pickLizhiDapai, decideFever } from './cpuLizhi';
 
@@ -46,6 +47,9 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     const cur = s.game.lunbanToPlayerId(s.game.state.lunban);
     if (!s.cpu[cur as 0 | 1 | 2]) break;
     if (s.game.canTsumo(cur)) {
+      // [2026-07-21 監査 D-11 fix] human tsumo と同じ「FEVER 中 + 冬持ち + 待ち残山 0 は
+      // 自動で冬使用」を CPU にも適用 [旧 path は冬を使わず終了し冬祝儀を失っていた]
+      autoConsumeFuyuIfFeverExhausted(s, cur);
       // R4 P1 #12 fix: saveSnapshot は hule() より 先
       // [2026-07-20 リョー報告] 巻き戻しは restoreSnapshot ではなくローカル snapshot で行う。
       // saveSnapshot は snapshotLocked [ダブロン評価中] にスキップされるのに
@@ -95,15 +99,10 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         s = triggerSaiKoroIfAny(s, result, cur);
         // [2026-07-16 リョー指示] CPU 和了のサイコロは人間の確認 [ackCpuWin] まで自動進行しない
         if (s.pendingSaiKoro) s.cpuWinAck = false;
-        const isFever = s.game.feverActive[cur];
-        if (isFever) {
-          s.game.feverWinCount[cur] += 1;
-          s.roundEnded = false;
-          if (!s.pendingFeverContinue) {
-            enterFeverContinueStage(s, { winner: cur, isRon: false });
-          }
-        } else {
-          s.roundEnded = true;
+        // [2026-07-21 監査 D-11 fix] 手書きの FEVER 分岐を human と同じ settleAfterWin に
+        // 統一。旧 path は isFeverWaitExhausted を見ず、待ち 0 の FEVER を続行していた
+        settleAfterWin(s, { winner: cur, isRon: false, ronfrom: null });
+        if (s.roundEnded) {
           // [2026-07-17 リョー指摘: リーチ白ツモで勝手に上がって次へ行った]
           // サイコロ無しの素の和了も 3 秒 auto-advance で判定表示ごと飛んでいた。
           // 局終了時は必ず人間の確認 [次局へ or ackCpuWin] まで止める。

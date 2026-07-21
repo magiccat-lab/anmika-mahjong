@@ -649,6 +649,11 @@ export class Game3 {
    * 毎回表裏 1 組を追加表示していた */
   akiUsedIndicators: Record<PlayerId, string[]> = { 0: [], 1: [], 2: [] };
 
+  /** [2026-07-21 監査 D-07 fix] FEVER 最後の待ちで和了した際、サイコロ chance が
+   * 残っている間は endFever を遅延するフラグ。clearSaiKoroStage [全消化/置換空] が
+   * 発火する。サイコロ modal 中は牌譜保存不可のため永続化しない一時フラグ */
+  feverEndPendingAfterEffects: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false };
+
   /** 金北強化選択 [局中固定、 1 回選んだら変更不可、 null=未選択 / 保留] */
   kinpeiTarget: Record<PlayerId, 'haru' | 'natsu' | 'aki' | 'fuyu' | null> = { 0: null, 1: null, 2: null };
   /** ドラ表/裏ドラ表に現れた正ぽっちを、物理出現 source:index ごとに任意指定する。 */
@@ -4820,6 +4825,7 @@ export class Game3 {
   }
 
   endFever(player: PlayerId): void {
+    this.feverEndPendingAfterEffects[player] = false;
     this.feverActive[player] = false;
     this.feverTier[player] = 1;
     this.feverDeclareTing[player] = [];

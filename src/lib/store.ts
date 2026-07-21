@@ -311,6 +311,18 @@ export function enterFuyuKamiPochiStage(s: StoreState, context: WinChoiceContext
   return false;
 }
 
+/** [2026-07-21 監査 D-11 fix] FEVER 中の CPU 和了評価前に、human 経路 [機能 11] と同じ
+ * 「待ち残山 0 + 冬持ちなら自動で冬使用」を適用する。旧 CPU path はこの判定を通らず、
+ * 冬を使わないまま終了して冬祝儀を取り損ねていた */
+export function autoConsumeFuyuIfFeverExhausted(s: StoreState, player: PlayerId): void {
+  if (!s.game.feverActive[player]) return;
+  if (s.game.pochiPaymentMode[player]) return;
+  if (s.game.fuyuConsumed[player]) return;
+  if (!s.game.effectiveHuapaiAtHule(player).includes('f4')) return;
+  if (!s.game.isFeverWaitExhausted(player)) return;
+  s.game.fuyuConsumed[player] = true;
+}
+
 /**
  * 加槓の槍槓反応窓 [R9 P1 #7 → 2026-07-21 監査 D-04 fix で human/CPU 共通化]。
  * mianzi が加槓 pattern なら他家ロン可否を確認し、
@@ -343,6 +355,8 @@ export function processKakanQianggangWindow(
     const ronResults: Array<{ player: number; result: any }> = [];
     for (const p of cpuRonCands) {
       s.game.restoreSnapshot();
+      // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
+      autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
       if (hasGoldKita(s.game, p as PlayerId)) {
         s.game.autoResolveKinpei(p as any);
         saveHuleSnapshot(s.game);
@@ -1250,7 +1264,9 @@ export function createGameStore() {
           // [2026-05-15 機能 11] 待ち残山 0 → modal skip で 自動冬使用 [user 選択不要]
           if (s.game.isFeverWaitExhausted(player as 0|1|2) && !reversePochiDecisionRon) {
             s.game.fuyuConsumed[player as 0|1|2] = true;
-            s.game.endFever(player as PlayerId);
+            // [2026-07-21 監査 D-08 fix] ここで endFever すると hule/applyHule 前に
+            // FEVER 倍率が消え、今回の和了の点数・祝儀が非 FEVER 扱いになっていた。
+            // 終了は settleAfterWin [精算完了後] が担当する
             // fall through で 通常 ron path に
           } else {
             // 2026-05-14 codex review P1 fix: pendingFuyu 化前に saveSnapshot
@@ -1371,6 +1387,8 @@ export function createGameStore() {
           if (s.cpu[p as 0|1|2]) {
             // WSA: 秋ダブロン対策 — 全 winner を同一 pre-ron snapshot から評価
             s.game.restoreSnapshot();
+            // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
+            autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
             if (hasGoldKita(s.game, p as PlayerId)) {
               s.game.autoResolveKinpei(p as any);
               saveHuleSnapshot(s.game);
@@ -1417,7 +1435,9 @@ export function createGameStore() {
         );
         s.ronResults = allRonResults;
         const isFever = s.game.feverActive[player as 0|1|2];
-        const feverNote = isFever ? '🔥 [フィーバー継続中、 次局へ進まず待ち継続]' : '';
+        // [D-08 fix 追随] 待ち枯れで終了する最終和了に「継続中」note を出さない
+        const feverNote = isFever && !s.game.isFeverWaitExhausted(player as 0|1|2)
+          ? '🔥 [フィーバー継続中、 次局へ進まず待ち継続]' : '';
         // R13 P0 #4 fix: lastWinner を ronDeclaredPlayers 全体 + 今回 ronResults から
         // 親優先 再計算。 旧 code は今回 ronResults だけ見て、 ダブロン 2 人目 ron で
         // 既宣言 1 人目 [親含む可能性] が忘れられて 連荘情報 失う bug
@@ -1635,6 +1655,8 @@ export function createGameStore() {
           for (const p of otherCands) {
             if (s.cpu[p as 0|1|2]) {
               s.game.restoreSnapshot();
+              // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
+              autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
               if (hasGoldKita(s.game, p as PlayerId)) {
                 s.game.autoResolveKinpei(p as any);
                 saveHuleSnapshot(s.game);
@@ -1694,7 +1716,7 @@ export function createGameStore() {
         }
         s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), ...ronResults.map(r => r.player).filter(p => !(s.ronDeclaredPlayers ?? []).includes(p))];
         const isFever = s.game.feverActive[winner as 0|1|2];
-        const feverNote = isFever ? '🔥 [フィーバー継続中]' : '';
+        const feverNote = isFever && !s.game.isFeverWaitExhausted(winner as 0|1|2) ? '🔥 [フィーバー継続中]' : '';
         s.message = s.ronResults.length > 1
           ? `🎉🎉 ダブロン! ${formatRonResults(s.ronResults)} ${feverNote}`
           : `🎉 player ${winner} ${isRon ? 'ロン' : 'ツモ'}和了！ ${formatHuleResult(result)} ${feverNote}`;
@@ -1891,7 +1913,7 @@ export function createGameStore() {
           s.ronResults = [];
         }
         const isFever = s.game.feverActive[winner as 0|1|2];
-        const feverNote = isFever ? '🔥 [フィーバー継続中]' : '';
+        const feverNote = isFever && !s.game.isFeverWaitExhausted(winner as 0|1|2) ? '🔥 [フィーバー継続中]' : '';
         const targetLabel = target ? ` [金北→${target}]` : ' [金北→保留]';
         const settledResults = isRon && s.ronResults.length > 0 ? s.ronResults : allResults;
         s.message = settledResults.length > 1
@@ -2364,6 +2386,8 @@ export function createGameStore() {
               // can consume Autumn indicators, so carrying the prior claimant's
               // mutation into this calculation would change the hand value.
               s.game.restoreSnapshot();
+              // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
+              autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
               // R5 P1 #4 fix: human pass 後 CPU 後発ロン でも 金北 autoResolve、 通常 path と揃える
               if (hasGoldKita(s.game, p as PlayerId)) {
                 s.game.autoResolveKinpei(p as any);
@@ -2540,7 +2564,8 @@ export function createGameStore() {
           // [user confirm 不要、 「使う以外 ありえない」 局面なので 自動 applyFuyu(true)]
           if (s.game.isFeverWaitExhausted(player) && !reversePochiDecisionTsumo) {
             s.game.fuyuConsumed[player] = true;
-            s.game.endFever(player);
+            // [2026-07-21 監査 D-08 fix] endFever は精算完了後 [settleAfterWin] に遅延。
+            // hule/applyHule 前に終了すると今回の和了から FEVER 倍率が消えていた
             s.message = `❄️ フィーバー中 + 待ち残山 0、 冬 自動使用 [機能 11]`;
             // fall through で 通常 tsumo path に [pendingFuyu set しない]
           } else {
@@ -3382,6 +3407,8 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     saveHuleSnapshot(s.game);
     for (const p of cpuRonCands) {
       s.game.restoreSnapshot();
+      // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
+      autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
       // R7 P1 #6 fix: CPU 直ロン経路 [discard 直後] でも autoResolveKinpei、 通常 path と揃え
       if (hasGoldKita(s.game, p as PlayerId)) {
         s.game.autoResolveKinpei(p as any);
