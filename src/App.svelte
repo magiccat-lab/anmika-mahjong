@@ -109,6 +109,25 @@
     if (!$game.game.preHuleSnapshot) return null;
     return [0,1,2].map(p => state.defen[p as PlayerId] - (($game.game.preHuleSnapshot as any).defen[p] ?? 0)) as [number, number, number];
   }
+  // 2026-07-21 [リョー報告: ダブロンで自分の和了表示が出ない] ダブロン各 winner の個別 delta。
+  // 直近の連続 hule イベント塊 [ダブロン=2連] の中から該当 player の delta を取り出す
+  function huleDefenDeltaFor(player: number): [number, number, number] | null {
+    const events = (($game.game.events ?? []) as any[]);
+    let lastHule = -1;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i]?.type === 'hule') { lastHule = i; break; }
+    }
+    if (lastHule < 0) return null;
+    let first = lastHule;
+    while (first > 0 && events[first - 1]?.type === 'hule' && events[first - 1]?.delta) first--;
+    for (let i = lastHule; i >= first; i--) {
+      const e = events[i];
+      if (e?.player === player && e?.delta) {
+        return [Number(e.delta[0] ?? 0), Number(e.delta[1] ?? 0), Number(e.delta[2] ?? 0)];
+      }
+    }
+    return null;
+  }
   // R6 P2 #13 fix: DEV / Playwright のみ debug log を発火、 production console を汚さない
   $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) console.log('[seat-debug] selfPlayer=', selfPlayer, 'srv0=', srv0, 'srv1=', srv1, 'srv2=', srv2, 'rotateOffset=', rotateOffset, 'revealCheck(srv0)=', selfPlayer === srv0); }
   $: { if (typeof window !== 'undefined' && onlineGameStarted && ((import.meta as any).env?.DEV || (typeof navigator !== 'undefined' && (navigator as any).webdriver))) console.log('[disabled-debug] currentPlayer=', currentPlayer, 'lunban=', state.lunban, 'srv0=', srv0, 'isCurrent(self)=', currentPlayer === srv0, 'needsZimo=', needsZimo, '_zimo(cur)=', $game.game.shoupai.get(currentPlayer)?._zimo, '_zimo(srv0)=', $game.game.shoupai.get(srv0)?._zimo, 'awaitRon=', $game.awaitingRonDecision, 'awaitFulou=', $game.awaitingFulou); }
@@ -1654,25 +1673,36 @@
   // 一人回しモード 自動 CPU 進行: P0 dapai 後 / 局終了以外 で 現家が P1/P2 [CPU] なら自動 cpuStep
   // [P0 zimo 待ち or modal 待ち or 副露候補 待ち で停止]
   // ※ オンライン時は host CPU driver に任せる、 各 client が独立 cpuStep 呼ぶと WS で連発 send になる
-  // 2026-05-14 fix: reactive 反復で同一手番に対して複数 setTimeout が積まれる不具合を防ぐ、
-  // jushu + lunban の合成 key で dedupe
-  let lastCpuStepKey: string | null = null;
+  // 2026-05-14 fix: reactive 反復で同一手番に対して複数 setTimeout が積まれる不具合を防ぐ
+  // 2026-07-21 fix [リョー報告: フィーバー中 CPU 手番で停止]: 旧 latch は key=jushu-lunban を
+  //   人間手番の観測 [cur===0] で解除していたが、フィーバー強制ツモ切り [7a8a22f] で人間手番が
+  //   同期通過すると reactive が cur===0 を観測できず、次の CPU 手番が同一 key で skip され
+  //   永久停止する。H-01 [北抜きロン見逃し後の同手番再開不能] も同因。key 比較を廃止し、
+  //   「未発火 timer 1 本のみ + 発火時に再検証」で重複予約と発火漏れの両方を防ぐ。
+  let cpuStepTimer: ReturnType<typeof setTimeout> | null = null;
+  function cpuCanStepNow(): boolean {
+    const snap = get(game) as any;
+    const cur = snap.game.lunbanToPlayerId(snap.game.state.lunban);
+    const cutinBusy = !!snap.cutin || ((snap.cutinQueue?.length ?? 0) > 0);
+    return !onlineGameStarted && viewMode === 'single' && !snap.roundEnded
+      && !snap.awaitingRonDecision && !snap.awaitingFulou
+      && !snap.pendingFuyu && !snap.pendingKinpei && !snap.pendingKamiPochi && !snap.pendingPochiSwap && !snap.pendingSaiKoro && !snap.pendingFeverContinue
+      && !cutinBusy
+      && cur !== 0 && snap.cpu[cur];
+  }
   $: {
     const cur = $game.game.lunbanToPlayerId($game.game.state.lunban);
-    const key = `${state.jushu}-${state.lunban}`;
-    // [2026-07-16 リョー指示: 演出同期] cutin 再生中は CPU を進めない。
-    // 再生終了で canStep が立ち直った時に同一手番でも再発火できるよう latch を解除する
     const cutinBusy = !!$game.cutin || (($game.cutinQueue?.length ?? 0) > 0);
     const canStep = !onlineGameStarted && viewMode === 'single' && !$game.roundEnded
       && !$game.awaitingRonDecision && !$game.awaitingFulou
       && !$game.pendingFuyu && !$game.pendingKinpei && !$game.pendingKamiPochi && !$game.pendingPochiSwap && !$game.pendingSaiKoro && !$game.pendingFeverContinue
       && !cutinBusy
       && cur !== 0 && $game.cpu[cur];
-    if (canStep && lastCpuStepKey !== key) {
-      lastCpuStepKey = key;
-      setTimeout(() => game.cpuStep(), cpuDelayMs);
-    } else if (!canStep && (cur === 0 || $game.roundEnded || cutinBusy)) {
-      lastCpuStepKey = null;
+    if (canStep && cpuStepTimer === null) {
+      cpuStepTimer = setTimeout(() => {
+        cpuStepTimer = null;
+        if (cpuCanStepNow()) game.cpuStep();
+      }, cpuDelayMs);
     }
   }
   // CPU ツモ和了のみ 自動遷移 [3 秒、 リョー指示 2026-05-12]、 CPU ロンは P0 に
@@ -2032,7 +2062,7 @@
     <div class="action-row sys">
       <span class="row-label">システム:</span>
       <button on:click={() => game.reset()}>初期化</button>
-      <button on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : '安全な手番開始時に保存できます'}>牌譜保存</button>
+      <button on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : (onlineGameStarted ? 'オンライン対局の牌譜保存は未対応です' : '安全な手番開始時に保存できます')}>牌譜保存</button>
       <button on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]">状態ダンプ</button>
       {#if onlineGameStarted && currentRoomId}
         <button on:click={requestRewind} disabled={rewindBusy} title="オンラインで事故った時、この局の冒頭まで巻き戻す [PW 必要]">🔧 局頭に戻す</button>
@@ -2097,7 +2127,7 @@
           <label title="他家の手牌を表示"><input type="checkbox" checked={revealAll} on:change={toggleRevealAll}>他家手牌</label>
           <label title="CPU の操作を2.5秒遅らせる"><input type="checkbox" bind:checked={cpuSlowMode}>CPU ラグ</label>
           <button class="table-setting-btn online" on:click={() => { viewMode = 'online'; }} title="オンライン対戦へ" aria-label="オンライン対戦へ">🌐 <span class="settings-label">オンライン対戦</span></button>
-          <button class="table-setting-btn save" on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : '安全な手番開始時に保存できます'} aria-label="牌譜保存">📂 <span class="settings-label">牌譜保存</span></button>
+          <button class="table-setting-btn save" on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : (onlineGameStarted ? 'オンライン対局の牌譜保存は未対応です' : '安全な手番開始時に保存できます')} aria-label="牌譜保存">📂 <span class="settings-label">牌譜保存</span></button>
           <button class="table-setting-btn save" on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ">🩺 <span class="settings-label">状態ダンプ</span></button>
           <!-- 打牌アドバイス [2026-07-21 リョー要望]: CPU戦のみ。初版は header 内 action-row に
                置いて single モードの display:none で丸ごと消えていた -->
@@ -2474,33 +2504,43 @@
             </div>
           {/if}
         {/if}
-        {#if $game.lastHuleResult && !state.finished}
-          <RoundEndPanel
-            lastWinner={$game.lastWinner}
-            huleResult={$game.lastHuleResult}
-            baopai={[...$game.game.shan.baopai]}
-            fubaopai={$game.game.shan.fubaopai ? [...$game.game.shan.fubaopai] : null}
-            winnerLizhi={$game.lastWinner !== null && $game.game.lizhi.has($game.lastWinner as PlayerId)}
-            defenDelta={latestHuleDefenDelta()}
-            defenAfter={[state.defen[0], state.defen[1], state.defen[2]] as [number, number, number]}
-            winnerShoupai={$game.lastWinner !== null ? handTiles($game.game.shoupai.get($game.lastWinner as PlayerId), $game.lastWinner) : []}
-            winnerFulou={$game.lastWinner !== null ? fulouMianzi($game.game.shoupai.get($game.lastWinner as PlayerId), $game.lastWinner as PlayerId) : []}
-            winnerHuapai={$game.lastWinner !== null ? ($game.game.huapai[$game.lastWinner as PlayerId] ?? []) : []}
-            winnerNuki={$game.lastWinner !== null ? ($game.game.nukidora[$game.lastWinner as PlayerId] ?? 0) : 0}
-            winnerNukiGold={$game.lastWinner !== null ? ($game.game.nukidoraGold[$game.lastWinner as PlayerId] ?? 0) : 0}
-            hideFuyuResult={$game.pendingKinpei !== null}
-            agariType={$game.lastDapai && $game.lastWinner !== null && $game.lastDapai.player !== $game.lastWinner ? 'ron' : ($game.lastWinner !== null ? 'tsumo' : null)}
-            agariPai={$game.lastDapai && $game.lastWinner !== null && $game.lastDapai.player !== $game.lastWinner
-              ? $game.lastDapai.pai
-              : ($game.lastWinner !== null ? ($game.game.shoupai.get($game.lastWinner as PlayerId)?._zimo ?? null) : null)}
-            agariFrom={$game.lastDapai && $game.lastWinner !== null && $game.lastDapai.player !== $game.lastWinner ? $game.lastDapai.player : null}
-          >
-            <div slot="chip">
-              {#if $game.lastHuleResult?.chipBreakdown?.length > 0}
-                <ChipBreakdown breakdown={$game.lastHuleResult.chipBreakdown} total={$game.lastHuleResult.chipTotal ?? 0} />
-              {/if}
-            </div>
-          </RoundEndPanel>
+        {#if $game.lastHuleResult}
+          <!-- 2026-07-21 fix [リョー報告: ダブロンで自分の和了が出ない]: ronResults の全 winner を
+               表示する [従来は lastHuleResult = kamicha 順最後の 1 人だけ]。
+               オーラス [state.finished] でも和了詳細を GameEndPanel の下に出す
+               [従来は終局サマリへ直行して最終局の和了内訳が見えなかった]。 -->
+          {@const huleEntries = ($game.ronResults?.length ?? 0) > 0
+            ? $game.ronResults
+            : ($game.lastWinner !== null ? [{ player: $game.lastWinner, result: $game.lastHuleResult }] : [])}
+          {#each huleEntries as hw (hw.player)}
+            {@const hwPid = hw.player as PlayerId}
+            <RoundEndPanel
+              lastWinner={hw.player}
+              huleResult={hw.result}
+              baopai={[...$game.game.shan.baopai]}
+              fubaopai={$game.game.shan.fubaopai ? [...$game.game.shan.fubaopai] : null}
+              winnerLizhi={$game.game.lizhi.has(hwPid)}
+              defenDelta={huleEntries.length > 1 ? huleDefenDeltaFor(hw.player) : latestHuleDefenDelta()}
+              defenAfter={[state.defen[0], state.defen[1], state.defen[2]] as [number, number, number]}
+              winnerShoupai={handTiles($game.game.shoupai.get(hwPid), hw.player)}
+              winnerFulou={fulouMianzi($game.game.shoupai.get(hwPid), hwPid)}
+              winnerHuapai={$game.game.huapai[hwPid] ?? []}
+              winnerNuki={$game.game.nukidora[hwPid] ?? 0}
+              winnerNukiGold={$game.game.nukidoraGold[hwPid] ?? 0}
+              hideFuyuResult={$game.pendingKinpei !== null}
+              agariType={$game.lastDapai && $game.lastDapai.player !== hw.player ? 'ron' : 'tsumo'}
+              agariPai={$game.lastDapai && $game.lastDapai.player !== hw.player
+                ? $game.lastDapai.pai
+                : ($game.game.shoupai.get(hwPid)?._zimo ?? null)}
+              agariFrom={$game.lastDapai && $game.lastDapai.player !== hw.player ? $game.lastDapai.player : null}
+            >
+              <div slot="chip">
+                {#if hw.result?.chipBreakdown?.length > 0}
+                  <ChipBreakdown breakdown={hw.result.chipBreakdown} total={hw.result.chipTotal ?? 0} />
+                {/if}
+              </div>
+            </RoundEndPanel>
+          {/each}
         {/if}
       </div>
       <!-- 2026-05-14 codex review #3 fix: inline Kinpei は winner 限定 -->
