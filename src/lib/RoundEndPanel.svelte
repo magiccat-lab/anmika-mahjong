@@ -181,11 +181,13 @@
     animation: kindStamp 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) both;
   }
   /* 2026-07-21 リョー指摘: ロン/ツモを赤青で塗り分けるのはきもい → 金縁の共通バッジ */
+  /* 2026-07-22 リョー指摘: 旧色[#243c2e]が暗くて見づらい → 明度と縁を上げて可読性UP */
   .kind-ron,
   .kind-tsumo {
-    background: linear-gradient(135deg, #243c2e, #16281e);
-    border: 1px solid #d4af37;
-    color: #f0e6c8;
+    background: linear-gradient(135deg, #3a7d55, #23543a);
+    border: 2px solid #f0d878;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   }
   .winner { font-weight: 800; color: #7c1620; font-size: 20px; }
   .score { color: #555; font-size: 15px; font-weight: 600; }
