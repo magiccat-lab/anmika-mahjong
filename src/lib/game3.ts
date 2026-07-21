@@ -297,6 +297,22 @@ function resultHasYakuman(result: any): boolean {
 
 export type KamiPochiContext = 'dora' | 'fuyu';
 export type KamiPochiDoraSource = 'baopai' | 'fubaopai';
+
+/** 打牌アドバイス1行 [adviseDiscard / evaluateDiscardRows_ 共通]。
+ *  safety: 現物10 / スジ4 / カベ2 / 危険-5、リーチ家なしは0 [hasLizhiOpponent=false]。
+ *  prio: CPU 内部優先度 [字牌・端牌加点と祝儀温存の減点込み]。 */
+export type DiscardAdviceRow = {
+  pai: string;
+  base: string;
+  xiangting: number;
+  ukeire: number;
+  safety: number;
+  hasLizhiOpponent: boolean;
+  prio: number;
+  dropsNiji: boolean;
+  forced: 'fever' | 'lizhi' | null;
+  recommended?: boolean;
+};
 export type KamiPochiDoraOccurrence = {
   key: string;
   source: KamiPochiDoraSource;
@@ -1509,6 +1525,22 @@ export class Game3 {
    *  同シャンテン候補内では: 全リーチ家の現物 [+10] > 字牌 [+3] > 端牌 [+2] > 2/8 [+1] > 中央
    *  他家リーチ中に自分がこのシャンテン以上 [遠い] なら安全度優先へ切り替える */
   pickBestDiscard(player: PlayerId): Pai | null {
+    const evaluated = this.evaluateDiscardRows_(player);
+    if (!evaluated) return null;
+    if (evaluated.forced) return evaluated.rows[0]?.pai as Pai ?? null;
+    return this.selectBestFromRows_(evaluated.rows, evaluated.foldMode) as Pai | null;
+  }
+
+  /** 打牌候補の共通評価 [pickBestDiscard と adviseDiscard の単一の物差し]。
+   *  2026-07-21 リョー要望のアドバイスモードで CPU と同じ評価を人間に開示するため、
+   *  pickBestDiscard のループを行データ生成 [evaluateDiscardRows_] と
+   *  選択 [selectBestFromRows_] に分離した。ヒューリスティックの中身は挙動保存の移動。
+   *  返り値 rows は get_dapai の候補順 [選択の同点先勝ちを保つため並べ替えない]。 */
+  private evaluateDiscardRows_(player: PlayerId): {
+    rows: DiscardAdviceRow[];
+    foldMode: boolean;
+    forced: 'fever' | 'lizhi' | null;
+  } | null {
     const sp = this.shoupai.get(player);
     if (!sp) return null;
     let candidates: string[];
@@ -1524,11 +1556,18 @@ export class Game3 {
     //   ただし z4 [北] は dapai 不可 [抜き北 path に任せる]、 ここでは候補から除外済の
     //   pickBestDiscard fallback に進めて 通常 heuristic 経由で他の打牌を選ばせる
     const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => this.feverActive[p]);
-    const mustTsumogiri = (someoneFever && !this.feverActive[player])
+    const isFeverForced = someoneFever && !this.feverActive[player];
+    const mustTsumogiri = isFeverForced
       || (this.lizhi.has(player) && !this.lizhiDeclareDapai[player]);
     if (mustTsumogiri) {
       const z = this.currentPhysicalZimoPai(player, sp);
-      if (z && toCorePai(z) !== 'z4') return z as Pai;
+      if (z && toCorePai(z) !== 'z4') {
+        return {
+          rows: [this.buildForcedTsumogiriRow_(sp, z)],
+          foldMode: false,
+          forced: isFeverForced ? 'fever' : 'lizhi',
+        };
+      }
     }
     const lizhiOpponents = [0, 1, 2].filter((p) => p !== player && this.lizhi.has(p as PlayerId)) as PlayerId[];
     const baseTile = (p: string) => {
@@ -1656,17 +1695,7 @@ export class Game3 {
       return coreCount <= held;
     };
 
-    let bestPai: string | null = null;
-    let bestShanten = 99;
-    let bestUkeire = -1;
-    let bestPriority = -1;
-    let bestSafety = -99;
-    let bestDropsNiji = false;
-    let keepPai: string | null = null;
-    let keepShanten = 99;
-    let keepUkeire = -1;
-    let keepPriority = -1;
-    let keepSafety = -99;
+    const rows: DiscardAdviceRow[] = [];
     for (const c of candidates) {
       const basePai = c.replace(/_$/, '');
       const sp_clone = sp.clone();
@@ -1734,8 +1763,39 @@ export class Game3 {
       }
       const dropsNiji = releasesNiji(baseTile(basePai));
       if (dropsNiji) prio -= 6;
-      // 通常は xt 最小 > ukeire 最大 > priority 最大。
-      // ベタオリ中は safety [純粋な安全度] を最優先し、同安全度の中で手を進める
+      rows.push({
+        pai: c,
+        base: baseTile(basePai),
+        xiangting: xt,
+        ukeire,
+        safety,
+        hasLizhiOpponent: lizhiOpponents.length > 0,
+        prio,
+        dropsNiji,
+        forced: null,
+      });
+    }
+    if (rows.length === 0) return null;
+    return { rows, foldMode, forced: null };
+  }
+
+  /** rows から CPU の1位打牌を選ぶ [挙動保存: 同点は候補順の先勝ち]。
+   *  通常は xt 最小 > ukeire 最大 > priority 最大。
+   *  ベタオリ中は safety [純粋な安全度] を最優先し、同安全度の中で手を進める */
+  private selectBestFromRows_(rows: DiscardAdviceRow[], foldMode: boolean): string | null {
+    let bestPai: string | null = null;
+    let bestShanten = 99;
+    let bestUkeire = -1;
+    let bestPriority = -1;
+    let bestSafety = -99;
+    let bestDropsNiji = false;
+    let keepPai: string | null = null;
+    let keepShanten = 99;
+    let keepUkeire = -1;
+    let keepPriority = -1;
+    let keepSafety = -99;
+    for (const row of rows) {
+      const { xiangting: xt, ukeire, prio, safety, dropsNiji } = row;
       const isBetter = (bs: number, bu: number, bp: number, bsf: number) => foldMode
         ? (safety > bsf
           || (safety === bsf && xt < bs)
@@ -1748,7 +1808,7 @@ export class Game3 {
         bestUkeire = ukeire;
         bestPriority = prio;
         bestSafety = safety;
-        bestPai = c;
+        bestPai = row.pai;
         bestDropsNiji = dropsNiji;
       }
       if (!dropsNiji && isBetter(keepShanten, keepUkeire, keepPriority, keepSafety)) {
@@ -1756,7 +1816,7 @@ export class Game3 {
         keepUkeire = ukeire;
         keepPriority = prio;
         keepSafety = safety;
-        keepPai = c;
+        keepPai = row.pai;
       }
     }
     // 押し引き平常時: 同シャンテンで虹を守れる代替打があるなら、受け入れ損は
@@ -1765,6 +1825,57 @@ export class Game3 {
       return keepPai;
     }
     return bestPai;
+  }
+
+  /** 強制ツモ切り時の advise 表示用行。metrics は取れる範囲で埋める [失敗時 0]。 */
+  private buildForcedTsumogiriRow_(sp: any, z: string): DiscardAdviceRow {
+    let xt = 99;
+    try {
+      const clone = sp.clone();
+      clone.dapai(z);
+      xt = lizhiXiangting(clone);
+    } catch { /* 表示用のみ、失敗は許容 */ }
+    const core = toCorePai(String(z).replace(/[_*]$/, ''));
+    return {
+      pai: z,
+      base: core.length >= 2 ? core[0] + (core[1] === '0' ? '5' : core[1]) : core,
+      xiangting: xt === 99 ? 0 : xt,
+      ukeire: 0,
+      safety: 0,
+      hasLizhiOpponent: false,
+      prio: 0,
+      dropsNiji: false,
+      forced: null,
+    };
+  }
+
+  /** 打牌アドバイス [2026-07-21 リョー要望: CPU戦のみのアドバイスモード]。
+   *  CPU の打牌評価 [evaluateDiscardRows_] と同じ物差しで候補を採点して返す。
+   *  他家の伏せ牌・山は一切見ない [visibleElsewhere ベース、CPU と同条件]。
+   *  recommended は pickBestDiscard と同一ロジック [selectBestFromRows_] の1位。
+   *  並びは foldMode なら安全度優先、通常は向聴 > 受け入れ > 優先度。同点は候補順維持。 */
+  adviseDiscard(player: PlayerId, topN = 5): DiscardAdviceRow[] {
+    const evaluated = this.evaluateDiscardRows_(player);
+    if (!evaluated) return [];
+    const { rows, foldMode, forced } = evaluated;
+    if (forced) {
+      return [{ ...rows[0], forced, recommended: true }];
+    }
+    const bestPai = this.selectBestFromRows_(rows, foldMode);
+    const sorted = [...rows].sort((a, b) => {
+      if (foldMode) {
+        if (a.safety !== b.safety) return b.safety - a.safety;
+        if (a.xiangting !== b.xiangting) return a.xiangting - b.xiangting;
+        return b.ukeire - a.ukeire;
+      }
+      if (a.xiangting !== b.xiangting) return a.xiangting - b.xiangting;
+      if (a.ukeire !== b.ukeire) return b.ukeire - a.ukeire;
+      return b.prio - a.prio;
+    });
+    return sorted.slice(0, topN).map((row) => ({
+      ...row,
+      recommended: row.pai === bestPai,
+    }));
   }
 
   /** 北を手牌構成 [雀頭/面子/ロン牌] として使う和了は、役満だけ許可する。 */

@@ -1321,6 +1321,25 @@
     }
   }
 
+  // 打牌アドバイスモード [2026-07-21 リョー要望: CPU戦のみ・基本非表示・押した時だけ計算]
+  // CPU の打牌評価 [adviseDiscard] をそのまま開示する。山・他家の伏せ牌は見ない
+  let adviceOpen = false;
+  $: adviceAvailable = viewMode === 'single' && !onlineGameStarted
+    && currentPlayer === selfPlayer && !$game.cpu[selfPlayer as PlayerId]
+    && !!$game.lastZimo && !$game.roundEnded && !$game.awaitingRonDecision
+    && !$game.awaitingFulou && $game.lizhiPending === null;
+  $: adviceRows = (adviceOpen && adviceAvailable)
+    ? $game.game.adviseDiscard(selfPlayer as PlayerId, 5)
+    : [];
+  $: adviceDoraTiles = baopai.map(doraFrom);
+  function adviceIsDora(row: { base: string; pai: string }): boolean {
+    if (/^[mps]0$/.test(row.pai.replace(/[_*]$/, ''))) return true;
+    return countDisplayDora([row.base], adviceDoraTiles) > 0;
+  }
+  function adviceSafetyLabel(safety: number): string {
+    return safety >= 10 ? '現物' : safety >= 4 ? 'スジ' : safety >= 2 ? 'カベ' : '危険';
+  }
+
   // ツモ切り auto モード [リョー指示 2026-05-12 checkbox 化]
   let autoTsumoKiri = false;
   function readAutoTsumokiriToken(): AutoTsumokiriToken | null {
@@ -1783,6 +1802,43 @@
         />
       {/each}
     </div>
+    <!-- 打牌アドバイス [2026-07-21 リョー要望]: CPU戦のみ、ボタンを押した時だけ表示 -->
+    {#if !onlineGameStarted && viewMode === 'single'}
+      <div class="action-row">
+        <button class:advice-on={adviceOpen} on:click={() => adviceOpen = !adviceOpen}>💡 助言</button>
+        {#if adviceOpen}
+          <span class="advice-note">CPUと同じ目線の目安。山と他家の伏せ牌は見てない</span>
+        {/if}
+      </div>
+      {#if adviceOpen}
+        <div class="advice-panel">
+          {#if !adviceAvailable}
+            <div class="advice-hint">自分の手番 [ツモ後] に候補が出る</div>
+          {:else if adviceRows.length === 0}
+            <div class="advice-hint">この局面では候補を出せない</div>
+          {:else if adviceRows[0].forced}
+            <div class="advice-hint">
+              {adviceRows[0].forced === 'fever' ? 'フィーバー中はツモ切り強制:' : 'リーチ中はツモ切り:'}
+              <Tile pai={adviceRows[0].base} size="sm" /> を切る
+            </div>
+          {:else}
+            {#each adviceRows as row (row.pai)}
+              <div class="advice-row" class:advice-best={row.recommended}>
+                <Tile pai={row.base} size="sm" />
+                <span class="advice-cell">{row.xiangting === 0 ? 'テンパイ' : `${row.xiangting}向聴`}</span>
+                <span class="advice-cell">受け{row.ukeire}枚</span>
+                {#if row.hasLizhiOpponent}
+                  <span class="advice-chip" class:advice-danger={row.safety < 2}>{adviceSafetyLabel(row.safety)}</span>
+                {/if}
+                {#if adviceIsDora(row)}<span class="advice-chip advice-dora">ドラ</span>{/if}
+                {#if row.dropsNiji}<span class="advice-chip advice-danger">虹が出る</span>{/if}
+                {#if row.recommended}<span class="advice-chip advice-best-chip">CPU推し</span>{/if}
+              </div>
+            {/each}
+          {/if}
+        </div>
+      {/if}
+    {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: 進行 row は debug 寄り、 オンライン中は
          ツモ切り / 自動 / CPU button が 他人手番でも代理 action になるので非表示。
          CPU toggle は local 状態 [single mode 用]、 単独表示にする -->
@@ -2741,6 +2797,29 @@
   }
   .tile-btn:disabled { cursor: default; opacity: 0.6; }
   .tile-btn:not(:disabled):hover { background: #ffe; border-radius: 4px; }
+  /* 打牌アドバイス [2026-07-21] */
+  button.advice-on { background: #2e5c48; color: #ffd54f; }
+  .advice-note { font-size: 11px; opacity: 0.75; }
+  .advice-panel {
+    display: flex; flex-direction: column; gap: 3px;
+    margin: 4px 0; padding: 6px 8px;
+    background: rgba(0, 0, 0, 0.25); border-radius: 8px;
+    max-width: 480px;
+  }
+  .advice-hint { font-size: 12px; opacity: 0.85; display: flex; align-items: center; gap: 4px; }
+  .advice-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 2px 4px; border-radius: 6px; font-size: 12px;
+  }
+  .advice-row.advice-best { background: rgba(255, 213, 79, 0.16); }
+  .advice-cell { min-width: 58px; }
+  .advice-chip {
+    padding: 1px 6px; border-radius: 8px; font-size: 11px;
+    background: #35584a; color: #cfe8dc;
+  }
+  .advice-chip.advice-danger { background: #6b2f2f; color: #ffbdbd; }
+  .advice-chip.advice-dora { background: #7a5a1e; color: #ffe1a1; }
+  .advice-chip.advice-best-chip { background: #ffd54f; color: #23372e; font-weight: 700; }
   .tile-btn.tsumo-tile {
     margin-left: 12px;
     border-bottom: 3px solid #f0a000;
