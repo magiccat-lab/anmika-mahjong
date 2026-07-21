@@ -237,7 +237,10 @@ describe('saiKoro actions [no-op / 基本進行]', () => {
     expect(zoro?.total).toBe(22);
   });
 
-  it('フィーバー継続中のロン由来サイコロにも逆ぽっちを適用する', () => {
+  it('フィーバー継続中のロン由来サイコロはぽっちを除外する [2026-07-21 監査 D-06]', () => {
+    // 旧テストは「FEVER 中はロン由来にも逆ぽっち適用」を検証していたが、
+    // 2026-07-15 裁定はロン由来サイコロを FEVER の有無にかかわらずぽっち除外とする。
+    // FEVER tier2 の倍率だけが乗る [1 × 4hit × FEVER2 = +8]。
     const s = get(game);
     s.game.feverActive[0] = true;
     s.game.feverTier[0] = 2;
@@ -254,9 +257,9 @@ describe('saiKoro actions [no-op / 基本進行]', () => {
     for (let i = 0; i < 4; i++) game.rollSaiKoroDice([1, 2]);
     const after = get(game);
     const entry = after.game.chipBreakdown.at(-1);
-    expect(entry?.multiplier).toBe(-4);
-    expect(entry?.total).toBe(-16);
-    expect(after.pendingSaiKoro?.summary?.chipN).toBe(-16);
+    expect(entry?.multiplier).toBe(2);
+    expect(entry?.total).toBe(8);
+    expect(after.pendingSaiKoro?.summary?.chipN).toBe(8);
   });
 
   it('countを独立した出目宣言セッションへ展開する', () => {

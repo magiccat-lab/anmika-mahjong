@@ -311,6 +311,100 @@ export function enterFuyuKamiPochiStage(s: StoreState, context: WinChoiceContext
   return false;
 }
 
+/**
+ * 加槓の槍槓反応窓 [R9 P1 #7 → 2026-07-21 監査 D-04 fix で human/CPU 共通化]。
+ * mianzi が加槓 pattern なら他家ロン可否を確認し、
+ * - 人間候補あり → pendingQianggang + awaitingRonDecision で判断待ち [handled]
+ * - CPU 候補のみ → 即 auto-ron で槍槓成立 [handled] / 全役なしなら通常進行へ
+ * - 候補なし / 暗槓 → handled=false [呼び出し側が declareKanImpl へ進む]
+ * 旧実装は store action [人間] 専用で、CPU の自動加槓 [cpuStepImpl] は
+ * game.declareKan 直呼びで窓を作らず槍槓を迂回していた。
+ */
+export function processKakanQianggangWindow(
+  s: StoreState,
+  mianzi: string,
+): { s: StoreState; handled: boolean } {
+  const isKakan = !!mianzi.match(/^[mpsz]\d{3}[\+\=\-]\d$/);
+  if (!isKakan) return { s, handled: false };
+  const player = s.game.lunbanToPlayerId(s.game.state.lunban);
+  // 加槓 tile = mianzi 末尾 1 桁 [例 m1110→ kakan の 4 枚目]、 ronpai として使う
+  const kakanN = mianzi[mianzi.length - 1];
+  const kakanPai = mianzi[0] + kakanN;
+  // 他家で ron 可能か check [qianggangPending true で hule に qianggang flag が付く]
+  s.game.qianggangPending = true;
+  const ronCands = ([0, 1, 2] as const).filter(p => p !== player && s.game.canRon(p, kakanPai, player as any));
+  // R11 codex P0 #1 fix: CPU only 候補 だと誰も押せず online で停止、 CPU は即 auto-ron
+  const cpuRonCands = ronCands.filter(p => s.cpu[p as 0|1|2]);
+  const humanRonCands = ronCands.filter(p => !s.cpu[p as 0|1|2]);
+  if (humanRonCands.length === 0 && cpuRonCands.length > 0) {
+    // CPU 槍槓 ron 即時 apply
+    saveHuleSnapshot(s.game);
+    s.lastDapai = { player, pai: kakanPai };
+    const ronResults: Array<{ player: number; result: any }> = [];
+    for (const p of cpuRonCands) {
+      s.game.restoreSnapshot();
+      if (hasGoldKita(s.game, p as PlayerId)) {
+        s.game.autoResolveKinpei(p as any);
+        saveHuleSnapshot(s.game);
+      }
+      let r = s.game.hule(p as any, kakanPai, player as any);
+      if (r) {
+        const choice = resolvePreSettlementPochiChoices(
+          s,
+          r,
+          { winner: p as PlayerId, isRon: true, ronfrom: player as PlayerId },
+          () => s.game.hule(p as PlayerId, kakanPai, player as PlayerId),
+        );
+        if (choice.pending) return { s, handled: true };
+        r = choice.result;
+      }
+      if (r) {
+        ronResults.push({ player: p, result: r });
+      }
+    }
+    s.game.qianggangPending = false;
+    if (ronResults.length > 0) {
+      const settledRonResults = settleRonResultsInKamichaOrder(
+        s.game,
+        player as PlayerId,
+        ronResults,
+      );
+      const oya = s.game.currentOya;
+      const oyaWon = settledRonResults.find(r => r.player === oya);
+      s.lastWinner = oyaWon ? oyaWon.player : settledRonResults[settledRonResults.length - 1].player;
+      s.lastHuleResult = settledRonResults[settledRonResults.length - 1].result;
+      s.ronResults = settledRonResults;
+      if (enterFuyuKamiPochiStage(s, {
+        winner: s.lastWinner as PlayerId,
+        isRon: true,
+        ronfrom: player as PlayerId,
+      })) {
+        return { s, handled: true };
+      }
+      // R18 #4 fix: CPU 槍槓 ロンも fever 継続対応 [旧 roundEnded=true 固定で fever 抜け]
+      const winnerSeatQ = s.lastWinner as PlayerId;
+      settleAfterWin(s, { winner: winnerSeatQ, isRon: true, ronfrom: player as PlayerId });
+      s.message = `🎉 CPU 槍槓 ron: ${settledRonResults.map(r => `p${r.player}`).join('/')}`;
+      for (const rr of settledRonResults) {
+        s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
+        s = triggerSaiKoroIfAny(s, rr.result, rr.player);
+      }
+      return { s, handled: true };
+    }
+    // 全 CPU 役なしで ron 失敗 → 加槓 通常進行
+  }
+  if (humanRonCands.length > 0) {
+    enterQianggangStage(s, { player, mianzi, kakanPai });
+    s.lastDapai = { player, pai: kakanPai };
+    enterRonDecisionStage(s);
+    s.message = `🎯 加槓 [${mianzi}] → 槍槓 ron 候補 p${humanRonCands.join('/')} の判断待ち`;
+    return { s, handled: true };
+  }
+  // ron 候補なし → 通常 declareKanImpl に進む [qianggangPending は declareKan 内で再 set]
+  s.game.qianggangPending = false;
+  return { s, handled: false };
+}
+
 function hasPostWinDecision(s: StoreState): boolean {
   return !!(s.pendingFuyu || s.pendingKinpei || s.pendingKamiPochi || s.pendingPochiSwap
     || s.pendingSaiKoro || s.pendingFeverContinue);
@@ -1995,7 +2089,8 @@ export function createGameStore() {
             const chanceMode = (curChance as any)?.mode ?? 'tsumo';
             s.game.applyChipOall(chanceWinner, zoroBonusThisRoll, {
               bypassShuvari: true,
-              bypassPochi: chanceMode === 'ron' && !s.game.feverActive[chanceWinner],
+              // [2026-07-21 監査 D-06 fix] ロン由来サイコロは FEVER 中でもぽっち除外 [2026-07-15 裁定]
+              bypassPochi: chanceMode === 'ron',
               bypassFever: false,
               label: `🎲 ゾロ目連続特典 [${n},${n}] ×${consec}`,
               mode: chanceMode,
@@ -2026,7 +2121,8 @@ export function createGameStore() {
             // シュバは サイコロ chip 倍率に乗らない [リョー指示 2026-05-12]
             s.game.applyChipOall(chanceWinner, chipN, {
               bypassShuvari: true,
-              bypassPochi: (chance as any).mode === 'ron' && !s.game.feverActive[chanceWinner],
+              // [2026-07-21 監査 D-06 fix] ロン由来サイコロは FEVER 中でもぽっち除外 [2026-07-15 裁定]
+              bypassPochi: (chance as any).mode === 'ron',
               bypassFever: false,
               label: `🎲 サイコロ ${chance.name} [${hits} hit × ${baseChip}]`,
               mode: (chance as any).mode ?? 'tsumo',
@@ -2047,7 +2143,7 @@ export function createGameStore() {
           const chanceMode = (chanceFin as any).mode ?? 'tsumo';
           const mulFin = s.game.computeChipMultiplier(chanceWinner, {
             bypassShuvari: true,
-            bypassPochi: chanceMode === 'ron' && !s.game.feverActive[chanceWinner],
+            bypassPochi: chanceMode === 'ron',
             mode: chanceMode,
           });
           ps.summary = { hits, chipN: chipN * mulFin, zoroBonusTotal: zoroAcc };
@@ -2590,87 +2686,9 @@ export function createGameStore() {
       if (sendOnlineAction({ type: 'declareKan', mianzi })) return;
       update((s) => {
         if (isLiveTurnActionBlocked(s)) return { ...s };
-        // R9 P1 #7 fix: 加槓 [mianzi が ^[mpsz]\d{3}[\+\=\-]\d$ pattern] は 他家ロン window を挟む。
-        // ron 可能な player いれば pendingQianggang に保存 + awaitingRonDecision、 全 pass で 後段実行
-        const isKakan = !!mianzi.match(/^[mpsz]\d{3}[\+\=\-]\d$/);
-        if (isKakan) {
-          const player = s.game.lunbanToPlayerId(s.game.state.lunban);
-          // 加槓 tile = mianzi 末尾 1 桁 [例 m1110→ kakan の 4 枚目]、 ronpai として使う
-          const kakanN = mianzi[mianzi.length - 1];
-          const kakanPai = mianzi[0] + kakanN;
-          // 他家で ron 可能か check [qianggangPending true で hule に qianggang flag が付く]
-          s.game.qianggangPending = true;
-          const ronCands = ([0, 1, 2] as const).filter(p => p !== player && s.game.canRon(p, kakanPai, player as any));
-          // R11 codex P0 #1 fix: CPU only 候補 だと誰も押せず online で停止、 CPU は即 auto-ron
-          const cpuRonCands = ronCands.filter(p => s.cpu[p as 0|1|2]);
-          const humanRonCands = ronCands.filter(p => !s.cpu[p as 0|1|2]);
-          if (humanRonCands.length === 0 && cpuRonCands.length > 0) {
-            // CPU 槍槓 ron 即時 apply
-            saveHuleSnapshot(s.game);
-            s.lastDapai = { player, pai: kakanPai };
-            const ronResults: Array<{ player: number; result: any }> = [];
-            for (const p of cpuRonCands) {
-              s.game.restoreSnapshot();
-              if (hasGoldKita(s.game, p as PlayerId)) {
-                s.game.autoResolveKinpei(p as any);
-                saveHuleSnapshot(s.game);
-              }
-              let r = s.game.hule(p as any, kakanPai, player as any);
-              if (r) {
-                const choice = resolvePreSettlementPochiChoices(
-                  s,
-                  r,
-                  { winner: p as PlayerId, isRon: true, ronfrom: player as PlayerId },
-                  () => s.game.hule(p as PlayerId, kakanPai, player as PlayerId),
-                );
-                if (choice.pending) return { ...s };
-                r = choice.result;
-              }
-              if (r) {
-                ronResults.push({ player: p, result: r });
-              }
-            }
-            s.game.qianggangPending = false;
-            if (ronResults.length > 0) {
-              const settledRonResults = settleRonResultsInKamichaOrder(
-                s.game,
-                player as PlayerId,
-                ronResults,
-              );
-              const oya = s.game.currentOya;
-              const oyaWon = settledRonResults.find(r => r.player === oya);
-              s.lastWinner = oyaWon ? oyaWon.player : settledRonResults[settledRonResults.length - 1].player;
-              s.lastHuleResult = settledRonResults[settledRonResults.length - 1].result;
-              s.ronResults = settledRonResults;
-              if (enterFuyuKamiPochiStage(s, {
-                winner: s.lastWinner as PlayerId,
-                isRon: true,
-                ronfrom: player as PlayerId,
-              })) {
-                return { ...s };
-              }
-              // R18 #4 fix: CPU 槍槓 ロンも fever 継続対応 [旧 roundEnded=true 固定で fever 抜け]
-              const winnerSeatQ = s.lastWinner as PlayerId;
-              settleAfterWin(s, { winner: winnerSeatQ, isRon: true, ronfrom: player as PlayerId });
-              s.message = `🎉 CPU 槍槓 ron: ${settledRonResults.map(r => `p${r.player}`).join('/')}`;
-              for (const rr of settledRonResults) {
-                s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
-                s = triggerSaiKoroIfAny(s, rr.result, rr.player);
-              }
-              return { ...s };
-            }
-            // 全 CPU 役なしで ron 失敗 → 加槓 通常進行
-          }
-          if (humanRonCands.length > 0) {
-            enterQianggangStage(s, { player, mianzi, kakanPai });
-            s.lastDapai = { player, pai: kakanPai };
-            enterRonDecisionStage(s);
-            s.message = `🎯 加槓 [${mianzi}] → 槍槓 ron 候補 p${humanRonCands.join('/')} の判断待ち`;
-            return { ...s };
-          }
-          // ron 候補なし → 通常 declareKanImpl に進む [qianggangPending は declareKan 内で再 set]
-          s.game.qianggangPending = false;
-        }
+        const kakan = processKakanQianggangWindow(s, mianzi);
+        s = kakan.s;
+        if (kakan.handled) return { ...s };
         return declareKanImpl(s, mianzi);
       });
     },

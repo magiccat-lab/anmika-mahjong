@@ -14,6 +14,7 @@ import {
   confirmPendingFeverBeforeDraw,
   enterFuyuKamiPochiStage,
   resolvePreSettlementPochiChoices,
+  processKakanQianggangWindow,
 } from '../store';
 import { toCorePai } from '../helpers';
 import { enterFeverContinueStage } from './winPipeline';
@@ -246,6 +247,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     //   - majiang-core 側で 形崩れ filter は通る前提 [getKanCandidates の get_gang_mianzi]
     //   - 副露直後 [_zimo が mianzi 文字列、 length>3] は kan 不可 [実 tile 無いため skip]
     let didKan = false;
+    let kanReactionOpened = false;
     const _zimoLen = typeof curSp?._zimo === 'string' ? curSp._zimo.length : 0;
     if (declaredLizhiDapai === null && _zimoLen > 0 && _zimoLen <= 3) {
       try {
@@ -254,6 +256,15 @@ export function cpuStepImpl(initial: StoreState): StoreState {
           // m is a core mianzi string, not an expanded physical tile name.
           const head = `${m[0]}${m[1]}`;
           if (head === 'z5' || head === 'z6' || head === 'z7') {
+            // [2026-07-21 監査 D-04 fix] CPU の加槓も human と同じ槍槓反応窓を通す。
+            // 旧実装は game.declareKan 直呼びで pendingQianggang/awaitingRonDecision を
+            // 作らず嶺上まで取得し、他家が槍槓できなかった
+            const kakan = processKakanQianggangWindow(s, m);
+            s = kakan.s;
+            if (kakan.handled) {
+              kanReactionOpened = true;
+              break;
+            }
             const repl = s.game.declareKan(cur, m);
             if (repl) {
               s.lastZimo = repl;
@@ -265,6 +276,8 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         }
       } catch { /* skip kan, fall through to discard */ }
     }
+    // 槍槓判断待ち [人間] / 槍槓和了処理済み [CPU] はこの手番を中断する
+    if (kanReactionOpened) break;
     if (didKan) { safety++; continue; }
     // Once riichi has been charged, the same step must commit one of the
     // declaration candidates.  A general efficiency pick may break tenpai;
