@@ -235,6 +235,10 @@ function hasPendingDecision(state: Pick<StoreState,
  * match after every post-win decision has been resolved.
  */
 export function isSafePaifuSavePoint(state: StoreState): boolean {
+  // [2026-07-21 監査 C-01 fix] オンライン [blind 山] の v3 は山 inventory を持たず、
+  // 読込側の diffInventory に必ず拒否される。「保存成功に見えて復元不能」な生成物を
+  // 作らないよう、blind state は保存点として認めない [権威 snapshot 保存に対応するまで]
+  if (state.game.shan?.isBlind) return false;
   if (hasPendingDecision(state)) return false;
   // [2026-07-20] カットイン再生中は CPU 進行が止まっている最中で、
   // 復元しても演出状態は再現されない。安全な保存点ではない

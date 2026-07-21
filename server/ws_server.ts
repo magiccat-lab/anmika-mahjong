@@ -1203,7 +1203,33 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       return;
     }
 
-    if (canonical.roundEnded) return;
+    if (canonical.roundEnded) {
+      // [2026-07-21 監査 H-02 fix] 解決済み終局は winner/host の ready [markReadyForNextRound]
+      // 頼みで、両者が切断すると誰も次局へ進めず残った参加者が全員詰みだった。
+      // サーバー自身が長めの fallback deadline で冪等な nextRound を発行する。
+      // ready が先に動けば revision が進み、この timer は guard で no-op になる。
+      if (!authority.isPostWinResolved()) return;
+      if (canonical.game?.state?.finished) return; // 半荘終了は nextMatch [host 選択] 待ち
+      const revision = room.snapshot.revision;
+      const fallbackMs = Number(process.env.ANMIKA_NEXT_ROUND_FALLBACK_MS || 120_000);
+      room.deadlineTimer = setTimeout(() => {
+        room.queue = room.queue.then(async () => {
+          if (room.snapshot.revision !== revision || !room.authority?.isPostWinResolved()) return;
+          const accepted = acceptAction(
+            room,
+            room.authority.lastWinner ?? 0,
+            '__server_next_round_fallback__',
+            { type: 'nextRound', from_role: 'server-fallback' },
+            `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
+          );
+          if (accepted.command) {
+            broadcastAction(room, accepted.command);
+            scheduleRoomDeadline(room);
+          }
+        }).catch((error) => warn('[anmika-ws] next-round fallback failed', error));
+      }, fallbackMs);
+      return;
+    }
 
     const reactionSeats = new Set<number>();
     for (const player of authority.ronCandidates) reactionSeats.add(player);

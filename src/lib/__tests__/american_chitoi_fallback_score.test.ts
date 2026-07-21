@@ -8,6 +8,11 @@ function gameWithAmericanChitoi(tiles: string[]): Game3 {
   (game.shan as any)._pai = ['p2', 's2', 'p3', 's3'];
   (game.shan as any)._baopai = [];
   (game.shan as any)._fubaopai = [];
+  // [2026-07-21 fix] qipai のランダム配牌で華 [秋 f3 等] が残ると和了時に追加ドラが開いて
+  // doraFanshu がブレる flaky だった [vitest retry=2 が隠していた]。華牌も完全初期化する
+  game.huapai[0] = [];
+  game.huapai[1] = [];
+  game.huapai[2] = [];
   game.firstTurnState.players[0].drawCount = 2;
   game.firstTurnState.players[0].hasDiscarded = true;
   game.lizhi.add(0);
