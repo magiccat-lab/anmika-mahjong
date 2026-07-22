@@ -1150,6 +1150,11 @@
       ws.send(JSON.stringify({ type: 'resync', expectedVersion: 0 }));
       return;
     }
+    // [2026-07-22 Sol指摘 P1] start.members は開始時点の stale。reconnect 後の
+    // 表示名や接続状態は server 同梱の currentMembers を正とする
+    if (Array.isArray(snapshot.currentMembers) && snapshot.currentMembers.length > 0) {
+      onlineMembers = snapshot.currentMembers;
+    }
     if (!snapshot.state || !game.hydrateOnlineProjection(snapshot.state)) {
       ws.send(JSON.stringify({ type: 'resync', expectedVersion: 0 }));
       return;
@@ -1408,6 +1413,18 @@
       autoTsumoKiri = false;
     }
   }
+  // [2026-07-22 リョー報告: 試合開始直後にツモを進めてくださいで停止]
+  // オンラインで自分の手番なのに zimo が無い中間 state に落ちたら自動で進める
+  // [drawNext は server 側 action として実装済み。単体モードは従来通り手動ボタン]
+  let _autoDrawNextKey = '';
+  $: if (onlineGameStarted && needsZimo && currentPlayer === selfPlayer && !$game.roundEnded) {
+    const k = `${state.changbang}-${state.jushu}-${state.benbang}-${$game.game.events?.length ?? 0}`;
+    if (k !== _autoDrawNextKey) {
+      _autoDrawNextKey = k;
+      setTimeout(() => { const s: any = get(game); if (s && !s.roundEnded) game.drawNext(); }, 400);
+    }
+  }
+
   // [2026-07-22 リョー要望] オンライン用トグル: 鳴きなし / 自動アガリ
   let onlineNoCall = false;
   let onlineAutoWin = false;

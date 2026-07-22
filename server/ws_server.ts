@@ -888,6 +888,7 @@ function sendSync(
   recipientSeat: number,
   authority: RoomAuthority | null,
   fullCommands?: AcceptedRoomCommand[],
+  currentMembers?: Array<{ seat: number; user_id: string; username: string; is_cpu: boolean; connected?: boolean }> | null,
 ): void {
   const payload = fullCommands ? { ...snapshot, commands: fullCommands } : snapshot;
   let sanitizedStart = payload.start;
@@ -911,6 +912,9 @@ function sendSync(
       ...payload,
       start: sanitizedStart,
       commands,
+      // [2026-07-22 Sol指摘 P1] reconnect 時に stale な start.members が
+      // fresh lobby を上書きする穴。現在の members を authoritative として同梱
+      currentMembers: currentMembers ?? null,
       state: authority ? captureSeatProjection(authority, recipientSeat) : null,
     },
   });
@@ -1137,7 +1141,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         // settlement inputs are derived from canonical server state.
         action.resetChip = action.resetChip === true;
         action.finalize = action.resetChip !== true;
-        action.qijia = room.authority.game.state.qijia;
+        // [2026-07-22 リョー要望: 回り親] 次の試合は起家を1つ回す [server 決定、Sol設計D]
+        action.qijia = ((room.authority.game.state.qijia + 1) % 3) as 0 | 1 | 2;
         action.cpuSeats = membersForAuthority(room)
           .filter((member) => member.is_cpu)
           .map((member) => member.seat);
@@ -1580,7 +1585,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         let msg: unknown;
         try { msg = JSON.parse(data.toString()); } catch { return; }
         if ((msg as Record<string, unknown>)?.type === 'resync') {
-          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId));
+          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
           return;
         }
         if ((msg as Record<string, unknown>)?.type === 'start') {
@@ -1615,14 +1620,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           // The retrying client may have missed commands accepted after its
           // original one. A full canonical sync is safe and avoids relaying an
           // old revision with today's match/round identifiers.
-          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId));
+          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
           return;
         }
         if (envelope.expectedVersion !== room.snapshot.revision
           || envelope.matchId !== room.snapshot.matchId
           || envelope.roundId !== room.snapshot.roundId) {
           reject(ws, room, envelope.commandId, 'version conflict');
-          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId));
+          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
           return;
         }
         const validated = validateAction(room, payload.uid, payload.seat, envelope.action);
@@ -1672,7 +1677,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
 
     broadcast(room, lobbyPayload(room));
     if (room.snapshot.started) {
-      sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId));
+      sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
       // [2026-07-21 監査 D-15 fix] 再接続時は手番 deadline を現在時刻から張り直す。
       // scheduleRoomDeadline は冒頭で旧 timer を clearTimeout するので、切断前の
       // 残り期限で復帰直後に auto-discard される事故を防ぐ [新世代で rebase]
