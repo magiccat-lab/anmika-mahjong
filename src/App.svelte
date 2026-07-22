@@ -2489,10 +2489,6 @@
         {#if state.finished}
           <GameEndPanel ranking={$game.game.getRanking()} zifengZ={(p) => $game.game.zifengZ(p as any)} chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)} finalScore={$game.game.getFinalScore()} />
         {/if}
-        <!-- 2026-07-22 リョー指摘: 半荘終了の順位表と最終局の和了詳細がくっついてる。区切りを挟む -->
-        {#if state.finished && $game.lastHuleResult}
-          <div class="final-round-divider"><span>最終局の和了</span></div>
-        {/if}
         {#if $game.pendingPingju && !$game.lastHuleResult}
           <div class="pingju-head">
             <h2 class="pingju-title">流局</h2>
@@ -2515,11 +2511,12 @@
             </div>
           {/if}
         {/if}
-        {#if $game.lastHuleResult}
+        {#if $game.lastHuleResult && !state.finished}
           <!-- 2026-07-21 fix [リョー報告: ダブロンで自分の和了が出ない]: ronResults の全 winner を
                表示する [従来は lastHuleResult = kamicha 順最後の 1 人だけ]。
-               オーラス [state.finished] でも和了詳細を GameEndPanel の下に出す
-               [従来は終局サマリへ直行して最終局の和了内訳が見えなかった]。 -->
+               2026-07-22 リョー指示: 終局は 上がりパネル → 次へ → 終局パネル の順次表示。
+               和了詳細は roundEnded 段階 [ここ] で全 winner 分見えるので、
+               state.finished 後の GameEndPanel への併記 [07-21 の暫定] は廃止。 -->
           {@const huleEntries = ($game.ronResults?.length ?? 0) > 0
             ? $game.ronResults
             : ($game.lastWinner !== null ? [{ player: $game.lastWinner, result: $game.lastHuleResult }] : [])}
@@ -3884,27 +3881,6 @@
     grid-row: 1;
     grid-column: 1 / -1;
     overflow: auto;
-  }
-  /* 2026-07-22 リョー指摘: 半荘終了の順位表と最終局の和了詳細の間の区切り */
-  .final-round-divider {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 18px 0 6px;
-  }
-  .final-round-divider::before,
-  .final-round-divider::after {
-    content: '';
-    flex: 1;
-    height: 0;
-    border-top: 2px solid #d4af37;
-  }
-  .final-round-divider span {
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: 2px;
-    color: #9a7b1f;
-    white-space: nowrap;
   }
   /* SaiKoroModal を agari panel と同じ領域に [リョー指示 2026-05-12]。
      2026-07-21 リョー指摘 [演出ダサい]: ベージュ塗り潰し override をやめ、
