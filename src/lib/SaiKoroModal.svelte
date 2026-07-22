@@ -2,6 +2,7 @@
 <script lang="ts">
   // サイコロチャンス [出目当て] modal [MVP、 2026-05-12]
   // 仕様: 出目宣言 [順序なし 15 通り] → サイコロ 2 個振り 4 回 [ゾロ目はリプレイ] → 結果確認 → 次へ
+  export let winnerName: string | null = null;
   export let winner: number;
   export let canOperate: boolean = true;  // false なら read-only [オンラインで上がり者以外、 2026-05-13]
   export let chances: Array<{ name: string; baseChip: number; shuvariApplicable: boolean; alwaysShuvari?: boolean; rollCount?: number; count: number; plusMinus: '+' | '-' }>;
@@ -114,7 +115,7 @@
 
 {#if chance}
   <div class="modal sai">
-    <div class="title">🎲 サイコロチャンス [player {winner}] - {chance.name}</div>
+    <div class="title">🎲 サイコロチャンス [{winnerName ?? `player ${winner}`}] - {chance.name}</div>
     <div class="info">
       {currentIdx + 1} / {chances.length} 件目 | base {chance.baseChip} × {chance.count} 回 × 倍率 {chipMultiplier} = {chance.baseChip * chance.count * chipMultiplier} オール / hit
     </div>

@@ -52,6 +52,15 @@
   // ?uiv1=1 が旧レイアウトへの退避ハッチ [数日 soak して問題なければ旧層ごと削除 = 手順F]
   const uiBoardV2 = typeof window === 'undefined' || !new URLSearchParams(window.location.search).has('uiv1');
 
+  // [2026-07-22 リョー要望] オンラインは P0/P1 じゃなくユーザー名で表示する
+  let seatDisplayNames: [string, string, string] = ['P0', 'P1', 'P2'];
+  $: {
+    void onlineMembers;
+    seatDisplayNames = onlineGameStarted
+      ? [seatName(0), seatName(1), seatName(2)]
+      : ['P0', 'P1', 'P2'];
+  }
+
   let cutinTimer: ReturnType<typeof setTimeout> | null = null;
   $: if (typeof window !== 'undefined' && !$game.cutin && ($game.cutinQueue?.length ?? 0) > 0 && cutinTimer === null) {
     game.playNextCutin();
@@ -258,32 +267,32 @@
       const owner = chance?.winner ?? sai.winner;
       return owner === myself
         ? { text: 'サイコロを操作', tone: 'action' }
-        : { text: `P${owner} のサイコロ待ち`, tone: 'waiting' };
+        : { text: `${seatDisplayNames[owner as 0|1|2]} のサイコロ待ち`, tone: 'waiting' };
     }
     if (snapshot.pendingFuyu) {
       return (snapshot.pendingFuyu.decisionOwners ?? [snapshot.pendingFuyu.winner]).includes(myself)
         ? { text: '冬の効果を選択', tone: 'action' }
-        : { text: `P${snapshot.pendingFuyu.winner} の冬選択待ち`, tone: 'waiting' };
+        : { text: `${seatDisplayNames[snapshot.pendingFuyu.winner as 0|1|2]} の冬選択待ち`, tone: 'waiting' };
     }
     if (snapshot.pendingKinpei) {
       return (snapshot.pendingKinpei.decisionOwners ?? [snapshot.pendingKinpei.winner]).includes(myself)
         ? { text: '金北の強化先を選択', tone: 'action' }
-        : { text: `P${snapshot.pendingKinpei.winner} の金北選択待ち`, tone: 'waiting' };
+        : { text: `${seatDisplayNames[snapshot.pendingKinpei.winner as 0|1|2]} の金北選択待ち`, tone: 'waiting' };
     }
     if (snapshot.pendingKamiPochi) {
       return snapshot.pendingKamiPochi.decisionOwners.includes(myself)
         ? { text: '神ぽっちの牌を選択', tone: 'action' }
-        : { text: `P${snapshot.pendingKamiPochi.winner} の神ぽっち選択待ち`, tone: 'waiting' };
+        : { text: `${seatDisplayNames[snapshot.pendingKamiPochi.winner as 0|1|2]} の神ぽっち選択待ち`, tone: 'waiting' };
     }
     if (snapshot.pendingPochiSwap) {
       return snapshot.pendingPochiSwap.decisionOwners.includes(myself)
         ? { text: 'ぽっちの高目を選択', tone: 'action' }
-        : { text: `P${snapshot.pendingPochiSwap.winner} の高目選択待ち`, tone: 'waiting' };
+        : { text: `${seatDisplayNames[snapshot.pendingPochiSwap.winner as 0|1|2]} の高目選択待ち`, tone: 'waiting' };
     }
     if (snapshot.pendingFeverContinue) {
       return snapshot.pendingFeverContinue.winner === myself
         ? { text: 'フィーバーを続行', tone: 'action' }
-        : { text: `P${snapshot.pendingFeverContinue.winner} の続行待ち`, tone: 'waiting' };
+        : { text: `${seatDisplayNames[snapshot.pendingFeverContinue.winner as 0|1|2]} の続行待ち`, tone: 'waiting' };
     }
     if (snapshot.awaitingRonDecision) {
       if (ronPlayers.includes(myself)) {
@@ -306,7 +315,7 @@
     if (snapshot.lizhiPending !== null) {
       return snapshot.lizhiPending === myself
         ? { text: 'リーチする捨て牌を選択', tone: 'action' }
-        : { text: `P${snapshot.lizhiPending} のリーチ牌待ち`, tone: 'waiting' };
+        : { text: `${seatDisplayNames[snapshot.lizhiPending as 0|1|2]} のリーチ牌待ち`, tone: 'waiting' };
     }
     if (activePlayer === myself) {
       if (waitingForDraw) return { text: 'ツモを進めてください', tone: 'action' };
@@ -321,10 +330,10 @@
       }
       return { text: '打牌を選んでください', tone: 'action' };
     }
-    return { text: `P${activePlayer} の手番`, tone: 'waiting' };
+    return { text: `${seatDisplayNames[activePlayer as 0|1|2]} の手番`, tone: 'waiting' };
   }
 
-  $: actionStatus = describeActionStatus($game, currentPlayer, selfPlayer, ronCandidates, needsZimo, canTsumo);
+  $: actionStatus = (seatDisplayNames, describeActionStatus($game, currentPlayer, selfPlayer, ronCandidates, needsZimo, canTsumo));
 
   // 牌譜 [event log] 全件
   $: events = $game.game.events;
@@ -1964,6 +1973,7 @@
       {@const tingW = $game.game.feverDeclareTing?.[$game.pendingFuyu.winner as 0|1|2] ?? $game.game.getTingpaiList($game.pendingFuyu.winner as 0|1|2)}
       {@const remainW = fuyuWaitRemain($game.pendingFuyu.winner as PlayerId, tingW)}
       <FuyuModal
+        winnerName={onlineGameStarted ? seatDisplayNames[$game.pendingFuyu.winner] : null}
         winner={$game.pendingFuyu.winner}
         waitRemain={remainW}
         shanRemain={paishu}
@@ -1973,7 +1983,7 @@
     <!-- 2026-05-14 ゆーま 自走 bug fix: online で winner != selfPlayer の client にも
          modal が出てて 誤クリックで他人の金北選択を送れた、 winner のみ表示に gate -->
     {#if $game.pendingKinpei && viewMode !== 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(selfPlayer))}
-      <KinpeiModal winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
+      <KinpeiModal winnerName={onlineGameStarted ? seatDisplayNames[$game.pendingKinpei.winner] : null} winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
     {/if}
     {#if $game.pendingKamiPochi && (!onlineGameStarted || $game.pendingKamiPochi.decisionOwners.includes(selfPlayer))}
       <div class="pochi-choice-backdrop" role="presentation">
@@ -2063,7 +2073,7 @@
             <button class="next-btn agariyame" on:click={() => game.agariyame()}>アガリ止め</button>
           {/if}
         {:else}
-          <button class="next-btn" disabled>p{$game.lastWinner} の「次局へ」待ち</button>
+          <button class="next-btn" disabled>{$game.lastWinner !== null ? seatDisplayNames[$game.lastWinner as 0|1|2] : '?'} の「次局へ」待ち</button>
         {/if}
       </div>
     {/if}
@@ -2469,6 +2479,7 @@
 
   {#if state.finished && viewMode !== 'single'}
     <GameEndPanel
+      names={seatDisplayNames}
       ranking={$game.game.getRanking()}
       zifengZ={(p) => $game.game.zifengZ(p as any)}
       chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)}
@@ -2482,6 +2493,7 @@
          手牌の実体は server 投影の post-win 開示 [ws_server publiclyRevealed] 前提 -->
     {@const _olWinner = $game.lastWinner}
     <RoundEndPanel
+      names={seatDisplayNames}
       lastWinner={_olWinner}
       huleResult={$game.lastHuleResult}
       baopai={[...$game.game.shan.displayBaopai]}
@@ -2667,6 +2679,7 @@
     {@const _chanceOwner = (((_curChance as any)?.winner) ?? $game.pendingSaiKoro.winner) as PlayerId}
     <!-- R5 P1 #2 fix: canOperate / chipMultiplier も current chance owner 基準に [ダブロン 2 人目 winner 操作権] -->
     <SaiKoroModal
+      winnerName={onlineGameStarted ? seatDisplayNames[_chanceOwner] : null}
       winner={_chanceOwner}
       canOperate={!onlineGameStarted || _chanceOwner === selfPlayer}
       chances={$game.pendingSaiKoro.chances}

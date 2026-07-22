@@ -1,6 +1,7 @@
 ﻿
 <script lang="ts">
   // 金北強化選択 modal [アガリ後変更可]
+  export let winnerName: string | null = null;
   export let winner: number;
   export let huapai: string[];
   export let onSelect: (target: 'haru' | 'natsu' | 'aki' | 'fuyu' | null) => void;
@@ -9,7 +10,7 @@
 </script>
 
 <div class="modal kinpei">
-  <div class="title">🎁 金北 強化対象選択 [player {winner}]{allowHold ? '' : ' [必須]'}</div>
+  <div class="title">🎁 金北 強化対象選択 [{winnerName ?? `player ${winner}`}]{allowHold ? '' : ' [必須]'}</div>
   <div class="actions">
     {#if huapai.includes('f1')}
       <button class="haru" on:click={() => onSelect('haru')}>春</button>

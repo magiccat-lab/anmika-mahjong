@@ -1,6 +1,7 @@
 ﻿
 <script lang="ts">
   // フィーバー中 冬使う / 保留 modal
+  export let winnerName: string | null = null;
   export let winner: number;
   export let waitRemain: number = 0;
   export let shanRemain: number = 0;
@@ -8,7 +9,7 @@
 </script>
 
 <div class="modal fuyu">
-  <div class="title">❄️ フィーバー中、 冬を使う？ [player {winner}]</div>
+  <div class="title">❄️ フィーバー中、 冬を使う？ [{winnerName ?? `player ${winner}`}]</div>
   <div class="info">
     <div class="info-row">残り待ち牌: <strong>{waitRemain}</strong> 枚</div>
     <div class="info-row">残り山: <strong>{shanRemain}</strong> 枚</div>

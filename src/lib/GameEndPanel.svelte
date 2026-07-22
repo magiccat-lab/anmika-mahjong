@@ -1,6 +1,8 @@
 ﻿
 <script lang="ts">
   export let ranking: { rank: number; player: number; defen: number }[];
+  /** 席表示名 [オンラインはユーザー名] */
+  export let names: string[] = ['P0', 'P1', 'P2'];
   export let zifengZ: (p: number) => number;
   /** 半荘 chip 収支 [P0/P1/P2 = 累計 chip ledger]、 final score 表示用 fallback */
   export let chipLedger: number[] | null = null;
@@ -24,7 +26,7 @@
       {#each (finalScore ?? ranking.map(r => ({ ...r, chipBase: chipLedger?.[r.player] ?? 0, uma: 0, topNBonus: 0, tobiBonus: 0, tontonbuBonus: 0, chip: chipLedger?.[r.player] ?? 0, total: chipLedger?.[r.player] ?? 0 }))) as r}
         <tr class="rank-{r.rank}">
           <td class="pos">{r.rank}位</td>
-          <td class="who">P{r.player} [{['東','南','西'][zifengZ(r.player) - 1]}家]</td>
+          <td class="who">{names[r.player] ?? `P${r.player}`} [{['東','南','西'][zifengZ(r.player) - 1]}家]</td>
           <td class="raw-defen">{r.defen.toLocaleString()}</td>
           <td class="ledger">{(r.chipBase ?? 0) > 0 ? '+' : ''}{r.chipBase ?? 0}</td>
           <td class="uma">{r.uma > 0 ? '+' : ''}{r.uma}</td>

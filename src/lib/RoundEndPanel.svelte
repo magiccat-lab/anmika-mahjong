@@ -12,6 +12,8 @@
   /** 移動後の各家 defen */
   export let defenAfter: [number, number, number] | null = null;
   /** 上がった人の手牌 [副露 mianzi 含む、 ロン牌 末尾] */
+  /** 席表示名 [オンラインはユーザー名、単体は P0/P1/P2] */
+  export let names: string[] = ['P0', 'P1', 'P2'];
   export let winnerShoupai: string[] = [];
   export let winnerFulou: FulouMianzi[] = [];
   export let winnerHuapai: string[] = [];
@@ -53,7 +55,7 @@
         {agariType === 'ron' ? 'ロン' : 'ツモ'}
       </span>
     {/if}
-    <span class="winner">player {lastWinner} 和了</span>
+    <span class="winner">{lastWinner !== null ? (names[lastWinner] ?? `P${lastWinner}`) : ''} 和了</span>
     <span class="score">{huleResult.fu ?? 0}符 {huleResult.fanshu ?? 0}翻</span>
     {#if tier}<span class="tier-chip tier-{tier === '役満' ? 'yakuman' : 'big'}">{tier}</span>{/if}
     <span class="defen">{Math.round($defenTween).toLocaleString()}<span class="defen-unit">点</span></span>
@@ -66,7 +68,7 @@
         <span class="payment-label">点数移動:</span>
         {#each defenDelta as v, p}
           <span class="payment-cell {v > 0 ? 'gain' : (v < 0 ? 'loss' : 'zero')}">
-            <span class="payment-player">P{p}</span>
+            <span class="payment-player">{names[p] ?? `P${p}`}</span>
             <span class="payment-delta">{v > 0 ? '+' : (v === 0 ? '±' : '')}{v.toLocaleString()}</span>
             {#if defenAfter}<span class="payment-after">→ {defenAfter[p].toLocaleString()}</span>{/if}
           </span>
@@ -93,10 +95,10 @@
         <span class="agari-label">
           {#if agariType === 'ron'}
             ロン牌
-            {#if agariFrom !== null}<span class="agari-from">[P{agariFrom} 振込]</span>{/if}
+            {#if agariFrom !== null}<span class="agari-from">[{names[agariFrom] ?? `P${agariFrom}`} 振込]</span>{/if}
           {:else}
             ツモ牌
-            {#if lastWinner !== null}<span class="agari-from">[P{lastWinner} 自摸]</span>{/if}
+            {#if lastWinner !== null}<span class="agari-from">[{names[lastWinner] ?? `P${lastWinner}`} 自摸]</span>{/if}
           {/if}
           :
         </span>

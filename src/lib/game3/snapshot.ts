@@ -154,11 +154,10 @@ export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null
     }
   }
   Object.assign(refs.feverActive, snap.feverActive);
-  if (refs.feverSaiAwarded) {
-    for (const p of PLAYERS) {
-      refs.feverSaiAwarded[p] = [...(snap.feverSaiAwarded?.[p] ?? [])];
-    }
-  }
+  // [2026-07-22 リョー報告: 金北で華を強化すると四華サイコロが2回] feverSaiAwarded は
+  // restore で巻き戻さない。金北変更等の再計算 [saveHuleSnapshot→restore→再settle] で
+  // 支払い済みサイコロの記録が消え、同じ award が再発火していた。
+  // 「振ったサイコロは巻き戻らない」= 局内で単調増加、消去は局開始リセットのみ
   if (refs.lateShuvariWindow) {
     Object.assign(refs.lateShuvariWindow, snap.lateShuvariWindow ?? { 0: false, 1: false, 2: false });
   }
