@@ -18,6 +18,9 @@
   export let onSelectCombo: (a: number, b: number) => void;
   export let onRoll: (override?: [number, number]) => void;
   export let onAdvance: () => void;
+  /** [2026-07-23 総点検 P1] reject/sync 受信時に親が進める復旧カウンタ。
+   *  変化したら awaitingRollAck を解除する [送信が握り潰された/弾かれた時の片道切符対策] */
+  export let recoveryNonce = 0;
 
   import { onDestroy } from 'svelte';
   import DiceCube from './DiceCube.svelte';
@@ -56,6 +59,12 @@
   const SPIN_MS = 750;
 
   $: settled = !rolling && landingQueue.length === 0;
+
+  let _lastRecoveryNonce = 0;
+  $: if (recoveryNonce !== _lastRecoveryNonce) {
+    _lastRecoveryNonce = recoveryNonce;
+    awaitingRollAck = false;
+  }
 
   function stopDrumAudio() {
     if (!drumAudio) return;
@@ -120,6 +129,13 @@
       revealedRollsCount = rolls.length;
       const last = rolls[rolls.length - 1];
       if (last) { displayD1 = last.dice[0]; displayD2 = last.dice[1]; }
+    } else if (rolls.length < prevRollsCount) {
+      // [2026-07-23 総点検 P2] currentIdx 不変のまま rolls が縮んだ場合 [rewind 等] の防御。
+      // 計数を再同期しないと以後の増分が旧値を超えるまで演出も ack 解除も死ぬ
+      prevRollsCount = rolls.length;
+      revealedRollsCount = Math.min(revealedRollsCount, rolls.length);
+      landingQueue = [];
+      awaitingRollAck = false;
     } else if (rolls.length > prevRollsCount) {
       // winner / 非 winner 共通: rolls の増分 1 件につき spin 1 回を queue
       for (let i = prevRollsCount; i < rolls.length; i++) {

@@ -33,7 +33,7 @@
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
   import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint, buildDiagnosticDump } from './lib/store/paifuIo';
   import { serializeCanonical } from './lib/canonicalJson';
-  import { toCorePai } from './lib/helpers';
+  import { isPositiveZ5, toCorePai } from './lib/helpers';
   import { getTingpaiList as tingpaiForShoupai } from './lib/game3/tingpai';
   import { feverWaitInfoFromLiveWall } from './lib/game3/feverLizhi';
   import { computeTileInventory, expectedInventory } from './lib/game3/inventory';
@@ -197,17 +197,21 @@
   let pochiReveal: { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean } | null = null;
   let pochiRevealQueue: Array<{ player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean }> = [];
   let lastSeenZimoEventCount = 0;
-  let lastSeenGameRef: any = null;
+  let pochiScanBootstrapped = false;
   const POCHI_COLOR_MAP: Record<string, 'blue'|'red'|'green'|'yellow'> = { z5b: 'blue', z5r: 'red', z5g: 'green', z5y: 'yellow' };
   $: {
-    if ($game.game !== lastSeenGameRef) {
-      lastSeenGameRef = $game.game;
-      lastSeenZimoEventCount = 0;
+    // [2026-07-23 総点検 P2] オンラインの projection hydrate は毎回 new Game3 を作るため
+    // game ref 追跡は毎 action リセットになり、リロード/resync で過去の白ぽっち開示を
+    // 再生していた。ref 追跡を廃止し、初回は履歴を演出なしで読み飛ばす + 以後は
+    // 「伸びた差分だけ処理 / 縮んだら局替わりとして同期」に変更 [イベント列は局内 append-only]
+    const zimoEvents = $game.game.events.filter((e: any) => e.type === 'zimo') as Array<{ type: 'zimo'; player: 0|1|2; pai: string }>;
+    if (!pochiScanBootstrapped) {
+      pochiScanBootstrapped = true;
+      lastSeenZimoEventCount = zimoEvents.length;
       pochiRevealQueue = [];
     }
-    const zimoEvents = $game.game.events.filter((e: any) => e.type === 'zimo') as Array<{ type: 'zimo'; player: 0|1|2; pai: string }>;
     if (zimoEvents.length < lastSeenZimoEventCount) {
-      lastSeenZimoEventCount = 0;
+      lastSeenZimoEventCount = zimoEvents.length;
       pochiRevealQueue = [];
       pochiReveal = null;
     }
@@ -1047,8 +1051,10 @@
   })();
   function isNakiCand(pai: string): boolean {
     if (nakiCandPais.size === 0) return false;
-    // 金牌表記 [gp/gs] は元の赤5 [p0/s0] として照合、 赤5 と通常 5 は相互許容
-    const base = pai === 'gp' ? 'p0' : pai === 'gs' ? 's0' : pai;
+    // [2026-07-23 総点検 P2] 拡張物理牌 [z5b/r/g/y・np3/ns3/nz3・gp/gs] を toCorePai で
+    // core 名に落として照合 [手書き gp/gs 変換だけだと白ポン判断で何も光らなかった]。
+    // 赤5 と通常 5 は相互許容
+    const base = toCorePai(pai);
     if (nakiCandPais.has(base)) return true;
     if (base[1] === '0' && nakiCandPais.has(base[0] + '5')) return true;
     if (base[1] === '5' && nakiCandPais.has(base[0] + '0')) return true;
@@ -1056,20 +1062,17 @@
   }
 
   // [2026-07-22 リョー要望] 表ドラの現物を自手牌でハイライト
-  function doraOfIndicator(indicator: string): string | null {
-    const ind = toCorePai(indicator);
-    const s = ind[0];
-    const n = ind[1] === '0' ? 5 : parseInt(ind[1]);
-    if (!Number.isFinite(n)) return null;
-    if (s !== 'm' && s !== 'p' && s !== 's' && s !== 'z') return null; // 華牌 indicator はドラ対象外
-    const nextN = s === 'z' ? (n <= 4 ? (n % 4) + 1 : ((n - 4) % 3) + 5) : (n % 9) + 1;
-    return `${s}${nextN}`;
-  }
+  // [2026-07-23 総点検 P1×2 + P2] 変換は採点系と同じ doraFrom を使う [萬子は m7↔m9 循環。
+  // 素の (n%9)+1 だと萬子表示牌で一切光らない]。正ぽっち表示牌 [z5g/z5b] は 4d309c3 で
+  // 神ぽっち選択制になり base ドラから外れたので光らせない。参照はコミット済の displayBaopai
+  // [生 _baopai だと金北/神ぽっち選択窓で未確定の秋めくりが先バレする]
   $: doraPaiSet = (() => {
     const set = new Set<string>();
-    for (const ind of ($game.game.shan?.baopai ?? []) as string[]) {
-      const dora = doraOfIndicator(ind);
-      if (dora) set.add(dora);
+    for (const ind of (baopai ?? []) as string[]) {
+      if (typeof ind !== 'string' || ind.length === 0 || ind[0] === 'f') continue;
+      if (isPositiveZ5(ind)) continue;
+      const dora = doraFrom(ind);
+      if (dora && /^[mpsz][1-9]$/.test(dora)) set.add(dora);
     }
     return set;
   })();
@@ -1233,6 +1236,12 @@
       ws.send(JSON.stringify({ type: 'resync', expectedVersion: 0 }));
       return;
     }
+    // [2026-07-23 総点検 P2] sync を正として ready 押下表示をリセット [server の
+    // nextRoundReady 再送で正しい進捗に復元される。復元部屋の「全員待ち」凍結を防ぐ]。
+    // サイコロの応答待ちフラグも sync で解除できるよう nonce を進める
+    nextRoundPressedLocal = false;
+    nextRoundReadySeats = [];
+    saiKoroRecoveryNonce += 1;
     const projectedBaseline = snapshot.state?.store?.matchStartChipLedger;
     const baseline = projectedBaseline ? {
       0: Number(projectedBaseline[0] ?? projectedBaseline['0'] ?? 0),
@@ -1315,6 +1324,12 @@
         applyRevisionedAction(ws, msg);
       } else if (msg.type === 'reject') {
         console.warn('[online] command rejected', msg.reason, msg.commandId);
+        // [2026-07-23 総点検 P1] roll 送信が reject された時に awaitingRollAck が
+        // 永久に残らないよう、SaiKoroModal へ復旧シグナルを送る
+        saiKoroRecoveryNonce += 1;
+      } else if (msg.type === 'readyNextRoundNack') {
+        // [2026-07-23 総点検 P2] 楽観押下のロールバック [押せるのに全員待ち表示で固まる対策]
+        nextRoundPressedLocal = false;
       } else if (msg.type === 'nextRoundReady') {
         // [2026-07-22 リョー要望] 全員ready制の進捗 [server broadcast]
         nextRoundReadySeats = Array.isArray(msg.seats) ? msg.seats : [];
@@ -1344,6 +1359,7 @@
   let nextRoundReadyTotal = 3;
   let nextRoundPressedLocal = false;
   let nextRoundReadySafe = false;
+  let saiKoroRecoveryNonce = 0;
   $: nextRoundReadySafe = onlineGameStarted
       && !!onlineWs
       && onlineWs.readyState === WebSocket.OPEN
@@ -1529,18 +1545,27 @@
   // [2026-07-22 リョー要望] オンライン用トグル: 鳴きなし / 自動アガリ
   let onlineNoCall = false;
   let onlineAutoWin = false;
+  // [2026-07-23 総点検 P2] $: 副作用は ack 反映前の store 更新 [cutin 等] で何度も走る。
+  // 判定窓ごとに1回だけ送るキーで連射を止める [server 側 reject で壊れはしないがノイズ源]
+  let _noCallSentKey = '';
+  let _autoWinSentKey = '';
   $: if (onlineGameStarted && onlineNoCall && $game.awaitingFulou) {
     const canCallSelf = [...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])]
       .some((c: any) => c.player === selfPlayer && (c.mianzi?.length ?? 0) > 0);
-    if (canCallSelf) game.pass();
+    const k = `pass-${$game.game.events?.length ?? 0}-${$game.lastDapai?.player ?? 'x'}-${$game.lastDapai?.pai ?? 'x'}`;
+    if (canCallSelf && k !== _noCallSentKey) {
+      _noCallSentKey = k;
+      game.pass();
+    }
   }
   $: if (onlineGameStarted && onlineAutoWin && !$game.roundEnded) {
+    const k = `win-${$game.game.events?.length ?? 0}`;
     if ($game.awaitingRonDecision && ronCandidates.includes(selfPlayer)
         && !(($game.ronDeclaredPlayers ?? []) as number[]).includes(selfPlayer)) {
-      game.ron(selfPlayer);
+      if (k !== _autoWinSentKey) { _autoWinSentKey = k; game.ron(selfPlayer); }
     } else if (!progressControlsBlocked && currentPlayer === selfPlayer && canTsumo
         && !$game.awaitingRonDecision && !$game.lastDapai) {
-      game.tsumo();
+      if (k !== _autoWinSentKey) { _autoWinSentKey = k; game.tsumo(); }
     }
   }
 
@@ -1658,14 +1683,21 @@
   // 演出尺の 3 倍を超えて残っていたら強制解除する保険。
   // finishCutin は ts 一致でしか消さないので、既に進んでいれば no-op。
   let cutinWatchdogTimer: ReturnType<typeof setTimeout> | undefined;
+  let cutinWatchdogTs: number | null = null;
   $: {
     const stuckCutin = $game.cutin;
-    if (cutinWatchdogTimer) clearTimeout(cutinWatchdogTimer);
-    if (stuckCutin) {
-      cutinWatchdogTimer = setTimeout(() => {
-        game.finishCutin(stuckCutin.ts);
-        game.playNextCutin();
-      }, CUTIN_DURATION_MS * 3);
+    const wdTs = stuckCutin?.ts ?? null;
+    // [2026-07-23 総点検 P2] store 更新のたびに clear→再アームすると「最後の更新から3倍尺」
+    // に化け、オンラインで projection が流れ続ける限り永遠に発火しない。ts 単位で一度だけ張る
+    if (wdTs !== cutinWatchdogTs) {
+      cutinWatchdogTs = wdTs;
+      if (cutinWatchdogTimer) { clearTimeout(cutinWatchdogTimer); cutinWatchdogTimer = undefined; }
+      if (stuckCutin) {
+        cutinWatchdogTimer = setTimeout(() => {
+          game.finishCutin(stuckCutin.ts);
+          game.playNextCutin();
+        }, CUTIN_DURATION_MS * 3);
+      }
     }
   }
   onDestroy(() => { if (cutinWatchdogTimer) clearTimeout(cutinWatchdogTimer); });
@@ -1699,6 +1731,10 @@
       && onlineGameStarted && onlineRoomMeta?.isHost
       && currentRoomId && $game.game.state.finished
       && !resetChipOnNextMatch  // chip reset 時は match 永続化スキップ
+      // [2026-07-23 総点検 P2] サイコロ等の未消化 pending があると getFinalScore が
+      // dice 分を含まない時点で確定してしまう。全消化後に送る
+      && !$game.pendingSaiKoro && !$game.pendingKinpei && !$game.pendingFuyu
+      && !$game.pendingKamiPochi && !$game.pendingPochiSwap && !$game.pendingFeverContinue
     ) {
       __matchPostInflight = true;
       try {
@@ -2928,7 +2964,8 @@
     <SaiKoroModal
       winnerName={onlineGameStarted ? seatDisplayNames[_chanceOwner] : null}
       winner={_chanceOwner}
-      canOperate={!onlineGameStarted || _chanceOwner === selfPlayer}
+      canOperate={(!onlineGameStarted || _chanceOwner === selfPlayer) && (!onlineGameStarted || !!onlineWs)}
+      recoveryNonce={saiKoroRecoveryNonce}
       chances={$game.pendingSaiKoro.chances}
       currentIdx={$game.pendingSaiKoro.currentIdx}
       selectedCombo={$game.pendingSaiKoro.selectedCombo}

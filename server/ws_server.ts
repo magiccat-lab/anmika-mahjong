@@ -1101,7 +1101,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     actionInput: Record<string, unknown>,
     commandId: string,
   ): { reason: string | null; command?: AcceptedRoomCommand; ack?: CommandAck } => {
-    const previous = room.snapshot;
+    let previous = room.snapshot;
     const action = { ...actionInput };
     // actorSeat は envelope 検証時に確定済み。中継後は CPU 代理という transport
     // detail を残さず、その席が発した正規 command として全 client に適用させる。
@@ -1128,17 +1128,31 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         // 権威側の nextMatch は post-win pending [サイコロ未消化等] が残っていると
         // store 実装が無言 no-op になり、投影が旧試合へスナップバックしていた。
         // host の明示操作 = 試合を締める意思なので、残りの勝ち処理を自動消化してから進める
+        // [2026-07-23 総点検 P0] 自動消化は正規 command として append/persist/broadcast する。
+        // 旧実装は validateAndApply 直叩きで command log に残らず、その log は
+        // 「pending 残存のまま nextMatch」という並びになり、restore/replay 時に
+        // canonical nextMatch が blockingWinPipelineReason で no-op → mutation-token
+        // throw → reject rollback・部屋再ロード・rewind が全部恒久失敗する時限爆弾だった
         for (let guard = 0; guard < 60; guard++) {
           const canonical = room.authority.canonicalState();
           if (!canonical.game.state?.finished) break;
           const auto = computePostWinAutoAction(canonical);
           if (!auto) break;
-          const autoReason = room.authority.validateAndApply(auto.owner, auto.action, membersForAuthority(room));
-          if (autoReason) {
-            warn('[anmika-ws] nextMatch fast-forward reject', autoReason, auto.action?.type);
+          const autoAccepted = acceptAction(
+            room,
+            auto.owner,
+            SERVER_NEXT_ROUND_UID,
+            auto.action,
+            `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
+          );
+          if (!autoAccepted.command) {
+            warn('[anmika-ws] nextMatch fast-forward reject', autoAccepted.reason, auto.action?.type);
             break;
           }
+          broadcastAction(room, autoAccepted.command);
         }
+        // 自動消化で revision が進んでいるため、この nextMatch 自体の baseline を取り直す
+        previous = room.snapshot;
       }
       if (action.type === 'nextMatch') {
         // The host may choose whether accumulated chips are reset.  All other
@@ -1400,33 +1414,12 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     }
 
     if (canonical.roundEnded) {
-      // [2026-07-21 監査 H-02 fix] 解決済み終局は winner/host の ready [markReadyForNextRound]
-      // 頼みで、両者が切断すると誰も次局へ進めず残った参加者が全員詰みだった。
-      // サーバー自身が長めの fallback deadline で冪等な nextRound を発行する。
-      // ready が先に動けば revision が進み、この timer は guard で no-op になる。
-      if (!authority.isPostWinResolved()) return;
-      if (canonical.game?.state?.finished) return; // 半荘終了は nextMatch [host 選択] 待ち
-      const revision = room.snapshot.revision;
-      const fallbackMs = Number(process.env.ANMIKA_NEXT_ROUND_FALLBACK_MS || 120_000);
-      room.deadlineTimer = setTimeout(() => {
-        room.queue = room.queue.then(async () => {
-          if (room.snapshot.revision !== revision || !room.authority?.isPostWinResolved()) return;
-          // client 側検証は「和了局 nextRound は winner か host、流局は host のみ」。
-          // 和了局は winner、流局 [lastWinner null] は host を actor にして整合させる
-          const hostSeat = room.members.get(room.hostUserId)?.seat;
-          const accepted = acceptAction(
-            room,
-            room.authority.lastWinner ?? hostSeat ?? 0,
-            '__server_next_round_fallback__',
-            { type: 'nextRound', from_role: 'server-fallback' },
-            `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
-          );
-          if (accepted.command) {
-            broadcastAction(room, accepted.command);
-            scheduleRoomDeadline(room);
-          }
-        }).catch((error) => warn('[anmika-ws] next-round fallback failed', error));
-      }, fallbackMs);
+      // [2026-07-23 総点検] 旧 H-02 fallback [押下0人でも 120s で自動 nextRound] は撤去。
+      // 全員ready制 [2026-07-22 リョー要望] では「全員が押すまで進まない」が仕様で、
+      // ・押下後の AFK/切断は markReadyForNextRound が張る 180s timeout が拾う
+      // ・未押下メンバーの切断確定時は close handler が gate を再評価して進める
+      // ・全員切断は cleanup → 復元後に再押下できる [ready 状態は sync で再配布]
+      // ため、0押下自動進行という H-02 の穴埋めはもう不要 [仕様違反side effectだけが残る]
       return;
     }
 
@@ -1637,7 +1630,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         if ((msg as Record<string, unknown>)?.type === 'readyNextRound') {
           const value = msg as Record<string, unknown>;
           const reason = markReadyForNextRound(room, payload.seat, Number(value.revision));
-          if (reason) reject(ws, room, null, reason);
+          // [2026-07-23 総点検 P2] 拒否は typed nack で返す [client が楽観押下を戻せるように]
+          if (reason) sendJson(ws, { type: 'readyNextRoundNack', reason, revision: room.snapshot.revision });
           else sendJson(ws, { type: 'readyNextRoundAck', revision: room.snapshot.revision });
           return;
         }
@@ -1662,6 +1656,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           // original one. A full canonical sync is safe and avoids relaying an
           // old revision with today's match/round identifiers.
           sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
+          sendNextRoundReadyStateTo(ws, room);
           return;
         }
         if (envelope.expectedVersion !== room.snapshot.revision
@@ -1669,6 +1664,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           || envelope.roundId !== room.snapshot.roundId) {
           reject(ws, room, envelope.commandId, 'version conflict');
           sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
+          sendNextRoundReadyStateTo(ws, room);
           return;
         }
         const validated = validateAction(room, payload.uid, payload.seat, envelope.action);
@@ -1685,6 +1681,13 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         );
         if (!accepted.command || !accepted.ack) {
           reject(ws, room, envelope.commandId, accepted.reason ?? 'action rejected');
+          // [2026-07-23 総点検] 'zimo already drawn' で弾かれた client は投影が
+          // 欠けて needsZimo 停止している張本人。reject だけ返すと ▶ツモ も
+          // 400ms橋 も全部弾かれて詰むため、最新 projection を送って自己修復させる
+          if (String(accepted.reason ?? '').includes('zimo already drawn')) {
+            sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
+            sendNextRoundReadyStateTo(ws, room);
+          }
           return;
         }
         broadcastAction(room, accepted.command);
@@ -1723,6 +1726,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     broadcast(room, lobbyPayload(room));
     if (room.snapshot.started) {
       sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
+      sendNextRoundReadyStateTo(ws, room);
       // [2026-07-21 監査 D-15 fix] 再接続時は手番 deadline を現在時刻から張り直す。
       // scheduleRoomDeadline は冒頭で旧 timer を clearTimeout するので、切断前の
       // 残り期限で復帰直後に auto-discard される事故を防ぐ [新世代で rebase]

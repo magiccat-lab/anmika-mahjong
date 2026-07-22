@@ -3048,6 +3048,7 @@ export function createGameStore() {
           const replacement = s.game.declareKan(player, kanCands[0]);
           if (replacement) {
             s.lastZimo = replacement;
+            enqueueCutinState(s, 'kan', player as any);
             s.message = `[自動カン] player ${player} 暗槓 [${kanCands[0]}]、 嶺上 ${replacement}`;
             return { ...s };
           }
@@ -3634,6 +3635,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
         s.game.declarePon(cand.player as any, cand.mianzi[0], player as any);
         s.lastZimo = null;
         clearReactionStage(s);
+        enqueueCutinState(s, 'pon', cand.player as any);
         s.message = `[CPU] player ${cand.player} ポン [${cand.mianzi[0]}]`;
         return { ...s };
       }
@@ -3667,6 +3669,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
         }
         s.lastZimo = replacement;
         clearReactionStage(s);
+        enqueueCutinState(s, 'kan', cand.player as any);
         s.message = `[CPU] player ${cand.player} 大明槓 [${cand.mianzi[0]}]、 嶺上 ${replacement}`;
         return { ...s };
       }
@@ -3782,6 +3785,7 @@ export function autoLizhiInline(s: StoreState, safetyMax = 12): StoreState {
       const replacement = s.game.declareKan(player, kanCands[0]);
       if (replacement) {
         s.lastZimo = replacement;
+        enqueueCutinState(s, 'kan', player as any);
         s.message = `[自動カン] player ${player} 暗槓 [${kanCands[0]}]`;
         safety++;
         continue;
