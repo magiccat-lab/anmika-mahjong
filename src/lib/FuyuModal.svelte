@@ -22,16 +22,21 @@
 <style>
   .modal {
     position: fixed;
-    top: 22%;
+    /* 2026-07-22 SP対応: 低背でも収まるよう固定寸法を流体化 [PC は従来寸法に収束] */
+    top: min(22%, 48px);
     left: 50%;
     transform: translateX(-50%);
     background: #222;
     color: #fff;
-    padding: 22px 28px;
+    padding: clamp(12px, 4dvh, 22px) clamp(16px, 5dvw, 28px);
     z-index: 1010;
     border-radius: 10px;
     font-family: 'Noto Sans JP', sans-serif;
-    min-width: 460px;
+    min-width: min(460px, 88dvw);
+    max-width: 94dvw;
+    max-height: 86dvh;
+    overflow-y: auto;
+    box-sizing: border-box;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
   }
   .modal.fuyu { border: 3px solid skyblue; }

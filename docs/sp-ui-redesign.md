@@ -56,14 +56,25 @@
 - 移行順: Pochi 2種 [markup ほぼ同一] → Fuyu/Kinpei → SaiKoro → RoundEnd 最後
   [RoundEnd は panel + inline 金北を含む。金北は「和了結果を見ながら選ぶ」要件があるため body 内 sub-flow のまま]
 
-## 移行手順 [commit 単位]
+## 移行手順 [commit 単位] と進捗 [2026-07-22 時点]
 
-- A. スクショ基線: 844x390 / 915x412 / 実効高340相当 + safe-area 疑似。bbox assert 込み
-- B. Tile CSS props API 化 + hit target 分離 [見た目不変]
-- C. v2 grid root [5行 + safe-area + center-cell/board-stage]。score/河の見た目は未移植
-- D. score → 河 → nuki → action dock の順に v2 へ。各段でスクショ
-- E. modal Sheet 化
-- F. v2 固定後、旧 @media 2層・重複宣言・!important 群・flag を一括除去
+- A. スクショ基線 — **済** [sp_baseline.spec.ts、両レイアウト x 3viewport + hit 44px assert]
+- B. Tile CSS props API 化 + hit target 分離 — **済**
+- C. v2 grid root — **済**
+- D. score/河/nuki/action dock — **済** [D-1: board-stage + 縮退規則 / D-2: tap44px + dock]
+- E. modal SP 適合 — **サイズ流体化まで済** [ぽっち開示/Fuyu/SaiKoro/Kinpei。
+  ぽっち選択2種は元から流体]。Sheet 共通 shell への構造統合は F と同時にやる
+  [旧 !important 層が生きている間は二重管理になるだけのため]
+- F. 旧層一括除去 — **soak 待ち**。2026-07-22 に v2 をデフォルト化 [?uiv1=1 が退避ハッチ]。
+  リョーが v2 で数日回して問題なければ: 旧 @media 2層 + 全体 tile override +
+  !important 群 + ハッチ削除、agari-unified-panel の低背フルスクリーン規則を
+  v2 セクションへ移植、Sheet shell 統合
+
+## デスクトップパリティ [v2 デフォルト化の前提、確認済み]
+
+- 手牌: --tile-h 上限 74px = 旧 min(6vmin,100vw/22) の 1440x900 実寸と一致
+- score: 上限 340px [旧 36vmin 相当]、横長化 CQ は max-height 420px 条件付き
+  [広いデスクトップセルで誤発火して正方形が崩れるのを防ぐ]
 
 優先順位: A → B → C → score+river → hand/action → Sheet。
 中央 stage までを最初の塊 [P1] に含める [変数導入だけだと現行 hack に拘束されるため]。

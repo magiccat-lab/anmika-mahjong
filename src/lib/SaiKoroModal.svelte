@@ -189,16 +189,21 @@
 <style>
   .modal {
     position: fixed;
-    top: 20%;
+    /* 2026-07-22 SP対応: 低背では上に寄せて max-height + scroll で必ず収める */
+    top: min(20%, 24px);
     left: 50%;
     transform: translateX(-50%);
     background: #1a1a1a;
     color: #fff;
-    padding: 14px 18px;
+    padding: clamp(10px, 3dvh, 14px) clamp(12px, 4dvw, 18px);
     z-index: 1010;
     border-radius: 8px;
     font-family: 'Noto Sans JP', sans-serif;
-    min-width: 380px;
+    min-width: min(380px, 88dvw);
+    max-width: 94dvw;
+    max-height: 88dvh;
+    overflow-y: auto;
+    box-sizing: border-box;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
   }
   .modal.sai { border: 2px solid #d4af37; }

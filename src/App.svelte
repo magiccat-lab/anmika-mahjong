@@ -48,9 +48,9 @@
     game.sendStamp(selfPlayer as PlayerId, id);
   }
 
-  // SP再設計 v2 flag [docs/sp-ui-redesign.md 手順C]: ?uiv2=1 で新レイアウト骨格を有効化。
-  // 旧レイアウトと並行構築し [ストラングラー方式]、v2 完成後に flag と旧 @media 層を一括削除する
-  const uiBoardV2 = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('uiv2');
+  // SP再設計 v2 [docs/sp-ui-redesign.md]: 2026-07-22 リョー承認で v2 をデフォルト化。
+  // ?uiv1=1 が旧レイアウトへの退避ハッチ [数日 soak して問題なければ旧層ごと削除 = 手順F]
+  const uiBoardV2 = typeof window === 'undefined' || !new URLSearchParams(window.location.search).has('uiv1');
 
   let cutinTimer: ReturnType<typeof setTimeout> | null = null;
   $: if (typeof window !== 'undefined' && !$game.cutin && ($game.cutinQueue?.length ?? 0) > 0 && cutinTimer === null) {
@@ -4492,9 +4492,10 @@
      -12vh hack 廃止 / スケールトークン宣言。score/河の見た目移植は手順D。
      ============================================================ */
   main.mode-single.ui-board-v2 {
-    /* スケールトークン [基準1+派生。値の最終調整は手順D] */
-    --tile-h: clamp(30px, 11dvh, 55px);
-    --tile-w: calc(var(--tile-h) * 0.727); /* 40/55 比率維持 */
+    /* スケールトークン [基準1+派生]。上限 74px は旧デスクトップ実寸
+       [min(6vmin,100vw/22) が 1440x900 で 54x74] とのパリティ */
+    --tile-h: clamp(30px, 11dvh, 74px);
+    --tile-w: calc(var(--tile-h) * 0.727);
     --board-side: min(88cqh, 60cqw);       /* board-cell コンテナ内で解決 */
     height: 100dvh;
     padding:
@@ -4553,8 +4554,8 @@
        score-side は「score + 下河3段 + 左右河」が必ずセルに収まる上限から逆算:
        縦 = side×(1 + 0.22×3 + gap) ≈ side×1.75 → side ≤ 56cqh
        横 = side×(aspect1.4 + 河0.66×2 + gap) ≈ side×2.9 → side ≤ 34cqw */
-    --score-side: min(56cqh, 34cqw);
-    --river-tile-h: clamp(15px, calc(var(--score-side) * 0.22), 34px);
+    --score-side: min(56cqh, 34cqw, 340px); /* 340px 上限 = 旧デスクトップ 36vmin 相当 */
+    --river-tile-h: clamp(15px, calc(var(--score-side) * 0.22), 36px);
     --river-tile-w: calc(var(--river-tile-h) * 0.727);
   }
   main.mode-single.ui-board-v2 .center-board {
@@ -4588,8 +4589,9 @@
   main.mode-single.ui-board-v2 .score-box .score-side.score-left,
   main.mode-single.ui-board-v2 .score-box .score-side.score-right { padding: 1px; overflow: hidden; }
   main.mode-single.ui-board-v2 .score-box .score-side.score-bottom { padding: 1px 3px; overflow: hidden; }
-  /* 低背横 [中央セルが横長] は score を横長にして名前と点数の可読性を優先 */
-  @container board-cell (aspect-ratio > 1.8) {
+  /* 低背横 [中央セルが横長かつ低い] は score を横長にして名前と点数の可読性を優先。
+     高さ条件がないとデスクトップの広セルでも発火して正方形が崩れる */
+  @container board-cell (aspect-ratio > 1.8) and (max-height: 420px) {
     main.mode-single.ui-board-v2 .score-box { --score-aspect: 1.4; }
   }
   /* 縮退規則 [Sol指摘: セルが低いと score 内の全情報は物理的に入らない]:

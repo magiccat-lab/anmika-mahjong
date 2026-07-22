@@ -32,7 +32,7 @@
 <style>
   .modal {
     position: fixed;
-    top: 30%;
+    top: min(30%, 64px);
     left: 50%;
     transform: translateX(-50%);
     background: #222;
@@ -41,6 +41,10 @@
     z-index: 1000;
     border-radius: 8px;
     font-family: 'Noto Sans JP', sans-serif;
+    max-width: 94dvw;
+    max-height: 86dvh;
+    overflow-y: auto;
+    box-sizing: border-box;
   }
   .modal.kinpei { border: 2px solid gold; }
   .title { font-weight: bold; margin-bottom: 8px; font-size: 13px; }

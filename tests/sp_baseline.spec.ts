@@ -23,11 +23,11 @@ function intersects(a: Box, b: Box): boolean {
   return !(a.bottom <= b.top || b.bottom <= a.top || a.right <= b.left || b.right <= a.left);
 }
 
-// flag='' は現行レイアウト、flag='?uiv2=1' は v2 [docs/sp-ui-redesign.md]。
-// 両方が同じ幾何不変条件を満たすことを常時検証する
+// 2026-07-22 から v2 がデフォルト ['/']、旧レイアウトは ?uiv1=1 の退避ハッチ。
+// 旧層を削除する手順F まで、両方が同じ幾何不変条件を満たすことを常時検証する
 const FLAGS = [
-  { name: 'current', query: '/' },
-  { name: 'v2', query: '/?uiv2=1' },
+  { name: 'v2', query: '/' },
+  { name: 'legacy', query: '/?uiv1=1' },
 ];
 
 for (const fl of FLAGS)
