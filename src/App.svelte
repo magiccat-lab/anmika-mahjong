@@ -52,6 +52,27 @@
   // ?uiv1=1 が旧レイアウトへの退避ハッチ [数日 soak して問題なければ旧層ごと削除 = 手順F]
   const uiBoardV2 = typeof window === 'undefined' || !new URLSearchParams(window.location.search).has('uiv1');
 
+  // [2026-07-22 リョー実害: 古いバンドルのタブで「直ってない」誤認が多発]
+  // build 時に吐く version.json を60秒ごとに照合し、差分でリロード案内を出す
+  let newVersionAvailable = false;
+  let _bootVersion: string | null = null;
+  function startVersionWatch() {
+    const check = async () => {
+      try {
+        const r = await fetch(`/version.json?ts=${Date.now()}`, { cache: 'no-store' });
+        if (!r.ok) return;
+        const j = await r.json();
+        const v = String(j?.v ?? '');
+        if (!v) return;
+        if (_bootVersion === null) { _bootVersion = v; return; }
+        if (v !== _bootVersion) newVersionAvailable = true;
+      } catch { /* offline等は無視 */ }
+    };
+    check();
+    setInterval(check, 60_000);
+  }
+  if (typeof window !== 'undefined') startVersionWatch();
+
   // [2026-07-22 リョー要望] オンラインは P0/P1 じゃなくユーザー名で表示する
   let seatDisplayNames: [string, string, string] = ['P0', 'P1', 'P2'];
   $: {
@@ -1378,6 +1399,15 @@
 
   // ツモ切り auto モード [リョー指示 2026-05-12 checkbox 化]
   let autoTsumoKiri = false;
+  // [2026-07-22 リョー要望] 局が変わったらツモ切りチェックを自動で外す
+  let _tsumoKiriRoundKey = '';
+  $: {
+    const rk = `${state.changbang}-${state.jushu}-${state.benbang}`;
+    if (rk !== _tsumoKiriRoundKey) {
+      _tsumoKiriRoundKey = rk;
+      autoTsumoKiri = false;
+    }
+  }
   // [2026-07-22 リョー要望] オンライン用トグル: 鳴きなし / 自動アガリ
   let onlineNoCall = false;
   let onlineAutoWin = false;
@@ -1399,6 +1429,19 @@
   // [2026-07-22 リョー要望] 右クリックでツモ切り。自分の手番でツモ牌がある時だけ
   // 奪う [それ以外はブラウザ標準メニューを妨げない]
   function onContextMenuTsumokiri(e: MouseEvent) {
+    // [2026-07-22 リョー要望] 鳴き/ロン判定中の右クリック = 見送る
+    if ($game.awaitingFulou || $game.awaitingRonDecision) {
+      const canCallSelf = [...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])]
+        .some((c: any) => c.player === selfPlayer && (c.mianzi?.length ?? 0) > 0);
+      const canRonSelf = $game.awaitingRonDecision
+        && ronCandidates.includes(selfPlayer)
+        && !$game.game.shuvariActive[selfPlayer as PlayerId];
+      if (canCallSelf || canRonSelf) {
+        e.preventDefault();
+        game.pass();
+      }
+      return;
+    }
     if (onlineGameStarted && currentPlayer !== selfPlayer) return;
     if (viewMode !== 'single' && !onlineGameStarted) return;
     if (currentPlayer !== selfPlayer) return;
@@ -1957,9 +2000,9 @@
         {/if}
       </div>
     {/if}
-    {#if $game.awaitingRonDecision && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei}
+    {#if $game.awaitingRonDecision && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && ($game.message || ronCandidates.includes(selfPlayer))}
       <div class="action-row hot">
-        <span class="row-label alert">⚠ {$game.message}</span>
+        {#if $game.message}<span class="row-label alert">⚠ {$game.message}</span>{/if}
         {#each ronCandidates.filter((p) => p === selfPlayer) as p}
           <button class="ron-btn" on:click={() => game.ron(p)}>p{p} ロン{$game.game.shuvariActive[p as PlayerId] ? ' [必須]' : ''}</button>
         {/each}
@@ -1968,9 +2011,9 @@
         {/if}
       </div>
     {/if}
-    {#if $game.awaitingFulou}
+    {#if $game.awaitingFulou && ($game.message || [...$game.ponCandidates, ...$game.kanCandidates].some((c) => c.player === selfPlayer))}
       <div class="action-row hot">
-        <span class="row-label alert">⚠ {$game.message}</span>
+        {#if $game.message}<span class="row-label alert">⚠ {$game.message}</span>{/if}
         {#each $game.ponCandidates.filter((c) => c.player === selfPlayer) as cand}
           {#each cand.mianzi as m}
             <button class="pon-btn" on:click={() => game.pon(cand.player, m)}>p{cand.player} ポン [{m}]</button>
@@ -2580,7 +2623,7 @@
     <div class="agari-unified-panel" class:appear-after-cutin={!!$game.lastHuleResult && !state.finished}>
       <div class="agari-left" class:pingju-only={$game.pendingPingju && !$game.lastHuleResult && !state.finished}>
         {#if state.finished}
-          <GameEndPanel ranking={$game.game.getRanking()} zifengZ={(p) => $game.game.zifengZ(p as any)} chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)} finalScore={$game.game.getFinalScore()} />
+          <GameEndPanel names={seatDisplayNames} ranking={$game.game.getRanking()} zifengZ={(p) => $game.game.zifengZ(p as any)} chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)} finalScore={$game.game.getFinalScore()} />
         {/if}
         {#if $game.pendingPingju && !$game.lastHuleResult}
           <div class="pingju-head">
@@ -2616,6 +2659,7 @@
           {#each huleEntries as hw (hw.player)}
             {@const hwPid = hw.player as PlayerId}
             <RoundEndPanel
+              names={seatDisplayNames}
               lastWinner={hw.player}
               huleResult={hw.result}
               baopai={[...$game.game.shan.displayBaopai]}
@@ -2681,13 +2725,14 @@
       {/if}
       {#if ($game.roundEnded || $game.pendingPingju || $game.pendingFeverContinue) && !$game.pendingKinpei}
         <div class="agari-actions">
-          {#if $game.game.preHuleSnapshot && $game.lastWinner !== null}
-            {@const chipDelta = [0,1,2].map(p => ($game.game.chipLedger[p as PlayerId] ?? 0) - (($game.game.preHuleSnapshot as any).chipLedger?.[p] ?? 0))}
+          {#if ($game.game.preHuleSnapshot || $game.lastHuleResult?._chipLedgerBeforeThis) && $game.lastWinner !== null}
+            {@const _ctBefore = ($game.game.preHuleSnapshot as any)?.chipLedger ?? $game.lastHuleResult?._chipLedgerBeforeThis ?? {}}
+            {@const chipDelta = [0,1,2].map(p => ($game.game.chipLedger[p as PlayerId] ?? 0) - (_ctBefore[p] ?? 0))}
             <div class="chip-transfer">
               {#each [0,1,2] as p}
                 {#each [0,1,2] as q}
                   {#if chipDelta[p] < 0 && chipDelta[q] > 0}
-                    <div class="ct-row">P{p}→P{q}: <strong>{Math.min(Math.abs(chipDelta[p]), Math.abs(chipDelta[q]))}枚</strong></div>
+                    <div class="ct-row">{seatDisplayNames[p as 0|1|2]}→{seatDisplayNames[q as 0|1|2]}: <strong>{Math.min(Math.abs(chipDelta[p]), Math.abs(chipDelta[q]))}枚</strong></div>
                   {/if}
                 {/each}
               {/each}
@@ -2728,11 +2773,20 @@
     </div>
   {/if}
 
+  {#if newVersionAvailable}
+    <div class="new-version-toast" role="alert">
+      <span>新しいバージョンがある。リロードで反映してくれ</span>
+      <button on:click={() => location.reload()}>🔄 リロード</button>
+    </div>
+  {/if}
+
   <!-- 2026-05-14: 非 winner client にも modal は見せる [dice 物理動画 WS sync を視認可能に]、
        操作は canOperate prop で完全遮断、 store 側 send-gate でも二重防御。
        2026-07-22 リョー報告 [オンラインで他の人にサイコロが出ない] を受けて
        header 内から main 直下へ移設 [mode-single の header 内表示規則に巻き込まれない] -->
-  {#if $game.pendingSaiKoro && (viewMode !== 'single' || (saiKoroOpened && $game.cpuWinAck))}
+  <!-- [2026-07-22 Sol調査 P0] オンライン対局中も viewMode='single' [App onlineStart で設定] のため、
+       旧gate [viewMode !== 'single'] はオンラインで恒久false → 非winnerに出なかった -->
+  {#if $game.pendingSaiKoro && (onlineGameStarted || (saiKoroOpened && $game.cpuWinAck))}
     {@const _curChance = $game.pendingSaiKoro.chances[$game.pendingSaiKoro.currentIdx]}
     {@const _chanceOwner = (((_curChance as any)?.winner) ?? $game.pendingSaiKoro.winner) as PlayerId}
     <!-- R5 P1 #2 fix: canOperate / chipMultiplier も current chance owner 基準に [ダブロン 2 人目 winner 操作権] -->
@@ -4876,5 +4930,31 @@
     main.mode-single.ui-board-v2 :global(.lizhi-controls .choice .choice-candidates) {
       font-size: 8px;
     }
+  }
+  .new-version-toast {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30000;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #1f3864;
+    color: #fff;
+    border: 2px solid #ffd060;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 14px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+  .new-version-toast button {
+    background: #ffd060;
+    color: #1a1820;
+    border: 0;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-weight: 700;
+    cursor: pointer;
   }
 </style>
