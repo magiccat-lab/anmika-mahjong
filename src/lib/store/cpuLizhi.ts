@@ -175,8 +175,11 @@ export function currentTurn(game: Game3, player: PlayerId): number {
 export const FEVER_LATE_TURN = 8;
 /** この待ち枚数を割ったら細いとみなす */
 export const FEVER_THIN_WAIT = 4;
-/** この tier 以上なら待ちを問わず取る */
-export const FEVER_FORCE_TIER = 3;
+/** この tier 以上なら待ちを問わず取る。
+ *  2026-07-22 リョー報告 [CPUがダブフィを打たなかった] を受けて 3→2。
+ *  見送っても結局同じ待ちで通常リーチするだけ [ダマ禁止卓で戻す選択肢は実在しない] ので、
+ *  倍率 x2 が乗るダブフィ以上を見送る合理性がない */
+export const FEVER_FORCE_TIER = 2;
 /** 暗刻がこれだけあれば高打点とみなして待ちを問わず取る */
 export const FEVER_FORCE_ANKO = 3;
 

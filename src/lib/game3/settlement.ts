@@ -58,25 +58,30 @@ export function evaluateWinPoints(input: WinPointInput): WinPointEvaluation {
   const ceil100 = (n: number) => Math.ceil(n / 100) * 100;
   const feverMultiplier = Math.max(1, input.feverMultiplier ?? 1);
   const pointMultiplier = Math.max(1, input.pointMultiplier ?? 1);
-  const base = computeSanmaBase(input.result) * feverMultiplier;
+  // 2026-07-22 リョー裁定: ダブフィ等のフィーバー倍率は、本場・ツモの +1000 ボーナスまで
+  // 全部含めた最終支払いに一番最後に掛ける [夏夏金北の pointMultiplier と同じ位置]。
+  // 旧実装は基本点に掛けていたため本場とツモボーナスが倍にならなかった。
+  // リーチ供託はどちらの倍率も対象外のまま [docstring 参照]。
+  const finalMultiplier = pointMultiplier * feverMultiplier;
+  const base = computeSanmaBase(input.result);
   const isOya = input.winner === input.oya;
 
   const effectiveLoser = input.result._treatAsTsumo ? null : input.loser;
   if (effectiveLoser !== null) {
     const handPayment = isOya ? ceil100(base * 6) : ceil100(base * 4);
-    const payment = (handPayment + input.benbang * 2000) * pointMultiplier;
+    const payment = (handPayment + input.benbang * 2000) * finalMultiplier;
     deltas[input.winner] += payment;
     deltas[effectiveLoser] -= payment;
   } else if (isOya) {
-    const payment = (ceil100(base * 2) + input.benbang * 1000 + 1000) * pointMultiplier;
+    const payment = (ceil100(base * 2) + input.benbang * 1000 + 1000) * finalMultiplier;
     for (const player of [0, 1, 2] as PlayerId[]) {
       if (player === input.winner) continue;
       deltas[player] -= payment;
       deltas[input.winner] += payment;
     }
   } else {
-    const oyaPayment = (ceil100(base * 2) + input.benbang * 1000 + 1000) * pointMultiplier;
-    const koPayment = (ceil100(base) + input.benbang * 1000 + 1000) * pointMultiplier;
+    const oyaPayment = (ceil100(base * 2) + input.benbang * 1000 + 1000) * finalMultiplier;
+    const koPayment = (ceil100(base) + input.benbang * 1000 + 1000) * finalMultiplier;
     for (const player of [0, 1, 2] as PlayerId[]) {
       if (player === input.winner) continue;
       const payment = player === input.oya ? oyaPayment : koPayment;

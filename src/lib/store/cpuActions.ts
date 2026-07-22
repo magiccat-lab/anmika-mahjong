@@ -17,7 +17,7 @@ import {
   processKakanQianggangWindow,
   autoConsumeFuyuIfFeverExhausted,
 } from '../store';
-import { toCorePai } from '../helpers';
+import { dlog, toCorePai } from '../helpers';
 import { settleAfterWin } from './winPipeline';
 import { decideCpuShuvari } from './cpuShuvari';
 import { pickLizhiDapai, decideFever } from './cpuLizhi';
@@ -172,7 +172,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         const fc = feverMap.get(feverDapai);
         // [2026-07-20 リョー裁定] フィーバーは待ちが固定される。細い待ちなら
         // 1 シャンテン戻す手もあるが、それが成立するのは戻す時間がある序盤だけ。
-        // 全虹 / 高 tier / 暗刻の厚い手は待ちを問わず取る
+        // 全虹 / 高 tier [2026-07-22 からダブフィ以上] / 暗刻の厚い手は待ちを問わず取る
         const fd = fc ? decideFever(s.game, cur, feverDapai, fc.tier, { rainbow: fc.rainbow }) : null;
         if (fc && fd?.takeFever) {
           const sd = decideCpuShuvari(s.game, cur, { discardPai: feverDapai, feverTier: fc.tier });
@@ -181,8 +181,22 @@ export function cpuStepImpl(initial: StoreState): StoreState {
           if (declared) {
             declaredLizhiDapai = feverDapai;
             if (sd.shuvari) shuvariNote = `シュバ [見込み ${sd.score} 枚]`;
+          } else {
+            // [2026-07-22 リョー報告: ダブフィを打たない] 実走でしか出ない経路の特定用。
+            // ここに来たら宣言時再検証 [declareLizhi 内] で落ちてる
+            dlog('[cpu-lizhi] fever宣言が verify で落ちて通常リーチへ fallback', {
+              cur, feverDapai, tier: fc.tier, rainbow: fc.rainbow,
+            });
           }
+        } else {
+          dlog('[cpu-lizhi] fever 見送り', {
+            cur, feverDapai, hasCheck: !!fc, tier: fc?.tier, reason: fd?.reason ?? 'feverCheck なし',
+          });
         }
+      } else if (feverMap.size > 0) {
+        dlog('[cpu-lizhi] fever候補はあるがリーチ候補と交差せず', {
+          cur, feverKeys: [...feverMap.keys()], lizhiCandidates,
+        });
       }
       if (!declared) {
         // [2026-07-20] 宣言牌は待ちの広い方を選ぶ。旧実装は候補の先頭固定だった

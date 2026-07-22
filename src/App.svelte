@@ -4524,6 +4524,11 @@
     --tap-min-h: 44px;
     --tap-min-w: calc(var(--tile-w) + 3px);
   }
+  /* 2026-07-22 リョー報告: 抜きが多いと手牌左端が押し出されて打牌できない。
+     手牌行の華/抜き表示は上部の抜き box [P0 抜[自]] と完全二重なので v2 では出さない */
+  main.mode-single.ui-board-v2 .seat-bottom :global(.hand .hua-group) {
+    display: none;
+  }
   /* 手順D-2: 操作 dock [リーチ/カン/次局へ] を v2 の側柱幅 + safe-area 基準に
      アンカーし、リーチ選択帯は右寄せで折り返して盤面中央を塞がない */
   main.mode-single.ui-board-v2 .toolbar-red {

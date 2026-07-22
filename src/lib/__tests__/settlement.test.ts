@@ -69,4 +69,42 @@ describe('pure win settlement', () => {
     expect(result.defen3).toBe(32000);
     expect(game.state.lizhibang).toBe(0);
   });
+
+  // 2026-07-22 リョー裁定: ダブフィ等のフィーバー倍率は本場・ツモボーナスまで
+  // 全部含めた最終支払いに一番最後に掛ける [旧: 基本点のみ x2 で本場と +1000 が素通り]
+  it('ダブフィ x2 は本場・ツモの +1000 込みの最終支払いに掛かる', () => {
+    // 子ツモ [fanshu5 = base 2000]、1 本場、fever x2
+    const ev = evaluateWinPoints({
+      result: { fu: 30, fanshu: 5 },
+      winner: 1, loser: null, oya: 0, benbang: 1,
+      feverMultiplier: 2,
+    });
+    // 親払い: (2000x2 + 1000 + 1000) x2 = 12000 / 子払い: (2000 + 1000 + 1000) x2 = 8000
+    expect(ev.deltas[0]).toBe(-12000);
+    expect(ev.deltas[2]).toBe(-8000);
+    expect(ev.winnerGain).toBe(20000);
+  });
+
+  it('ダブフィ x2 のロンも本場込みの支払いに掛かる', () => {
+    // 子ロン [fanshu5 = base 2000]、2 本場、fever x2
+    const ev = evaluateWinPoints({
+      result: { fu: 30, fanshu: 5 },
+      winner: 2, loser: 0, oya: 0, benbang: 2,
+      feverMultiplier: 2,
+    });
+    // (2000x4 + 2x2000) x2 = 24000
+    expect(ev.deltas[2]).toBe(24000);
+    expect(ev.deltas[0]).toBe(-24000);
+  });
+
+  it('夏夏金北 x2 とダブフィ x2 が両方最後に掛かる [x4]', () => {
+    const ev = evaluateWinPoints({
+      result: { fu: 30, fanshu: 5 },
+      winner: 1, loser: 0, oya: 1, benbang: 0,
+      feverMultiplier: 2,
+      pointMultiplier: 2,
+    });
+    // 親ロン: (2000x6) x2 x2 = 48000
+    expect(ev.deltas[1]).toBe(48000);
+  });
 });
