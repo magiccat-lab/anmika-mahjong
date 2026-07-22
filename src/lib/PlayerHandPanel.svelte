@@ -139,6 +139,18 @@
     padding: 0;
     cursor: pointer;
   }
+  /* SP再設計 手順B [docs/sp-ui-redesign.md]: タップ領域を表示サイズから分離。
+     --tap-min 未設定 [=0px] では従来と完全同一。v2 が --tap-min: 44px を設定すると
+     牌の見た目を変えずにヒット領域だけ広がる。隣接重複の管理は v2 側の責務 */
+  .tile-btn::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, var(--tap-min, 0px));
+    height: max(100%, var(--tap-min, 0px));
+    transform: translate(-50%, -50%);
+  }
   .tile-btn:disabled { cursor: default; opacity: 0.6; }
   .tile-btn.tsumo-tile { box-shadow: 0 0 0 2px #f0c040 inset; border-radius: 4px; margin-left: 16px; }
   .tile-btn.lizhi-cand {

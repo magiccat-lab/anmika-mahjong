@@ -114,9 +114,12 @@
     overflow: hidden;
     vertical-align: middle;
   }
-  .tile.size-sm { width: 22px; height: 30px; }
-  .tile.size-md { width: 32px; height: 44px; }
-  .tile.size-lg { width: 40px; height: 55px; }
+  /* SP再設計 手順B [docs/sp-ui-redesign.md]: サイズを CSS custom props の正式APIに。
+     fallback は従来の固定値なので、変数未設定の既存画面は見た目不変。
+     v2 レイアウトが文脈ごとに --tile-*-w/h を設定してスケールさせる */
+  .tile.size-sm { width: var(--tile-sm-w, 22px); height: var(--tile-sm-h, 30px); }
+  .tile.size-md { width: var(--tile-md-w, 32px); height: var(--tile-md-h, 44px); }
+  .tile.size-lg { width: var(--tile-lg-w, 40px); height: var(--tile-lg-h, 55px); }
   .tile.down {
     background: #506070;
     border-color: #303a44;
