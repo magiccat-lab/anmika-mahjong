@@ -69,7 +69,7 @@ const _STAMP_ID_SET: Set<string> = new Set(STAMP_IDS);
 /** スタンプ表示の自動 fade-out [ms] */
 export const STAMP_DURATION_MS = 1500;
 export const CUTIN_DURATION_MS = 1800;
-export type CutinId = 'reach' | 'ron' | 'tsumo' | 'fever';
+export type CutinId = 'reach' | 'ron' | 'tsumo' | 'fever' | 'kan' | 'pon';
 export type CutinPayload = { id: CutinId; ts: number; seat?: PlayerId };
 
 export interface StoreState {

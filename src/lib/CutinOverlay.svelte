@@ -9,6 +9,8 @@
     ron: 'ロン！',
     tsumo: 'ツモ！',
     fever: 'フィーバー！',
+    kan: 'カン！',
+    pon: 'ポン！',
   };
 
   function seatClass(seat?: 0 | 1 | 2): string {
@@ -76,6 +78,8 @@
   .cutin-ron { --accent: #d9b453; }
   .cutin-tsumo { --accent: #d9b453; }
   .cutin-fever { --accent: #e0a53e; }
+  .cutin-kan { --accent: #4a90d9; }
+  .cutin-pon { --accent: #4aa96c; }
 
   .cutin-band {
     position: relative;

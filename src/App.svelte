@@ -2345,21 +2345,21 @@
            v2 は inline offset を無効化して grid 配置にこの変数を使う -->
       <div class="hez hez-bottom">
         {#each he0 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {Math.floor(i / 6) * 6}vmin; left: {(i % 6) * 5.5}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" class:claim-target={($game.awaitingFulou || $game.awaitingRonDecision) && $game.lastDapai?.player === srv0 && i === he0.length - 1} style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {Math.floor(i / 6) * 6}vmin; left: {(i % 6) * 5.5}vmin;">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
       </div>
       <div class="hez hez-left">
         {#each he1 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {(i % 6) * 5.5}vmin; right: {Math.floor(i / 6) * 6}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" class:claim-target={($game.awaitingFulou || $game.awaitingRonDecision) && $game.lastDapai?.player === srv1 && i === he1.length - 1} style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {(i % 6) * 5.5}vmin; right: {Math.floor(i / 6) * 6}vmin;">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
       </div>
       <div class="hez hez-right">
         {#each he2 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; bottom: {(i % 6) * 5.5}vmin; left: {Math.floor(i / 6) * 6}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" class:claim-target={($game.awaitingFulou || $game.awaitingRonDecision) && $game.lastDapai?.player === srv2 && i === he2.length - 1} style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; bottom: {(i % 6) * 5.5}vmin; left: {Math.floor(i / 6) * 6}vmin;">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
@@ -3517,6 +3517,11 @@
   }
   main.mode-single .hez-right .hez-tile.lizhi-tile {
     transform: rotate(0deg);
+  }
+  /* [2026-07-22 リョー要望] 鳴き/ロン判定中の対象牌を強調 [リーチ宣言牌と同系のリング] */
+  main.mode-single .hez .hez-tile.claim-target :global(.tile) {
+    box-shadow: 0 0 0 3px #ffb000, 0 0 12px rgba(255, 176, 0, 0.9);
+    border-radius: 4px;
   }
   /* [2026-05-21] 鳴かれた牌 (naki) は薄く gray out、 ツモ切り (tsumogiri) は軽い透過 */
   main.mode-single .hez .hez-tile.naki-tile {

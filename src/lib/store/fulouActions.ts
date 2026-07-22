@@ -3,7 +3,7 @@
 // pure function: state + args → state、 store.ts 側は update(s => impl(s, ...args)) で呼ぶ
 
 import type { StoreState } from '../store';
-import { applyPingjuTransition } from '../store';
+import { applyPingjuTransition, enqueueCutinState } from '../store';
 import { dlog } from '../helpers';
 import { clearReactionStage } from './winPipeline';
 
@@ -24,6 +24,8 @@ export function declareKanImpl(initial: StoreState, mianzi: string): StoreState 
     s.message = `player ${player} カン不可 [mianzi=${mianzi}]、 別の打牌 / カン候補から再選択`;
     return { ...s };
   }
+  // [2026-07-22 リョー要望] カンもリーチ同様のカットインを出す
+  enqueueCutinState(s as any, 'kan', player as any);
   s.lastZimo = replacement;
   s.message = `player ${player} カン [${mianzi}]、 嶺上 ${replacement}`;
   return { ...s };
@@ -47,6 +49,8 @@ export function ponImpl(initial: StoreState, player: number, mianzi: string): St
     return { ...s };
   }
   clearReactionStage(s);
+  // [2026-07-22 リョー要望] ポンもリーチ同様のカットインを出す
+  enqueueCutinState(s as any, 'pon', player as any);
   s.lastZimo = null;
   s.message = `player ${player} ポン → 打牌してください`;
   return { ...s };
@@ -71,6 +75,8 @@ export function damingangImpl(initial: StoreState, player: number, mianzi: strin
     return { ...s };
   }
   clearReactionStage(s);
+  // [2026-07-22 リョー要望] カンもリーチ同様のカットインを出す
+  enqueueCutinState(s as any, 'kan', player as any);
   // [2026-07-22 リョー報告: ミンカンして嶺上ツモしたらつもれなくなった]
   // 槓で消費した打牌が lastDapai に残ると、ツモ宣言 UI のゲート [!lastDapai] に
   // 塞がれて嶺上開花が宣言できず、和了種別も ロン に誤分類される
