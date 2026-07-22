@@ -4517,6 +4517,25 @@
     min-width: 0;
     min-height: 0;
   }
+  /* 手順D-2: 手牌のタップ領域 44px 化 [表示サイズは不変、縦のみ拡張。
+     横は margin 1px x2 の隙間分だけ広げ、隣牌との hitbox 重複を避ける] */
+  main.mode-single.ui-board-v2 .seat-bottom {
+    --tap-min-h: 44px;
+    --tap-min-w: calc(var(--tile-w) + 3px);
+  }
+  /* 手順D-2: 操作 dock [リーチ/カン/次局へ] を v2 の側柱幅 + safe-area 基準に
+     アンカーし、リーチ選択帯は右寄せで折り返して盤面中央を塞がない */
+  main.mode-single.ui-board-v2 .toolbar-red {
+    right: calc(clamp(44px, 12vmin, 96px) + 8px + env(safe-area-inset-right));
+    bottom: calc(var(--tile-h) + 30px + env(safe-area-inset-bottom));
+    max-width: min(48vw, 380px);
+  }
+  main.mode-single.ui-board-v2 .toolbar-red .tb-row {
+    justify-content: flex-end;
+  }
+  main.mode-single.ui-board-v2 .toolbar-red :global(.lizhi-controls) {
+    justify-content: flex-end;
+  }
   main.mode-single.ui-board-v2 .center-board {
     /* -12vh 持ち上げ hack 廃止。セル内で完結 */
     transform: none;

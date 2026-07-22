@@ -147,8 +147,10 @@
     position: absolute;
     left: 50%;
     top: 50%;
-    width: max(100%, var(--tap-min, 0px));
-    height: max(100%, var(--tap-min, 0px));
+    /* 縦横を分離: 縦は指の逃げを大きく取れるが、横は隣牌との hitbox 重複を
+       避けるため gap 分しか広げられない [Sol レビュー] */
+    width: max(100%, var(--tap-min-w, var(--tap-min, 0px)));
+    height: max(100%, var(--tap-min-h, var(--tap-min, 0px)));
     transform: translate(-50%, -50%);
   }
   .tile-btn:disabled { cursor: default; opacity: 0.6; }
