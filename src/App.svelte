@@ -2501,7 +2501,11 @@
     />
   {/if}
 
-  {#if ($game.lastHuleResult || state.finished || $game.pendingPingju) && viewMode === 'single'}
+  <!-- 2026-07-22 fix [リョー報告: 金北の強化先選択でスタック]: 90ee941 以降、人間の
+       金北選択は lastHuleResult 確定前に pendingKinpei だけ立てて return する
+       [秋ドラ表示を上がりまで隠すため]。この panel が唯一の金北UIなので、
+       pendingKinpei 単独でも開くようにしないと single で操作手段が消えて詰む -->
+  {#if ($game.lastHuleResult || state.finished || $game.pendingPingju || $game.pendingKinpei) && viewMode === 'single'}
     <div class="agari-unified-panel" class:appear-after-cutin={!!$game.lastHuleResult && !state.finished}>
       <div class="agari-left" class:pingju-only={$game.pendingPingju && !$game.lastHuleResult && !state.finished}>
         {#if state.finished}
