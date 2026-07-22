@@ -729,9 +729,12 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       ponCandidates: structuredClone(ownPonCandidates),
       kanCandidates: structuredClone(ownKanCandidates),
       roundEnded: state.roundEnded,
+      // [2026-07-22 リョー報告] 「player N リーチ、宣言牌を選んで…」の操作プロンプトが
+      // 他家にも出ていた。宣言者本人以外には送らない [状態は status 行が名前付きで示す]。
+      // S-02 の反応窓マスクが最優先
       message: reactionWindowOpen && isPostWinState(state)
         ? 'ロン宣言 受付中 [他家の判断待ち]'
-        : state.message,
+        : (state.lizhiPending !== null && state.lizhiPending !== own ? null : state.message),
       cpu: structuredClone(state.cpu),
       lizhiPending: state.lizhiPending === own ? own : null,
       // The two-stage declaration choice is private to the acting seat until
@@ -1113,6 +1116,23 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         action.preShuffledPool = serverShuffledPool();
       }
       if (action.type === 'nextMatch') {
+        // [2026-07-22 リョー報告: 次の試合へで同じ東1局に戻る]
+        // 権威側の nextMatch は post-win pending [サイコロ未消化等] が残っていると
+        // store 実装が無言 no-op になり、投影が旧試合へスナップバックしていた。
+        // host の明示操作 = 試合を締める意思なので、残りの勝ち処理を自動消化してから進める
+        for (let guard = 0; guard < 60; guard++) {
+          const canonical = room.authority.canonicalState();
+          if (!canonical.game.state?.finished) break;
+          const auto = computePostWinAutoAction(canonical);
+          if (!auto) break;
+          const autoReason = room.authority.validateAndApply(auto.owner, auto.action, membersForAuthority(room));
+          if (autoReason) {
+            warn('[anmika-ws] nextMatch fast-forward reject', autoReason, auto.action?.type);
+            break;
+          }
+        }
+      }
+      if (action.type === 'nextMatch') {
         // The host may choose whether accumulated chips are reset.  All other
         // settlement inputs are derived from canonical server state.
         action.resetChip = action.resetChip === true;
@@ -1195,6 +1215,63 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         }
       }).catch((error) => warn('[anmika-ws] next-round deadline failed', error));
     }, nextRoundTimeoutMs);
+    return null;
+  };
+
+  /** post-win pending [冬/金北/神ぽっち/高目/サイコロ/フィーバー継続] の自動消化アクション。
+   *  deadline 代行と nextMatch 前の fast-forward [2026-07-22] で共用 */
+  const computePostWinAutoAction = (
+    canonical: ReturnType<RoomAuthority['canonicalState']>,
+  ): { owner: number; action: Record<string, unknown> } | null => {
+    if (canonical.pendingFuyu) {
+      const pending = canonical.pendingFuyu;
+      return {
+        owner: pending.decisionOwners?.[pending.decisionOwnerIndex ?? 0] ?? pending.winner,
+        action: { type: 'selectFuyu', use: true },
+      };
+    }
+    if (canonical.pendingKinpei) {
+      const pending = canonical.pendingKinpei;
+      const hua = pending.availableHuapai
+        ?? canonical.game.effectiveHuapaiAtHule(pending.winner as 0 | 1 | 2);
+      const target = hua.includes('f4') ? 'fuyu'
+        : hua.includes('f3') ? 'aki'
+        : hua.includes('f2') ? 'natsu'
+        : hua.includes('f1') ? 'haru'
+        : null;
+      return {
+        owner: pending.decisionOwners?.[pending.decisionOwnerIndex ?? 0] ?? pending.winner,
+        action: { type: 'selectKinpei', target },
+      };
+    }
+    if (canonical.pendingKamiPochi) {
+      const pending = canonical.pendingKamiPochi;
+      return {
+        owner: pending.decisionOwners[pending.decisionOwnerIndex] ?? pending.winner,
+        action: { type: 'selectKamiPochi', target: pending.candidates[0], occurrenceKey: pending.occurrenceKey },
+      };
+    }
+    if (canonical.pendingPochiSwap) {
+      const pending = canonical.pendingPochiSwap;
+      return {
+        owner: pending.decisionOwners[pending.decisionOwnerIndex] ?? pending.winner,
+        action: { type: 'selectPochiSwap', target: pending.candidates[0]?.target },
+      };
+    }
+    if (canonical.pendingSaiKoro) {
+      const pending = canonical.pendingSaiKoro;
+      const chance = pending.chances[pending.currentIdx] as any;
+      const owner = chance?.winner ?? pending.winner;
+      const action = !pending.selectedCombo
+        ? { type: 'selectSaiKoroCombo', small: 1, large: 6 }
+        : !pending.finalized
+          ? { type: 'rollSaiKoroDice', override: [cryptoRandomInt(1, 7), cryptoRandomInt(1, 7)] }
+          : { type: 'advanceSaiKoro' };
+      return { owner, action };
+    }
+    if (canonical.pendingFeverContinue) {
+      return { owner: canonical.pendingFeverContinue.winner, action: { type: 'continueFever' } };
+    }
     return null;
   };
 
