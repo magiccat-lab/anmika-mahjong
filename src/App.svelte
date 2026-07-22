@@ -1790,7 +1790,7 @@
     <span>対局画面は横向きで全体を確認できます</span>
   </div>
   <header>
-    <h1>アンミカ三麻 [{onlineGameStarted ? `オンライン [部屋 ${currentRoomId}]` : (viewMode === 'single' ? '一人回しモード' : 'phase 1 dev')}]
+    <h1>ONLINE ANMIKA [{onlineGameStarted ? `オンライン [部屋 ${currentRoomId}]` : (viewMode === 'single' ? '一人回しモード' : 'phase 1 dev')}]
       <button class="mode-toggle" on:click={() => { appMode = 'menu'; viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>
         🏠 メニューに戻る
       </button>

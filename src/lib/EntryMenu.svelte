@@ -8,8 +8,7 @@
 
 <div class="entry-menu">
   <div class="entry-brand">
-    <h1>アンミカ三麻</h1>
-    <p class="tagline">金牌・華牌・フィーバー——ちょっと欲張りなオリジナル三人麻雀</p>
+    <h1>ONLINE ANMIKA</h1>
   </div>
   <button class="entry-btn solo" on:click={onSelectSolo}>
     <span class="btn-main">🀄 一人回しモード</span>
@@ -55,12 +54,6 @@
     letter-spacing: 0.06em;
     text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
   }
-  .tagline {
-    margin: 0;
-    color: rgba(240, 240, 235, 0.82);
-    font-size: 0.95rem;
-    letter-spacing: 0.02em;
-  }
   .entry-btn {
     display: flex;
     flex-direction: column;
@@ -91,6 +84,5 @@
     .entry-menu { gap: 1rem; padding: 16px; box-sizing: border-box; }
     .entry-menu h1 { margin-bottom: 0.5rem; font-size: 2rem; }
     .entry-btn { width: 100%; font-size: 1rem; }
-    .tagline { font-size: 0.85rem; }
   }
 </style>
