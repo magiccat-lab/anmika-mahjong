@@ -48,6 +48,10 @@
     game.sendStamp(selfPlayer as PlayerId, id);
   }
 
+  // SP再設計 v2 flag [docs/sp-ui-redesign.md 手順C]: ?uiv2=1 で新レイアウト骨格を有効化。
+  // 旧レイアウトと並行構築し [ストラングラー方式]、v2 完成後に flag と旧 @media 層を一括削除する
+  const uiBoardV2 = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('uiv2');
+
   let cutinTimer: ReturnType<typeof setTimeout> | null = null;
   $: if (typeof window !== 'undefined' && !$game.cutin && ($game.cutinQueue?.length ?? 0) > 0 && cutinTimer === null) {
     game.playNextCutin();
@@ -1788,7 +1792,7 @@
     <button class="mode-toggle" on:click={() => { viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>← オフラインに戻る</button>
   </div>
 {:else}
-<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)}>
+<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:ui-board-v2={uiBoardV2}>
   <div class="orientation-notice" role="status">
     <strong>端末を横向きにしてください</strong>
     <span>対局画面は横向きで全体を確認できます</span>
@@ -4475,5 +4479,45 @@
   .pochi-choice-tile small {
     color: #584b20;
     font-size: 10px;
+  }
+
+  /* ============================================================
+     SP再設計 v2 骨格 [ui-board-v2 flag / docs/sp-ui-redesign.md 手順C]
+     旧レイアウト層 [上の @media パッチ群] には触らない。ここだけで完結させ、
+     v2 完成後に旧層と flag を一括削除する。
+     C の範囲: dvh+safe-area / 側柱 clamp / center セルの寸法確定+containment /
+     -12vh hack 廃止 / スケールトークン宣言。score/河の見た目移植は手順D。
+     ============================================================ */
+  main.mode-single.ui-board-v2 {
+    /* スケールトークン [基準1+派生。値の最終調整は手順D] */
+    --tile-h: clamp(30px, 11dvh, 55px);
+    --tile-w: calc(var(--tile-h) * 0.727); /* 40/55 比率維持 */
+    --board-side: min(88cqh, 60cqw);       /* board-cell コンテナ内で解決 */
+    height: 100dvh;
+    padding:
+      calc(4px + env(safe-area-inset-top))
+      calc(4px + env(safe-area-inset-right))
+      calc(4px + env(safe-area-inset-bottom))
+      calc(4px + env(safe-area-inset-left));
+    grid-template-columns:
+      clamp(44px, 12vmin, 96px)
+      minmax(0, 1fr)
+      clamp(44px, 12vmin, 96px);
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  }
+  /* 自家手牌の牌は v2 トークンに追従 [Tile 手順B の props API 経由] */
+  main.mode-single.ui-board-v2 .seat-bottom {
+    --tile-lg-w: var(--tile-w);
+    --tile-lg-h: var(--tile-h);
+  }
+  main.mode-single.ui-board-v2 .center-board {
+    /* -12vh 持ち上げ hack 廃止。セル内で完結 */
+    transform: none;
+    min-width: 0;
+    min-height: 0;
+    /* grid セルで寸法が確定しているため container-type: size が安全に使える
+       [高さが子依存の要素に cqh を使うと循環するので、この形以外で使わない] */
+    container-type: size;
+    container-name: board-cell;
   }
 </style>
