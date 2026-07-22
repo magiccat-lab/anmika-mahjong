@@ -601,6 +601,14 @@ export class RoomAuthority {
     if (currentErr) return currentErr;
     const pendingErr = this.requireNoReactionPending('drawNext');
     if (pendingErr) return pendingErr;
+    // [2026-07-22 Sol調査C P0] 既にツモ牌がある状態の drawNext を validation 段階で
+    // 明示 reject。client 400ms 橋の遅延発火が正常 projection と競合した時に、
+    // canonical 側の無言 no-op と validation mirror の実ツモで状態が割れて
+    // mutation-token 差分 reject に流れる間接経路を塞ぐ [山も余分に削らない]。
+    // 注意: this.lastZimo は打牌後もクリアされない「最後に引いた牌」のメモなので
+    // 条件に使わない [使うと正規の次家ツモまで全部弾く]。手牌の _zimo だけを見る
+    const spDraw: any = this.game.shoupai.get(actor);
+    if (spDraw?._zimo != null) return 'drawNext: zimo already drawn';
     const z = this.game.zimo();
     this.lastZimo = z;
     if (z === null) this.roundEnded = true;

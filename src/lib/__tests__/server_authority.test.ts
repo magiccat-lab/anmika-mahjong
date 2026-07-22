@@ -191,8 +191,11 @@ describe('server RoomAuthority', () => {
     // A new round already starts with the dealer's draw.  The validation
     // mirror used to consume the request and mark the round ended before the
     // canonical reducer correctly rejected this duplicate draw.
+    // [2026-07-22 Sol調査C P0] Now applyDrawNext rejects the duplicate before
+    // the mirror mutates at all [_zimo already present], so the reason comes
+    // from the validation layer instead of the canonical-reject rollback.
     expect(a.validateAndApply(current, { type: 'drawNext' }, members))
-      .toContain('canonical reducer rejected');
+      .toContain('zimo already drawn');
 
     expect({
       lastZimo: a.lastZimo,

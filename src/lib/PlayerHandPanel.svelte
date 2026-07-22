@@ -18,6 +18,7 @@
   export let revealHand: boolean;
   export let lastZimoIdx: number;
   export let isLizhiCand: (t: string) => boolean = () => false;
+  export let isNakiCand: (t: string) => boolean = () => false;
   export let lizhiPending: boolean = false;
   export let lizhiKindLabel: string = 'リーチ';
   export let onTileClick: (p: number, t: string) => void = () => {};
@@ -37,6 +38,8 @@
         class="tile-btn"
         class:tsumo-tile={i === lastZimoIdx && isCurrent}
         class:lizhi-cand={isPendingCandidate}
+        class:naki-cand={isNakiCand(t)}
+        data-naki-candidate={isNakiCand(t) ? 'true' : undefined}
         class:lizhi-dim={isCurrent && lizhiPending && !isLizhiCand(t)}
         aria-label={isPendingCandidate ? `${lizhiKindLabel}の宣言牌として${lizhiPaiLabel(t)}を切る` : undefined}
         title={isPendingCandidate ? `${lizhiKindLabel}: ${lizhiPaiLabel(t)}を切る` : undefined}
@@ -155,6 +158,11 @@
   }
   .tile-btn:disabled { cursor: default; opacity: 0.6; }
   .tile-btn.tsumo-tile { box-shadow: 0 0 0 2px #f0c040 inset; border-radius: 4px; margin-left: 16px; }
+  /* [2026-07-22 リョー要望] 鳴き判断対象の手牌側ハイライト [リーチ宣言牌と同系の金リング] */
+  .tile-btn.naki-cand {
+    box-shadow: 0 0 0 3px #ffb000, 0 0 10px rgba(255, 176, 0, 0.8);
+    border-radius: 4px;
+  }
   .tile-btn.lizhi-cand {
     box-shadow: 0 0 0 3px #ffb000, 0 0 12px rgba(255, 176, 0, 0.9);
     border-radius: 4px;

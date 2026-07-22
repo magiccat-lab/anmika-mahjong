@@ -330,9 +330,10 @@
     if (snapshot.awaitingFulou) {
       const canCall = [...(snapshot.ponCandidates ?? []), ...(snapshot.kanCandidates ?? [])]
         .some((candidate: any) => candidate.player === myself && (candidate.mianzi?.length ?? 0) > 0);
-      return canCall
-        ? { text: '鳴く／見送るを選択', tone: 'action' }
-        : { text: '鳴き判定待ち', tone: 'waiting' };
+      // [2026-07-22 リョー要望] 非候補に「鳴き判定待ち」を出すと鳴ける牌が出た事自体が
+      // 全員にバレる。非候補には手番表示のままにして判定窓を悟らせない
+      if (canCall) return { text: '鳴く／見送るを選択', tone: 'action' };
+      return { text: `${seatDisplayNames[activePlayer as 0|1|2]} の手番`, tone: 'waiting' };
     }
     if (snapshot.pendingPingju) return { text: '流局処理中', tone: 'waiting' };
     if (snapshot.pendingQianggang) return { text: '槍槓判定中', tone: 'waiting' };
@@ -1005,6 +1006,37 @@
   $: feverLizhiPhysicalCandidates = physicalLizhiCandidates(feverDapaiTiles);
   $: selectedLizhiLabel = lizhiChoiceLabel(lizhiChoiceId(pendingLizhiFlags));
 
+  // [2026-07-22 リョー要望] 鳴き判断中の対象は自分の手牌側でハイライトする
+  // [河の牌に付けると全 client で同じ牌が光り、鳴ける牌が出た事が他家にバレる]
+  $: nakiCandPais = (() => {
+    const set = new Set<string>();
+    if (!$game.awaitingFulou) return set;
+    for (const c of [...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])] as any[]) {
+      if (c.player !== selfPlayer) continue;
+      for (const m of (c.mianzi ?? []) as string[]) {
+        const suit = m[0];
+        const body = m.slice(1);
+        for (let i = 0; i < body.length; i++) {
+          const ch = body[i];
+          if (ch < '0' || ch > '9') continue;
+          const marker = body[i + 1];
+          if (marker === '-' || marker === '=' || marker === '+') continue; // 鳴く牌 [他家の捨て牌] は手牌に無い
+          set.add(suit + ch);
+        }
+      }
+    }
+    return set;
+  })();
+  function isNakiCand(pai: string): boolean {
+    if (nakiCandPais.size === 0) return false;
+    // 金牌表記 [gp/gs] は元の赤5 [p0/s0] として照合、 赤5 と通常 5 は相互許容
+    const base = pai === 'gp' ? 'p0' : pai === 'gs' ? 's0' : pai;
+    if (nakiCandPais.has(base)) return true;
+    if (base[1] === '0' && nakiCandPais.has(base[0] + '5')) return true;
+    if (base[1] === '5' && nakiCandPais.has(base[0] + '0')) return true;
+    return false;
+  }
+
   function isLizhiCand(pai: string): boolean {
     if (lizhiCandidates.length === 0) return false;
     const target = pai.replace(/[_*]$/, '');
@@ -1418,10 +1450,25 @@
   // [drawNext は server 側 action として実装済み。単体モードは従来通り手動ボタン]
   let _autoDrawNextKey = '';
   $: if (onlineGameStarted && needsZimo && currentPlayer === selfPlayer && !$game.roundEnded) {
-    const k = `${state.changbang}-${state.jushu}-${state.benbang}-${$game.game.events?.length ?? 0}`;
+    const rk = `${state.changbang}-${state.jushu}-${state.benbang}`;
+    const k = `${rk}-${$game.game.events?.length ?? 0}`;
     if (k !== _autoDrawNextKey) {
       _autoDrawNextKey = k;
-      setTimeout(() => { const s: any = get(game); if (s && !s.roundEnded) game.drawNext(); }, 400);
+      // [2026-07-22 Sol調査C P0] 発火時に全条件を再検証。400ms の間に正常 projection が
+      // 届いていたら送らない [余計な drawNext が authority の reject/二重ツモ経路に入らない]
+      setTimeout(() => {
+        const s: any = get(game);
+        if (!s || s.roundEnded) return;
+        const st = s.game.state;
+        if (`${st.changbang}-${st.jushu}-${st.benbang}` !== rk) return;
+        const cur = s.game.lunbanToPlayerId(st.lunban);
+        if (cur !== selfPlayer) return;
+        if (s.game.shoupai.get(cur)?._zimo != null) return;
+        if (s.lastZimo != null) return;
+        if (s.awaitingRonDecision || s.awaitingFulou || s.pendingFeverContinue || s.pendingFuyu
+          || s.pendingKinpei || s.pendingKamiPochi || s.pendingPochiSwap) return;
+        game.drawNext();
+      }, 400);
     }
   }
 
@@ -2345,21 +2392,21 @@
            v2 は inline offset を無効化して grid 配置にこの変数を使う -->
       <div class="hez hez-bottom">
         {#each he0 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" class:claim-target={($game.awaitingFulou || $game.awaitingRonDecision) && $game.lastDapai?.player === srv0 && i === he0.length - 1} style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {Math.floor(i / 6) * 6}vmin; left: {(i % 6) * 5.5}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {Math.floor(i / 6) * 6}vmin; left: {(i % 6) * 5.5}vmin;">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
       </div>
       <div class="hez hez-left">
         {#each he1 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" class:claim-target={($game.awaitingFulou || $game.awaitingRonDecision) && $game.lastDapai?.player === srv1 && i === he1.length - 1} style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {(i % 6) * 5.5}vmin; right: {Math.floor(i / 6) * 6}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {(i % 6) * 5.5}vmin; right: {Math.floor(i / 6) * 6}vmin;">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
       </div>
       <div class="hez hez-right">
         {#each he2 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" class:claim-target={($game.awaitingFulou || $game.awaitingRonDecision) && $game.lastDapai?.player === srv2 && i === he2.length - 1} style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; bottom: {(i % 6) * 5.5}vmin; left: {Math.floor(i / 6) * 6}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; bottom: {(i % 6) * 5.5}vmin; left: {Math.floor(i / 6) * 6}vmin;">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
@@ -2468,6 +2515,7 @@
       revealHand={selfPlayer === srv0 || (!onlineGameStarted && revealAll) || $game.game.openLizhi.has(srv0) || $game.game.isFeverConfirmed(srv0)}
       lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv0), shoupai0)}
       isLizhiCand={isLizhiCand}
+      isNakiCand={isNakiCand}
       lizhiPending={$game.lizhiPending === currentPlayer}
       lizhiKindLabel={selectedLizhiLabel}
       onTileClick={onTileClick}
@@ -2803,7 +2851,9 @@
        header 内から main 直下へ移設 [mode-single の header 内表示規則に巻き込まれない] -->
   <!-- [2026-07-22 Sol調査 P0] オンライン対局中も viewMode='single' [App onlineStart で設定] のため、
        旧gate [viewMode !== 'single'] はオンラインで恒久false → 非winnerに出なかった -->
-  {#if $game.pendingSaiKoro && (onlineGameStarted || (saiKoroOpened && $game.cpuWinAck))}
+  <!-- [2026-07-22 リョー報告: ポッチツモ等のカットインが短く見えてすぐサイコロに進む]
+       cutin 再生完了までサイコロ modal を出さず、演出を直列にする -->
+  {#if $game.pendingSaiKoro && !$game.cutin && (($game.cutinQueue?.length ?? 0) === 0) && (onlineGameStarted || (saiKoroOpened && $game.cpuWinAck))}
     {@const _curChance = $game.pendingSaiKoro.chances[$game.pendingSaiKoro.currentIdx]}
     {@const _chanceOwner = (((_curChance as any)?.winner) ?? $game.pendingSaiKoro.winner) as PlayerId}
     <!-- R5 P1 #2 fix: canOperate / chipMultiplier も current chance owner 基準に [ダブロン 2 人目 winner 操作権] -->
@@ -3517,11 +3567,6 @@
   }
   main.mode-single .hez-right .hez-tile.lizhi-tile {
     transform: rotate(0deg);
-  }
-  /* [2026-07-22 リョー要望] 鳴き/ロン判定中の対象牌を強調 [リーチ宣言牌と同系のリング] */
-  main.mode-single .hez .hez-tile.claim-target :global(.tile) {
-    box-shadow: 0 0 0 3px #ffb000, 0 0 12px rgba(255, 176, 0, 0.9);
-    border-radius: 4px;
   }
   /* [2026-05-21] 鳴かれた牌 (naki) は薄く gray out、 ツモ切り (tsumogiri) は軽い透過 */
   main.mode-single .hez .hez-tile.naki-tile {

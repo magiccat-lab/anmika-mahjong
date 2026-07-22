@@ -23,25 +23,39 @@
   import DiceCube from './DiceCube.svelte';
 
   $: chance = chances[currentIdx];
-  $: nonZoroCount = rolls.filter((r) => !r.zoro).length;
-  $: hits = rolls.filter((r) => r.hit).length;
+  // 表示は「演出が着地した分」だけ [spin 中に結果 text が先バレしない]
+  $: shownRolls = rolls.slice(0, revealedRollsCount);
+  $: nonZoroCount = shownRolls.filter((r) => !r.zoro).length;
+  $: hits = shownRolls.filter((r) => r.hit).length;
   $: rollsLeft = Math.max(0, (chance?.rollCount ?? 4) - nonZoroCount);
 
   // 順序なし 15 通り [(1,2), (1,3), ... (5,6)] 生成
   const allCombos: Array<[number, number]> = [];
   for (let a = 1; a <= 6; a++) for (let b = a + 1; b <= 6; b++) allCombos.push([a, b]);
 
-  // サイコロ アニメ + SE [2026-07-15 リョー指示: dice-box(WebGL物理) を内製 CSS cube に置換。
-  // 出目は store/server が確定する。演出は表示専用で、init 失敗・watchdog の類は不要になった]
+  // サイコロ アニメ + SE [2026-07-15 リョー指示: dice-box(WebGL物理) を内製 CSS cube に置換]
+  // [2026-07-22 Sol調査B fix] 演出と確定値の同期を作り直し:
+  // - 振る操作は即 server/store へ送り、演出は rolls 配列の増分だけから駆動する
+  //   [旧: 旧 display 値で 750ms 回してから送信 → 着地と確定結果がズレる]
+  // - roll 1 件 = spin 1 回。連続着信は queue で直列再生 [上書きしない]
+  // - chance が進んだら [currentIdx 変化] 計数と queue をリセット
+  //   [旧: prevRollsCount 持ち越しで次 chance の演出が丸ごと死ぬ]
+  // - mount 時の既存履歴は演出なしで即表示 [途中参加で過去 roll を再生しない]
   let rolling = false;
   let displayD1 = 1;
   let displayD2 = 1;
   let drumAudio: HTMLAudioElement | null = null;
-  let prevRollsCount = 0;
   let rollTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingResultCallback: (() => void) | null = null;
+  let landingQueue: Array<{ d1: number; d2: number; fanfare: boolean; upto: number }> = [];
+  let revealedRollsCount = 0;
+  let prevRollsCount = 0;
+  let awaitingRollAck = false;
+  let trackedIdx: number | null = null;
+  let bootstrapped = false;
   // タンブル時間。止まり際の ease [0.55s] は DiceCube 側
   const SPIN_MS = 750;
+
+  $: settled = !rolling && landingQueue.length === 0;
 
   function stopDrumAudio() {
     if (!drumAudio) return;
@@ -49,19 +63,11 @@
     drumAudio = null;
   }
 
-  function completePendingRoll() {
-    const callback = pendingResultCallback;
-    pendingResultCallback = null;
-    rolling = false;
-    stopDrumAudio();
-    callback?.();
-  }
-
   onDestroy(() => {
     if (rollTimer !== null) clearTimeout(rollTimer);
     rollTimer = null;
-    pendingResultCallback = null;
     rolling = false;
+    landingQueue = [];
     stopDrumAudio();
   });
 
@@ -74,42 +80,58 @@
     } catch (e) { return null; }
   }
 
-  function startSpin(callback: () => void) {
+  function startNextSpin() {
+    const item = landingQueue.shift();
+    landingQueue = landingQueue;
+    if (!item) return;
     rolling = true;
+    // DiceCube は rolling → false の瞬間に value へ settle するため、着地値を先に固定する
+    displayD1 = item.d1;
+    displayD2 = item.d2;
     drumAudio = playSE('/sounds/drum_roll.mp3', 0.55);
-    pendingResultCallback = callback;
     rollTimer = setTimeout(() => {
       rollTimer = null;
-      completePendingRoll();
+      rolling = false;
+      stopDrumAudio();
+      revealedRollsCount = Math.max(revealedRollsCount, item.upto);
+      if (item.fanfare) playSE('/sounds/se_a.mp3', 0.6);
+      if (landingQueue.length > 0) startNextSpin();
     }, SPIN_MS);
   }
 
   function handleRoll() {
-    if (rolling) return;
-    startSpin(() => onRoll());
+    if (rolling || awaitingRollAck || landingQueue.length > 0) return;
+    // 即送信。演出は rolls 増分検出側 [下の $:] が確定値で発火する
+    awaitingRollAck = true;
+    onRoll();
   }
 
-  // 新規 roll 検出 → hit / ゾロ目 2 連続目以降 [ゾロ目連続特典] で ファンファーレ
-  // 非 canOperate side [オンライン非 winner] では 視覚動画も WS sync で発火 [リョー指示 2026-05-13]
-  // 物理 sim の land 値は捨てて text result は WS の `rolls` 配列の値で表示する [diceBox.roll は value 強制注入 path 無し]
   $: {
-    if (rolls.length > prevRollsCount) {
-      const newest = rolls[rolls.length - 1];
-      const prev = rolls.length >= 2 ? rolls[rolls.length - 2] : null;
-      if (newest) {
-        displayD1 = newest.dice[0];
-        displayD2 = newest.dice[1];
-        const zoroConsecutive = newest.zoro && prev && prev.zoro;
-        if (newest.hit || zoroConsecutive) {
-          playSE('/sounds/se_a.mp3', 0.6);
-        }
-        // 非 winner 側: ws sync で rolls 増えた時、 タンブル演出を発火 [視覚同期。 値は WS 確定済]
-        if (!canOperate && !rolling) {
-          startSpin(() => {});
-        }
-      }
+    if (!bootstrapped || trackedIdx !== currentIdx) {
+      // 初回 mount / chance 切替: 既存履歴は演出なしで表示状態に同期
+      bootstrapped = true;
+      trackedIdx = currentIdx;
+      if (rollTimer !== null) { clearTimeout(rollTimer); rollTimer = null; }
+      rolling = false;
+      stopDrumAudio();
+      landingQueue = [];
+      awaitingRollAck = false;
       prevRollsCount = rolls.length;
+      revealedRollsCount = rolls.length;
+      const last = rolls[rolls.length - 1];
+      if (last) { displayD1 = last.dice[0]; displayD2 = last.dice[1]; }
+    } else if (rolls.length > prevRollsCount) {
+      // winner / 非 winner 共通: rolls の増分 1 件につき spin 1 回を queue
+      for (let i = prevRollsCount; i < rolls.length; i++) {
+        const r = rolls[i];
+        const prev = i >= 1 ? rolls[i - 1] : null;
+        landingQueue.push({ d1: r.dice[0], d2: r.dice[1], fanfare: r.hit || (!!r.zoro && !!prev?.zoro), upto: i + 1 });
+      }
+      landingQueue = landingQueue;
+      prevRollsCount = rolls.length;
+      awaitingRollAck = false;
     }
+    if (!rolling && landingQueue.length > 0) startNextSpin();
   }
 </script>
 
@@ -146,25 +168,25 @@
     {:else}
       <div class="step">宣言出目: <strong>{selectedCombo[0]}, {selectedCombo[1]}</strong></div>
       <div class="rolls">
-        {#each rolls as r, i}
+        {#each shownRolls as r, i}
           <span class="roll {r.zoro ? 'zoro' : r.hit ? 'hit' : 'miss'}">
             #{i + 1}: ({r.dice[0]}, {r.dice[1]})
             {#if r.zoro} ゾロ目 ↻{:else if r.hit} ◎ hit{:else} ✗{/if}
           </span>
         {/each}
       </div>
-      {#if !finalized}
+      {#if !finalized || !settled}
         <div class="dice-stage" aria-label="サイコロ">
           <DiceCube value={displayD1} rolling={rolling} size={64} />
           <DiceCube value={displayD2} rolling={rolling} size={64} />
         </div>
         <!-- 直近 roll 結果 [text] -->
-        {#if rolls.length > 0}
-          <div class="roll-result">直近: ({rolls[rolls.length - 1].dice[0]}, {rolls[rolls.length - 1].dice[1]})</div>
+        {#if shownRolls.length > 0}
+          <div class="roll-result">直近: ({shownRolls[shownRolls.length - 1].dice[0]}, {shownRolls[shownRolls.length - 1].dice[1]})</div>
         {/if}
         <div class="info">残り {rollsLeft} 振り | 現 {hits} hit</div>
         <div class="actions">
-          <button class="roll-btn" on:click={handleRoll} disabled={rolling || !canOperate}>{rolling ? '🎲 振っています…' : (canOperate ? '🎲 サイコロを振る' : '🎲 上がり者の振り待ち…')}</button>
+          <button class="roll-btn" on:click={handleRoll} disabled={rolling || awaitingRollAck || landingQueue.length > 0 || !canOperate}>{(rolling || awaitingRollAck || landingQueue.length > 0) ? '🎲 振っています…' : (canOperate ? '🎲 サイコロを振る' : '🎲 上がり者の振り待ち…')}</button>
         </div>
       {:else}
         <div class="result">

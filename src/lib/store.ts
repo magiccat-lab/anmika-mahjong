@@ -877,7 +877,11 @@ export function createGameStore() {
     },
     /** Apply the server's seat-scoped canonical state. */
     hydrateOnlineProjection(projection: unknown): boolean {
-      return hydrateProjectionState(projection);
+      const ok = hydrateProjectionState(projection);
+      // [2026-07-22 Sol調査C P0] hydrate 拒否は「第一ツモが出ない」系の一次証拠。
+      // 本番でも観測できるよう warn に昇格 [dlog は DEV のみで沈黙する]
+      if (!ok) console.warn('[online] projection hydrate rejected', { recipient: (projection as any)?.recipientSeat, schema: (projection as any)?.schemaVersion, mySeat: myOnlineSeat });
+      return ok;
     },
     getOnlineProtocolState() {
       return { revision: onlineRevision, matchId: onlineMatchId, roundId: onlineRoundId };
@@ -908,7 +912,11 @@ export function createGameStore() {
      *  2026-05-14 codex review #1 fix: from_seat と action.player / 現在手番 / 候補者 の
      *  整合 check を追加、 不正 seat からの proxy action [他人の宣言/打牌 横取り] を reject */
     applyOnlineRemoteAction(from_seat: number, action: any) {
-      if (action?._state) return hydrateProjectionState(action._state);
+      if (action?._state) {
+        const ok = hydrateProjectionState(action._state);
+        if (!ok) console.warn('[online] remote _state hydrate rejected', { from_seat, type: action?.type, recipient: action._state?.recipientSeat, mySeat: myOnlineSeat });
+        return ok;
+      }
       // スタンプ [cosmetic、 game state 副作用なし]: 全 validation skip、
       // from_seat の stamps slot に set + STAMP_DURATION_MS 後に null に戻す
       if (action?.type === 'stamp') {
