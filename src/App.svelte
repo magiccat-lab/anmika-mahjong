@@ -97,6 +97,12 @@
   onDestroy(() => {
     if (cutinTimer !== null) clearTimeout(cutinTimer);
   });
+  // [2026-07-23 Sol調査: ポッチ演出割り込み] 演出は排他で直列に出す
+  // [cutin → 白ぽっち開示 → 選択モーダル → サイコロ]。
+  // 主因は PochiReveal が独立キュー + z-index 9999 で他演出を覆っていた事
+  $: fxCutinBusy = !!$game.cutin || (($game.cutinQueue?.length ?? 0) > 0);
+  $: fxPochiRevealShowing = !!pochiReveal && (!onlineGameStarted || pochiReveal.player === selfPlayer);
+  $: fxPresentationBusy = fxCutinBusy || fxPochiRevealShowing;
 
   const PLAYERS = [0, 1, 2] as const satisfies readonly PlayerId[];
 
@@ -2147,7 +2153,7 @@
     <!-- [2026-07-22] online の祝儀表示は RoundEndPanel の chip slot に統合済み [重複防止で撤去] -->
     <!-- 2026-05-14 codex review #3 fix: online で 自家 [selfPlayer] のみ表示、
          他家のぽっち色 [非公開情報] 漏洩防止 -->
-    {#if pochiReveal && (!onlineGameStarted || pochiReveal.player === selfPlayer)}
+    {#if pochiReveal && (!onlineGameStarted || pochiReveal.player === selfPlayer) && !fxCutinBusy}
       <!-- 2026-07-22 fix [リョー報告: 追いかけリーチ時 白ぽっち演出で停止]: 開示が連続すると
            {#if} は component を再生成せず props 差替えだけになり、前回の revealed/closing が
            持ち越されて 2 枚目が「開いたまま timer なし」で永久に残る。{#key} で毎回作り直す -->
@@ -2157,7 +2163,7 @@
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: FuyuModal も winner client のみ表示、
          非 winner が誤クリックで selectFuyu broadcast するのを防ぐ -->
-    {#if $game.pendingFuyu && (!onlineGameStarted || ($game.pendingFuyu.decisionOwners ?? [$game.pendingFuyu.winner]).includes(selfPlayer))}
+    {#if $game.pendingFuyu && (!onlineGameStarted || ($game.pendingFuyu.decisionOwners ?? [$game.pendingFuyu.winner]).includes(selfPlayer)) && !fxPresentationBusy}
       {@const tingW = $game.game.feverDeclareTing?.[$game.pendingFuyu.winner as 0|1|2] ?? $game.game.getTingpaiList($game.pendingFuyu.winner as 0|1|2)}
       {@const remainW = fuyuWaitRemain($game.pendingFuyu.winner as PlayerId, tingW)}
       <FuyuModal
@@ -2170,10 +2176,10 @@
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: online で winner != selfPlayer の client にも
          modal が出てて 誤クリックで他人の金北選択を送れた、 winner のみ表示に gate -->
-    {#if $game.pendingKinpei && viewMode !== 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(selfPlayer))}
+    {#if $game.pendingKinpei && viewMode !== 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(selfPlayer)) && !fxPresentationBusy}
       <KinpeiModal preview={$game.pendingKinpei.preview ?? null} winnerName={onlineGameStarted ? seatDisplayNames[$game.pendingKinpei.winner] : null} winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
     {/if}
-    {#if $game.pendingKamiPochi && (!onlineGameStarted || $game.pendingKamiPochi.decisionOwners.includes(selfPlayer))}
+    {#if $game.pendingKamiPochi && (!onlineGameStarted || $game.pendingKamiPochi.decisionOwners.includes(selfPlayer)) && !fxPresentationBusy}
       <div class="pochi-choice-backdrop" role="presentation">
         <dialog open class="pochi-choice-modal" aria-label="神ぽっちの牌選択">
           <h2>神ぽっち</h2>
@@ -2209,7 +2215,7 @@
         </dialog>
       </div>
     {/if}
-    {#if $game.pendingPochiSwap && (!onlineGameStarted || $game.pendingPochiSwap.decisionOwners.includes(selfPlayer))}
+    {#if $game.pendingPochiSwap && (!onlineGameStarted || $game.pendingPochiSwap.decisionOwners.includes(selfPlayer)) && !fxPresentationBusy}
       <div class="pochi-choice-backdrop" role="presentation">
         <dialog open class="pochi-choice-modal" aria-label="ぽっちの高目選択">
           <h2>{$game.pendingPochiSwap.kind === 'deka' ? 'でかぽっち' : '白ぽっち'} 高目選択</h2>
@@ -2810,7 +2816,7 @@
         {/if}
       </div>
       <!-- 2026-05-14 codex review #3 fix: inline Kinpei は winner 限定 -->
-      {#if $game.pendingKinpei && viewMode === 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(selfPlayer))}
+      {#if $game.pendingKinpei && viewMode === 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(selfPlayer)) && !fxPresentationBusy}
         {@const effectiveKinpeiHua = $game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)}
         <div class="kinpei-inline">
           <div class="kinpei-title">金北 強化対象 [{seatDisplayNames[$game.pendingKinpei.winner as 0|1|2]} 選択]</div>
@@ -2915,7 +2921,7 @@
        旧gate [viewMode !== 'single'] はオンラインで恒久false → 非winnerに出なかった -->
   <!-- [2026-07-22 リョー報告: ポッチツモ等のカットインが短く見えてすぐサイコロに進む]
        cutin 再生完了までサイコロ modal を出さず、演出を直列にする -->
-  {#if $game.pendingSaiKoro && !$game.cutin && (($game.cutinQueue?.length ?? 0) === 0) && (onlineGameStarted || (saiKoroOpened && $game.cpuWinAck))}
+  {#if $game.pendingSaiKoro && !fxPresentationBusy && (onlineGameStarted || (saiKoroOpened && $game.cpuWinAck))}
     {@const _curChance = $game.pendingSaiKoro.chances[$game.pendingSaiKoro.currentIdx]}
     {@const _chanceOwner = (((_curChance as any)?.winner) ?? $game.pendingSaiKoro.winner) as PlayerId}
     <!-- R5 P1 #2 fix: canOperate / chipMultiplier も current chance owner 基準に [ダブロン 2 人目 winner 操作権] -->

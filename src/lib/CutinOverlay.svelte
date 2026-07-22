@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { game as gameStore } from './store';
   import type { CutinPayload } from './store';
 
   export let cutin: CutinPayload | null;
@@ -19,25 +18,11 @@
     return 'from-bottom';
   }
 
-  // cutin が変わるたびに animation 終了後 [1.8s] に finish + 次の queue を play
-  // 2026-05-16 fix: 旧 codex 2 周目で enqueue/finish のペアリングが App.svelte 側で
-  // 配線されてなかった、 ここで self-contained に lifecycle を回す
-  import { onDestroy } from 'svelte';
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let pumpTimer: ReturnType<typeof setTimeout> | undefined;
-  $: if (cutin) {
-    if (timer) clearTimeout(timer);
-    const ts = cutin.ts;
-    timer = setTimeout(() => {
-      gameStore.finishCutin(ts);
-      // 次の cutin を pump、 queue 残ってれば即 再生
-      pumpTimer = setTimeout(() => gameStore.playNextCutin(), 30);
-    }, 1850);
-  }
-  onDestroy(() => {
-    if (timer) clearTimeout(timer);
-    if (pumpTimer) clearTimeout(pumpTimer);
-  });
+  // [2026-07-23 Sol調査: ポッチ演出割り込み] cutin の finish/pump タイマーは
+  // App.svelte [85行付近、CUTIN_DURATION_MS] が単一所有者。
+  // 旧: ここにも 1850ms+pump があり二重管理 → 双方が playNextCutin を撃って
+  // queue を 2 個消費し、カットインが途中で食われて「表示が短い」の一因になっていた。
+  // この component は表示専用にする
 </script>
 
 {#if cutin}
