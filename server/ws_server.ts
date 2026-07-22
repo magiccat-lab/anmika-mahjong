@@ -577,8 +577,14 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
   const publicHands: Record<number, Record<string, unknown>> = {};
   for (const player of [0, 1, 2] as const) {
     const sp: any = game.shoupai.get(player);
+    // [2026-07-22 リョー報告: 他の人のアガリがback表示] 和了確定後 [反応窓クローズ後] は
+    // 勝者の手牌を全席に開示する。従来はオープンリーチとフィーバーだけが開示対象で、
+    // 通常の和了は勝者以外の画面で手牌が裏のままだった
+    const isPostWinRevealedWinner = revealPostWinPrivateState
+      && postWinWinners(state).has(player);
     const publiclyRevealed = game.openLizhi.has(player)
-      || (game.feverActive[player] && game.feverDeclareDapaiPlayer !== player);
+      || (game.feverActive[player] && game.feverDeclareDapaiPlayer !== player)
+      || isPostWinRevealedWinner;
     const exposedWaits = new Set<string>();
     for (const [declarer, waits] of waitsByDeclarer) {
       if (declarer === player) continue;

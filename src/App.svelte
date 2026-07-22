@@ -1947,9 +1947,7 @@
     {#if $game.message && !$game.awaitingRonDecision && !$game.awaitingFulou}
       <div class="action-row"><span class="alert">{$game.message}</span></div>
     {/if}
-    {#if $game.lastHuleResult?.chipBreakdown?.length > 0 && viewMode !== 'single'}
-      <ChipBreakdown breakdown={$game.lastHuleResult.chipBreakdown} total={$game.lastHuleResult.chipTotal ?? 0} />
-    {/if}
+    <!-- [2026-07-22] online の祝儀表示は RoundEndPanel の chip slot に統合済み [重複防止で撤去] -->
     <!-- 2026-05-14 codex review #3 fix: online で 自家 [selfPlayer] のみ表示、
          他家のぽっち色 [非公開情報] 漏洩防止 -->
     {#if pochiReveal && (!onlineGameStarted || pochiReveal.player === selfPlayer)}
@@ -2040,28 +2038,9 @@
         </button>
       </div>
     {/if}
-    <!-- 2026-05-14: 非 winner client にも modal は見せる [dice 物理動画 WS sync を視認可能に]、
-         操作は canOperate prop で完全遮断、 store 側 send-gate でも二重防御 -->
-    {#if $game.pendingSaiKoro && (viewMode !== 'single' || (saiKoroOpened && $game.cpuWinAck))}
-      {@const _curChance = $game.pendingSaiKoro.chances[$game.pendingSaiKoro.currentIdx]}
-      {@const _chanceOwner = (((_curChance as any)?.winner) ?? $game.pendingSaiKoro.winner) as PlayerId}
-      <!-- R5 P1 #2 fix: canOperate / chipMultiplier も current chance owner 基準に [ダブロン 2 人目 winner 操作権] -->
-      <SaiKoroModal
-        winner={_chanceOwner}
-        canOperate={!onlineGameStarted || _chanceOwner === selfPlayer}
-        chances={$game.pendingSaiKoro.chances}
-        currentIdx={$game.pendingSaiKoro.currentIdx}
-        selectedCombo={$game.pendingSaiKoro.selectedCombo}
-        rolls={$game.pendingSaiKoro.rolls}
-        finalized={$game.pendingSaiKoro.finalized}
-        summary={$game.pendingSaiKoro.summary}
-        chipMultiplier={$game.game.computeChipMultiplier(_chanceOwner, { bypassShuvari: true, bypassFever: false, bypassPochi: (_curChance as any)?.mode === 'ron', mode: (_curChance as any)?.mode ?? 'tsumo' })}
-        ownerShuvariActive={$game.game.shuvariActive[_chanceOwner]}
-        onSelectCombo={(a, b) => game.selectSaiKoroCombo(a, b)}
-        onRoll={(override?: [number, number]) => game.rollSaiKoroDice(override)}
-        onAdvance={() => game.advanceSaiKoro()}
-      />
-    {/if}
+    <!-- [2026-07-22 リョー報告: サイコロが他の人に表示されない] SaiKoroModal は
+         template 末尾のトップレベルへ移設 [包み要素の表示規則に依存しない位置] -->
+
     {#if $game.roundEnded && !$game.pendingSaiKoro}
       <!-- R21 P0 fix: nextRound は host or winner [人間] or 親 [agariyame] 許容 [server で gate]、
            次局へ は 流局 = host、 和了 = winner 自身 が押す自然な UX に -->
@@ -2487,18 +2466,36 @@
   {/if}
 
   {#if $game.lastHuleResult && viewMode !== 'single'}
+    <!-- 2026-07-22 リョー報告 [オンライン: 勝者手牌がback/チップ移動が出ない]:
+         single 版と同じく 手牌/華/抜き/点数移動/祝儀 を全部配線する。
+         手牌の実体は server 投影の post-win 開示 [ws_server publiclyRevealed] 前提 -->
+    {@const _olWinner = $game.lastWinner}
     <RoundEndPanel
-      lastWinner={$game.lastWinner}
+      lastWinner={_olWinner}
       huleResult={$game.lastHuleResult}
       baopai={[...$game.game.shan.displayBaopai]}
       fubaopai={$game.game.shan.displayFubaopai ? [...$game.game.shan.displayFubaopai] : null}
-      winnerLizhi={$game.lastWinner !== null && $game.game.lizhi.has($game.lastWinner as PlayerId)}
-      agariType={$game.lastDapai && $game.lastWinner !== null && $game.lastDapai.player !== $game.lastWinner ? 'ron' : ($game.lastWinner !== null ? 'tsumo' : null)}
-      agariPai={$game.lastDapai && $game.lastWinner !== null && $game.lastDapai.player !== $game.lastWinner
+      winnerLizhi={_olWinner !== null && $game.game.lizhi.has(_olWinner as PlayerId)}
+      defenDelta={latestHuleDefenDelta()}
+      defenAfter={[state.defen[0], state.defen[1], state.defen[2]] as [number, number, number]}
+      winnerShoupai={_olWinner !== null ? handTiles($game.game.shoupai.get(_olWinner as PlayerId), _olWinner as PlayerId) : []}
+      winnerFulou={_olWinner !== null ? fulouMianzi($game.game.shoupai.get(_olWinner as PlayerId), _olWinner as PlayerId) : []}
+      winnerHuapai={_olWinner !== null ? ($game.game.huapai[_olWinner as PlayerId] ?? []) : []}
+      winnerNuki={_olWinner !== null ? ($game.game.nukidora[_olWinner as PlayerId] ?? 0) : 0}
+      winnerNukiGold={_olWinner !== null ? ($game.game.nukidoraGold[_olWinner as PlayerId] ?? 0) : 0}
+      hideFuyuResult={$game.pendingKinpei !== null}
+      agariType={$game.lastDapai && _olWinner !== null && $game.lastDapai.player !== _olWinner ? 'ron' : (_olWinner !== null ? 'tsumo' : null)}
+      agariPai={$game.lastDapai && _olWinner !== null && $game.lastDapai.player !== _olWinner
         ? $game.lastDapai.pai
-        : ($game.lastWinner !== null ? ($game.game.shoupai.get($game.lastWinner as PlayerId)?._zimo ?? null) : null)}
-      agariFrom={$game.lastDapai && $game.lastWinner !== null && $game.lastDapai.player !== $game.lastWinner ? $game.lastDapai.player : null}
-    />
+        : (_olWinner !== null ? ($game.game.shoupai.get(_olWinner as PlayerId)?._zimo ?? null) : null)}
+      agariFrom={$game.lastDapai && _olWinner !== null && $game.lastDapai.player !== _olWinner ? $game.lastDapai.player : null}
+    >
+      <div slot="chip">
+        {#if $game.lastHuleResult?.chipBreakdown?.length > 0}
+          <ChipBreakdown breakdown={$game.lastHuleResult.chipBreakdown} total={$game.lastHuleResult.chipTotal ?? 0} />
+        {/if}
+      </div>
+    </RoundEndPanel>
   {/if}
 
   <!-- 2026-07-22 fix [リョー報告: 金北の強化先選択でスタック]: 90ee941 以降、人間の
@@ -2648,6 +2645,31 @@
         </div>
       {/if}
     </div>
+  {/if}
+
+  <!-- 2026-05-14: 非 winner client にも modal は見せる [dice 物理動画 WS sync を視認可能に]、
+       操作は canOperate prop で完全遮断、 store 側 send-gate でも二重防御。
+       2026-07-22 リョー報告 [オンラインで他の人にサイコロが出ない] を受けて
+       header 内から main 直下へ移設 [mode-single の header 内表示規則に巻き込まれない] -->
+  {#if $game.pendingSaiKoro && (viewMode !== 'single' || (saiKoroOpened && $game.cpuWinAck))}
+    {@const _curChance = $game.pendingSaiKoro.chances[$game.pendingSaiKoro.currentIdx]}
+    {@const _chanceOwner = (((_curChance as any)?.winner) ?? $game.pendingSaiKoro.winner) as PlayerId}
+    <!-- R5 P1 #2 fix: canOperate / chipMultiplier も current chance owner 基準に [ダブロン 2 人目 winner 操作権] -->
+    <SaiKoroModal
+      winner={_chanceOwner}
+      canOperate={!onlineGameStarted || _chanceOwner === selfPlayer}
+      chances={$game.pendingSaiKoro.chances}
+      currentIdx={$game.pendingSaiKoro.currentIdx}
+      selectedCombo={$game.pendingSaiKoro.selectedCombo}
+      rolls={$game.pendingSaiKoro.rolls}
+      finalized={$game.pendingSaiKoro.finalized}
+      summary={$game.pendingSaiKoro.summary}
+      chipMultiplier={$game.game.computeChipMultiplier(_chanceOwner, { bypassShuvari: true, bypassFever: false, bypassPochi: (_curChance as any)?.mode === 'ron', mode: (_curChance as any)?.mode ?? 'tsumo' })}
+      ownerShuvariActive={$game.game.shuvariActive[_chanceOwner]}
+      onSelectCombo={(a, b) => game.selectSaiKoroCombo(a, b)}
+      onRoll={(override?: [number, number]) => game.rollSaiKoroDice(override)}
+      onAdvance={() => game.advanceSaiKoro()}
+    />
   {/if}
 
   {#if loadedPaifu}
