@@ -2355,7 +2355,7 @@ export function createGameStore() {
           const hasFulouCand = (s.ponCandidates?.length ?? 0) > 0 || (s.kanCandidates?.length ?? 0) > 0;
           if (wasAwaitingRon && hasFulouCand) {
             enterFulouStage(s, { ponCandidates: s.ponCandidates, kanCandidates: s.kanCandidates });
-            s.message = `ロン全 pass、 副露可能`;
+            s.message = null; // [2026-07-22 リョー指摘] 内部状態文言は出さない
             return { ...s };
           }
           clearReactionStage(s, { clearRonTracking: false });
@@ -2512,7 +2512,7 @@ export function createGameStore() {
         // 進んでて 鳴き候補消失 bug
         if (s.awaitingRonDecision && !s.awaitingFulou && (newPonCands.length > 0 || newKanCands.length > 0)) {
           enterFulouStage(s, { ponCandidates: newPonCands, kanCandidates: newKanCands });
-          s.message = `ロン全 pass、 副露可能: p${[...newPonCands.map((c:any)=>c.player), ...newKanCands.map((c:any)=>c.player)].join('/')}`;
+          s.message = null; // [2026-07-22 リョー指摘] 副露可能:pN の内部文言は出さない
           return { ...s };
         }
         // 全 候補 消費 → 次の手番へ進む
@@ -3666,7 +3666,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
         ...humanPonCands.map((c) => `pon p${c.player}`),
         ...humanKanCands.map((c) => `kan p${c.player}`),
       ];
-      s.message = `副露可能: ${ppl.join(' / ')}`;
+      s.message = null; // [2026-07-22 リョー指摘] 内部状態文言は出さない
       return { ...s };
     }
     // 誰もポンしない → 通常のツモへ

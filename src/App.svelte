@@ -190,9 +190,13 @@
         const color = ev?.pai ? POCHI_COLOR_MAP[ev.pai] : undefined;
         // [2026-07-21 リョー裁定] フィーバー中の非フィーバー家は強制ツモ切りなので、
         // ぽっちを引いても開示演出 [ツモ！めくり] を出さない。牌はそのまま河へ
+        // [2026-07-22 リョー報告: 自分リーチ中に CPU の白ツモで演出が出る]
+        // CPU の引き牌開示は全画面モーダルを出さない [05-13 の「CPUも同じ演出」仕様を上書き。
+        // 結果は河・和了時カットインで分かる]。人間の引き牌だけ開示する
         if (color && $game.game.lizhi.has(ev.player)
+            && $game.cpu[ev.player] !== true
             && !(someoneFeverNow && !$game.game.feverActive[ev.player])) {
-          pochiRevealQueue.push({ player: ev.player, color, isCpu: $game.cpu[ev.player] === true });
+          pochiRevealQueue.push({ player: ev.player, color, isCpu: false });
         }
       }
       lastSeenZimoEventCount = zimoEvents.length;
@@ -1374,6 +1378,18 @@
 
   // ツモ切り auto モード [リョー指示 2026-05-12 checkbox 化]
   let autoTsumoKiri = false;
+  // [2026-07-22 リョー要望] 右クリックでツモ切り。自分の手番でツモ牌がある時だけ
+  // 奪う [それ以外はブラウザ標準メニューを妨げない]
+  function onContextMenuTsumokiri(e: MouseEvent) {
+    if (onlineGameStarted && currentPlayer !== selfPlayer) return;
+    if (viewMode !== 'single' && !onlineGameStarted) return;
+    if (currentPlayer !== selfPlayer) return;
+    if (progressControlsBlocked || $game.lizhiPending !== null) return;
+    const sp = $game.game.shoupai.get(selfPlayer as PlayerId);
+    if (!sp?._zimo) return;
+    e.preventDefault();
+    game.tsumokiri(selfPlayer as PlayerId);
+  }
   function readAutoTsumokiriToken(): AutoTsumokiriToken | null {
     const snap = get(game);
     const player = snap.game.lunbanToPlayerId(snap.game.state.lunban);
@@ -1801,7 +1817,7 @@
     <button class="mode-toggle" on:click={() => { viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>← オフラインに戻る</button>
   </div>
 {:else}
-<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class:ui-board-v2={uiBoardV2}>
+<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class:ui-board-v2={uiBoardV2} on:contextmenu={onContextMenuTsumokiri}>
   <div class="orientation-notice" role="status">
     <strong>端末を横向きにしてください</strong>
     <span>対局画面は横向きで全体を確認できます</span>

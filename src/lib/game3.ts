@@ -3364,6 +3364,9 @@ export class Game3 {
     fixYakuFan('混全帯幺', 'チャンタ', 4, 2);
     fixYakuFan('純全帯幺', '純チャンタ', 6, 4);
     fixYakuFan('両立直', 'ダブリー', 4, 4);
+    // [2026-07-22 リョー報告: ダブリーが2翻のまま] majiang-core の実役名は
+    // 「ダブル立直」で、「両立直」探索は一度も当たっていなかった。両方拾う
+    fixYakuFan('ダブル立直', 'ダブリー', 4, 4);
 
     // サイコロチャンス記録 [リョー指示: 画面実装は後回し、 記録のみ]
     result.saiKoroChances = result.saiKoroChances ?? [];
