@@ -12,11 +12,9 @@
   </div>
   <button class="entry-btn solo" on:click={onSelectSolo}>
     <span class="btn-main">🀄 一人回しモード</span>
-    <span class="btn-sub">CPU相手にすぐ遊べる</span>
   </button>
   <button class="entry-btn online" on:click={onSelectOnline}>
     <span class="btn-main">🌐 対戦モード</span>
-    <span class="btn-sub">Discord ログインでオンライン対戦</span>
   </button>
 </div>
 
@@ -73,7 +71,6 @@
     transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
   }
   .entry-btn .btn-main { font-size: 1.15rem; font-weight: 700; line-height: 1.25; }
-  .entry-btn .btn-sub { font-size: 0.78rem; font-weight: 500; opacity: 0.85; line-height: 1.2; }
   .entry-btn.solo { background: #2a7; color: white; }
   .entry-btn.online { background: #27a; color: white; }
   .entry-btn:hover { transform: translateY(-2px); box-shadow: 0 7px 18px rgba(0, 0, 0, 0.4); filter: brightness(1.07); }

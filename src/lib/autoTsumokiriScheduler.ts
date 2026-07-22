@@ -3,6 +3,9 @@ import type { PlayerId } from './types';
 export type AutoTsumokiriToken = {
   player: PlayerId;
   revision: string;
+  /** 発火までの待ち [未指定は scheduler default]。
+   *  リーチ中の人間手番は長め [リョー報告 2026-07-22: 高速スキップで誰のツモか分からない] */
+  delayMs?: number;
 };
 
 export function createAutoTsumokiriScheduler(opts: {
@@ -32,7 +35,7 @@ export function createAutoTsumokiriScheduler(opts: {
         const current = opts.readCurrent();
         if (!current || keyOf(current) !== key) return;
         opts.fire(token.player);
-      }, opts.delayMs);
+      }, token.delayMs ?? opts.delayMs);
     },
     cancel,
   };

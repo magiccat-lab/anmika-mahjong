@@ -14,6 +14,8 @@
   export let feverAvailable = false;
   export let shuvariUsed = false;
   export let onSelect: (opts: { open?: boolean; shuvari?: boolean; fever?: boolean }) => void = () => {};
+  // 2026-07-22 リョー要望: 宣言牌を切る前なら選択中ボタンの再クリックで取消
+  export let onCancel: () => void = () => {};
 
   $: selected = pending ? lizhiChoiceId(flags) : null;
   $: normalText = lizhiCandidateText(normalCandidates);
@@ -29,8 +31,8 @@
   <button
     type="button" class="choice lizhi-choice normal" class:selected={selected === 'normal'}
     aria-pressed={selected === 'normal'} aria-label={ariaLabel('normal', normalText)}
-    disabled={pending || normalCandidates.length === 0}
-    on:click={() => onSelect({})}
+    disabled={pending ? selected !== 'normal' : normalCandidates.length === 0}
+    on:click={() => pending ? onCancel() : onSelect({})}
   >
     <span class="choice-name">{selected === 'normal' ? '✓ ' : ''}通常リーチ</span>
     <span class="choice-candidates">宣言牌: {normalText}</span>
@@ -40,8 +42,8 @@
     <button
       type="button" class="choice lizhi-choice shuvari" class:selected={selected === 'shuvari'}
       aria-pressed={selected === 'shuvari'} aria-label={ariaLabel('shuvari', normalText)}
-      disabled={pending || normalCandidates.length === 0}
-      on:click={() => onSelect({ shuvari: true })}
+      disabled={pending ? selected !== 'shuvari' : normalCandidates.length === 0}
+      on:click={() => pending ? onCancel() : onSelect({ shuvari: true })}
     >
       <span class="choice-name">{selected === 'shuvari' ? '✓ ' : ''}シュバリーチ</span>
       <span class="choice-candidates">宣言牌: {normalText}</span>
@@ -52,8 +54,8 @@
     <button
       type="button" class="choice lizhi-choice fever" class:selected={selected === 'fever'}
       aria-pressed={selected === 'fever'} aria-label={ariaLabel('fever', feverText)}
-      disabled={pending || feverCandidates.length === 0}
-      on:click={() => onSelect({ fever: true })}
+      disabled={pending ? selected !== 'fever' : feverCandidates.length === 0}
+      on:click={() => pending ? onCancel() : onSelect({ fever: true })}
     >
       <span class="choice-name">{selected === 'fever' ? '✓ ' : ''}フィーバーリーチ</span>
       <span class="choice-candidates">宣言牌: {feverText}</span>
@@ -62,8 +64,8 @@
       <button
         type="button" class="choice lizhi-choice shuvari-fever" class:selected={selected === 'shuvari-fever'}
         aria-pressed={selected === 'shuvari-fever'} aria-label={ariaLabel('shuvari-fever', feverText)}
-        disabled={pending || feverCandidates.length === 0}
-        on:click={() => onSelect({ shuvari: true, fever: true })}
+        disabled={pending ? selected !== 'shuvari-fever' : feverCandidates.length === 0}
+        on:click={() => pending ? onCancel() : onSelect({ shuvari: true, fever: true })}
       >
         <span class="choice-name">{selected === 'shuvari-fever' ? '✓ ' : ''}シュバ・フィーバー</span>
         <span class="choice-candidates">宣言牌: {feverText}</span>
@@ -74,8 +76,8 @@
   <button
     type="button" class="choice lizhi-choice open" class:selected={selected === 'open'}
     aria-pressed={selected === 'open'} aria-label={ariaLabel('open', normalText)}
-    disabled={pending || normalCandidates.length === 0}
-    on:click={() => onSelect({ open: true })}
+    disabled={pending ? selected !== 'open' : normalCandidates.length === 0}
+    on:click={() => pending ? onCancel() : onSelect({ open: true })}
   >
     <span class="choice-name">{selected === 'open' ? '✓ ' : ''}オープンリーチ</span>
     <span class="choice-candidates">宣言牌: {normalText}</span>
@@ -85,8 +87,8 @@
     <button
       type="button" class="choice lizhi-choice shuvari-open" class:selected={selected === 'shuvari-open'}
       aria-pressed={selected === 'shuvari-open'} aria-label={ariaLabel('shuvari-open', normalText)}
-      disabled={pending || normalCandidates.length === 0}
-      on:click={() => onSelect({ shuvari: true, open: true })}
+      disabled={pending ? selected !== 'shuvari-open' : normalCandidates.length === 0}
+      on:click={() => pending ? onCancel() : onSelect({ shuvari: true, open: true })}
     >
       <span class="choice-name">{selected === 'shuvari-open' ? '✓ ' : ''}シュバ・オープン</span>
       <span class="choice-candidates">宣言牌: {normalText}</span>
@@ -97,7 +99,7 @@
     <div class="selection-status" role="status" aria-live="polite" data-testid="lizhi-selection-status">
       <strong>選択確定: {lizhiChoiceLabel(selected)}</strong>
       <span>次に切る牌: {selectedText}</span>
-      <small>手牌の「切る」表示から1枚選んでください</small>
+      <small>手牌の「切る」表示から1枚選んでください / 選択中ボタンをもう一度クリックで取消</small>
     </div>
   {/if}
 </div>

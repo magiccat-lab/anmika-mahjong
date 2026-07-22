@@ -91,6 +91,49 @@ describe('V37-5 lizhi: シンプル lizhi action', () => {
   });
 });
 
+describe('V37-5b cancelLizhi: 宣言牌を切る前の取消 [リョー要望 2026-07-22]', () => {
+  const HAND = ['p1','p1','p1','p2','p2','p2','p3','p3','p3','s7','s7','s7','s8'];
+
+  it('lizhi → cancelLizhi で pending 解除、通常打牌に戻りリーチ不成立', () => {
+    game.resetDebug(HAND, [], { forceShan: ['s9'] });
+    game.lizhi({ open: true });
+    const s1: any = get(game);
+    expect(s1.lizhiPending).toBe(0);
+    expect(s1.lizhiPendingFlags?.open).toBe(true);
+    game.cancelLizhi();
+    const s2: any = get(game);
+    expect(s2.lizhiPending).toBe(null);
+    expect(s2.lizhiPendingFlags).toBe(null);
+    const cand = s2.game.getLizhiCandidates(0)[0];
+    expect(cand).toBeTruthy();
+    game.discard(cand.replace(/_$/, ''));
+    const s3: any = get(game);
+    expect(s3.game.lizhi.has(0)).toBe(false);
+    expect(s3.game.state.defen[0]).toBe(35000);
+  });
+
+  it('取消後に再宣言→宣言牌切りでリーチ成立 [取消が後の宣言を壊さない]', () => {
+    game.resetDebug(HAND, [], { forceShan: ['s9'] });
+    game.lizhi();
+    game.cancelLizhi();
+    game.lizhi();
+    const s1: any = get(game);
+    expect(s1.lizhiPending).toBe(0);
+    const cand = s1.game.getLizhiCandidates(0)[0];
+    game.discard(cand.replace(/_$/, ''));
+    const s2: any = get(game);
+    expect(s2.game.lizhi.has(0)).toBe(true);
+  });
+
+  it('pending なしで cancelLizhi 呼んでも throw ナシ・状態不変', () => {
+    const before: any = get(game);
+    expect(() => game.cancelLizhi()).not.toThrow();
+    const after: any = get(game);
+    expect(after.lizhiPending).toBe(null);
+    expect(after.game.state.lunban).toBe(before.game.state.lunban);
+  });
+});
+
 describe('V37-6 pass: 全 CPU 進行中の pass で安全', () => {
   it('全 CPU 走、 副露候補発生時に pass で throw ナシ', () => {
     game.toggleCpu(0); game.toggleCpu(1); game.toggleCpu(2);

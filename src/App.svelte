@@ -1403,7 +1403,11 @@
       snap.game.events?.length ?? 0,
       snap.lastZimo,
     ].join(':');
-    return { player, revision };
+    // [2026-07-22 リョー報告: リーチ後の自動進行が速すぎて誰のツモか分からない]
+    // リーチ強制ツモ切りだけ 1.5s に伸ばし、自分の引き牌を視認できる間を作る。
+    // ツモ切り checkbox [user が速度を選んだ] とフィーバー強制は従来の 600ms
+    const riichiForced = snap.game.lizhi.has(player) && !autoTsumoKiri && !feverForced;
+    return { player, revision, delayMs: riichiForced ? 1500 : 600 };
   }
   const autoTsumokiriScheduler = createAutoTsumokiriScheduler({
     delayMs: 600,
@@ -1885,6 +1889,7 @@
           {feverAvailable}
           shuvariUsed={$game.game.shuvariUsed[currentPlayer]}
           onSelect={(opts) => game.lizhi(opts)}
+          onCancel={() => game.cancelLizhi()}
         />
       </div>
     {/if}
@@ -2304,6 +2309,7 @@
               {feverAvailable}
               shuvariUsed={$game.game.shuvariUsed[currentPlayer]}
               onSelect={(opts) => game.lizhi(opts)}
+              onCancel={() => game.cancelLizhi()}
             />
           </div>
         {/if}

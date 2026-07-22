@@ -225,17 +225,14 @@
   }
   .info { font-size: 11px; opacity: 0.85; margin-bottom: 8px; }
   .non-shuvari { color: #f88; }
+  /* 2026-07-22 リョー指摘: 背景箱が見づらい。箱をやめて文字自体を読めるサイズ・明度に */
   .shuvari-row {
-    font-size: 12px;
+    font-size: 13px;
     margin: 0 0 8px;
-    padding: 5px 8px;
-    border-radius: 4px;
-    background: #262130;
-    border-left: 3px solid #a06fd8;
   }
-  .shuvari-yes { color: #c79bf0; }
-  .shuvari-no { color: #999; }
-  .shuvari-note { font-size: 10px; opacity: 0.7; }
+  .shuvari-yes { color: #d9b8f8; font-size: 14px; }
+  .shuvari-no { color: #c0c0c0; font-size: 14px; }
+  .shuvari-note { font-size: 12px; color: #d6d0e4; }
   .step { font-size: 12px; margin: 8px 0 6px; }
   .combos {
     display: grid;

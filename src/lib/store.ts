@@ -1031,6 +1031,13 @@ export function createGameStore() {
             if (!passOk) return reject(`pass: ${from_seat} not in any candidate list`);
             break;
           }
+          // cancelLizhi は宣言者本人のみ [2026-07-22]。impl は current player しか見ないため、
+          // 他席からの remote cancel で本人の pending を落とされないよう from_seat を gate
+          case 'cancelLizhi': {
+            if (s.lizhiPending === null) return reject('cancelLizhi: no pending lizhi');
+            if (from_seat !== s.lizhiPending) return reject(`cancelLizhi: from_seat ${from_seat} ≠ lizhiPending ${s.lizhiPending}`);
+            break;
+          }
           // winner 限定 action: selectFuyu / selectKinpei / continueFever / agariyame
           case 'selectFuyu':
           case 'selectKinpei':
@@ -1101,6 +1108,7 @@ export function createGameStore() {
         switch (action.type) {
           case 'discard': (this as any).discard(action.pai, action.meta); break;
           case 'lizhi': (this as any).lizhi(action.opts ?? {}); break;
+          case 'cancelLizhi': (this as any).cancelLizhi(); break;
           case 'shuvari': (this as any).shuvari(action.player ?? from_seat); break;
           case 'tsumo': (this as any).tsumo(); break;
           case 'ron': (this as any).ron(action.player ?? from_seat); break;
@@ -2809,6 +2817,24 @@ export function createGameStore() {
     },
     /** [互換] 旧 openLizhi action は lizhi({open:true}) 経由 */
     openLizhi() { (this as any).lizhi({ open: true }); },
+    /** リーチ宣言の取り消し [リョー要望 2026-07-22: 宣言牌を切る前ならもう一度クリックで取消]。
+     *  lizhi() は store の pending state を立てるだけで engine 側は宣言牌の打牌まで
+     *  何も確定しない [shuvariUsed 等も dapai 時]。だから pending を畳むだけで安全に戻る */
+    cancelLizhi() {
+      if (!checkOnlineGate({ type: 'cancelLizhi' }, 'currentPlayer')) return;
+      if (sendOnlineAction({ type: 'cancelLizhi' })) return;
+      update((s) => {
+        const player = s.game.lunbanToPlayerId(s.game.state.lunban);
+        if (s.lizhiPending === null || s.lizhiPending !== player) return { ...s };
+        s.lizhiPending = null;
+        s.lizhiPendingFlags = null;
+        s._lizhiOpen = false;
+        s._lizhiShuvari = false;
+        s._lizhiFever = false;
+        s.message = `player ${player} リーチ宣言を取り消した`;
+        return { ...s };
+      });
+    },
     /** 通常立直成立後、次家の打牌までに行う遅延シュバリ宣言。 */
     shuvari(player?: number) {
       const state = get(store) as StoreState;
