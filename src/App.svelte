@@ -1792,7 +1792,7 @@
     <button class="mode-toggle" on:click={() => { viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>← オフラインに戻る</button>
   </div>
 {:else}
-<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:ui-board-v2={uiBoardV2}>
+<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class:ui-board-v2={uiBoardV2}>
   <div class="orientation-notice" role="status">
     <strong>端末を横向きにしてください</strong>
     <span>対局画面は横向きで全体を確認できます</span>
@@ -2046,7 +2046,18 @@
            次局へ は 流局 = host、 和了 = winner 自身 が押す自然な UX に -->
       <div class="action-row">
         <span class="row-label">局終了:</span>
-        {#if !onlineGameStarted || onlineRoomMeta?.isHost || $game.lastWinner === selfPlayer || ($game.lastWinner !== null && $game.cpu[$game.lastWinner as 0|1|2])}
+        {#if state.finished}
+          <!-- [2026-07-22 リョー報告: 終局時の表示と処理がされてない] online の半荘終了は
+               この行が唯一の進行 UI。host は次の試合へ、guest は待ち表示 -->
+          {#if !onlineGameStarted || onlineRoomMeta?.isHost}
+            <button class="next-btn" on:click={handleNextMatch}>▶ 次の試合へ</button>
+            <label style="display:inline-flex; align-items:center; gap:4px; font-size:13px;">
+              <input type="checkbox" bind:checked={resetChipOnNextMatch}>チップリセット
+            </label>
+          {:else}
+            <button class="next-btn" disabled>ホストの「次の試合へ」待ち</button>
+          {/if}
+        {:else if !onlineGameStarted || onlineRoomMeta?.isHost || $game.lastWinner === selfPlayer || ($game.lastWinner !== null && $game.cpu[$game.lastWinner as 0|1|2])}
           <button class="next-btn" on:click={() => game.nextRound()}>次局へ</button>
           {#if $game.lastWinner !== null && $game.game.canAgariyame($game.lastWinner as PlayerId) && !$game.cpu[$game.lastWinner as 0|1|2] && (!onlineGameStarted || $game.lastWinner === selfPlayer)}
             <button class="next-btn agariyame" on:click={() => game.agariyame()}>アガリ止め</button>
@@ -3026,7 +3037,10 @@
   main.mode-single header h1 { display: none; }
   main.mode-single header :global(.header-info) { display: none; }
   main.mode-single header :global(.defen) { display: none; }
-  main.mode-single header .action-row { display: none; }
+  /* [2026-07-22 リョー報告: オンラインで終局処理が出来ない] header 行の非表示は
+     single 限定にする。複製先の toolbar-red/yellow は single 限定レンダリングのため、
+     online では header 行が唯一の進行 UI [局終了/次の試合へ/ツモ] になる */
+  main.mode-single:not(.online-game) header .action-row { display: none; }
   main.mode-single header .hint { display: none; }
   main.mode-single :global(.header-info span),
   main.mode-single :global(.header-info div) { color: #e8e8e8 !important; }
