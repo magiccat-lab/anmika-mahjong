@@ -1944,7 +1944,12 @@
     <!-- 2026-05-14 codex review #3 fix: online で 自家 [selfPlayer] のみ表示、
          他家のぽっち色 [非公開情報] 漏洩防止 -->
     {#if pochiReveal && (!onlineGameStarted || pochiReveal.player === selfPlayer)}
-      <PochiRevealModal player={pochiReveal.player} color={pochiReveal.color} isCpu={pochiReveal.isCpu} onClose={closePochiReveal} />
+      <!-- 2026-07-22 fix [リョー報告: 追いかけリーチ時 白ぽっち演出で停止]: 開示が連続すると
+           {#if} は component を再生成せず props 差替えだけになり、前回の revealed/closing が
+           持ち越されて 2 枚目が「開いたまま timer なし」で永久に残る。{#key} で毎回作り直す -->
+      {#key pochiReveal}
+        <PochiRevealModal player={pochiReveal.player} color={pochiReveal.color} isCpu={pochiReveal.isCpu} onClose={closePochiReveal} />
+      {/key}
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: FuyuModal も winner client のみ表示、
          非 winner が誤クリックで selectFuyu broadcast するのを防ぐ -->
@@ -2133,12 +2138,12 @@
         {#if !onlineGameStarted}
           <label title="他家の手牌を表示"><input type="checkbox" checked={revealAll} on:change={toggleRevealAll}>他家手牌</label>
           <label title="CPU の操作を2.5秒遅らせる"><input type="checkbox" bind:checked={cpuSlowMode}>CPU ラグ</label>
-          <button class="table-setting-btn online" on:click={() => { viewMode = 'online'; }} title="オンライン対戦へ" aria-label="オンライン対戦へ">🌐 <span class="settings-label">オンライン対戦</span></button>
-          <button class="table-setting-btn save" on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : (onlineGameStarted ? 'オンライン対局の牌譜保存は未対応です' : '安全な手番開始時に保存できます')} aria-label="牌譜保存">📂 <span class="settings-label">牌譜保存</span></button>
+          <!-- 2026-07-22 リョー指示: 局中の オンライン対戦 button は撤去 [入口は menu のみ]。
+               牌譜保存も局中は状態ダンプと重複扱いで撤去 [終局画面の保存は残す] -->
           <button class="table-setting-btn save" on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ">🩺 <span class="settings-label">状態ダンプ</span></button>
           <!-- 打牌アドバイス [2026-07-21 リョー要望]: CPU戦のみ。初版は header 内 action-row に
                置いて single モードの display:none で丸ごと消えていた -->
-          <button class="table-setting-btn" class:advice-on={adviceOpen} on:click={() => adviceOpen = !adviceOpen} title="CPUと同じ評価で候補打牌を表示" aria-label="打牌の助言">💡 <span class="settings-label">助言</span></button>
+          <button class="table-setting-btn advice" class:advice-on={adviceOpen} on:click={() => adviceOpen = !adviceOpen} title="CPUと同じ評価で候補打牌を表示" aria-label="打牌の助言">💡 <span class="settings-label">助言</span></button>
         {:else}
           <button class="table-setting-btn leave" on:click={() => { disconnectOnline(); viewMode = 'online'; }} title="対局から退出" aria-label="対局から退出">× <span class="settings-label">退出</span></button>
         {/if}
@@ -3451,8 +3456,10 @@
     font-weight: 700;
     white-space: nowrap;
   }
-  main.mode-single .table-setting-btn.online { background: #5865f2; }
   main.mode-single .table-setting-btn.save { background: #4060a0; }
+  /* 2026-07-22 リョー指摘: 助言 button が無色 [白地に白字] で見えない。隣の save と同色に。
+     ON 中は従来の advice-on [緑地金字] を優先 */
+  main.mode-single .table-setting-btn.advice:not(.advice-on) { background: #4060a0; }
   main.mode-single .table-setting-btn.leave { background: #aa4040; }
   main.mode-single .table-setting-btn:hover:not(:disabled) { filter: brightness(1.15); }
 

@@ -49,33 +49,52 @@
   // timer を 管理して onDestroy で cleanup
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
   let cpuTimer: ReturnType<typeof setTimeout> | undefined;
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // 2026-07-22 fix [リョー報告: 追いかけリーチ時に白ぽっち演出で停止、ダンプ不可]:
+  // close 経路が 1.5s timer 1 本だけだと、timer が何かの拍子に失われた時に
+  // 全画面 overlay が永久に残って入力を全部塞ぐ。閉じ方を 3 重にする:
+  //   1. 通常: 開示 1.5s 後の auto close
+  //   2. escape hatch: 開示済みならクリックで即閉じ
+  //   3. deadline: mount 10s で未開示なら自動開示、開示済み残留なら強制 close
+  function forceClose(): void {
+    if (closing) return;
+    closing = true;
+    onClose();
+  }
 
   function reveal(): void {
-    if (revealed || closing) return;
+    if (closing) return;
+    if (revealed) { forceClose(); return; }
     revealed = true;
     // リョー指示: ラッパ ファンファーレ [正] / 残念 SE [逆]
     playSE(isPositive(color) ? '/sounds/se_a.mp3' : '/sounds/se_b.mp3', 0.65);
-    closeTimer = setTimeout(() => {
-      closing = true;
-      onClose();
-    }, 1500);
+    closeTimer = setTimeout(forceClose, 1500);
   }
 
   if (isCpu) {
     cpuTimer = setTimeout(reveal, 900);
   }
 
+  deadlineTimer = setTimeout(() => {
+    if (!revealed) {
+      reveal();
+      deadlineTimer = setTimeout(forceClose, 3000);
+    } else {
+      forceClose();
+    }
+  }, 10000);
+
   onDestroy(() => {
     if (closeTimer) clearTimeout(closeTimer);
     if (cpuTimer) clearTimeout(cpuTimer);
+    if (deadlineTimer) clearTimeout(deadlineTimer);
   });
 </script>
 
 <div class="overlay" on:click={reveal} on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') reveal(); }} role="dialog" tabindex="-1">
-  <!-- ダンガンロンパ風 斜め slit 背景 -->
-  <div class="slit-bg" style="--accent: {currentAccent}"></div>
-  <!-- 効果線 [中央から放射] -->
-  <div class="radial-lines"></div>
+  <!-- 2026-07-22 リョー指示: 斜め slit + 放射効果線 [線の演出] はダサいので撤去。
+       暗転 + 中央 panel + めくりだけ残す -->
   <!-- 中央 main panel -->
   <div class="cutin-panel" style="--accent: {currentAccent}">
     <!-- 2026-07-21: 誰の引き牌か表示 [リョーが P1 の演出を自分のツモと誤認した] -->
@@ -115,44 +134,6 @@
     outline: none;
   }
   @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
-
-  /* 斜め slit 背景 [ダンガンロンパ風] */
-  .slit-bg {
-    position: absolute;
-    inset: -30%;
-    background: repeating-linear-gradient(
-      -25deg,
-      transparent 0,
-      transparent 24px,
-      rgba(255, 255, 255, 0.08) 24px,
-      rgba(255, 255, 255, 0.08) 32px,
-      transparent 32px,
-      transparent 56px,
-      var(--accent, #ff4488) 56px,
-      var(--accent, #ff4488) 60px
-    );
-    animation: slit-slide 1.6s linear infinite;
-  }
-  @keyframes slit-slide {
-    from { transform: translateX(0); }
-    to { transform: translateX(-120px); }
-  }
-
-  .radial-lines {
-    position: absolute;
-    inset: 0;
-    background: repeating-conic-gradient(
-      from 0deg at 50% 50%,
-      transparent 0deg 4deg,
-      rgba(255, 255, 255, 0.1) 4deg 5deg
-    );
-    animation: radial-spin 8s linear infinite;
-    pointer-events: none;
-  }
-  @keyframes radial-spin {
-    from { transform: rotate(0); }
-    to { transform: rotate(360deg); }
-  }
 
   .cutin-panel {
     position: absolute;
