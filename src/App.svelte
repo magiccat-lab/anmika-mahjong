@@ -2243,23 +2243,26 @@
         </div>
       </div>
       <!-- 4 方向 河ゾーン [雀魂風、 6 牌/行で wrap]、 各 player の向きに合わせて回転 -->
+      <!-- SP再設計 手順D [docs/sp-ui-redesign.md]: --hr/--hc は論理座標 [段/列]。
+           旧レイアウトは従来通り inline top/left で絶対配置 [変数は未使用で無害]、
+           v2 は inline offset を無効化して grid 配置にこの変数を使う -->
       <div class="hez hez-bottom">
         {#each he0 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="top: {Math.floor(i / 6) * 6}vmin; left: {(i % 6) * 5.5}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {Math.floor(i / 6) * 6}vmin; left: {(i % 6) * 5.5}vmin;">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
       </div>
       <div class="hez hez-left">
         {#each he1 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="top: {(i % 6) * 5.5}vmin; right: {Math.floor(i / 6) * 6}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {(i % 6) * 5.5}vmin; right: {Math.floor(i / 6) * 6}vmin;">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
       </div>
       <div class="hez hez-right">
         {#each he2 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="bottom: {(i % 6) * 5.5}vmin; left: {Math.floor(i / 6) * 6}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; bottom: {(i % 6) * 5.5}vmin; left: {Math.floor(i / 6) * 6}vmin;">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
@@ -4505,10 +4508,14 @@
       clamp(44px, 12vmin, 96px);
     grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   }
-  /* 自家手牌の牌は v2 トークンに追従 [Tile 手順B の props API 経由] */
-  main.mode-single.ui-board-v2 .seat-bottom {
-    --tile-lg-w: var(--tile-w);
-    --tile-lg-h: var(--tile-h);
+  /* 自家手牌の牌は v2 トークンに追従。手牌は size-md [Tile default] で、
+     旧層の全体 override [min(6vmin, 100vw/22)] より高詳細度で上書きする。
+     .hand は PlayerHandPanel 側の要素なので :global に含める [scope 対象外] */
+  main.mode-single.ui-board-v2 .seat-bottom :global(.hand .tile.size-md) {
+    width: var(--tile-w);
+    height: var(--tile-h);
+    min-width: 0;
+    min-height: 0;
   }
   main.mode-single.ui-board-v2 .center-board {
     /* -12vh 持ち上げ hack 廃止。セル内で完結 */
@@ -4519,5 +4526,166 @@
        [高さが子依存の要素に cqh を使うと循環するので、この形以外で使わない] */
     container-type: size;
     container-name: board-cell;
+  }
+
+  /* ---- 手順D-1: score + 河 を board-stage 化 ---- */
+  main.mode-single.ui-board-v2 {
+    /* 盤面トークン [cq単位は使用側 = board-cell 内で解決される]。
+       score-side は「score + 下河3段 + 左右河」が必ずセルに収まる上限から逆算:
+       縦 = side×(1 + 0.22×3 + gap) ≈ side×1.75 → side ≤ 56cqh
+       横 = side×(aspect1.4 + 河0.66×2 + gap) ≈ side×2.9 → side ≤ 34cqw */
+    --score-side: min(56cqh, 34cqw);
+    --river-tile-h: clamp(15px, calc(var(--score-side) * 0.22), 34px);
+    --river-tile-w: calc(var(--river-tile-h) * 0.727);
+  }
+  main.mode-single.ui-board-v2 .center-board {
+    display: grid;
+    grid-template-areas:
+      'hl sc hr'
+      'hl hb hr';
+    grid-template-columns: auto auto auto;
+    grid-template-rows: auto auto;
+    justify-content: center;
+    align-content: center;
+    column-gap: calc(var(--river-tile-h) * 0.25);
+    row-gap: calc(var(--river-tile-h) * 0.2);
+  }
+  main.mode-single.ui-board-v2 .score-box {
+    grid-area: sc;
+    width: calc(var(--score-side) * var(--score-aspect, 1));
+    height: var(--score-side);
+    min-width: 0;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+  /* score 内の文字は箱の寸法に追従 [旧 px 固定の上書き] */
+  main.mode-single.ui-board-v2 .score-box .sname { font-size: clamp(8px, calc(var(--score-side) * 0.075), 12px); letter-spacing: 0; white-space: nowrap; }
+  main.mode-single.ui-board-v2 .score-box .sval { font-size: clamp(11px, calc(var(--score-side) * 0.115), 20px); letter-spacing: 0; }
+  main.mode-single.ui-board-v2 .score-box .ssub { font-size: clamp(7px, calc(var(--score-side) * 0.06), 10px); line-height: 1.15; margin-top: 0; }
+  main.mode-single.ui-board-v2 .score-box .score-side.score-top { font-size: clamp(9px, calc(var(--score-side) * 0.085), 14px); padding: 2px 0; }
+  main.mode-single.ui-board-v2 .score-box .benbang { font-size: clamp(9px, calc(var(--score-side) * 0.08), 13px); }
+  main.mode-single.ui-board-v2 .score-box .paishu { font-size: clamp(10px, calc(var(--score-side) * 0.10), 16px); }
+  main.mode-single.ui-board-v2 .score-box .score-side.score-left,
+  main.mode-single.ui-board-v2 .score-box .score-side.score-right { padding: 1px; overflow: hidden; }
+  main.mode-single.ui-board-v2 .score-box .score-side.score-bottom { padding: 1px 3px; overflow: hidden; }
+  /* 低背横 [中央セルが横長] は score を横長にして名前と点数の可読性を優先 */
+  @container board-cell (aspect-ratio > 1.8) {
+    main.mode-single.ui-board-v2 .score-box { --score-aspect: 1.4; }
+  }
+  /* 縮退規則 [Sol指摘: セルが低いと score 内の全情報は物理的に入らない]:
+     段階1 = チップ/シュバ等の詳細行と本場表示を落とし、名前+点数+山だけ残す */
+  @container board-cell (max-height: 190px) {
+    main.mode-single.ui-board-v2 .score-box .ssub { display: none; }
+    main.mode-single.ui-board-v2 .score-box .benbang { display: none; }
+    main.mode-single.ui-board-v2 .score-box .score-side.score-top { padding: 1px 0; }
+  }
+
+  /* 河: inline の絶対座標を無効化し、--hr/--hc の論理座標で 6列固定 grid に配置。
+     wrapper は回転後の占有寸法 [縦河は w=牌高, h=牌幅] でセルを切る */
+  main.mode-single.ui-board-v2 .hez {
+    position: relative;
+    /* 旧層の絶対配置オフセット [top:calc(50%+19vmin) 等] を無効化。
+       relative では offset が生きてズレるため明示 auto が必須 */
+    top: auto;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    transform: none;
+    width: auto;
+    height: auto;
+    display: grid;
+    gap: 2px;
+  }
+  main.mode-single.ui-board-v2 .hez .hez-tile {
+    position: relative;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    min-height: 0;
+  }
+  /* 旧層の 4vmin !important を上書き [F で旧層ごと消すまでの暫定] */
+  main.mode-single.ui-board-v2 .hez .hez-tile :global(.tile.size-md) {
+    width: var(--river-tile-w) !important;
+    height: var(--river-tile-h) !important;
+  }
+  main.mode-single.ui-board-v2 .hez-bottom {
+    grid-area: hb;
+    grid-template-columns: repeat(6, var(--river-tile-w));
+    grid-auto-rows: var(--river-tile-h);
+    justify-content: start;
+    align-content: start;
+  }
+  main.mode-single.ui-board-v2 .hez-bottom .hez-tile {
+    grid-row: calc(var(--hr, 0) + 1);
+    grid-column: calc(var(--hc, 0) + 1);
+  }
+  /* 左河: 上→下に流し、列は score 側から左へ増える [rtl で列順反転] */
+  main.mode-single.ui-board-v2 .hez-left {
+    grid-area: hl;
+    direction: rtl;
+    grid-template-rows: repeat(6, var(--river-tile-w));
+    grid-auto-columns: var(--river-tile-h);
+    align-content: center;
+    justify-content: end;
+  }
+  main.mode-single.ui-board-v2 .hez-left .hez-tile {
+    direction: ltr;
+    grid-row: calc(var(--hc, 0) + 1);
+    grid-column: calc(var(--hr, 0) + 1);
+  }
+  /* 右河: 下→上に流し [旧実装と同じ向き]、列は score 側から右へ増える */
+  main.mode-single.ui-board-v2 .hez-right {
+    grid-area: hr;
+    grid-template-rows: repeat(6, var(--river-tile-w));
+    grid-auto-columns: var(--river-tile-h);
+    align-content: center;
+    justify-content: start;
+  }
+  main.mode-single.ui-board-v2 .hez-right .hez-tile {
+    grid-row: calc(6 - var(--hc, 0));
+    grid-column: calc(var(--hr, 0) + 1);
+  }
+
+  /* ---- 手順D-1b: 上部行のダイエット [340px で center を確保する縮退規則] ---- */
+  main.mode-single.ui-board-v2 .dora-row { padding: 2px 4px; gap: 4px; }
+  main.mode-single.ui-board-v2 .dora-row :global(.tile.size-md) {
+    width: calc(var(--river-tile-w) * 1.1);
+    height: calc(var(--river-tile-h) * 1.1);
+  }
+  main.mode-single.ui-board-v2 .nuki-row { padding: 0 1vmin; }
+  main.mode-single.ui-board-v2 .nuki {
+    min-height: 0;
+    padding: 2px 3px 2px;
+    padding-top: 13px;
+  }
+  main.mode-single.ui-board-v2 .nuki-label { font-size: 9px; top: 1px; }
+  main.mode-single.ui-board-v2 .nuki :global(.tile.size-sm) {
+    width: calc(var(--river-tile-w) * 0.95);
+    height: calc(var(--river-tile-h) * 0.95);
+  }
+
+  /* ---- 手順D-1c: 低背端末の行ダイエット第2段 [340px 級で center を最大化] ----
+     v2 内で完結する単一の縮退段。旧パッチ層とは無関係 [F で旧層は消える] */
+  @media (max-height: 420px) {
+    main.mode-single.ui-board-v2 .dora-row { padding: 1px 3px; gap: 3px; }
+    main.mode-single.ui-board-v2 .turn-status { padding: 2px 6px; font-size: 10px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+    main.mode-single.ui-board-v2 .dora-row .settings-group { gap: 4px; font-size: 10px; }
+    main.mode-single.ui-board-v2 .settings-label { display: none; }
+    main.mode-single.ui-board-v2 .table-setting-btn { min-height: 26px; padding: 2px 6px; }
+    main.mode-single.ui-board-v2 .nuki { padding-top: 11px; padding-bottom: 1px; }
+    main.mode-single.ui-board-v2 .nuki-label { font-size: 8px; }
+    main.mode-single.ui-board-v2 .nuki :global(.tile.size-sm) {
+      width: calc(var(--river-tile-w) * 0.8);
+      height: calc(var(--river-tile-h) * 0.8);
+    }
+    main.mode-single.ui-board-v2 .dora-row :global(.tile.size-md) {
+      width: calc(var(--river-tile-w) * 0.9);
+      height: calc(var(--river-tile-h) * 0.9);
+    }
   }
 </style>
