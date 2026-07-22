@@ -2680,9 +2680,13 @@
 
 
 <style>
+  /* 2026-07-22 リョー指摘: デカすぎ。行いっぱいに伸ばさず小さいピルに */
   .stamp-open-btn {
-    font-size: 18px;
-    padding: 4px 10px;
+    font-size: 14px;
+    line-height: 1.3;
+    padding: 2px 8px;
+    width: fit-content;
+    align-self: center;
     border: 1px solid #ff9800;
     border-radius: 6px;
     background: #fff8e1;
@@ -3538,6 +3542,17 @@
   main.mode-single .toolbar-red .tb-row button:hover {
     background: #ffe080 !important;
   }
+  /* 2026-07-22 リョー指摘: スタンプ button がデカい。floating 大ボタン様式から外して小ピルに */
+  main.mode-single .toolbar-red .tb-row button.stamp-open-btn {
+    font-size: 13px !important;
+    padding: 3px 8px !important;
+    background: #fff8e1 !important;
+    border: 1px solid #ff9800 !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+  main.mode-single .toolbar-red .tb-row button.stamp-open-btn:hover {
+    background: #ffe082 !important;
+  }
   main.mode-single .toolbar .tb-row {
     display: flex;
     flex-direction: row;
@@ -3594,22 +3609,23 @@
     padding: 3px;
     align-items: center;
     min-width: 22vmin;
-    min-height: 10vmin;
+    min-height: 8vmin;
     flex: 1 1 0;
   }
+  /* 2026-07-22 リョー指摘: 抜き box が中央スコアと被る。ラベルを小さくして box を低く */
   main.mode-single .nuki-label {
-    font-size: 14px;
+    font-size: 12px;
     color: #ffd060;
     text-align: center;
     font-weight: 700;
     width: 100%;
     position: absolute;
-    top: 4px;
+    top: 3px;
     left: 0;
   }
   main.mode-single .nuki {
     position: relative;
-    padding-top: 22px;
+    padding-top: 18px;
   }
 
   /* 左右の vertical 縦並び タイル [雀魂風] */
@@ -4279,6 +4295,11 @@
     }
     main.mode-single .center-board { min-height: 0; }
     main.mode-single .nuki-row { padding: 1px 4px; gap: 2px; }
+    /* [2026-07-22 リョー報告: 抜き box と中央スコアが被る] -12vh の持ち上げ
+       [リョー指示 2026-05-12、広い画面用] は低背だと抜き行に食い込む。ほぼ無効化 */
+    main.mode-single .center-board { transform: translateY(-1vh); }
+    main.mode-single .nuki { min-height: 0; padding-top: 14px; }
+    main.mode-single .nuki-label { font-size: 10px; top: 2px; }
     main.mode-single .seat-bottom { min-height: 42px; }
     /* 和了パネル: 低背だと 11vh/16vh 挟みで窓が~200pxになり、役・祝儀の
      * 計算式がスクロール下に沈んで「出ない」ように見える。ほぼ全画面化する */
