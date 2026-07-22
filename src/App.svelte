@@ -4669,6 +4669,30 @@
     height: calc(var(--river-tile-h) * 0.95);
   }
 
+  /* ---- 手順D-2a: 中央アクション [ツモ/ロン] を盤面トークンに追従 ----
+     [2026-07-22 リョー報告: つもボタンとかデカい]。旧: padding 22px 56px +
+     font 36px 固定、ロン panel min 200x200。SP では盤面ごと隠れるため
+     score-side 比例 + clamp に置き換える */
+  main.mode-single.ui-board-v2 .center-board .agari-center-btn {
+    padding: calc(var(--score-side) * 0.09) calc(var(--score-side) * 0.26);
+    font-size: clamp(15px, calc(var(--score-side) * 0.21), 32px);
+    border-width: 2px;
+    border-radius: 8px;
+    letter-spacing: 1px;
+  }
+  main.mode-single.ui-board-v2 .center-board .ron-choice-panel {
+    width: calc(var(--score-side) * 1.35);
+    height: calc(var(--score-side) * 1.35);
+    min-width: 0;
+    min-height: 0;
+  }
+  main.mode-single.ui-board-v2 .center-board .ron-choice-panel .ron-half {
+    font-size: clamp(13px, calc(var(--score-side) * 0.16), 26px);
+  }
+  main.mode-single.ui-board-v2 .center-board .ron-choice-panel .skip-half {
+    font-size: clamp(11px, calc(var(--score-side) * 0.115), 19px);
+  }
+
   /* ---- 手順D-1c: 低背端末の行ダイエット第2段 [340px 級で center を最大化] ----
      v2 内で完結する単一の縮退段。旧パッチ層とは無関係 [F で旧層は消える] */
   @media (max-height: 420px) {
@@ -4686,6 +4710,25 @@
     main.mode-single.ui-board-v2 .dora-row :global(.tile.size-md) {
       width: calc(var(--river-tile-w) * 0.9);
       height: calc(var(--river-tile-h) * 0.9);
+    }
+    /* 右下 floating 大ボタン [次局へ/続行/▶ツモ] も低背では絞る
+       [旧層の 12px 22px !important を高詳細度 + !important で上書き] */
+    main.mode-single.ui-board-v2 .toolbar-red .tb-row button {
+      font-size: 13px !important;
+      padding: 7px 14px !important;
+    }
+    /* リーチ選択ボタン群 [LizhiControls] も低背では圧縮 [component 外なので :global] */
+    main.mode-single.ui-board-v2 :global(.lizhi-controls .choice) {
+      min-width: 92px;
+      max-width: 160px;
+      padding: 3px 6px;
+      gap: 1px;
+    }
+    main.mode-single.ui-board-v2 :global(.lizhi-controls .choice .choice-name) {
+      font-size: 11px;
+    }
+    main.mode-single.ui-board-v2 :global(.lizhi-controls .choice .choice-candidates) {
+      font-size: 8px;
     }
   }
 </style>
