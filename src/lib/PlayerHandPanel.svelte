@@ -19,6 +19,7 @@
   export let lastZimoIdx: number;
   export let isLizhiCand: (t: string) => boolean = () => false;
   export let isNakiCand: (t: string) => boolean = () => false;
+  export let isDoraPai: (t: string) => boolean = () => false;
   export let lizhiPending: boolean = false;
   export let lizhiKindLabel: string = 'リーチ';
   export let onTileClick: (p: number, t: string) => void = () => {};
@@ -39,6 +40,7 @@
         class:tsumo-tile={i === lastZimoIdx && isCurrent}
         class:lizhi-cand={isPendingCandidate}
         class:naki-cand={isNakiCand(t)}
+        class:dora-glow={isDoraPai(t)}
         data-naki-candidate={isNakiCand(t) ? 'true' : undefined}
         class:lizhi-dim={isCurrent && lizhiPending && !isLizhiCand(t)}
         aria-label={isPendingCandidate ? `${lizhiKindLabel}の宣言牌として${lizhiPaiLabel(t)}を切る` : undefined}
@@ -158,6 +160,11 @@
   }
   .tile-btn:disabled { cursor: default; opacity: 0.6; }
   .tile-btn.tsumo-tile { box-shadow: 0 0 0 2px #f0c040 inset; border-radius: 4px; margin-left: 16px; }
+  /* [2026-07-22 リョー要望] 表ドラ現物の常時ハイライト [水色。鳴き金リングより弱め、下に置いて負ける] */
+  .tile-btn.dora-glow {
+    box-shadow: 0 0 0 2px #27c4e8, 0 0 8px rgba(39, 196, 232, 0.75);
+    border-radius: 4px;
+  }
   /* [2026-07-22 リョー要望] 鳴き判断対象の手牌側ハイライト [リーチ宣言牌と同系の金リング] */
   .tile-btn.naki-cand {
     box-shadow: 0 0 0 3px #ffb000, 0 0 10px rgba(255, 176, 0, 0.8);

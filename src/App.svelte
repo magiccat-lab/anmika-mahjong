@@ -34,6 +34,7 @@
   import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint, buildDiagnosticDump } from './lib/store/paifuIo';
   import { serializeCanonical } from './lib/canonicalJson';
   import { toCorePai } from './lib/helpers';
+  import { getTingpaiList as tingpaiForShoupai } from './lib/game3/tingpai';
   import { feverWaitInfoFromLiveWall } from './lib/game3/feverLizhi';
   import { computeTileInventory, expectedInventory } from './lib/game3/inventory';
   import { countDisplayDora } from './lib/doraDisplay';
@@ -1004,6 +1005,17 @@
   }
   $: normalLizhiPhysicalCandidates = physicalLizhiCandidates(baseLizhiCandidates);
   $: feverLizhiPhysicalCandidates = physicalLizhiCandidates(feverDapaiTiles);
+  // [2026-07-23 リョー確認 / Sol調査A] フィーバー宣言前に「どの牌を切ると何段・何待ちか」を見せる
+  // [345777p46677788s 実例: 4s切り=シングル、6s切り=5s待ちでダブル。段数は切る牌ごとに違う]
+  $: feverCandidateViews = feverLizhiPhysicalCandidates.map((pai) => {
+    const fc = feverDapaiMap.get(pai);
+    let waits: string[] = [];
+    try {
+      const sp = $game.game.shoupai.get(currentPlayer)?.clone();
+      if (sp) { sp.dapai(pai); waits = tingpaiForShoupai(sp); }
+    } catch { waits = []; }
+    return { pai, tier: (fc?.tier ?? 1) as 1 | 2 | 3 | 4, rainbow: !!fc?.rainbow, waits };
+  });
   $: selectedLizhiLabel = lizhiChoiceLabel(lizhiChoiceId(pendingLizhiFlags));
 
   // [2026-07-22 リョー要望] 鳴き判断中の対象は自分の手牌側でハイライトする
@@ -1035,6 +1047,31 @@
     if (base[1] === '0' && nakiCandPais.has(base[0] + '5')) return true;
     if (base[1] === '5' && nakiCandPais.has(base[0] + '0')) return true;
     return false;
+  }
+
+  // [2026-07-22 リョー要望] 表ドラの現物を自手牌でハイライト
+  function doraOfIndicator(indicator: string): string | null {
+    const ind = toCorePai(indicator);
+    const s = ind[0];
+    const n = ind[1] === '0' ? 5 : parseInt(ind[1]);
+    if (!Number.isFinite(n)) return null;
+    if (s !== 'm' && s !== 'p' && s !== 's' && s !== 'z') return null; // 華牌 indicator はドラ対象外
+    const nextN = s === 'z' ? (n <= 4 ? (n % 4) + 1 : ((n - 4) % 3) + 5) : (n % 9) + 1;
+    return `${s}${nextN}`;
+  }
+  $: doraPaiSet = (() => {
+    const set = new Set<string>();
+    for (const ind of ($game.game.shan?.baopai ?? []) as string[]) {
+      const dora = doraOfIndicator(ind);
+      if (dora) set.add(dora);
+    }
+    return set;
+  })();
+  function isDoraPai(pai: string): boolean {
+    if (doraPaiSet.size === 0 || pai === 'back') return false;
+    const core = toCorePai(pai);
+    if (!/^[mpsz][0-9]$/.test(core)) return false;
+    return doraPaiSet.has(core[1] === '0' ? `${core[0]}5` : core);
   }
 
   function isLizhiCand(pai: string): boolean {
@@ -1085,7 +1122,6 @@
   let onlineReconnectAttempt = 0;
   let onlineReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let onlineShouldReconnect = false;
-  let lastReadyNextRoundKey = '';
 
   function seatName(seat: number): string {
     const m = onlineMembers.find((x) => x.seat === seat);
@@ -1273,6 +1309,10 @@
         applyRevisionedAction(ws, msg);
       } else if (msg.type === 'reject') {
         console.warn('[online] command rejected', msg.reason, msg.commandId);
+      } else if (msg.type === 'nextRoundReady') {
+        // [2026-07-22 リョー要望] 全員ready制の進捗 [server broadcast]
+        nextRoundReadySeats = Array.isArray(msg.seats) ? msg.seats : [];
+        if (typeof msg.total === 'number' && msg.total > 0) nextRoundReadyTotal = msg.total;
       }
     };
     ws.onclose = () => {
@@ -1292,11 +1332,13 @@
     onlineGameStarted = false;
     onlineRoomMeta = null;
   }
-  // 勝利後の選択・サイコロがすべて終わった client だけが safe revision を通知する。
-  // Node authority はこの通知を受けてから次局 timeout を開始する。
-  $: {
-    const protocolState = game.getOnlineProtocolState();
-    const safeForNextRound = onlineGameStarted
+  // [2026-07-22 リョー要望] 次局へは全員が押したら進む。自動 ready 送信を廃止し、
+  // 「次局へ」押下 = readyNextRound 送信。server が全員分揃った時に nextRound を発行する
+  let nextRoundReadySeats: number[] = [];
+  let nextRoundReadyTotal = 3;
+  let nextRoundPressedLocal = false;
+  let nextRoundReadySafe = false;
+  $: nextRoundReadySafe = onlineGameStarted
       && !!onlineWs
       && onlineWs.readyState === WebSocket.OPEN
       && $game.roundEnded
@@ -1310,14 +1352,20 @@
       && !$game.pendingFeverContinue
       && !$game.pendingSaiKoro
       && !$game.pendingQianggang;
-    const authorized = !!onlineRoomMeta?.isHost
-      || ($game.lastWinner !== null && onlineRoomMeta?.mySeat === $game.lastWinner);
-    const key = `${onlineSocketGeneration}:${protocolState.revision}`;
-    if (safeForNextRound && authorized && key !== lastReadyNextRoundKey) {
-      lastReadyNextRoundKey = key;
-      onlineWs?.send(JSON.stringify({ type: 'readyNextRound', revision: protocolState.revision }));
-    }
+  // 局が動いたら押下状態と進捗をリセット
+  $: if (!$game.roundEnded) {
+    if (nextRoundPressedLocal) nextRoundPressedLocal = false;
+    if (nextRoundReadySeats.length > 0) nextRoundReadySeats = [];
   }
+  function sendNextRoundReady() {
+    if (!nextRoundReadySafe || !onlineWs || onlineWs.readyState !== WebSocket.OPEN) return;
+    nextRoundPressedLocal = true;
+    const protocolState = game.getOnlineProtocolState();
+    onlineWs.send(JSON.stringify({ type: 'readyNextRound', revision: protocolState.revision }));
+  }
+  $: selfNextRoundReady = nextRoundPressedLocal
+    || nextRoundReadySeats.includes((onlineRoomMeta?.mySeat ?? -1) as number);
+  $: nextRoundReadyShownCount = Math.max(nextRoundReadySeats.length, nextRoundPressedLocal ? 1 : 0);
   onMount(async () => {
     // 起動時 single モードの初期化 [P1/P2 CPU on、 revealAll off、 self=0]
     if (viewMode === 'single') {
@@ -2207,13 +2255,19 @@
           {:else}
             <button class="next-btn" disabled>ホストの「次の試合へ」待ち</button>
           {/if}
-        {:else if !onlineGameStarted || onlineRoomMeta?.isHost || $game.lastWinner === selfPlayer || ($game.lastWinner !== null && $game.cpu[$game.lastWinner as 0|1|2])}
+        {:else if !onlineGameStarted}
           <button class="next-btn" on:click={() => game.nextRound()}>次局へ</button>
-          {#if $game.lastWinner !== null && $game.game.canAgariyame($game.lastWinner as PlayerId) && !$game.cpu[$game.lastWinner as 0|1|2] && (!onlineGameStarted || $game.lastWinner === selfPlayer)}
+          {#if $game.lastWinner !== null && $game.game.canAgariyame($game.lastWinner as PlayerId) && !$game.cpu[$game.lastWinner as 0|1|2]}
             <button class="next-btn agariyame" on:click={() => game.agariyame()}>アガリ止め</button>
           {/if}
         {:else}
-          <button class="next-btn" disabled>{$game.lastWinner !== null ? seatDisplayNames[$game.lastWinner as 0|1|2] : '?'} の「次局へ」待ち</button>
+          <!-- [2026-07-22 リョー要望] 全員が「次局へ」を押したら進む [server all-ready 発行] -->
+          <button class="next-btn" disabled={selfNextRoundReady || !nextRoundReadySafe} on:click={sendNextRoundReady}>
+            {selfNextRoundReady ? `全員待ち [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]` : `次局へ [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]`}
+          </button>
+          {#if $game.lastWinner !== null && $game.lastWinner === selfPlayer && $game.game.canAgariyame($game.lastWinner as PlayerId)}
+            <button class="next-btn agariyame" on:click={() => game.agariyame()}>アガリ止め</button>
+          {/if}
         {/if}
       </div>
     {/if}
@@ -2457,6 +2511,7 @@
               flags={pendingLizhiFlags}
               normalCandidates={normalLizhiPhysicalCandidates}
               feverCandidates={feverLizhiPhysicalCandidates}
+              feverCandidateViews={feverCandidateViews}
               {feverAvailable}
               shuvariUsed={$game.game.shuvariUsed[currentPlayer]}
               onSelect={(opts) => game.lizhi(opts)}
@@ -2516,6 +2571,7 @@
       lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv0), shoupai0)}
       isLizhiCand={isLizhiCand}
       isNakiCand={isNakiCand}
+      isDoraPai={isDoraPai}
       lizhiPending={$game.lizhiPending === currentPlayer}
       lizhiKindLabel={selectedLizhiLabel}
       onTileClick={onTileClick}
@@ -2824,13 +2880,19 @@
           {:else}
             <!-- R21 P0 fix: nextRound は host or winner or 親 許容 [server gate]、
                  ゲスト人間和了で 詰みを 解消 -->
-            {#if (!onlineGameStarted || onlineRoomMeta?.isHost || $game.lastWinner === selfPlayer || ($game.lastWinner !== null && $game.cpu[$game.lastWinner as 0|1|2])) && !$game.pendingSaiKoro}
+            {#if !onlineGameStarted && !$game.pendingSaiKoro}
               <button on:click={() => game.nextRound()}>▶ 次局へ</button>
-              {#if $game.lastWinner !== null && $game.game.canAgariyame($game.lastWinner as PlayerId) && !$game.cpu[$game.lastWinner as 0|1|2] && (!onlineGameStarted || $game.lastWinner === selfPlayer)}
+              {#if $game.lastWinner !== null && $game.game.canAgariyame($game.lastWinner as PlayerId) && !$game.cpu[$game.lastWinner as 0|1|2]}
                 <button on:click={() => game.agariyame()}>アガリ止め</button>
               {/if}
-            {:else}
-              <span class="muted-hint">p{$game.lastWinner} の「次局へ」を待ってる</span>
+            {:else if onlineGameStarted && !$game.pendingSaiKoro}
+              <!-- [2026-07-22 リョー要望] 全員が「次局へ」を押したら進む -->
+              <button disabled={selfNextRoundReady || !nextRoundReadySafe} on:click={sendNextRoundReady}>
+                {selfNextRoundReady ? `全員待ち [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]` : `▶ 次局へ [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]`}
+              </button>
+              {#if $game.lastWinner !== null && $game.lastWinner === selfPlayer && $game.game.canAgariyame($game.lastWinner as PlayerId)}
+                <button on:click={() => game.agariyame()}>アガリ止め</button>
+              {/if}
             {/if}
           {/if}
         </div>

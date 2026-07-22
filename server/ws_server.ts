@@ -29,7 +29,9 @@ const DEFAULT_PORT = 8791;
 const DEFAULT_REACTION_TIMEOUT_MS = 15_000;
 const DEFAULT_TURN_TIMEOUT_MS = 60_000;
 const DEFAULT_DISCONNECT_GRACE_MS = 30_000;
-const DEFAULT_NEXT_ROUND_TIMEOUT_MS = 30_000;
+// [2026-07-22 リョー要望: 全員ready制] 30s 自動進行は廃止。timeout は AFK/切断時の最終保険のみ
+const DEFAULT_NEXT_ROUND_TIMEOUT_MS = 180_000;
+const SERVER_NEXT_ROUND_UID = '__server_next_round__';
 
 const STAMP_IDS = new Set([
   'shunkashutou', 'kita4', 'konmika', 'shubapotsumo',
@@ -67,6 +69,7 @@ type Room = {
   cleanupTimer: ReturnType<typeof setTimeout> | null;
   nextRoundTimer: ReturnType<typeof setTimeout> | null;
   nextRoundReadyRevision: number | null;
+  nextRoundReadySeats: Set<number>;
 };
 
 export type WsRuntimeOptions = {
@@ -956,10 +959,10 @@ function validateAction(room: Room, uid: string, seat: number, action: Record<st
   if (action.type === 'nextMatch' && uid !== room.hostUserId) {
     return { actorSeat: actor.actorSeat, reason: 'nextMatch requires host' };
   }
-  if (action.type === 'nextRound'
-    && uid !== room.hostUserId
-    && actor.actorSeat !== room.authority?.lastWinner) {
-    return { actorSeat: actor.actorSeat, reason: 'nextRound requires winner or host' };
+  // [2026-07-22 リョー要望: 全員が次局へを押したら進む] client 直送の nextRound は廃止。
+  // readyNextRound が全員分揃った時 [または timeout] に server だけが発行する [uid は偽装不可]
+  if (action.type === 'nextRound' && uid !== SERVER_NEXT_ROUND_UID) {
+    return { actorSeat: actor.actorSeat, reason: 'nextRound advances after all players press ready' };
   }
   return actor;
 }
@@ -1056,6 +1059,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       cleanupTimer: null,
       nextRoundTimer: null,
       nextRoundReadyRevision: null,
+      nextRoundReadySeats: new Set<number>(),
     };
     for (const member of snapshot.start?.members ?? []) {
       room.members.set(member.user_id, { ...member, ws: null, generation: 0, connected: false });
@@ -1184,6 +1188,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
         room.nextRoundTimer = null;
         room.nextRoundReadyRevision = null;
+        room.nextRoundReadySeats = new Set();
       }
     } catch (error) {
       room.authority = restoreAuthority(previous, persistence.loadCommands(room.roomId));
@@ -1193,33 +1198,68 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     return { reason: null, command: appended.command, ack };
   };
 
+  const nextRoundReadyPayload = (room: Room) => ({
+    type: 'nextRoundReady',
+    revision: room.nextRoundReadyRevision,
+    seats: [...room.nextRoundReadySeats].sort((a, b) => a - b),
+    total: Math.max(1, Array.from(room.members.values()).filter((m) => !m.is_cpu).length),
+  });
+
+  const sendNextRoundReadyStateTo = (ws: WebSocket, room: Room) => {
+    if (room.nextRoundReadyRevision !== room.snapshot.revision || room.nextRoundReadySeats.size === 0) return;
+    sendJson(ws, nextRoundReadyPayload(room));
+  };
+
+  const issueServerNextRound = (room: Room, revision: number, actorSeat: number, fromRole: string) => {
+    room.queue = room.queue.then(async () => {
+      if (room.snapshot.revision !== revision || !room.authority?.isPostWinResolved()) return;
+      const action = { type: 'nextRound', from_role: fromRole };
+      const accepted = acceptAction(
+        room,
+        actorSeat,
+        SERVER_NEXT_ROUND_UID,
+        action,
+        `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
+      );
+      if (accepted.command) {
+        broadcastAction(room, accepted.command);
+        scheduleRoomDeadline(room);
+      }
+    }).catch((error) => warn('[anmika-ws] next-round advance failed', error));
+  };
+
+  const maybeAdvanceAllReady = (room: Room, revision: number) => {
+    if (room.nextRoundReadyRevision !== revision || room.snapshot.revision !== revision) return;
+    // 切断中の人間は押せないので gate から除外 [復帰しないケースは timeout fallback が拾う]
+    const required = Array.from(room.members.values())
+      .filter((m) => !m.is_cpu && m.connected)
+      .map((m) => m.seat);
+    if (required.length === 0) return;
+    if (!required.every((seat) => room.nextRoundReadySeats.has(seat))) return;
+    issueServerNextRound(room, revision, required[0], 'all-ready');
+  };
+
+  // [2026-07-22 リョー要望] 次局へは「全員が押したら進む」。
+  // 従来の winner/host 限定 ready + 30s 自動進行を、全席 ready 集約に変更
   const markReadyForNextRound = (room: Room, actorSeat: number, revision: number): string | null => {
     if (!room.authority?.isPostWinResolved()) return 'round is not safely resolved';
     if (revision !== room.snapshot.revision) return 'version conflict';
-    const hostSeat = room.members.get(room.hostUserId)?.seat;
-    if (actorSeat !== room.authority.lastWinner && actorSeat !== hostSeat) {
-      return 'only winner or host can ready next round';
+    const member = Array.from(room.members.values()).find((m) => m.seat === actorSeat);
+    if (!member || member.is_cpu) return 'only seated players can ready next round';
+    if (room.nextRoundReadyRevision !== revision) {
+      room.nextRoundReadyRevision = revision;
+      room.nextRoundReadySeats = new Set();
+      if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
+      room.nextRoundTimer = null;
     }
-    if (room.nextRoundReadyRevision === revision && room.nextRoundTimer) return null;
-    if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
-    room.nextRoundReadyRevision = revision;
-    room.nextRoundTimer = setTimeout(() => {
-      room.queue = room.queue.then(async () => {
-        if (room.snapshot.revision !== revision || !room.authority?.isPostWinResolved()) return;
-        const action = { type: 'nextRound', from_role: actorSeat === hostSeat ? 'host' : 'winner' };
-        const accepted = acceptAction(
-          room,
-          actorSeat,
-          '__server_next_round__',
-          action,
-          `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
-        );
-        if (accepted.command) {
-          broadcastAction(room, accepted.command);
-          scheduleRoomDeadline(room);
-        }
-      }).catch((error) => warn('[anmika-ws] next-round deadline failed', error));
-    }, nextRoundTimeoutMs);
+    room.nextRoundReadySeats.add(actorSeat);
+    broadcast(room, nextRoundReadyPayload(room));
+    if (!room.nextRoundTimer) {
+      room.nextRoundTimer = setTimeout(() => {
+        issueServerNextRound(room, revision, actorSeat, 'timeout');
+      }, nextRoundTimeoutMs);
+    }
+    maybeAdvanceAllReady(room, revision);
     return null;
   };
 
@@ -1586,6 +1626,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         try { msg = JSON.parse(data.toString()); } catch { return; }
         if ((msg as Record<string, unknown>)?.type === 'resync') {
           sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
+          sendNextRoundReadyStateTo(ws, room);
           return;
         }
         if ((msg as Record<string, unknown>)?.type === 'start') {
@@ -1660,6 +1701,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       current.ws = null;
       current.connected = false;
       broadcast(room, lobbyPayload(room));
+      // [2026-07-22 全員ready] 切断で gate 対象が減るため、待ち状態を再評価
+      if (room.nextRoundReadyRevision === room.snapshot.revision && room.nextRoundReadySeats.size > 0) {
+        maybeAdvanceAllReady(room, room.nextRoundReadyRevision);
+      }
       // WSA: CPU席を除いた human だけで無接続判定 [CPU入り部屋が永久に残る問題を修正]
       const humanMembers = Array.from(room.members.values()).filter((item) => !item.is_cpu);
       if (humanMembers.length === 0 || humanMembers.every((item) => !item.connected)) {

@@ -3,6 +3,7 @@
     lizhiCandidateText,
     lizhiChoiceId,
     lizhiChoiceLabel,
+    lizhiPaiLabel,
     type LizhiChoiceId,
     type LizhiPendingFlags,
   } from './lizhiUi';
@@ -11,6 +12,8 @@
   export let flags: LizhiPendingFlags | null = null;
   export let normalCandidates: string[] = [];
   export let feverCandidates: string[] = [];
+  // [2026-07-23 リョー確認 / Sol調査A] 宣言前に切る牌ごとの段数と待ちを見せる
+  export let feverCandidateViews: Array<{ pai: string; tier: 1 | 2 | 3 | 4; rainbow: boolean; waits: string[] }> = [];
   export let feverAvailable = false;
   export let shuvariUsed = false;
   export let onSelect: (opts: { open?: boolean; shuvari?: boolean; fever?: boolean }) => void = () => {};
@@ -18,6 +21,13 @@
   export let onCancel: () => void = () => {};
 
   $: selected = pending ? lizhiChoiceId(flags) : null;
+  const FEVER_TIER_LABELS: Record<1 | 2 | 3 | 4, string> = { 1: 'シングル', 2: 'ダブル', 3: 'トリプル', 4: '4段' };
+  function feverViewLine(v: { pai: string; tier: 1 | 2 | 3 | 4; rainbow: boolean; waits: string[] }): string {
+    const waits = v.waits.length > 0
+      ? [...new Set(v.waits.map(lizhiPaiLabel))].join('・') + '待ち'
+      : '待ち計算不可';
+    return `${lizhiPaiLabel(v.pai)}切り: ${FEVER_TIER_LABELS[v.tier]}${v.rainbow ? '+虹' : ''} / ${waits}`;
+  }
   $: normalText = lizhiCandidateText(normalCandidates);
   $: feverText = lizhiCandidateText(feverCandidates);
   $: selectedText = selected === 'fever' || selected === 'shuvari-fever' ? feverText : normalText;
@@ -58,7 +68,13 @@
       on:click={() => pending ? onCancel() : onSelect({ fever: true })}
     >
       <span class="choice-name">{selected === 'fever' ? '✓ ' : ''}フィーバーリーチ</span>
-      <span class="choice-candidates">宣言牌: {feverText}</span>
+      {#if feverCandidateViews.length > 0}
+        <span class="choice-candidates fever-details">
+          {#each feverCandidateViews as v}<span class="fever-line">{feverViewLine(v)}</span>{/each}
+        </span>
+      {:else}
+        <span class="choice-candidates">宣言牌: {feverText}</span>
+      {/if}
     </button>
     {#if !shuvariUsed}
       <button
@@ -68,7 +84,13 @@
         on:click={() => pending ? onCancel() : onSelect({ shuvari: true, fever: true })}
       >
         <span class="choice-name">{selected === 'shuvari-fever' ? '✓ ' : ''}シュバ・フィーバー</span>
-        <span class="choice-candidates">宣言牌: {feverText}</span>
+        {#if feverCandidateViews.length > 0}
+          <span class="choice-candidates fever-details">
+            {#each feverCandidateViews as v}<span class="fever-line">{feverViewLine(v)}</span>{/each}
+          </span>
+        {:else}
+          <span class="choice-candidates">宣言牌: {feverText}</span>
+        {/if}
       </button>
     {/if}
   {/if}
@@ -144,6 +166,8 @@
   button.choice.selected:disabled { cursor: default; opacity: 1; }
   .choice-name { font-size: 12px; font-weight: 800; }
   .choice-candidates { font-size: 10px; overflow-wrap: anywhere; }
+  .fever-details { display: flex; flex-direction: column; gap: 1px; }
+  .fever-line { display: block; font-size: 10px; text-align: left; }
   .selection-status {
     display: flex;
     flex: 1 1 100%;
