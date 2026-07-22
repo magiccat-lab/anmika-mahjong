@@ -29,6 +29,8 @@ export type PendingKinpei = {
   ronfrom: number | null;
   /** 和了計算で新たに表示された華を、snapshot 復元後も選択肢として保持する。 */
   availableHuapai?: string[];
+  /** [2026-07-22 リョー要望] 選択前に現段階の和了内容を見せる [強化前の暫定計算] */
+  preview?: { hupai: Array<{ name: string; fanshu: unknown }>; fanshu?: number; fu?: number } | null;
   otherWinners?: number[];
   humanOthers?: number[];
   cutinQueued?: boolean;

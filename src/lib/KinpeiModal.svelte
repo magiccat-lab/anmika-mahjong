@@ -1,6 +1,7 @@
 ﻿
 <script lang="ts">
   // 金北強化選択 modal [アガリ後変更可]
+  export let preview: { hupai: Array<{ name: string; fanshu: unknown }>; fanshu?: number } | null = null;
   export let winnerName: string | null = null;
   export let winner: number;
   export let huapai: string[];
@@ -11,6 +12,9 @@
 
 <div class="modal kinpei">
   <div class="title">🎁 金北 強化対象選択 [{winnerName ?? `player ${winner}`}]{allowHold ? '' : ' [必須]'}</div>
+  {#if preview}
+    <div class="preview">現時点: {preview.fanshu !== undefined ? `${preview.fanshu}翻` : '役満'} / {(preview.hupai ?? []).map((h) => h.name).join('・')}</div>
+  {/if}
   <div class="actions">
     {#if huapai.includes('f1')}
       <button class="haru" on:click={() => onSelect('haru')}>春</button>
@@ -48,6 +52,7 @@
     box-sizing: border-box;
   }
   .modal.kinpei { border: 2px solid gold; }
+  .preview { font-size: 11px; color: #ffe9ad; margin-bottom: 8px; max-width: 420px; line-height: 1.5; }
   .title { font-weight: bold; margin-bottom: 8px; font-size: 13px; }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .actions button {

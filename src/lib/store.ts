@@ -2688,6 +2688,12 @@ export function createGameStore() {
             isRon: false,
             ronfrom: null,
             availableHuapai: resolvedHuapai,
+            // [2026-07-22 リョー要望] 強化前の暫定和了を選択画面に見せる
+            preview: result ? {
+              hupai: (result.hupai ?? []).map((h: any) => ({ ...h })),
+              fanshu: result.fanshu,
+              fu: result.fu,
+            } : null,
           });
           s.message = `🎁 金北 強化対象を選択してください [保留も可]`;
           return { ...s };

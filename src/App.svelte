@@ -1378,6 +1378,24 @@
 
   // ツモ切り auto モード [リョー指示 2026-05-12 checkbox 化]
   let autoTsumoKiri = false;
+  // [2026-07-22 リョー要望] オンライン用トグル: 鳴きなし / 自動アガリ
+  let onlineNoCall = false;
+  let onlineAutoWin = false;
+  $: if (onlineGameStarted && onlineNoCall && $game.awaitingFulou) {
+    const canCallSelf = [...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])]
+      .some((c: any) => c.player === selfPlayer && (c.mianzi?.length ?? 0) > 0);
+    if (canCallSelf) game.pass();
+  }
+  $: if (onlineGameStarted && onlineAutoWin && !$game.roundEnded) {
+    if ($game.awaitingRonDecision && ronCandidates.includes(selfPlayer)
+        && !(($game.ronDeclaredPlayers ?? []) as number[]).includes(selfPlayer)) {
+      game.ron(selfPlayer);
+    } else if (!progressControlsBlocked && currentPlayer === selfPlayer && canTsumo
+        && !$game.awaitingRonDecision && !$game.lastDapai) {
+      game.tsumo();
+    }
+  }
+
   // [2026-07-22 リョー要望] 右クリックでツモ切り。自分の手番でツモ牌がある時だけ
   // 奪う [それ以外はブラウザ標準メニューを妨げない]
   function onContextMenuTsumokiri(e: MouseEvent) {
@@ -1393,8 +1411,7 @@
   function readAutoTsumokiriToken(): AutoTsumokiriToken | null {
     const snap = get(game);
     const player = snap.game.lunbanToPlayerId(snap.game.state.lunban);
-    const phaseReady = viewMode === 'single'
-      && !onlineGameStarted
+    const phaseReady = (viewMode === 'single' || onlineGameStarted)
       && !snap.roundEnded
       && !snap.awaitingRonDecision
       && !snap.awaitingFulou
@@ -1999,7 +2016,7 @@
     <!-- 2026-05-14 ゆーま 自走 bug fix: online で winner != selfPlayer の client にも
          modal が出てて 誤クリックで他人の金北選択を送れた、 winner のみ表示に gate -->
     {#if $game.pendingKinpei && viewMode !== 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(selfPlayer))}
-      <KinpeiModal winnerName={onlineGameStarted ? seatDisplayNames[$game.pendingKinpei.winner] : null} winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
+      <KinpeiModal preview={$game.pendingKinpei.preview ?? null} winnerName={onlineGameStarted ? seatDisplayNames[$game.pendingKinpei.winner] : null} winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
     {/if}
     {#if $game.pendingKamiPochi && (!onlineGameStarted || $game.pendingKamiPochi.decisionOwners.includes(selfPlayer))}
       <div class="pochi-choice-backdrop" role="presentation">
@@ -2170,6 +2187,10 @@
                置いて single モードの display:none で丸ごと消えていた -->
           <button class="table-setting-btn advice" class:advice-on={adviceOpen} on:click={() => adviceOpen = !adviceOpen} title="CPUと同じ評価で候補打牌を表示" aria-label="打牌の助言">💡 <span class="settings-label">助言</span></button>
         {:else}
+          <!-- [2026-07-22 リョー要望] オンラインにも 鳴きなし/ツモ切り/自動アガリ -->
+          <label title="ポン/カン機会を自動で見送る"><input type="checkbox" bind:checked={onlineNoCall}>鳴きなし</label>
+          <label title="自分の手番を自動でツモ切り"><input type="checkbox" bind:checked={autoTsumoKiri}>ツモ切り</label>
+          <label title="ツモ/ロンできる時に自動で和了"><input type="checkbox" bind:checked={onlineAutoWin}>自動アガリ</label>
           <button class="table-setting-btn leave" on:click={() => { disconnectOnline(); viewMode = 'online'; }} title="対局から退出" aria-label="対局から退出">× <span class="settings-label">退出</span></button>
         {/if}
       </div>
@@ -2533,6 +2554,20 @@
         {#if $game.lastHuleResult?.chipBreakdown?.length > 0}
           <ChipBreakdown breakdown={$game.lastHuleResult.chipBreakdown} total={$game.lastHuleResult.chipTotal ?? 0} />
         {/if}
+        <!-- [2026-07-22 リョー要望] 誰から誰に何枚 [result 添付の before ledger から算出] -->
+        {#if $game.lastHuleResult?._chipLedgerBeforeThis}
+          {@const _cb = $game.lastHuleResult._chipLedgerBeforeThis}
+          {@const _cd = [0, 1, 2].map((p) => ($game.game.chipLedger[p as PlayerId] ?? 0) - (_cb[p] ?? 0))}
+          <div class="chip-transfer">
+            {#each [0, 1, 2] as p}
+              {#each [0, 1, 2] as q}
+                {#if _cd[p] < 0 && _cd[q] > 0}
+                  <div class="ct-row">{seatDisplayNames[p as 0|1|2]}→{seatDisplayNames[q as 0|1|2]}: <strong>{Math.min(Math.abs(_cd[p]), Math.abs(_cd[q]))}枚</strong></div>
+                {/if}
+              {/each}
+            {/each}
+          </div>
+        {/if}
       </div>
     </RoundEndPanel>
   {/if}
@@ -2613,7 +2648,14 @@
       {#if $game.pendingKinpei && viewMode === 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(selfPlayer))}
         {@const effectiveKinpeiHua = $game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)}
         <div class="kinpei-inline">
-          <div class="kinpei-title">金北 強化対象 [P{$game.pendingKinpei.winner} 選択]</div>
+          <div class="kinpei-title">金北 強化対象 [{seatDisplayNames[$game.pendingKinpei.winner as 0|1|2]} 選択]</div>
+          <!-- [2026-07-22 リョー要望] 強化前の暫定和了を見せてから選ばせる -->
+          {#if $game.pendingKinpei.preview}
+            <div class="kinpei-preview">
+              現時点: {($game.pendingKinpei.preview.fanshu !== undefined ? `${$game.pendingKinpei.preview.fanshu}翻` : '役満')}
+              / {($game.pendingKinpei.preview.hupai ?? []).map((h) => h.name).join('・')}
+            </div>
+          {/if}
           <div class="kinpei-btns">
             {#if effectiveKinpeiHua.includes('f1')}
               <button class="kinpei-btn haru" on:click={() => game.selectKinpei('haru')}>春</button>
@@ -4096,6 +4138,15 @@
     margin: 4px 0;
   }
   /* kinpei inline 選択 [agari panel 下部に embed、 リョー指示 2026-05-12] */
+  main.mode-single .kinpei-preview {
+    font-size: 12px;
+    color: #4a3b10;
+    background: #fff4d9;
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-bottom: 6px;
+    line-height: 1.5;
+  }
   main.mode-single .agari-unified-panel .kinpei-inline {
     grid-row: 2;
     grid-column: 1 / -1;
