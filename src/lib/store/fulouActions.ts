@@ -71,6 +71,10 @@ export function damingangImpl(initial: StoreState, player: number, mianzi: strin
     return { ...s };
   }
   clearReactionStage(s);
+  // [2026-07-22 リョー報告: ミンカンして嶺上ツモしたらつもれなくなった]
+  // 槓で消費した打牌が lastDapai に残ると、ツモ宣言 UI のゲート [!lastDapai] に
+  // 塞がれて嶺上開花が宣言できず、和了種別も ロン に誤分類される
+  s.lastDapai = null;
   s.lastZimo = replacement;
   s.message = `player ${player} 大明槓 [${mianzi}]、 嶺上 ${replacement}`;
   return { ...s };
