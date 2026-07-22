@@ -2273,9 +2273,12 @@ export class Game3 {
       lingshang: isLingshangKaihua,
       haidi: isHaidi,
       tianhu: isTianhu,
-      // majiang-core は 'z5' のみ認識、 z5* [色付き] は 'z5' に正規化、 f1-4 [華牌] は indicator として無効なので除外
-      baopai: (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang),
-      fubaopai: isLizhi ? (this.shan.fubaopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang) : null,
+      // majiang-core は 'z5' のみ認識、 z5* [色付き] は 'z5' に正規化、 f1-4 [華牌] は indicator として無効なので除外。
+      // [2026-07-22 リョー報告: 表ドラの神ぽっちがダメ] 正ぽっち [z5g/z5b] 表示牌は
+      // 神ぽっち [選択制ドラ] であって白ではないため base 計算から除外する
+      // [白扱いだと幻の發ドラが混ざり、選択反映の採用比較も歪む]。逆ぽ [z5r/y] は白扱いのまま
+      baopai: (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f') && !isPositiveZ5(p)).map(normalizeBaopaiForMajiang),
+      fubaopai: isLizhi ? (this.shan.fubaopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f') && !isPositiveZ5(p)).map(normalizeBaopaiForMajiang) : null,
       changbang: this.state.benbang,
       lizhibang: this.state.lizhibang,
     });
@@ -2346,8 +2349,8 @@ export class Game3 {
         }
         if (this.shan.paishu === 0) break;
       }
-      param.baopai = (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
-      if (isLizhi) param.fubaopai = (this.shan.fubaopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
+      param.baopai = (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f') && !isPositiveZ5(p)).map(normalizeBaopaiForMajiang);
+      if (isLizhi) param.fubaopai = (this.shan.fubaopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f') && !isPositiveZ5(p)).map(normalizeBaopaiForMajiang);
       // 秋使い切り flag [huapai は残す、 春チップ計算等で抜き枚数に含める]
       this.akiUsedCount[player] += akiHandRemaining;
       // [D-01 fix] 発動対象になった表示 occurrence を消費済みへ [山切れ break 時も
@@ -2531,12 +2534,14 @@ export class Game3 {
         const newFubaopai = this.kamiPochiEffectiveIndicators_(player, 'fubaopai', [...(this.shan.fubaopai ?? [])])
           .map(normalizeBaopaiForMajiang);
         const newParam = { ...param, baopai: newBaopai, fubaopai: this.lizhi.has(player) ? newFubaopai : param.fubaopai };
+        let kamiApplied = false;
         try {
           const spForHule = sp.clone();
           const newResult = Majiang.Util.hule(spForHule, ronpaiWithDir, newParam);
           // result が null でも newResult があれば採用、 さらに fanshu 大なら更新
           if (newResult && newResult.fanshu !== undefined) {
-            if (!result || newResult.fanshu > (result.fanshu ?? 0)) {
+            // [2026-07-22] 同点でも選択反映側を採用 [神ぽっちラベルと正しいドラ帰属のため]
+            if (!result || newResult.fanshu >= (result.fanshu ?? 0)) {
               result = newResult;
               result.hupai = result.hupai ?? [];
               const choices = selectedKamiDora.map((occurrence) => `${occurrence.key}→${occurrence.target}`).join(', ');
@@ -2546,9 +2551,36 @@ export class Game3 {
               // → swap が原 fubaopai で計算 → 神ぽっち ura ドラ消える bug。
               param.baopai = newBaopai;
               if (this.lizhi.has(player)) param.fubaopai = newFubaopai;
+              kamiApplied = true;
             }
           }
-        } catch { /* skip */ }
+        } catch { /* fall through to manual merge */ }
+        // [2026-07-22 リョー報告: 表ドラの神ぽっちがダメ] 金牌・虹牌・ぽっち等の
+        // 特殊牌が手牌にあると Majiang.Util.hule 再実行は牌姿非対応で失敗し、
+        // 選択済み神ぽっちドラが無言で消えていた。再hule が採用されなかった場合は
+        // 既存 result に手動でドラ翻を合流させる [アメリカ七対子 path 2449 と同じ考え方]
+        if (!kamiApplied && result && result.fanshu !== undefined) {
+          let addCnt = 0;
+          for (const occurrence of selectedKamiDora) {
+            if (occurrence.source === 'fubaopai' && !this.lizhi.has(player)) continue;
+            addCnt += this.countDoraFromIndicator(
+              sp, normalizeBaopaiForMajiang(this.doraIndicatorOf(occurrence.target!)), ronpai);
+          }
+          // base 計算は正ぽっち表示牌を除外済みなので、選択ドラを足すだけでよい
+          const delta = addCnt;
+          if (delta !== 0) {
+            result.hupai = result.hupai ?? [];
+            const doraEntry = result.hupai.find((h: any) => h.name === 'ドラ' && typeof h.fanshu === 'number');
+            if (doraEntry) {
+              doraEntry.fanshu = Math.max(0, doraEntry.fanshu + delta);
+            } else if (delta > 0) {
+              result.hupai.push({ name: 'ドラ', fanshu: delta });
+            }
+            result.fanshu = Math.max(0, result.fanshu + delta);
+          }
+          const choices = selectedKamiDora.map((occurrence) => `${occurrence.key}→${occurrence.target}`).join(', ');
+          result.hupai.push({ name: `神ぽっち [${choices}]`, fanshu: 0 });
+        }
     }
     // 白ぽっち オールマイティ: リーチ後のツモ牌 z5 を候補ごとに実体化し、
     // 全祝儀処理後の期待値で強制高目を選ぶ。ロンの例外は上段の嵌八萬だけ。
@@ -4835,7 +4867,10 @@ export class Game3 {
     this.feverTier[player] = 1;
     this.feverDeclareTing[player] = [];
     this.feverPendingShuvari[player] = false;
-    this.feverSaiAwarded[player] = [];
+    // [2026-07-22 リョー報告: フィーバー中の四華サイコロが2回出た]
+    // feverSaiAwarded はここで消さない。冬使用等でフィーバーが終わった後、
+    // 同一局内の後続和了 [河底ロン等] で 1フィーバー1回のサイコロが再発火していた。
+    // 局開始リセット [initRound 側] だけが正規の消去点
     this.lateShuvariWindow[player] = false;
     if (this.feverDeclareDapaiPlayer === player) this.feverDeclareDapaiPlayer = null;
   }

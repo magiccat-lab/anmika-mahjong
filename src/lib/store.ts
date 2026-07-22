@@ -3401,15 +3401,18 @@ export function triggerSaiKoroIfAny(s: StoreState, result: any, winner: number):
   const seen = new Set<string>(awarded[winner] ?? []);
   const chances = rawChances.filter((c: any) => {
     const key = typeof c?.awardKey === 'string' ? c.awardKey : null;
-    // During FEVER, ordinary conditions are paid once. A true-yakuman dice
-    // award is the documented exception and repeats on every win.
-    if (!s.game.feverActive[winner as PlayerId] || !key || key.startsWith('yakuman:')) return true;
+    // 通常条件のサイコロは同一局内で 1 回。真役満系だけ和了ごとに繰り返す。
+    // [2026-07-22 fix] feverActive 条件を外した: 冬使用でフィーバーが終わった後の
+    // 同一局内の後続和了 [feverActive=false] で dedupe が素通りし、四華サイコロが
+    // 2 回出ていた。feverSaiAwarded は局開始で必ず空になるため、フィーバー外の
+    // 通常和了 [1 局 1 和了] には影響しない
+    if (!key || key.startsWith('yakuman:')) return true;
     return !seen.has(key);
   });
   if (chances.length === 0) return s;
   for (const c of chances) {
     const key = typeof c?.awardKey === 'string' ? c.awardKey : null;
-    if (s.game.feverActive[winner as PlayerId] && key && !key.startsWith('yakuman:')) seen.add(key);
+    if (key && !key.startsWith('yakuman:')) seen.add(key);
   }
   awarded[winner] = [...seen];
   // `count` is a number of independent sessions, not a payout multiplier.
