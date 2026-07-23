@@ -1469,30 +1469,36 @@ async def finish_match(request: Request):
             ).fetchall()
             snapshot_members = {m["user_id"] for m in members}
         member_ids = snapshot_members
-        # 参加者外 user_id reject
-        for uid in chip_delta.keys():
-            if uid not in member_ids:
-                raise HTTPException(status_code=400, detail=f"chip_delta user {uid} not a member")
-        # R5 P2 #7 fix: 全 member [CPU 含] の key 完全性、 omitted member は games_played が
-        # 増えない bug を防ぐ。 ゼロの人も 0 で送らせる
-        if set(chip_delta.keys()) != member_ids:
-            missing = member_ids - set(chip_delta.keys())
-            raise HTTPException(
-                status_code=400,
-                detail=f"chip_delta keys incomplete, missing: {sorted(missing)}",
-            )
-        # 範囲 + ゼロサム
-        total = 0
-        for uid, delta in chip_delta.items():
-            try:
-                d = int(delta)
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"chip_delta {uid} not int") from e
-            if abs(d) > 999_999:
-                raise HTTPException(status_code=400, detail=f"chip_delta {uid} out of range")
-            total += d
-        if total != 0:
-            raise HTTPException(status_code=400, detail=f"chip_delta sum != 0 (got {total})")
+        # [2026-07-24 Sol最終レビュー P0-2] rotation は DB room row で最初から判別できる。
+        # rotation 部屋の client chip_delta は server roomLedgerDelta で置換されるため、
+        # 試合1 trio 基準の member 検証 [2試合目以降 4-key を誤 reject する] は掛けない。
+        # 置換後の server 値には下で 4-key shape 検証を掛ける
+        db_rotation_room = bool(room["rotation_enabled"]) if "rotation_enabled" in room.keys() else False
+        if not db_rotation_room:
+            # 参加者外 user_id reject
+            for uid in chip_delta.keys():
+                if uid not in member_ids:
+                    raise HTTPException(status_code=400, detail=f"chip_delta user {uid} not a member")
+            # R5 P2 #7 fix: 全 member [CPU 含] の key 完全性、 omitted member は games_played が
+            # 増えない bug を防ぐ。 ゼロの人も 0 で送らせる
+            if set(chip_delta.keys()) != member_ids:
+                missing = member_ids - set(chip_delta.keys())
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"chip_delta keys incomplete, missing: {sorted(missing)}",
+                )
+            # 範囲 + ゼロサム
+            total = 0
+            for uid, delta in chip_delta.items():
+                try:
+                    d = int(delta)
+                except Exception as e:
+                    raise HTTPException(status_code=400, detail=f"chip_delta {uid} not int") from e
+                if abs(d) > 999_999:
+                    raise HTTPException(status_code=400, detail=f"chip_delta {uid} out of range")
+                total += d
+            if total != 0:
+                raise HTTPException(status_code=400, detail=f"chip_delta sum != 0 (got {total})")
         # WSA: Node authority の match-local ledger と必ず照合する。
         # authority 不在・未終了・通信失敗時は client 値を信用せず fail-closed。
         # [2026-07-23 Sol指摘 P1 TOCTOU] ledger と authoritative 牌譜は
@@ -1502,6 +1508,7 @@ async def finish_match(request: Request):
         authority_events = None
         rotation_room = False
         active_mapping = None
+        active_members = None
         try:
             async with httpx.AsyncClient(timeout=3) as cli:
                 resp = await cli.post(
@@ -1525,6 +1532,7 @@ async def finish_match(request: Request):
                         rotation_room = ledger_data.get("rotationEnabled") is True
                         room_ledger_delta = ledger_data.get("roomLedgerDelta")
                         active_mapping = ledger_data.get("activeMapping")
+                        active_members = ledger_data.get("activeMembers")
                         if rotation_room:
                             if not isinstance(room_ledger_delta, dict) or not room_ledger_delta:
                                 raise HTTPException(
@@ -1532,6 +1540,15 @@ async def finish_match(request: Request):
                                     detail="authority roomLedgerDelta unavailable for rotation room",
                                 )
                             chip_delta = {str(k): int(v) for k, v in room_ledger_delta.items()}
+                            # [Sol P0-2] server 値の shape 検証 [int/範囲/ゼロサム。
+                            # member set は ws が start snapshot roster から構築済み]
+                            _rot_total = 0
+                            for _uid, _d in chip_delta.items():
+                                if abs(_d) > 999_999:
+                                    raise HTTPException(status_code=500, detail=f"authority delta out of range for {_uid}")
+                                _rot_total += _d
+                            if _rot_total != 0:
+                                raise HTTPException(status_code=500, detail=f"authority delta not zero-sum ({_rot_total})")
                         else:
                             if set(auth_ledger.keys()) != set(chip_delta.keys()):
                                 raise HTTPException(
@@ -1597,18 +1614,15 @@ async def finish_match(request: Request):
             )
         # R7 P1 #7 / R14 P1 #5 / R22 P1 #4 fix: room_id+match_no UNIQUE + members_json snapshot
         members_snap_list: list[dict] = []
-        if rotation_room and isinstance(active_mapping, dict) and isinstance(active_mapping.get("gameToRoom"), list):
-            # [2026-07-24 4人回し Phase5, Sol設計(c)] members_json は現試合の active trio
-            # [game seat 契約]。start.members は試合1の trio のままなので使わない。
-            # 抜け番は行を作らない [gameplay 統計は active 3人だけ、資産 SSoT は chip_delta_json]
-            seat_rows_rot = c.execute(
-                "SELECT user_id, seat FROM room_members WHERE room_id=?", (room_id,)
-            ).fetchall()
-            user_by_room_seat = {r["seat"]: r["user_id"] for r in seat_rows_rot}
+        if rotation_room and isinstance(active_members, list) and active_members:
+            # [2026-07-24 4人回し Phase5, Sol設計(c) + 最終レビュー P1-2] members_json は
+            # 現試合の active trio [game seat 契約]。live の room_members DB でなく
+            # authority の start snapshot roster 由来 [対局中 leave/evict 後の POST でも
+            # 試合開始時点の参加者が保存される]。抜け番は行を作らない
             members_snap_list = [
-                {"user_id": user_by_room_seat[room_seat], "seat": game_seat}
-                for game_seat, room_seat in enumerate(active_mapping["gameToRoom"])
-                if room_seat in user_by_room_seat
+                {"user_id": m["user_id"], "seat": m["seat"]}
+                for m in active_members
+                if isinstance(m, dict) and isinstance(m.get("user_id"), str) and isinstance(m.get("seat"), int)
             ]
         elif sp and isinstance(sp.get("members"), list):
             members_snap_list = list(sp["members"])

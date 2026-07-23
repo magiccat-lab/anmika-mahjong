@@ -2301,6 +2301,19 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         // rotation 部屋向けに、抜け番の dice 分を含む現試合の room ledger delta も同梱する
         const ledger = ledgerByUserId(snapshot, matchLedger ?? null);
         const roomDelta = currentMatchRoomDelta(snapshot, persistence.loadCommands(room_id));
+        // [Sol最終レビュー P1-2] 現試合の active trio [user_id + game seat]。
+        // live の room_members DB でなく start snapshot 由来 [対局中 leave/evict 後の
+        // POST でも試合開始時点の参加者を保存できる]。python 側 members_json の SSoT
+        const rosterForActive = snapshot.start.roomMembers ?? snapshot.start.members;
+        const mappingForActive = snapshot.activeMapping ?? null;
+        const activeMembers = mappingForActive
+          ? mappingForActive.gameToRoom
+            .map((roomSeat, gameSeat) => {
+              const member = rosterForActive.find((m) => m.seat === roomSeat);
+              return member ? { user_id: member.user_id, seat: gameSeat } : null;
+            })
+            .filter((m): m is { user_id: string; seat: number } => m !== null)
+          : snapshot.start.members.map((m) => ({ user_id: m.user_id, seat: m.seat }));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           ok: true,
@@ -2310,6 +2323,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           roomInstanceId: snapshot.roomInstanceId ?? null,
           rotationEnabled: snapshot.start.rotationEnabled === true,
           activeMapping: snapshot.activeMapping ?? null,
+          activeMembers,
           roomLedgerDelta: roomDelta.byUser,
           roomLedgerDeltaBySeat: roomDelta.bySeat,
           roomChipLedger: snapshot.roomChipLedger ?? null,

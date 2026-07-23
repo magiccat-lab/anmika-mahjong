@@ -103,11 +103,11 @@
 </script>
 
 <div class="room">
-  <h2>🀄 部屋 {roomId}{room?.match_mode === 'hanchan' ? ' [半荘戦]' : ' [東風戦]'}</h2>
+  <h2>🀄 部屋 {roomId}{room?.match_mode === 'hanchan' ? ' [半荘戦]' : ' [東風戦]'}{room?.rotation_enabled ? ' [4人回し]' : ''}</h2>
   <p class="hint">招待リンク: <code>{shareLink()}</code> <button class="copy" on:click={copyLink}>📋 copy</button></p>
 
   <div class="members">
-    {#each [0, 1, 2] as seat}
+    {#each Array.from({ length: capacity }, (_, i) => i) as seat (seat)}
       {@const m = members.find((x) => x.seat === seat)}
       <div class="seat">
         <div class="seat-label">P{seat}</div>
