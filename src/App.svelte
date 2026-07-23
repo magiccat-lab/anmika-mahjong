@@ -117,7 +117,8 @@
   let selfPlayer = 0;
   // [2026-07-23 観戦モード] 操作ゲート用の実席。観戦者は -1 [誰とも一致しない]。
   // レイアウト回転は selfPlayer [anchor 0] のまま、操作/決定UIの判定だけコレを使う
-  $: actorSeat = onlineSpectator ? -1 : selfPlayer;
+  // [2026-07-23 4人回し Phase3] 抜け番 [onlineInactive] も観戦同様に操作権なし
+  $: actorSeat = onlineSpectator || onlineInactive ? -1 : selfPlayer;
 
   $: state = $game.game.state;
   $: canSavePaifu = isSafePaifuSavePoint($game);
@@ -1146,6 +1147,26 @@
   let onlineMe: { user_id: string; username: string } | null = null;
   let onlineGameStarted = false;
   let onlineRoomMeta: { isHost: boolean; hostUserId: string; mySeat: number } | null = null;
+  // [2026-07-23 4人回し Phase3] room seat [mySeat] と game seat を分離。
+  // server の start/sync/action が recipientGameSeat を配る [3人部屋は恒等]。
+  // 抜け番 = member だが game seat 無し → 観戦投影 + 自分の room chip 表示 [Phase6 UI]
+  let onlineGameSeat: number | null = null;
+  let onlineSeatInfoReceived = false;
+  let onlineActiveMapping: { gameToRoom: [number, number, number]; inactiveRoomSeat: number } | null = null;
+  let onlineRoomChipLedger: Record<string, number> | null = null;
+  $: onlineInactive = onlineGameStarted && !onlineSpectator && onlineSeatInfoReceived
+    && onlineActiveMapping !== null && onlineGameSeat === null;
+
+  /** server message から seat/mapping/room ledger の contract field を取り込む */
+  function absorbSeatContract(msg: any): void {
+    if (msg == null || typeof msg !== 'object') return;
+    if ('recipientGameSeat' in msg) {
+      onlineGameSeat = typeof msg.recipientGameSeat === 'number' ? msg.recipientGameSeat : null;
+      onlineSeatInfoReceived = true;
+    }
+    if ('activeMapping' in msg) onlineActiveMapping = msg.activeMapping ?? null;
+    if ('roomChipLedger' in msg && msg.roomChipLedger) onlineRoomChipLedger = msg.roomChipLedger;
+  }
   let onlineWs: WebSocket | null = null;
   let onlineMembers: Array<{ seat: number; user_id: string; username: string; is_cpu: boolean }> = [];
   let onlineSocketGeneration = 0;
@@ -1169,7 +1190,10 @@
       // [2026-07-23 changshu protocol] 東風/半荘は server start payload が持つ
       changshu: typeof msg.changshu === 'number' ? msg.changshu : undefined,
       cpuSeats: onlineMembers.filter((m: any) => m.is_cpu).map((m: any) => m.seat),
-      mySeat: onlineRoomMeta?.mySeat as 0|1|2|undefined,
+      // [2026-07-23 4人回し Phase3] store へ渡す自席は game seat [3人部屋は mySeat と同値]
+      mySeat: (onlineSeatInfoReceived
+        ? (onlineGameSeat ?? undefined)
+        : onlineRoomMeta?.mySeat) as 0|1|2|undefined,
       isHost: !!onlineRoomMeta?.isHost,
       hostSeat,
       ...protocol,
@@ -1191,7 +1215,11 @@
     onlineGameStarted = true;
     viewMode = 'single';
     // [2026-07-23 観戦モード] 席なし [-1] は盤面回転だけ seat 0 anchor で描く
-    selfPlayer = (onlineSpectator ? 0 : onlineRoomMeta!.mySeat) as 0 | 1 | 2;
+    // [2026-07-23 4人回し Phase3] 盤面の自席は game seat。抜け番 [game seat 無し] も
+    // 観戦と同じ seat 0 anchor で描く。3人部屋は recipientGameSeat = mySeat [恒等]
+    selfPlayer = (onlineSpectator || (onlineSeatInfoReceived && onlineGameSeat === null)
+      ? 0
+      : (onlineSeatInfoReceived ? onlineGameSeat! : onlineRoomMeta!.mySeat)) as 0 | 1 | 2;
     revealAll = false;
     if (msg.chipLedger) {
       const currentGame = (get(game) as any).game;
@@ -1336,6 +1364,7 @@
       if (generation !== onlineSocketGeneration) return;
       let msg: any; try { msg = JSON.parse(event.data); } catch { return; }
       if (msg.type === 'start') {
+        absorbSeatContract(msg); // [Phase3] selfPlayer 決定前に game seat を確定させる
         const initialized = initializeOnlineFromStart(ws, msg, {
           revision: msg.revision ?? 0,
           matchId: msg.matchId ?? 1,
@@ -1343,10 +1372,13 @@
         });
         if (!initialized) ws.send(JSON.stringify({ type: 'resync', expectedVersion: 0 }));
       } else if (msg.type === 'sync') {
+        absorbSeatContract(msg); // [Phase3] sync top-level に recipient seat 契約
+        absorbSeatContract(msg.snapshot); // activeMapping / roomChipLedger は snapshot 側
         applyCanonicalSync(ws, msg.snapshot);
       } else if (msg.type === 'lobby') {
         onlineMembers = msg.members ?? [];
       } else if (msg.type === 'action') {
+        absorbSeatContract(msg); // [Phase3] nextMatch の mapping 交換もこの経路で追従
         applyRevisionedAction(ws, msg);
       } else if (msg.type === 'reject') {
         console.warn('[online] command rejected', msg.reason, msg.commandId);
@@ -1363,8 +1395,9 @@
         // [2026-07-23 Sol R2で露出] 自分の押下が server 側の revision reset で消えていたら
         // 楽観「全員待ち」表示を戻して再押下できるようにする [nack 補完の保険]
         {
+          // [Phase3] ready 集約は room seat 契約 [4人部屋は seat 3 もあり得る]
           const own = onlineRoomMeta?.mySeat;
-          if (nextRoundPressedLocal && (own === 0 || own === 1 || own === 2)
+          if (nextRoundPressedLocal && typeof own === 'number' && own >= 0 && own <= 3
             && !nextRoundReadySeats.includes(own)) {
             nextRoundPressedLocal = false;
           }
@@ -1377,8 +1410,9 @@
         // 旧 true 票が server に残ったまま unchecked 表示だと、host の通常
         // 「次の試合へ」で予告なくリセットが発動し得た
         if (onlineGameStarted && !onlineSpectator) {
+          // [Phase3] チップリセット同意も room seat 契約
           const own = onlineRoomMeta?.mySeat;
-          if (own === 0 || own === 1 || own === 2) {
+          if (typeof own === 'number' && own >= 0 && own <= 3) {
             resetChipOnNextMatch = chipResetVoteSeats.includes(own);
           }
         }
@@ -1401,6 +1435,11 @@
     onlineGameStarted = false;
     onlineRoomMeta = null;
     onlineSpectator = false;
+    // [2026-07-23 4人回し Phase3] seat 契約 state も部屋を離れたら破棄
+    onlineGameSeat = null;
+    onlineSeatInfoReceived = false;
+    onlineActiveMapping = null;
+    onlineRoomChipLedger = null;
   }
   // [2026-07-22 リョー要望] 次局へは全員が押したら進む。自動 ready 送信を廃止し、
   // 「次局へ」押下 = readyNextRound 送信。server が全員分揃った時に nextRound を発行する
@@ -2205,7 +2244,8 @@
       </div>
     {/if}
     <!-- 2026-05-14 codex review #3 fix: フィーバー継続 button は winner client のみ表示 -->
-    {#if $game.game.canDeclareLateShuvari(selfPlayer as 0 | 1 | 2) && (!onlineGameStarted || actorSeat === onlineRoomMeta?.mySeat)}
+    <!-- [Phase3] online の自席判定は game seat [actorSeat===selfPlayer]。room seat と比較しない -->
+    {#if $game.game.canDeclareLateShuvari(selfPlayer as 0 | 1 | 2) && (!onlineGameStarted || actorSeat === selfPlayer)}
       <button class="lizhi-btn shuvari" on:click={() => game.shuvari(selfPlayer)}>シュバ追加宣言</button>
     {/if}
     {#if $game.pendingFeverContinue && !$game.pendingSaiKoro && (!onlineGameStarted || $game.pendingFeverContinue.winner === actorSeat)}

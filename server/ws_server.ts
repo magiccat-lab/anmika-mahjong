@@ -25,7 +25,7 @@ import {
   type RoomMemberSnapshot,
   type RoomStartSnapshot,
 } from './protocol';
-import { computeRoomChipDelta, foldRoomState, initialRoomChipLedger } from './rotation';
+import { computeRoomChipDelta, foldRoomState, gameToRoomSeat, initialRoomChipLedger, roomToGameSeat } from './rotation';
 
 const DEFAULT_PORT = 8791;
 const DEFAULT_REACTION_TIMEOUT_MS = 15_000;
@@ -123,11 +123,25 @@ function serverShuffledPool(): string[] {
   return pool;
 }
 
-function membersForAuthority(room: Room): AuthorityMember[] {
-  return Array.from(room.members.values()).map((member) => ({
-    seat: member.seat,
-    is_cpu: member.is_cpu,
-  }));
+export function membersForAuthority(room: Room): AuthorityMember[] {
+  // [2026-07-23 4人回し Phase3] member.seat は room seat 契約。authority へは
+  // mapping で game seat に写像し、抜け番 [game seat 無し] は渡さない。
+  // 3人部屋 [mapping null] は恒等写像で従来と同一
+  const mapping = room.snapshot.activeMapping ?? null;
+  const projected: AuthorityMember[] = [];
+  for (const member of room.members.values()) {
+    const gameSeat = roomToGameSeat(mapping, member.seat);
+    if (gameSeat === null) continue;
+    projected.push({ seat: gameSeat, is_cpu: member.is_cpu });
+  }
+  return projected;
+}
+
+/** [2026-07-23 4人回し Phase3] 権威側の game seat から room member を引く。
+ *  member.seat は room seat 契約なので、mapping 経由で照合する [mapping 無しは恒等] */
+export function memberByGameSeat(room: Room, gameSeat: number) {
+  const roomSeat = gameToRoomSeat(room.snapshot.activeMapping ?? null, gameSeat);
+  return Array.from(room.members.values()).find((member) => member.seat === roomSeat);
 }
 
 /** A Shuvari player cannot waive a legal ron, even when their decision is
@@ -924,12 +938,19 @@ function sanitizeActionForSeat(actionInput: Record<string, unknown>, recipientSe
 function actionRelay(
   command: AcceptedRoomCommand,
   snapshot: CanonicalRoomSnapshot,
-  recipientSeat: number,
+  recipientRoomSeat: number,
   authority: RoomAuthority | null,
   duplicate = false,
 ) {
-  const action = sanitizeActionForSeat(command.action, recipientSeat);
-  if (authority) action._state = captureSeatProjection(authority, recipientSeat);
+  // [2026-07-23 4人回し Phase3] 受信者は room seat 契約で渡り、masking / projection は
+  // game seat 契約。抜け番 [game seat 無し] は観戦投影 [全 private マスク] を受ける
+  const mapping = snapshot.activeMapping ?? null;
+  const recipientGameSeat = recipientRoomSeat === SPECTATOR_SEAT
+    ? null
+    : roomToGameSeat(mapping, recipientRoomSeat);
+  const projectionSeat = recipientGameSeat ?? SPECTATOR_SEAT;
+  const action = sanitizeActionForSeat(command.action, projectionSeat);
+  if (authority) action._state = captureSeatProjection(authority, projectionSeat);
   return {
     type: 'action',
     commandId: command.commandId,
@@ -937,8 +958,15 @@ function actionRelay(
     matchId: snapshot.matchId,
     roundId: snapshot.roundId,
     from_seat: command.actorSeat,
+    from_room_seat: command.actorRoomSeat ?? command.actorSeat,
     from_user_id: command.fromUserId,
     duplicate,
+    // [2026-07-23 4人回し Phase3] client の actorGameSeat 分離と room chip 表示用
+    recipientRoomSeat,
+    recipientGameSeat,
+    activeMapping: mapping,
+    roomChipLedger: snapshot.roomChipLedger ?? null,
+    mappingEpoch: snapshot.matchId,
     action,
   };
 }
@@ -993,11 +1021,17 @@ function broadcastAction(room: Room, command: AcceptedRoomCommand): void {
 function sendSync(
   ws: WebSocket | null,
   snapshot: CanonicalRoomSnapshot,
-  recipientSeat: number,
+  recipientRoomSeat: number,
   authority: RoomAuthority | null,
   fullCommands?: AcceptedRoomCommand[],
   currentMembers?: Array<{ seat: number; user_id: string; username: string; is_cpu: boolean; connected?: boolean }> | null,
 ): void {
+  // [2026-07-23 4人回し Phase3] 受信者 room seat → game seat 変換 [抜け番は観戦投影]
+  const mapping = snapshot.activeMapping ?? null;
+  const recipientGameSeat = recipientRoomSeat === SPECTATOR_SEAT
+    ? null
+    : roomToGameSeat(mapping, recipientRoomSeat);
+  const projectionSeat = recipientGameSeat ?? SPECTATOR_SEAT;
   const payload = fullCommands ? { ...snapshot, commands: fullCommands } : snapshot;
   let sanitizedStart = payload.start;
   if (sanitizedStart && sanitizedStart.preShuffledPool?.length > 0) {
@@ -1006,16 +1040,20 @@ function sendSync(
     sanitizedStart = {
       ...sanitizedStart,
       preShuffledPool: [],
-      ...maskBlindStart(blindData, recipientSeat),
+      ...maskBlindStart(blindData, projectionSeat),
       blindStart: true,
     } as any;
   }
   const commands = (payload.commands ?? []).map((command) => ({
     ...command,
-    action: sanitizeActionForSeat(command.action, recipientSeat),
+    action: sanitizeActionForSeat(command.action, projectionSeat),
   }));
   sendJson(ws, {
     type: 'sync',
+    // [2026-07-23 4人回し Phase3] client の actorGameSeat 分離用 [snapshot 内の
+    // activeMapping / roomChipLedger は spread でそのまま同梱される]
+    recipientRoomSeat,
+    recipientGameSeat,
     snapshot: {
       ...payload,
       start: sanitizedStart,
@@ -1023,7 +1061,7 @@ function sendSync(
       // [2026-07-22 Sol指摘 P1] reconnect 時に stale な start.members が
       // fresh lobby を上書きする穴。現在の members を authoritative として同梱
       currentMembers: currentMembers ?? null,
-      state: authority ? captureSeatProjection(authority, recipientSeat) : null,
+      state: authority ? captureSeatProjection(authority, projectionSeat) : null,
     },
   });
 }
@@ -1040,15 +1078,23 @@ function lobbyPayload(room: Room) {
 }
 
 export function resolveActorSeat(room: Room, uid: string, seat: number, action: Record<string, unknown>) {
-  const actorSeat = seat;
+  // [2026-07-23 4人回し Phase3] client envelope の seat は room seat 契約。
+  // canonical command の actorSeat は game seat 契約なのでここで写像する。
+  // 抜け番 [game seat 無し] の game action はこの境界で拒否 [room control は
+  // Phase4 の server control command 化で別経路になる]
+  const gameSeat = roomToGameSeat(room.snapshot?.activeMapping ?? null, seat);
+  if (gameSeat === null) {
+    return { actorSeat: seat, actorRoomSeat: seat, reason: 'inactive seat cannot send game actions' };
+  }
+  const actorSeat = gameSeat;
   // [2026-07-21 監査 S-01 fix] client 起点の cpuRelay [host が CPU action を代理送信] を廃止。
   // host は「その CPU が選んだ action か」を証明できず、不正候補が revision を消費しない性質と
   // 合わせて隠し手牌の oracle 探索・CPU 直接操作に使えた。CPU action は権威サーバーの
   // deadline driver [turnTimeoutAction、CPU 席は 750ms] だけが生成する。
   if (action.cpuRelay === true) {
-    return { actorSeat, reason: 'cpuRelay is no longer accepted; CPU actions are server-driven' };
+    return { actorSeat, actorRoomSeat: seat, reason: 'cpuRelay is no longer accepted; CPU actions are server-driven' };
   }
-  return { actorSeat, reason: null };
+  return { actorSeat, actorRoomSeat: seat, reason: null };
 }
 
 function validateAction(room: Room, uid: string, seat: number, action: Record<string, unknown>) {
@@ -1109,7 +1155,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       // seat と flag の整合も token 検証で強制する
       const spectator = value.spectator === true;
       if (spectator && value.seat !== -1) return null;
-      if (!spectator && value.seat !== 0 && value.seat !== 1 && value.seat !== 2) return null;
+      // [2026-07-23 4人回し Phase3] seat は room seat 契約。rotation 部屋の4人目 [seat 3]
+      // を許可 [3人部屋は app.py が 0-2 しか発行せず、接続時の member 照合でも縛られる]
+      if (!spectator && !(Number.isInteger(value.seat) && value.seat >= 0 && value.seat <= 3)) return null;
       return {
         uid: value.uid,
         username: typeof value.username === 'string' ? value.username : undefined,
@@ -1352,6 +1400,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     const appended = appendAcceptedCommand(previous, {
       commandId,
       actorSeat,
+      // [2026-07-23 4人回し Phase3] 表示/監査用の room seat [replay は actorSeat=game seat のまま]
+      actorRoomSeat: gameToRoomSeat(previous.activeMapping ?? null, actorSeat),
       fromUserId,
       action,
     });
@@ -1407,13 +1457,16 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     sendJson(ws, chipResetVotePayload(room));
   };
 
-  const issueServerNextRound = (room: Room, revision: number, actorSeat: number, fromRole: string) => {
+  const issueServerNextRound = (room: Room, revision: number, actorRoomSeat: number, fromRole: string) => {
     room.queue = room.queue.then(async () => {
       if (room.snapshot.revision !== revision || !room.authority?.isPostWinResolved()) return;
       const action = { type: 'nextRound', from_role: fromRole };
+      // [2026-07-23 4人回し Phase3] ready 集約は room seat 契約。canonical へは game seat。
+      // 押下者が抜け番 [Phase4 で除外予定] でも nextRound 自体は席非依存なので active 0 で代行
+      const actorGameSeat = roomToGameSeat(room.snapshot.activeMapping ?? null, actorRoomSeat) ?? 0;
       const accepted = acceptAction(
         room,
-        actorSeat,
+        actorGameSeat,
         SERVER_NEXT_ROUND_UID,
         action,
         `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
@@ -1576,7 +1629,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       postWinAction = { type: 'continueFever' };
     }
     if (postWinOwner !== null && postWinAction) {
-      const owner = Array.from(room.members.values()).find((item) => item.seat === postWinOwner);
+      const owner = memberByGameSeat(room, postWinOwner); // [Phase3] postWinOwner は game seat
       // 2026-07-16 リョー報告: CPU owner の 750ms 刻みだと client の演出 [サイコロ spin 等] が
       // 追いつかず「押す前に済んでチップが動いた」体験になる。solo の App 側 driver と同じ
       // 「見える」ペースに合わせる。人間 owner の deadline 代行 [勝手に出目宣言→roll] は
@@ -1623,7 +1676,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       room.deadlineTimer = setTimeout(() => {
         room.queue = room.queue.then(async () => {
           for (const seat of reactionSeats) {
-            const member = Array.from(room.members.values()).find((item) => item.seat === seat);
+            const member = memberByGameSeat(room, seat); // [Phase3] reaction 候補は game seat
             if (member?.is_cpu) continue;
             const result = acceptAction(
               room,
@@ -1641,7 +1694,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     }
 
     const current = authority.currentPlayer();
-    const member = Array.from(room.members.values()).find((item) => item.seat === current);
+    const member = memberByGameSeat(room, current); // [Phase3] currentPlayer は game seat
     // [2026-07-21 監査 D-15 fix] この timer を張った時点の接続世代を控える。
     // 発火までに切断→再接続で generation が上がっていたら、この timer は旧世代の
     // 期限なので無効化し、再接続時に張り直した新 timer に任せる
@@ -1663,7 +1716,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       room.queue = room.queue.then(async () => {
         const live = room.authority;
         if (!live || live.roundEnded || live.currentPlayer() !== current) return;
-        const liveMember = Array.from(room.members.values()).find((item) => item.seat === current);
+        const liveMember = memberByGameSeat(room, current); // [Phase3] game seat 照合
         if (liveMember && !liveMember.is_cpu && liveMember.generation !== scheduledGeneration) return;
         const action = turnTimeoutAction(live, member?.is_cpu === true);
         if (!action) {
@@ -1713,11 +1766,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     room.pendingStart = null;
     const blindStart = captureBlindStart(room.authority!);
     for (const member of room.members.values()) {
+      // [2026-07-23 4人回し Phase3] member.seat は room seat。masking/projection は game seat
+      const memberGameSeat = roomToGameSeat(room.snapshot.activeMapping ?? null, member.seat);
+      const memberProjectionSeat = memberGameSeat ?? SPECTATOR_SEAT;
       sendJson(member.ws, {
         type: 'start',
         blindStart: true,
-        ...maskBlindStart(blindStart, member.seat),
-        state: captureSeatProjection(room.authority!, member.seat),
+        ...maskBlindStart(blindStart, memberProjectionSeat),
+        state: captureSeatProjection(room.authority!, memberProjectionSeat),
         qijia: start.qijia,
         // [2026-07-23 changshu protocol] sync 経路 [snapshot.start] だけでなく直送 start にも同梱
         changshu,
@@ -1725,6 +1781,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         revision: room.snapshot.revision,
         matchId: room.snapshot.matchId,
         roundId: room.snapshot.roundId,
+        recipientRoomSeat: member.seat,
+        recipientGameSeat: memberGameSeat,
+        activeMapping: room.snapshot.activeMapping ?? null,
+        roomChipLedger: room.snapshot.roomChipLedger ?? null,
       });
     }
     // [2026-07-23 観戦モード] 観戦者にも全 private マスクで start を配る
