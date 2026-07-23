@@ -1,7 +1,14 @@
 # 4人回し (抜け番ローテーション) 設計 — Sol合意版
 
-日付: 2026-07-23 / 対象HEAD: f009a10 / 状態: 設計確定・実装未着手
+日付: 2026-07-23 / 対象HEAD: f009a10 / 状態: Phase 1-3 実装済み [Sol レビュー反映込み]
 リョー要件: 部屋に4人、順番に抜け番。抜け番はサイコロだけ受け取り/払い。観戦モードで部屋は見れる。
+
+進捗 (2026-07-23 深夜):
+- Phase 1 chip effect seam: 0308974 [+ Sol P1 反映 49a7dcb]
+- Phase 2 protocol v3 + mapping 層 + 4-way fold: 812a64b [+ Sol P1×2 反映 b2d7ddb]
+- Phase 3 seat 契約分離 + ready 抜け番除外: 6715f79 + 28171ce
+- 残り: Phase 4 [rotation 決定 + server control command 化]、Phase 5 [matches POST/stats]、Phase 6 [UI/join]
+- 運用注意: snapshot schema v3 は旧 server で読めない。deploy 前 DB backup、v3 後は rollback せず前進修正
 
 ## 方針 (Sol設計回答 2026-07-23 01:41Z、原文は agmsg log id=274)
 
