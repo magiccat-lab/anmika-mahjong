@@ -1831,6 +1831,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           const value = msg as Record<string, unknown>;
           const voteMember = Array.from(room.members.values()).find((m) => m.seat === payload.seat);
           if (!voteMember || voteMember.is_cpu) return;
+          // [2026-07-23 Sol R1テストで露出] 票 frame 直後の切断で、close handler の票失効の
+          // 後に queue 上の票処理が走って復活するレース。切断済み member の票は受けない
+          if (!voteMember.connected) return;
           // [2026-07-23 Sol 4周目 P2] 同意は試合終了ウィンドウ限定 [旧タブ/生 frame からの
           // 事前同意を弾く。票の有効期間は nextRound/nextMatch accept clear と合わせて match 内]
           if (room.authority?.canonicalState()?.game?.state?.finished !== true) return;
