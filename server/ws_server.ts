@@ -26,7 +26,7 @@ import {
   type RoomSeatMapping,
   type RoomStartSnapshot,
 } from './protocol';
-import { computeRoomChipDelta, foldRoomState, gameToRoomSeat, initialRoomChipLedger, nextMappingForMatch, roomToGameSeat } from './rotation';
+import { activeTrioForStart, computeRoomChipDelta, foldRoomState, gameToRoomSeat, initialRoomChipLedger, mappingFor, nextMappingForMatch, roomToGameSeat } from './rotation';
 
 const DEFAULT_PORT = 8791;
 const DEFAULT_REACTION_TIMEOUT_MS = 15_000;
@@ -80,6 +80,8 @@ type Room = {
   snapshot: CanonicalRoomSnapshot;
   // [2026-07-23] 部屋作成時の対局形式 [API が SSoT、start 時に changshu へ変換]
   matchMode: 'tonpu' | 'hanchan';
+  // [2026-07-24 4人回し Phase6] API room record 由来 [start 構築と定員 gate に使う]
+  rotationEnabled: boolean;
   // [2026-07-23 観戦モード] uid → 閲覧専用接続
   spectators: Map<string, SpectatorConn>;
   // [2026-07-23 Sol 7周目 P1] 初期化 [member/matchMode fetch] の完了 promise。
@@ -1226,13 +1228,13 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
 
   const fetchRoomInfo = async (
     roomId: string,
-  ): Promise<{ members: RoomMemberSnapshot[]; matchMode: 'tonpu' | 'hanchan' }> => {
-    if (!internalApiSecret) return { members: [], matchMode: 'tonpu' };
+  ): Promise<{ members: RoomMemberSnapshot[]; matchMode: 'tonpu' | 'hanchan'; rotationEnabled: boolean }> => {
+    if (!internalApiSecret) return { members: [], matchMode: 'tonpu', rotationEnabled: false };
     const response = await fetch(`${apiBase}/api/internal/rooms/${roomId}/members`, {
       headers: { 'X-Anmika-Internal-Secret': internalApiSecret },
     });
     if (!response.ok) throw new Error(`member authority returned ${response.status}`);
-    const data = await response.json() as { members?: Array<Record<string, unknown>>; match_mode?: unknown };
+    const data = await response.json() as { members?: Array<Record<string, unknown>>; match_mode?: unknown; rotation_enabled?: unknown };
     if (!Array.isArray(data.members)) throw new Error('member authority response missing members');
     const members = data.members
       .filter((member) => typeof member.user_id === 'string' && typeof member.seat === 'number')
@@ -1243,7 +1245,11 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         is_cpu: member.is_cpu === true || String(member.user_id).startsWith('CPU_'),
       }));
     // [2026-07-23 changshu protocol] 対局形式は API の room record が SSoT
-    return { members, matchMode: data.match_mode === 'hanchan' ? 'hanchan' : 'tonpu' };
+    return {
+      members,
+      matchMode: data.match_mode === 'hanchan' ? 'hanchan' : 'tonpu',
+      rotationEnabled: data.rotation_enabled === true,
+    };
   };
 
   const fetchMembers = async (roomId: string): Promise<RoomMemberSnapshot[]> => {
@@ -1290,6 +1296,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       authority: restoredAuthority,
       snapshot: { ...snapshot, commands: [] },
       matchMode: 'tonpu',
+      rotationEnabled: false,
       spectators: new Map<string, SpectatorConn>(),
       pendingStart: null,
       generation: 0,
@@ -1313,6 +1320,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     room.ready = (async () => {
       const roomInfo = await fetchRoomInfo(roomId);
       room.matchMode = roomInfo.matchMode;
+      room.rotationEnabled = roomInfo.rotationEnabled;
       for (const member of roomInfo.members) {
         const previous = room.members.get(member.user_id);
         room.members.set(member.user_id, {
@@ -1816,17 +1824,34 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
 
   const startRoom = (room: Room, qijia: number): void => {
     if (room.snapshot.started) return;
-    const members = Array.from(room.members.values())
+    const roomMembersAll = Array.from(room.members.values())
       .sort((a, b) => a.seat - b.seat)
       .map(({ seat, user_id, username, is_cpu }) => ({ seat, user_id, username, is_cpu }));
-    if (members.length < 3) {
+    // [2026-07-24 4人回し Phase6] 定員 gate: rotation 部屋は 4 人揃うまで開始しない
+    if (roomMembersAll.length < (room.rotationEnabled ? 4 : 3)) {
       room.pendingStart = { qijia };
       return;
     }
     const now = new Date().toISOString();
     // [2026-07-23 changshu protocol] 対局形式は room record [API] 由来。client 数値は使わない
     const changshu = room.matchMode === 'hanchan' ? 2 : 1;
-    const start = { preShuffledPool: serverShuffledPool(), qijia, members, changshu };
+    // [2026-07-24 4人回し Phase6] rotation 部屋の start 構築:
+    // - initialMapping = mappingFor(1, room seat 昇順, 末尾=4人目が最初の抜け番)
+    // - start.members は active trio を game seat で持つ [設計 §2: seat3 を混ぜない]
+    // - roomMembers に room seat 契約の全員を保持
+    const initialMapping = room.rotationEnabled && roomMembersAll.length === 4
+      ? mappingFor(1, roomMembersAll.map((member) => member.seat))
+      : undefined;
+    const members = initialMapping ? activeTrioForStart(roomMembersAll, initialMapping) : roomMembersAll;
+    const start: RoomStartSnapshot = {
+      preShuffledPool: serverShuffledPool(),
+      qijia,
+      members,
+      changshu,
+      ...(initialMapping
+        ? { rotationEnabled: true, roomMembers: roomMembersAll, initialMapping }
+        : {}),
+    };
     room.authority = createRoomAuthority(start);
     room.snapshot = {
       ...room.snapshot,
@@ -1837,7 +1862,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       updatedAt: now,
       // [2026-07-23 4人回し Phase2] room ledger / mapping の初期値。3人部屋は
       // mapping 無し [恒等写像扱い] で、fold 結果は game ledger と常に一致する
-      activeMapping: (start as RoomStartSnapshot).initialMapping ?? null,
+      activeMapping: start.initialMapping ?? null,
       roomChipLedger: initialRoomChipLedger(start),
     };
     persistence.resetRoom(room.snapshot);
@@ -2162,7 +2187,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       // 残り期限で復帰直後に auto-discard される事故を防ぐ [新世代で rebase]
       scheduleRoomDeadline(room);
     }
-    if (!room.snapshot.started && room.pendingStart && room.members.size >= 3) {
+    if (!room.snapshot.started && room.pendingStart && room.members.size >= (room.rotationEnabled ? 4 : 3)) {
       startRoom(room, room.pendingStart.qijia);
     }
   });

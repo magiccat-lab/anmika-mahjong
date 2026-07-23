@@ -2194,6 +2194,23 @@
       <button on:click={() => { disconnectOnline(); currentRoomId = null; viewMode = 'online'; }}>退出</button>
     </div>
   {/if}
+  <!-- [2026-07-24 4人回し Phase6] 抜け番バナー [観戦投影 + サイコロ精算だけ参加。次試合で復帰] -->
+  {#if onlineInactive}
+    <div class="spectator-banner rotation-inactive">
+      <span>😴 抜け番 [この試合は観戦。サイコロ精算は参加、次の試合で復帰]</span>
+    </div>
+  {/if}
+  <!-- [2026-07-24 4人回し Phase6] rotation 部屋の room chip [4人分] と現在の抜け番 -->
+  {#if onlineGameStarted && onlineActiveMapping && onlineRoomChipLedger}
+    <div class="rotation-chip-bar" role="status">
+      <span class="rc-title">🎲 部屋チップ</span>
+      {#each onlineMembers as m (m.seat)}
+        <span class="rc-entry" class:rc-inactive={m.seat === onlineActiveMapping.inactiveRoomSeat}>
+          {m.seat === onlineActiveMapping.inactiveRoomSeat ? '😴' : ''}{m.username}: {onlineRoomChipLedger[String(m.seat)] ?? 0}
+        </span>
+      {/each}
+    </div>
+  {/if}
   <div class="orientation-notice" role="status">
     <strong>端末を横向きにしてください</strong>
     <span>対局画面は横向きで全体を確認できます</span>
@@ -5351,4 +5368,30 @@
     cursor: pointer;
     font-size: 12px;
   }
+  /* [2026-07-24 4人回し Phase6] 抜け番バナーは観戦バナーと重なるので少し下げる */
+  .spectator-banner.rotation-inactive {
+    top: 40px;
+    border-color: rgba(150, 200, 255, 0.5);
+    color: #cfe4ff;
+  }
+  .rotation-chip-bar {
+    position: fixed;
+    bottom: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 350;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(20, 28, 40, 0.9);
+    border: 1px solid rgba(160, 200, 255, 0.35);
+    color: #dce8ff;
+    border-radius: 999px;
+    padding: 3px 14px;
+    font-size: 12px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+  }
+  .rotation-chip-bar .rc-title { opacity: 0.75; }
+  .rotation-chip-bar .rc-entry.rc-inactive { opacity: 0.65; font-style: italic; }
 </style>

@@ -216,6 +216,9 @@ def init_db() -> None:
         # [2026-07-23 changshu protocol] 対局形式 [tonpu=東風 / hanchan=半荘]。既存 room は 東風
         if "match_mode" not in room_cols:
             c.execute("ALTER TABLE rooms ADD COLUMN match_mode TEXT NOT NULL DEFAULT 'tonpu'")
+        # [2026-07-24 4人回し Phase6] 4人回し部屋 flag。既存部屋は通常3人 [0]
+        if "rotation_enabled" not in room_cols:
+            c.execute("ALTER TABLE rooms ADD COLUMN rotation_enabled INTEGER NOT NULL DEFAULT 0")
         for row in c.execute("SELECT room_id FROM rooms WHERE instance_id='' OR instance_id IS NULL").fetchall():
             c.execute(
                 "UPDATE rooms SET instance_id=? WHERE room_id=?",
@@ -460,7 +463,7 @@ async def list_rooms(request: Request):
         raise HTTPException(status_code=401, detail="login required")
     with db_conn() as c:
         rows = c.execute(
-            """SELECT r.room_id, r.host_user_id, r.status, r.created_at, r.match_mode,
+            """SELECT r.room_id, r.host_user_id, r.status, r.created_at, r.match_mode, r.rotation_enabled,
                       u.username AS host_name,
                       (SELECT COUNT(*) FROM room_members WHERE room_id=r.room_id) AS member_count
                FROM rooms r
@@ -487,6 +490,8 @@ async def create_room(request: Request):
     match_mode = body.get("match_mode") if isinstance(body, dict) else None
     if match_mode not in ("tonpu", "hanchan"):
         match_mode = "tonpu"
+    # [2026-07-24 4人回し Phase6] 4人回し [部屋定員4、順番に抜け番]。bool 以外は False
+    rotation_enabled = bool(body.get("rotation") is True) if isinstance(body, dict) else False
     # 1 user = 1 open 部屋 ホスト限定: 既に open があれば そっち返す [リョー指示 2026-05-13]
     with db_conn() as c:
         existing = c.execute(
@@ -503,6 +508,7 @@ async def create_room(request: Request):
                 "room_id": existing["room_id"],
                 "cpu_count": int(existing_cpu_count["n"] if existing_cpu_count else 0),
                 "match_mode": existing["match_mode"] if "match_mode" in existing.keys() else "tonpu",
+                "rotation": bool(existing["rotation_enabled"]) if "rotation_enabled" in existing.keys() else False,
                 "existing": True,
             }
     # R10 P2 #12 fix: room_id 衝突時 retry [4 文字 32^4 ~ 1M で稀だが、 同時 create で衝突可]
@@ -512,8 +518,8 @@ async def create_room(request: Request):
             candidate = _gen_room_id()
             try:
                 c.execute(
-                    "INSERT INTO rooms(room_id, instance_id, host_user_id, match_mode) VALUES(?,?,?,?)",
-                    (candidate, _secrets.token_urlsafe(18), u["user_id"], match_mode),
+                    "INSERT INTO rooms(room_id, instance_id, host_user_id, match_mode, rotation_enabled) VALUES(?,?,?,?,?)",
+                    (candidate, _secrets.token_urlsafe(18), u["user_id"], match_mode, 1 if rotation_enabled else 0),
                 )
                 room_id = candidate
                 break
@@ -527,8 +533,10 @@ async def create_room(request: Request):
         )
         # CPU 用 仮想 user_id [CPU は末尾 seat から逆順割当、 人間 2 人目を seat 1 に確保するため
         #  リョー指示 2026-05-13: 打牌順 magicren→magiccat.lab→CPU1 にしたい]
+        # [2026-07-24 4人回し Phase6] 定員 = rotation 4 / 通常 3。CPU は末尾 seat から逆順
+        last_seat = 3 if rotation_enabled else 2
         for i in range(cpu_count):
-            seat = 2 - i  # cpu_count=1 → seat 2、 cpu_count=2 → seat 2, 1
+            seat = last_seat - i  # 3人: cpu_count=1 → seat 2。4人回し: → seat 3
             cpu_uid = f"CPU_{room_id}_{seat}"
             c.execute(
                 """INSERT OR IGNORE INTO users(user_id, username, avatar_url)
@@ -540,7 +548,7 @@ async def create_room(request: Request):
                 (room_id, cpu_uid, seat),
             )
         c.commit()
-    return {"room_id": room_id, "cpu_count": cpu_count, "match_mode": match_mode}
+    return {"room_id": room_id, "cpu_count": cpu_count, "match_mode": match_mode, "rotation": rotation_enabled}
 
 
 @app.get("/api/rooms/{room_id}")
@@ -574,7 +582,7 @@ async def get_room_members_internal(room_id: str, request: Request):
     room_id = room_id.strip().upper()
     with db_conn() as c:
         room = c.execute(
-            "SELECT room_id, match_mode FROM rooms WHERE room_id=?", (room_id,)
+            "SELECT room_id, match_mode, rotation_enabled FROM rooms WHERE room_id=?", (room_id,)
         ).fetchone()
         if not room:
             raise HTTPException(status_code=404, detail="room not found")
@@ -585,7 +593,11 @@ async def get_room_members_internal(room_id: str, request: Request):
             (room_id,),
         ).fetchall()
     # [2026-07-23 changshu protocol] ws authority が start 時に changshu へ変換する
-    return {"members": [dict(m) for m in members], "match_mode": room["match_mode"]}
+    return {
+        "members": [dict(m) for m in members],
+        "match_mode": room["match_mode"],
+        "rotation_enabled": bool(room["rotation_enabled"]) if "rotation_enabled" in room.keys() else False,
+    }
 
 
 def _archive_or_delete_room(c: sqlite3.Connection, room_id: str) -> bool:
@@ -833,10 +845,15 @@ async def join_room(room_id: str, request: Request):
             return {"ok": True, "already_in": True}
         if room["status"] != "open":
             raise HTTPException(status_code=400, detail="room not open")
-        if len(members) >= 3:
+        # [2026-07-24 4人回し Phase6] 定員 = rotation 4 / 通常 3
+        _cap_rotation = bool(room["rotation_enabled"]) if "rotation_enabled" in room.keys() else False
+        if len(members) >= (4 if _cap_rotation else 3):
             raise HTTPException(status_code=400, detail="room full")
         used_seats = {m["seat"] for m in members}
-        seat = next(s for s in [0, 1, 2] if s not in used_seats)
+        # [2026-07-24 4人回し Phase6] rotation 部屋は定員4 [seat 0-3]
+        rotation_room = bool(room["rotation_enabled"]) if "rotation_enabled" in room.keys() else False
+        seat_pool = [0, 1, 2, 3] if rotation_room else [0, 1, 2]
+        seat = next(s for s in seat_pool if s not in used_seats)
         # R10 P2 #11 fix: UNIQUE(room_id, seat) で同時 join 衝突した場合 IntegrityError、
         # 409 に変換 [500 にしない]
         try:

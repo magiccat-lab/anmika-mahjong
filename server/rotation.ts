@@ -6,9 +6,23 @@ import type { ChipSettlementEffect } from '../src/lib/game3/chip.ts';
 import {
   applyRoomChipCommand,
   type AcceptedRoomCommand,
+  type RoomMemberSnapshot,
   type RoomSeatMapping,
   type RoomStartSnapshot,
 } from './protocol.ts';
+
+/** [2026-07-24 4人回し Phase6] start.members 用の active trio を game seat 契約で組む。
+ *  設計 §2: start.members に seat3 [room seat] を混ぜない。entry の seat は game seat。 */
+export function activeTrioForStart(
+  roomMembers: readonly RoomMemberSnapshot[],
+  mapping: RoomSeatMapping,
+): RoomMemberSnapshot[] {
+  return mapping.gameToRoom.map((roomSeat, gameSeat) => {
+    const source = roomMembers.find((member) => member.seat === roomSeat);
+    if (!source) throw new Error(`rotation start: no member at room seat ${roomSeat}`);
+    return { ...source, seat: gameSeat };
+  });
+}
 
 /** gameSeat → roomSeat。mapping 無し [3人部屋] は恒等 */
 export function gameToRoomSeat(mapping: RoomSeatMapping | null | undefined, gameSeat: number): number {

@@ -8,7 +8,7 @@
   const API_BASE = (import.meta as any).env?.VITE_ANMIKA_SERVER ?? '';
 
   type User = { user_id: string; username: string; avatar_url: string | null; chip_total: number; games_played: number };
-  type Room = { room_id: string; host_user_id: string; host_name: string; member_count: number; status: string; match_mode?: string };
+  type Room = { room_id: string; host_user_id: string; host_name: string; member_count: number; status: string; match_mode?: string; rotation_enabled?: number | boolean };
 
   let me: User | null = null;
   let rooms: Room[] = [];
@@ -17,6 +17,8 @@
   let cpuCount = 0; // 0 = 友達 2 人待ち、 1 = 友達 1 人 + CPU 1、 2 = CPU 2
   // [2026-07-23 リョー要望 東風戦設定] tonpu=東風 [東1〜東3+連荘/返り東] / hanchan=半荘
   let matchMode: 'tonpu' | 'hanchan' = 'tonpu';
+  // [2026-07-24 4人回し Phase6] 部屋定員4、試合ごとに順番で抜け番 [抜け番はサイコロだけ参加]
+  let rotationEnabled = false;
   export let onJoinRoom: (roomId: string, user: User) => void = () => {};
   // [2026-07-23 リョー要望 観戦モード] 部屋を閲覧専用で見る
   export let onSpectateRoom: (roomId: string, user: User) => void = () => {};
@@ -43,7 +45,7 @@
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cpu_count: cpuCount, match_mode: matchMode }),
+        body: JSON.stringify({ cpu_count: cpuCount, match_mode: matchMode, rotation: rotationEnabled }),
       });
       if (!r.ok) throw new Error('create failed');
       const { room_id } = await r.json();
@@ -141,6 +143,10 @@
           <option value="hanchan">半荘戦</option>
         </select>
       </label>
+      <!-- [2026-07-24 4人回し Phase6] 定員4で試合ごとに抜け番が回る。抜け番はサイコロ精算だけ参加 -->
+      <label class="cpu-select" title="部屋に4人。試合ごとに1人が抜け番になり、サイコロ精算だけ参加する">
+        <input type="checkbox" bind:checked={rotationEnabled} /> 4人回し
+      </label>
       <button class="create" on:click={createRoom}>＋ 新しい部屋を作る</button>
     </div>
     <h3>公開中の部屋 <button class="cleanup-btn" on:click={cleanupOld} title="24h 以上古い open 部屋を一括削除">🧹 古い部屋 cleanup</button></h3>
@@ -151,12 +157,12 @@
         {#each rooms as r}
           <li class="room">
             <div>
-              <strong>{r.room_id}</strong> [{r.member_count}/3 人]{r.match_mode === 'hanchan' ? ' 半荘' : ' 東風'}{r.status === 'playing' ? ' ▶対局中' : ''}
+              <strong>{r.room_id}</strong> [{r.member_count}/{r.rotation_enabled ? 4 : 3} 人]{r.match_mode === 'hanchan' ? ' 半荘' : ' 東風'}{r.rotation_enabled ? ' 4人回し' : ''}{r.status === 'playing' ? ' ▶対局中' : ''}
               <span class="host"> host: {r.host_name}</span>
             </div>
             <div style="display:flex; gap:6px;">
               {#if r.status === 'open'}
-                <button on:click={() => joinRoom(r.room_id)} disabled={r.member_count >= 3}>入る</button>
+                <button on:click={() => joinRoom(r.room_id)} disabled={r.member_count >= (r.rotation_enabled ? 4 : 3)}>入る</button>
               {/if}
               <!-- [2026-07-23 観戦モード] 対局中の部屋は閲覧専用で覗ける -->
               <button on:click={() => { if (!me) { window.location.href = `${API_BASE}/auth/discord/login`; return; } onSpectateRoom(r.room_id, me); }} title="閲覧専用で見る">👁 観戦</button>
