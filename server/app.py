@@ -409,6 +409,9 @@ async def issue_ws_token(request: Request):
         room_id = str(body.get("room_id", "")).strip().upper()
     if not room_id:
         raise HTTPException(status_code=400, detail="room_id required")
+    # [2026-07-23 リョー要望 観戦モード] spectate=true なら member でなくても
+    # seat=-1 の閲覧専用 token を発行 [ログイン必須。node 側は action を一切受けない]
+    spectate = bool(body.get("spectate")) if isinstance(body, dict) else False
     with db_conn() as c:
         room = c.execute(
             "SELECT host_user_id, status, instance_id FROM rooms WHERE room_id=?",
@@ -422,16 +425,18 @@ async def issue_ws_token(request: Request):
             "SELECT seat FROM room_members WHERE room_id=? AND user_id=?",
             (room_id, u["user_id"]),
         ).fetchone()
-        if not member:
+        if not member and not spectate:
             raise HTTPException(status_code=403, detail="not a room member")
     now = int(_time.time())
+    is_spectator = spectate or not member
     payload = {
         "uid": u["user_id"],
         "username": u["username"],
-        "seat": int(member["seat"]),
+        "seat": -1 if is_spectator else int(member["seat"]),
         "room_id": room_id,
         "room_instance_id": room["instance_id"],
-        "is_host": room["host_user_id"] == u["user_id"],
+        "is_host": (not is_spectator) and room["host_user_id"] == u["user_id"],
+        "spectator": is_spectator,
         "iat": now,
         "exp": now + WS_TOKEN_TTL_SEC,
     }
@@ -441,18 +446,19 @@ async def issue_ws_token(request: Request):
 
 @app.get("/api/rooms")
 async def list_rooms(request: Request):
-    """open 状態の部屋一覧 [認証必須]"""
+    """open + playing の部屋一覧 [認証必須]。
+    [2026-07-23 観戦モード] playing も返す [観戦ボタンの対象]。match_mode も同梱"""
     u = current_user(request)
     if not u:
         raise HTTPException(status_code=401, detail="login required")
     with db_conn() as c:
         rows = c.execute(
-            """SELECT r.room_id, r.host_user_id, r.status, r.created_at,
+            """SELECT r.room_id, r.host_user_id, r.status, r.created_at, r.match_mode,
                       u.username AS host_name,
                       (SELECT COUNT(*) FROM room_members WHERE room_id=r.room_id) AS member_count
                FROM rooms r
                LEFT JOIN users u ON u.user_id = r.host_user_id
-               WHERE r.status='open'
+               WHERE r.status IN ('open', 'playing')
                ORDER BY r.created_at DESC LIMIT 50""",
         ).fetchall()
         return [dict(r) for r in rows]

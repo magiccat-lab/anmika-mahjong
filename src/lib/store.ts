@@ -507,7 +507,8 @@ export function createGameStore() {
   let onlineMode = false;
   let isApplyingRemote = false;
   // 2026-05-14 codex review P0 fix: 自席 / host gate 用、 initOnlineGame で set される
-  let myOnlineSeat: 0 | 1 | 2 | null = null;
+  // [2026-07-23 観戦モード] -1 = 席なし閲覧専用 [全 action gate が自動で塞がる]
+  let myOnlineSeat: 0 | 1 | 2 | -1 | null = null;
   let iAmHost = false;
   // 2026-05-14 R3 P0 #1: applyOnlineRemoteAction で cpuRelay 検証用、 host seat を保持
   let hostSeat: 0 | 1 | 2 | null = null;
@@ -596,7 +597,8 @@ export function createGameStore() {
       if (!projection || projection.schemaVersion !== 1) return false;
       if (myOnlineSeat === null || projection.recipientSeat !== myOnlineSeat) return false;
       if (!projection.gameState || !projection.shan || !projection.fields || !projection.store) return false;
-      if (!projection.privateHand || !projection.publicHands || !projection.rivers) return false;
+      // [2026-07-23 観戦モード] seat=-1 [席なし] は privateHand を持たない正規 projection
+      if ((projection.recipientSeat !== -1 && !projection.privateHand) || !projection.publicHands || !projection.rivers) return false;
 
       const current = get(store) as StoreState;
       const ng = new Game3({
@@ -800,7 +802,7 @@ export function createGameStore() {
     subscribe,
     /** オンライン対戦 接続 & game init */
     initOnlineGame(opts: {
-      ws: WebSocket; qijia: 0|1|2; cpuSeats?: number[]; mySeat?: 0|1|2; isHost?: boolean; hostSeat?: 0|1|2; revision?: number; matchId?: number; roundId?: number;
+      ws: WebSocket; qijia: 0|1|2; cpuSeats?: number[]; mySeat?: 0|1|2|-1; isHost?: boolean; hostSeat?: 0|1|2; revision?: number; matchId?: number; roundId?: number;
       changshu?: number;
       preShuffledPool?: string[];
       blindStart?: { hands: Record<0|1|2, string[]>; firstZimo: string; paishu: number; baopai: string[]; fubaopai: string[] | null; canDrawRinshan?: boolean; huapai?: Record<0|1|2, string[]>; goldHand?: Record<0|1|2, {p:number;s:number;z:number}>; pochiHand?: Record<0|1|2, Record<string, number>> };

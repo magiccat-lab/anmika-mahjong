@@ -46,9 +46,22 @@ type WsTokenPayload = {
   room_id: string;
   room_instance_id: string;
   is_host: boolean;
+  // [2026-07-23 リョー要望 観戦モード] true なら seat=-1 の閲覧専用接続
+  spectator?: boolean;
   iat?: number;
   exp?: number;
 };
+
+// [2026-07-23 観戦モード] 閲覧専用接続。room.members には入れない [ゲーム進行に不関与]
+type SpectatorConn = {
+  user_id: string;
+  username: string;
+  ws: WebSocket;
+  generation: number;
+};
+
+// 観戦者の projection は「席なし」= 全 private マスク [own=null 経路]
+const SPECTATOR_SEAT = -1;
 
 type Member = RoomMemberSnapshot & {
   ws: WebSocket | null;
@@ -64,6 +77,8 @@ type Room = {
   snapshot: CanonicalRoomSnapshot;
   // [2026-07-23] 部屋作成時の対局形式 [API が SSoT、start 時に changshu へ変換]
   matchMode: 'tonpu' | 'hanchan';
+  // [2026-07-23 観戦モード] uid → 閲覧専用接続
+  spectators: Map<string, SpectatorConn>;
   pendingStart: { qijia: number } | null;
   generation: number;
   queue: Promise<void>;
@@ -881,11 +896,17 @@ function sendJson(ws: WebSocket | null, payload: unknown): void {
 
 function broadcast(room: Room, payload: unknown): void {
   for (const member of room.members.values()) sendJson(member.ws, payload);
+  // [2026-07-23 観戦モード] broadcast は public payload のみ [lobby/stamp/ready 等] なのでそのまま流す
+  for (const spectator of room.spectators.values()) sendJson(spectator.ws, payload);
 }
 
 function broadcastAction(room: Room, command: AcceptedRoomCommand): void {
   for (const member of room.members.values()) {
     sendJson(member.ws, actionRelay(command, room.snapshot, member.seat, room.authority));
+  }
+  // [2026-07-23 観戦モード] seat=-1 の sanitize/projection [own=null、全 private マスク]
+  for (const spectator of room.spectators.values()) {
+    sendJson(spectator.ws, actionRelay(command, room.snapshot, SPECTATOR_SEAT, room.authority));
   }
   // [2026-07-21 監査 L-03] 各 seat の projection に cutin を載せて配り終えたので、
   // canonical から drain して cutinQueue の無限蓄積を防ぐ [server は pop しないため]
@@ -1068,6 +1089,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       authority: restoreAuthority(snapshot, dbCommands),
       snapshot: { ...snapshot, commands: [] },
       matchMode: 'tonpu',
+      spectators: new Map<string, SpectatorConn>(),
       pendingStart: null,
       generation: 0,
       queue: Promise.resolve(),
@@ -1541,6 +1563,23 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         ...maskBlindStart(blindStart, member.seat),
         state: captureSeatProjection(room.authority!, member.seat),
         qijia: start.qijia,
+        // [2026-07-23 changshu protocol] sync 経路 [snapshot.start] だけでなく直送 start にも同梱
+        changshu,
+        members: start.members,
+        revision: room.snapshot.revision,
+        matchId: room.snapshot.matchId,
+        roundId: room.snapshot.roundId,
+      });
+    }
+    // [2026-07-23 観戦モード] 観戦者にも全 private マスクで start を配る
+    for (const spectator of room.spectators.values()) {
+      sendJson(spectator.ws, {
+        type: 'start',
+        blindStart: true,
+        ...maskBlindStart(blindStart, SPECTATOR_SEAT),
+        state: captureSeatProjection(room.authority!, SPECTATOR_SEAT),
+        qijia: start.qijia,
+        changshu,
         members: start.members,
         revision: room.snapshot.revision,
         matchId: room.snapshot.matchId,
@@ -1579,6 +1618,46 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     }
     if (rooms.get(roomId) !== room || room.snapshot.roomInstanceId !== payload.room_instance_id) {
       ws.close(4002, 'room session replaced');
+      return;
+    }
+    // [2026-07-23 リョー要望 観戦モード] 閲覧専用接続はここで分岐。
+    // room.members には入れず [ゲーム進行・全員ready・cleanup 判定に不関与]、
+    // 受信は resync だけ処理して action は一切 authority に触らせない
+    if (payload.spectator === true) {
+      const generation = ++room.generation;
+      const previousSpec = room.spectators.get(payload.uid);
+      if (previousSpec?.ws && previousSpec.ws !== ws) previousSpec.ws.close(4001, 'replaced by newer connection');
+      room.spectators.set(payload.uid, {
+        user_id: payload.uid,
+        username: payload.username ?? payload.uid,
+        ws,
+        generation,
+      });
+      const membersForSync = () => Array.from(room.members.values())
+        .sort((a, b) => a.seat - b.seat)
+        .map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected }));
+      const specSync = () => sendSync(
+        ws, room.snapshot, SPECTATOR_SEAT, room.authority,
+        persistence.loadCommands(room.roomId), membersForSync(),
+      );
+      const handleSpectatorMessage = (data: RawData) => {
+        room.queue = room.queue.then(async () => {
+          let msg: unknown;
+          try { msg = JSON.parse(data.toString()); } catch { return; }
+          if ((msg as Record<string, unknown>)?.type === 'resync') specSync();
+        }).catch((error) => warn(`[anmika-ws] spectator queue room=${room.roomId}`, error));
+      };
+      ws.off('message', bufferEarlyMessage);
+      ws.on('message', handleSpectatorMessage);
+      ws.on('close', () => {
+        const current = room.spectators.get(payload.uid);
+        if (current && current.generation === generation && current.ws === ws) {
+          room.spectators.delete(payload.uid);
+        }
+      });
+      sendJson(ws, lobbyPayload(room));
+      if (room.snapshot.started) specSync();
+      for (const data of earlyMessages) handleSpectatorMessage(data);
       return;
     }
     // Revalidate every connection, including reconnects to a cached room.
@@ -1874,6 +1953,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           if (room.deadlineTimer) { clearTimeout(room.deadlineTimer); room.deadlineTimer = null; }
           for (const member of room.members.values()) {
             sendSync(member.ws, rewound, member.seat, authority, kept);
+          }
+          // [2026-07-23 観戦モード] 巻き戻しは観戦者にも配る
+          for (const spectator of room.spectators.values()) {
+            sendSync(spectator.ws, rewound, SPECTATOR_SEAT, authority, kept);
           }
           scheduleRoomDeadline(room);
         }

@@ -8,7 +8,7 @@
   const API_BASE = (import.meta as any).env?.VITE_ANMIKA_SERVER ?? '';
 
   type User = { user_id: string; username: string; avatar_url: string | null; chip_total: number; games_played: number };
-  type Room = { room_id: string; host_user_id: string; host_name: string; member_count: number; status: string };
+  type Room = { room_id: string; host_user_id: string; host_name: string; member_count: number; status: string; match_mode?: string };
 
   let me: User | null = null;
   let rooms: Room[] = [];
@@ -18,6 +18,8 @@
   // [2026-07-23 リョー要望 東風戦設定] tonpu=東風 [東1〜東3+連荘/返り東] / hanchan=半荘
   let matchMode: 'tonpu' | 'hanchan' = 'tonpu';
   export let onJoinRoom: (roomId: string, user: User) => void = () => {};
+  // [2026-07-23 リョー要望 観戦モード] 部屋を閲覧専用で見る
+  export let onSpectateRoom: (roomId: string, user: User) => void = () => {};
 
   async function refreshMe() {
     try {
@@ -149,11 +151,15 @@
         {#each rooms as r}
           <li class="room">
             <div>
-              <strong>{r.room_id}</strong> [{r.member_count}/3 人]
+              <strong>{r.room_id}</strong> [{r.member_count}/3 人]{r.match_mode === 'hanchan' ? ' 半荘' : ' 東風'}{r.status === 'playing' ? ' ▶対局中' : ''}
               <span class="host"> host: {r.host_name}</span>
             </div>
             <div style="display:flex; gap:6px;">
-              <button on:click={() => joinRoom(r.room_id)} disabled={r.member_count >= 3}>入る</button>
+              {#if r.status === 'open'}
+                <button on:click={() => joinRoom(r.room_id)} disabled={r.member_count >= 3}>入る</button>
+              {/if}
+              <!-- [2026-07-23 観戦モード] 対局中の部屋は閲覧専用で覗ける -->
+              <button on:click={() => { if (!me) { window.location.href = `${API_BASE}/auth/discord/login`; return; } onSpectateRoom(r.room_id, me); }} title="閲覧専用で見る">👁 観戦</button>
               {#if me && r.host_user_id === me.user_id}
                 <button on:click={() => deleteRoom(r.room_id)} class="del-btn" title="自分の部屋を削除">🗑️</button>
               {/if}

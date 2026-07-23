@@ -50,7 +50,7 @@
   function closeStampPallet() { stampPalletOpen = false; }
   function onStampSelect(id: StampId) {
     // 自家 seat に local set + online なら ws send [server で from_seat 上書き]
-    game.sendStamp(selfPlayer as PlayerId, id);
+    game.sendStamp(actorSeat as PlayerId, id);
   }
 
   // SP再設計 v2 [docs/sp-ui-redesign.md]: 2026-07-22 リョー承認で v2 をデフォルト化。
@@ -105,7 +105,7 @@
   // [cutin → 白ぽっち開示 → 選択モーダル → サイコロ]。
   // 主因は PochiReveal が独立キュー + z-index 9999 で他演出を覆っていた事
   $: fxCutinBusy = !!$game.cutin || (($game.cutinQueue?.length ?? 0) > 0);
-  $: fxPochiRevealShowing = !!pochiReveal && (!onlineGameStarted || pochiReveal.player === selfPlayer);
+  $: fxPochiRevealShowing = !!pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat);
   $: fxPresentationBusy = fxCutinBusy || fxPochiRevealShowing;
 
   const PLAYERS = [0, 1, 2] as const satisfies readonly PlayerId[];
@@ -114,6 +114,9 @@
   let revealAll = true;
   // 自家 [プレイヤー視点]
   let selfPlayer = 0;
+  // [2026-07-23 観戦モード] 操作ゲート用の実席。観戦者は -1 [誰とも一致しない]。
+  // レイアウト回転は selfPlayer [anchor 0] のまま、操作/決定UIの判定だけコレを使う
+  $: actorSeat = onlineSpectator ? -1 : selfPlayer;
 
   $: state = $game.game.state;
   $: canSavePaifu = isSafePaifuSavePoint($game);
@@ -378,7 +381,7 @@
   $: {
     // seatDisplayNames の変更 [ユーザー名到着] でも status 文言を再評価させる
     void seatDisplayNames;
-    actionStatus = describeActionStatus($game, currentPlayer, selfPlayer, ronCandidates, needsZimo, canTsumo);
+    actionStatus = describeActionStatus($game, currentPlayer, actorSeat, ronCandidates, needsZimo, canTsumo);
   }
 
   // 牌譜 [event log] 全件
@@ -841,7 +844,7 @@
         || $game.pendingFeverContinue) return;
     if ($game.lizhiPending !== null && !isLizhiCand(pai)) return;
     // online 中は自席のみ
-    if (onlineGameStarted && player !== selfPlayer) return;
+    if (onlineGameStarted && player !== actorSeat) return;
     // 金牌 [gp/gs/gN] / 白ぽっち [bu/br/bg/by] を内部 majiang-core 表記 + meta に変換
     // 通常 p0 / s0 [赤] / z4 [北] も明示 meta=false を渡して dapai の auto-pick 金 を抑制
     let actualPai = pai;
@@ -1043,7 +1046,7 @@
     const set = new Set<string>();
     if (!$game.awaitingFulou) return set;
     for (const c of [...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])] as any[]) {
-      if (c.player !== selfPlayer) continue;
+      if (c.player !== actorSeat) continue;
       for (const m of (c.mianzi ?? []) as string[]) {
         const suit = m[0];
         const body = m.slice(1);
@@ -1132,6 +1135,10 @@
   let appMode: 'menu' | 'started' = 'menu';
   // [2026-07-23 リョー要望] 戦績パネル [エントリ画面から開く]
   let statsPanelOpen = false;
+  // [2026-07-23 リョー要望] 観戦モード: seat=-1 の閲覧専用接続。
+  // store 側は myOnlineSeat=-1 で全 action 送信が gate され、server も action を受けない。
+  // 盤面レイアウトの回転だけ selfPlayer=0 anchor で描く
+  let onlineSpectator = false;
   let currentRoomId: string | null = null;
   let onlineMe: { user_id: string; username: string } | null = null;
   let onlineGameStarted = false;
@@ -1180,7 +1187,8 @@
     }
     onlineGameStarted = true;
     viewMode = 'single';
-    selfPlayer = onlineRoomMeta!.mySeat as 0 | 1 | 2;
+    // [2026-07-23 観戦モード] 席なし [-1] は盤面回転だけ seat 0 anchor で描く
+    selfPlayer = (onlineSpectator ? 0 : onlineRoomMeta!.mySeat) as 0 | 1 | 2;
     revealAll = false;
     if (msg.chipLedger) {
       const currentGame = (get(game) as any).game;
@@ -1297,7 +1305,7 @@
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room_id: roomAtConnect }),
+        body: JSON.stringify({ room_id: roomAtConnect, spectate: onlineSpectator }),
       });
       if (!response.ok) throw new Error(`ws-token ${response.status}: ${await response.text().catch(() => '')}`);
       const data = (await response.json()) as { token: string; ws_url?: string };
@@ -1365,6 +1373,7 @@
     game.disconnectOnline();
     onlineGameStarted = false;
     onlineRoomMeta = null;
+    onlineSpectator = false;
   }
   // [2026-07-22 リョー要望] 次局へは全員が押したら進む。自動 ready 送信を廃止し、
   // 「次局へ」押下 = readyNextRound 送信。server が全員分揃った時に nextRound を発行する
@@ -1502,7 +1511,7 @@
   // CPU の打牌評価 [adviseDiscard] をそのまま開示する。山・他家の伏せ牌は見ない
   let adviceOpen = false;
   $: adviceAvailable = viewMode === 'single' && !onlineGameStarted
-    && currentPlayer === selfPlayer && !$game.cpu[selfPlayer as PlayerId]
+    && currentPlayer === actorSeat && !$game.cpu[selfPlayer as PlayerId]
     && !!$game.lastZimo && !$game.roundEnded && !$game.awaitingRonDecision
     && !$game.awaitingFulou && $game.lizhiPending === null;
   $: adviceRows = (adviceOpen && adviceAvailable)
@@ -1535,7 +1544,7 @@
   // [2026-07-23 Sol総点検 P1] 判定窓 [槍槓/流局/サイコロ/リーチ宣言等] 中は橋をアームしない。
   // 窓中に key を先消費すると、窓解除が events 長不変のとき同じ key で再発火できず
   // 橋が死ぬ [本物の停止が直せなくなる]。timer 内判定も evaluateDrawNextBridge に一本化
-  $: if (onlineGameStarted && needsZimo && currentPlayer === selfPlayer && !$game.roundEnded && !progressControlsBlocked) {
+  $: if (onlineGameStarted && needsZimo && currentPlayer === actorSeat && !$game.roundEnded && !progressControlsBlocked) {
     const rk = `${state.changbang}-${state.jushu}-${state.benbang}`;
     const k = `${rk}-${$game.game.events?.length ?? 0}`;
     if (k !== _autoDrawNextKey) {
@@ -1543,7 +1552,7 @@
       // [2026-07-22 Sol調査C P0] 発火時に全条件を再検証。400ms の間に正常 projection が
       // 届いていたら送らない [余計な drawNext が authority の reject/二重ツモ経路に入らない]
       setTimeout(() => {
-        const verdict = evaluateDrawNextBridge(get(game), selfPlayer as PlayerId, rk);
+        const verdict = evaluateDrawNextBridge(get(game), actorSeat as PlayerId, rk);
         if (verdict === 'rearm') {
           if (_autoDrawNextKey === k) _autoDrawNextKey = '';
           return;
@@ -1563,7 +1572,7 @@
   let _autoWinSentKey = '';
   $: if (onlineGameStarted && onlineNoCall && $game.awaitingFulou) {
     const canCallSelf = [...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])]
-      .some((c: any) => c.player === selfPlayer && (c.mianzi?.length ?? 0) > 0);
+      .some((c: any) => c.player === actorSeat && (c.mianzi?.length ?? 0) > 0);
     const k = `pass-${$game.game.events?.length ?? 0}-${$game.lastDapai?.player ?? 'x'}-${$game.lastDapai?.pai ?? 'x'}`;
     if (canCallSelf && k !== _noCallSentKey) {
       _noCallSentKey = k;
@@ -1572,10 +1581,10 @@
   }
   $: if (onlineGameStarted && onlineAutoWin && !$game.roundEnded) {
     const k = `win-${$game.game.events?.length ?? 0}`;
-    if ($game.awaitingRonDecision && ronCandidates.includes(selfPlayer)
-        && !(($game.ronDeclaredPlayers ?? []) as number[]).includes(selfPlayer)) {
-      if (k !== _autoWinSentKey) { _autoWinSentKey = k; game.ron(selfPlayer); }
-    } else if (!progressControlsBlocked && currentPlayer === selfPlayer && canTsumo
+    if ($game.awaitingRonDecision && ronCandidates.includes(actorSeat)
+        && !(($game.ronDeclaredPlayers ?? []) as number[]).includes(actorSeat)) {
+      if (k !== _autoWinSentKey) { _autoWinSentKey = k; game.ron(actorSeat); }
+    } else if (!progressControlsBlocked && currentPlayer === actorSeat && canTsumo
         && !$game.awaitingRonDecision && !$game.lastDapai) {
       if (k !== _autoWinSentKey) { _autoWinSentKey = k; game.tsumo(); }
     }
@@ -1587,9 +1596,9 @@
     // [2026-07-22 リョー要望] 鳴き/ロン判定中の右クリック = 見送る
     if ($game.awaitingFulou || $game.awaitingRonDecision) {
       const canCallSelf = [...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])]
-        .some((c: any) => c.player === selfPlayer && (c.mianzi?.length ?? 0) > 0);
+        .some((c: any) => c.player === actorSeat && (c.mianzi?.length ?? 0) > 0);
       const canRonSelf = $game.awaitingRonDecision
-        && ronCandidates.includes(selfPlayer)
+        && ronCandidates.includes(actorSeat)
         && !$game.game.shuvariActive[selfPlayer as PlayerId];
       if (canCallSelf || canRonSelf) {
         e.preventDefault();
@@ -1597,7 +1606,7 @@
       }
       return;
     }
-    if (onlineGameStarted && currentPlayer !== selfPlayer) return;
+    if (onlineGameStarted && currentPlayer !== actorSeat) return;
     if (viewMode !== 'single' && !onlineGameStarted) return;
     if (currentPlayer !== selfPlayer) return;
     if (progressControlsBlocked || $game.lizhiPending !== null) return;
@@ -1627,7 +1636,7 @@
       // [2026-07-21 監査 L-02 fix] lizhiPending は seat 番号で P0 の宣言待ちは数値 0。
       // falsy 判定だと P0 の宣言牌選択中に無効な自動ツモ切り timer を張っていた
       && snap.lizhiPending === null
-      && player === selfPlayer
+      && player === actorSeat
       && !!snap.lastZimo
       && !snap.game.canTsumo(player);
     // [2026-07-21 リョー報告 stuck dump] フィーバー強制ツモ切りの人間手番は選択の
@@ -1877,7 +1886,7 @@
     if (_ps) {
       const _cur = _ps.chances[_ps.currentIdx] as any;
       const _owner = (_cur?.winner ?? _ps.winner);
-      if (_owner === selfPlayer) saiKoroOpened = true;
+      if (_owner === actorSeat) saiKoroOpened = true;
     }
   }
   $: feverInProgress = ([0, 1, 2] as const).some((p) => $game.game.feverActive[p]);
@@ -2018,7 +2027,14 @@
     <StatsPanel onClose={() => { statsPanelOpen = false; }} />
   {/if}
 {:else if viewMode === 'online' && !onlineGameStarted}
-  {#if currentRoomId && onlineMe}
+  {#if currentRoomId && onlineMe && onlineSpectator}
+    <!-- [2026-07-23 観戦モード] 非メンバーは RoomPanel [403] を経由せず接続待ち表示 -->
+    <div class="spectator-wait">
+      <h2>👁 部屋 {currentRoomId} を観戦中</h2>
+      <p>対局が始まる [または進行中の盤面が届く] まで待機…</p>
+      <button class="mode-toggle" on:click={() => { disconnectOnline(); currentRoomId = null; }}>← やめる</button>
+    </div>
+  {:else if currentRoomId && onlineMe}
     <RoomPanel
       roomId={currentRoomId}
       me={onlineMe}
@@ -2041,13 +2057,29 @@
       }}
     />
   {:else}
-    <LobbyPanel onJoinRoom={(rid, user) => { currentRoomId = rid; onlineMe = user; }} />
+    <LobbyPanel
+      onJoinRoom={(rid, user) => { currentRoomId = rid; onlineMe = user; }}
+      onSpectateRoom={(rid, user) => {
+        currentRoomId = rid;
+        onlineMe = user;
+        onlineSpectator = true;
+        onlineRoomMeta = { isHost: false, hostUserId: '', mySeat: -1 as any };
+        connectOnlineWs();
+      }}
+    />
   {/if}
   <div class="online-back-wrap">
     <button class="mode-toggle" on:click={() => { viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>← オフラインに戻る</button>
   </div>
 {:else}
-<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class:ui-board-v2={uiBoardV2} on:contextmenu={onContextMenuTsumokiri}>
+<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class:ui-board-v2={uiBoardV2} class:spectating={onlineSpectator} on:contextmenu={onContextMenuTsumokiri}>
+  <!-- [2026-07-23 リョー要望 観戦モード] 閲覧専用の明示バナー -->
+  {#if onlineSpectator && onlineGameStarted}
+    <div class="spectator-banner">
+      <span>👁 観戦中 [部屋 {currentRoomId}]</span>
+      <button on:click={() => { disconnectOnline(); currentRoomId = null; viewMode = 'online'; }}>退出</button>
+    </div>
+  {/if}
   <div class="orientation-notice" role="status">
     <strong>端末を横向きにしてください</strong>
     <span>対局画面は横向きで全体を確認できます</span>
@@ -2120,10 +2152,10 @@
       </div>
     {/if}
     <!-- 2026-05-14 codex review #3 fix: フィーバー継続 button は winner client のみ表示 -->
-    {#if $game.game.canDeclareLateShuvari(selfPlayer as 0 | 1 | 2) && (!onlineGameStarted || selfPlayer === onlineRoomMeta?.mySeat)}
+    {#if $game.game.canDeclareLateShuvari(selfPlayer as 0 | 1 | 2) && (!onlineGameStarted || actorSeat === onlineRoomMeta?.mySeat)}
       <button class="lizhi-btn shuvari" on:click={() => game.shuvari(selfPlayer)}>シュバ追加宣言</button>
     {/if}
-    {#if $game.pendingFeverContinue && !$game.pendingSaiKoro && (!onlineGameStarted || $game.pendingFeverContinue.winner === selfPlayer)}
+    {#if $game.pendingFeverContinue && !$game.pendingSaiKoro && (!onlineGameStarted || $game.pendingFeverContinue.winner === actorSeat)}
       <div class="action-row hot">
         <span class="row-label">🔥 フィーバー継続:</span>
         <button class="next-btn" on:click={() => game.continueFever()}>▶ 続行</button>
@@ -2131,13 +2163,13 @@
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: online で他人の手番に 私の旧 toolbar ツモ button
          が出て 代理ツモ宣言 できてた、 currentPlayer === selfPlayer gate 追加 -->
-    {#if canTsumo && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingSaiKoro && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && !$game.lastDapai && (!onlineGameStarted || currentPlayer === selfPlayer)}
+    {#if canTsumo && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingSaiKoro && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && !$game.lastDapai && (!onlineGameStarted || currentPlayer === actorSeat)}
       <div class="action-row hot">
         <span class="row-label">アガリ:</span>
         <button class="tsumo-btn" on:click={() => game.tsumo()}>🎉 ツモ宣言</button>
       </div>
     {/if}
-    {#if !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && baseLizhiCandidates.length > 0 && (!onlineGameStarted || currentPlayer === selfPlayer)}
+    {#if !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && baseLizhiCandidates.length > 0 && (!onlineGameStarted || currentPlayer === actorSeat)}
       <div class="action-row">
         <span class="row-label">リーチ:</span>
         <LizhiControls
@@ -2154,7 +2186,7 @@
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: online で 他人手番の 北抜き / カン button が
          出てしまい 代理 action 可能だった、 currentPlayer === selfPlayer gate 追加 -->
-    {#if (!onlineGameStarted || currentPlayer === selfPlayer) && !$game.roundEnded && !$game.awaitingRonDecision && (
+    {#if (!onlineGameStarted || currentPlayer === actorSeat) && !$game.roundEnded && !$game.awaitingRonDecision && (
       $game.game.canNukiBei(currentPlayer) ||
       ($game.game.getKanCandidates(currentPlayer).length > 0 && !$game.awaitingFulou)
     )}
@@ -2170,31 +2202,31 @@
         {/if}
       </div>
     {/if}
-    {#if $game.awaitingRonDecision && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && ($game.message || ronCandidates.includes(selfPlayer))}
+    {#if $game.awaitingRonDecision && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && ($game.message || ronCandidates.includes(actorSeat))}
       <div class="action-row hot">
         {#if $game.message}<span class="row-label alert">⚠ {$game.message}</span>{/if}
-        {#each ronCandidates.filter((p) => p === selfPlayer) as p}
+        {#each ronCandidates.filter((p) => p === actorSeat) as p}
           <button class="ron-btn" on:click={() => game.ron(p)}>p{p} ロン{$game.game.shuvariActive[p as PlayerId] ? ' [必須]' : ''}</button>
         {/each}
-        {#if !ronCandidates.some((p) => $game.game.shuvariActive[p as PlayerId]) && (!onlineGameStarted || ronCandidates.includes(selfPlayer))}
+        {#if !ronCandidates.some((p) => $game.game.shuvariActive[p as PlayerId]) && (!onlineGameStarted || ronCandidates.includes(actorSeat))}
           <button on:click={() => game.pass()}>見送る</button>
         {/if}
       </div>
     {/if}
-    {#if $game.awaitingFulou && ($game.message || [...$game.ponCandidates, ...$game.kanCandidates].some((c) => c.player === selfPlayer))}
+    {#if $game.awaitingFulou && ($game.message || [...$game.ponCandidates, ...$game.kanCandidates].some((c) => c.player === actorSeat))}
       <div class="action-row hot">
         {#if $game.message}<span class="row-label alert">⚠ {$game.message}</span>{/if}
-        {#each $game.ponCandidates.filter((c) => c.player === selfPlayer) as cand}
+        {#each $game.ponCandidates.filter((c) => c.player === actorSeat) as cand}
           {#each cand.mianzi as m}
             <button class="pon-btn" on:click={() => game.pon(cand.player, m)}>p{cand.player} ポン [{m}]</button>
           {/each}
         {/each}
-        {#each $game.kanCandidates.filter((c) => c.player === selfPlayer) as cand}
+        {#each $game.kanCandidates.filter((c) => c.player === actorSeat) as cand}
           {#each cand.mianzi as m}
             <button class="kan-btn" on:click={() => game.damingang(cand.player, m)}>p{cand.player} 大明槓 [{m}]</button>
           {/each}
         {/each}
-        {#if !onlineGameStarted || $game.ponCandidates.some((c) => c.player === selfPlayer) || $game.kanCandidates.some((c) => c.player === selfPlayer)}
+        {#if !onlineGameStarted || $game.ponCandidates.some((c) => c.player === actorSeat) || $game.kanCandidates.some((c) => c.player === actorSeat)}
           <button on:click={() => game.pass()}>見送る</button>
         {/if}
       </div>
@@ -2205,7 +2237,7 @@
     <!-- [2026-07-22] online の祝儀表示は RoundEndPanel の chip slot に統合済み [重複防止で撤去] -->
     <!-- 2026-05-14 codex review #3 fix: online で 自家 [selfPlayer] のみ表示、
          他家のぽっち色 [非公開情報] 漏洩防止 -->
-    {#if pochiReveal && (!onlineGameStarted || pochiReveal.player === selfPlayer) && !fxCutinBusy}
+    {#if pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat) && !fxCutinBusy}
       <!-- 2026-07-22 fix [リョー報告: 追いかけリーチ時 白ぽっち演出で停止]: 開示が連続すると
            {#if} は component を再生成せず props 差替えだけになり、前回の revealed/closing が
            持ち越されて 2 枚目が「開いたまま timer なし」で永久に残る。{#key} で毎回作り直す -->
@@ -2215,7 +2247,7 @@
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: FuyuModal も winner client のみ表示、
          非 winner が誤クリックで selectFuyu broadcast するのを防ぐ -->
-    {#if $game.pendingFuyu && (!onlineGameStarted || ($game.pendingFuyu.decisionOwners ?? [$game.pendingFuyu.winner]).includes(selfPlayer)) && !fxPresentationBusy}
+    {#if $game.pendingFuyu && (!onlineGameStarted || ($game.pendingFuyu.decisionOwners ?? [$game.pendingFuyu.winner]).includes(actorSeat)) && !fxPresentationBusy}
       {@const tingW = $game.game.feverDeclareTing?.[$game.pendingFuyu.winner as 0|1|2] ?? $game.game.getTingpaiList($game.pendingFuyu.winner as 0|1|2)}
       {@const remainW = fuyuWaitRemain($game.pendingFuyu.winner as PlayerId, tingW)}
       <FuyuModal
@@ -2228,10 +2260,10 @@
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: online で winner != selfPlayer の client にも
          modal が出てて 誤クリックで他人の金北選択を送れた、 winner のみ表示に gate -->
-    {#if $game.pendingKinpei && viewMode !== 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(selfPlayer)) && !fxPresentationBusy}
+    {#if $game.pendingKinpei && viewMode !== 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(actorSeat)) && !fxPresentationBusy}
       <KinpeiModal preview={$game.pendingKinpei.preview ?? null} winnerName={onlineGameStarted ? seatDisplayNames[$game.pendingKinpei.winner] : null} winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
     {/if}
-    {#if $game.pendingKamiPochi && (!onlineGameStarted || $game.pendingKamiPochi.decisionOwners.includes(selfPlayer)) && !fxPresentationBusy}
+    {#if $game.pendingKamiPochi && (!onlineGameStarted || $game.pendingKamiPochi.decisionOwners.includes(actorSeat)) && !fxPresentationBusy}
       <div class="pochi-choice-backdrop" role="presentation">
         <dialog open class="pochi-choice-modal" aria-label="神ぽっちの牌選択">
           <h2>神ぽっち</h2>
@@ -2267,7 +2299,7 @@
         </dialog>
       </div>
     {/if}
-    {#if $game.pendingPochiSwap && (!onlineGameStarted || $game.pendingPochiSwap.decisionOwners.includes(selfPlayer)) && !fxPresentationBusy}
+    {#if $game.pendingPochiSwap && (!onlineGameStarted || $game.pendingPochiSwap.decisionOwners.includes(actorSeat)) && !fxPresentationBusy}
       <div class="pochi-choice-backdrop" role="presentation">
         <dialog open class="pochi-choice-modal" aria-label="ぽっちの高目選択">
           <h2>{$game.pendingPochiSwap.kind === 'deka' ? 'でかぽっち' : '白ぽっち'} 高目選択</h2>
@@ -2320,10 +2352,14 @@
           {/if}
         {:else}
           <!-- [2026-07-22 リョー要望] 全員が「次局へ」を押したら進む [server all-ready 発行] -->
+          {#if !onlineSpectator}
           <button class="next-btn" disabled={selfNextRoundReady || !nextRoundReadySafe} on:click={sendNextRoundReady}>
             {selfNextRoundReady ? `全員待ち [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]` : `次局へ [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]`}
           </button>
-          {#if $game.lastWinner !== null && $game.lastWinner === selfPlayer && $game.game.canAgariyame($game.lastWinner as PlayerId)}
+          {:else}
+          <span class="muted-hint">👁 観戦中 [{nextRoundReadyShownCount}/{nextRoundReadyTotal} 次局待ち]</span>
+          {/if}
+          {#if $game.lastWinner !== null && $game.lastWinner === actorSeat && $game.game.canAgariyame($game.lastWinner as PlayerId)}
             <button class="next-btn agariyame" on:click={() => game.agariyame()}>アガリ止め</button>
           {/if}
         {/if}
@@ -2355,7 +2391,7 @@
       </span>
     </div>
     {/if}
-    {#if needsZimo && (!onlineGameStarted || currentPlayer === selfPlayer)}
+    {#if needsZimo && (!onlineGameStarted || currentPlayer === actorSeat)}
       <div class="action-row hot">
         <span class="row-label">🃏 次の手番:</span>
         <button class="next-btn" on:click={() => game.drawNext()}>▶ ツモ [p{currentPlayer}]</button>
@@ -2453,14 +2489,14 @@
       <!-- 2026-05-15 [bug C] fix: 他家打牌で ロン判定中 [awaitingRonDecision] や 直前打牌が残ってる
            [lastDapai !== null] 状態では 「ツモ」 button を出さない。 これが残ると ロン宣言時 UI に
            ツモ button が被って 「ロンなのにツモ表示」 と混同させる -->
-      {#if currentPlayer === selfPlayer && canTsumo && !$game.roundEnded
+      {#if currentPlayer === actorSeat && canTsumo && !$game.roundEnded
             && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.lastDapai
             && !$game.pendingSaiKoro && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei}
         <button class="agari-center-btn tsumo-center" on:click={() => game.tsumo()}>ツモ</button>
       {/if}
-      {#if $game.awaitingRonDecision && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && ronCandidates.includes(selfPlayer)}
+      {#if $game.awaitingRonDecision && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && ronCandidates.includes(actorSeat)}
         <div class="ron-choice-panel">
-          <button class="ron-half" on:click={() => game.ron(selfPlayer)}>P{$game.lastDapai?.player ?? '?'}→P{selfPlayer} ロン</button>
+          <button class="ron-half" on:click={() => game.ron(actorSeat)}>P{$game.lastDapai?.player ?? '?'}→P{selfPlayer} ロン</button>
           {#if !ronCandidates.some((p) => $game.game.shuvariActive[p as PlayerId])}
             <button class="skip-half" on:click={() => game.pass()}>見送る</button>
           {/if}
@@ -2562,7 +2598,7 @@
       <div class="toolbar toolbar-red">
         <!-- 現在 player [手番] が P0 [user] の時だけ アクション button 表示 [リョー指示 2026-05-12: CPU 手番中 北抜きボタンが出る bug fix] -->
         <!-- ツモ button は center overlay に移動。暗槓は下の実候補一覧から宣言する。 -->
-        {#if currentPlayer === selfPlayer && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && baseLizhiCandidates.length > 0}
+        {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && baseLizhiCandidates.length > 0}
           <div class="tb-row">
             <LizhiControls
               pending={$game.lizhiPending === currentPlayer}
@@ -2577,7 +2613,7 @@
             />
           </div>
         {/if}
-        {#if currentPlayer === selfPlayer && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou}
+        {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou}
           {#each $game.game.getKanCandidates(currentPlayer) as km}
             <div class="tb-row"><button class="kan-btn" on:click={() => game.declareKan(km)}>{km === whiteKanCandidate ? '白暗カン' : 'カン'}</button></div>
           {/each}
@@ -2587,13 +2623,13 @@
         <!-- 自家 [selfPlayer] が候補のときだけ ポン/カン/スキップ を表示 [mianzi 非空チェック]
              2026-05-14 ゆーま 自走 bug fix: 旧 hardcoded 0 だと online で selfPlayer != 0
              の時 ポンボタンが出ない、 selfPlayer 参照に修正 -->
-        {#if $game.awaitingFulou && ([...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])].some(c => c.player === selfPlayer && (c.mianzi?.length ?? 0) > 0))}
-          {#each ($game.ponCandidates ?? []).filter(c => c.player === selfPlayer) as cand}
+        {#if $game.awaitingFulou && ([...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])].some(c => c.player === actorSeat && (c.mianzi?.length ?? 0) > 0))}
+          {#each ($game.ponCandidates ?? []).filter(c => c.player === actorSeat) as cand}
             {#each cand.mianzi as m}
               <div class="tb-row hot"><button class="pon-btn" on:click={() => game.pon(cand.player, m)}>ポン</button></div>
             {/each}
           {/each}
-          {#each ($game.kanCandidates ?? []).filter(c => c.player === selfPlayer) as cand}
+          {#each ($game.kanCandidates ?? []).filter(c => c.player === actorSeat) as cand}
             {#each cand.mianzi as m}
               <div class="tb-row hot"><button class="kan-btn" on:click={() => game.damingang(cand.player, m)}>カン</button></div>
             {/each}
@@ -2601,10 +2637,10 @@
           <div class="tb-row"><button on:click={() => game.pass()}>見送る</button></div>
         {/if}
         <!-- 2026-05-14 codex review #3 fix: 続行 / drawNext も winner / currentPlayer===selfPlayer gate -->
-        {#if $game.pendingFeverContinue && !$game.pendingSaiKoro && (!onlineGameStarted || $game.pendingFeverContinue.winner === selfPlayer)}
+        {#if $game.pendingFeverContinue && !$game.pendingSaiKoro && (!onlineGameStarted || $game.pendingFeverContinue.winner === actorSeat)}
           <div class="tb-row hot"><button class="next-btn" on:click={() => game.continueFever()}>続行</button></div>
         {/if}
-        {#if needsZimo && (!onlineGameStarted || currentPlayer === selfPlayer)}
+        {#if needsZimo && (!onlineGameStarted || currentPlayer === actorSeat)}
           <div class="tb-row hot">
             <button class="next-btn" on:click={() => game.drawNext()}>▶ ツモ [p{currentPlayer}]</button>
           </div>
@@ -2613,7 +2649,7 @@
           <div class="tb-row"><span class="alert">{$game.message}</span></div>
         {/if}
         <!-- スタンプ button [自家のみ表示、 cosmetic、 game state 副作用なし] -->
-        <div class="tb-row"><button class="stamp-open-btn" on:click={openStampPallet} title="スタンプ">💬</button></div>
+        {#if !onlineSpectator}<div class="tb-row"><button class="stamp-open-btn" on:click={openStampPallet} title="スタンプ">💬</button></div>{/if}
       </div>
     {/if}
     <PlayerHandPanel
@@ -2867,7 +2903,7 @@
         {/if}
       </div>
       <!-- 2026-05-14 codex review #3 fix: inline Kinpei は winner 限定 -->
-      {#if $game.pendingKinpei && viewMode === 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(selfPlayer)) && !fxPresentationBusy}
+      {#if $game.pendingKinpei && viewMode === 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(actorSeat)) && !fxPresentationBusy}
         {@const effectiveKinpeiHua = $game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)}
         <div class="kinpei-inline">
           <div class="kinpei-title">金北 強化対象 [{seatDisplayNames[$game.pendingKinpei.winner as 0|1|2]} 選択]</div>
@@ -2916,9 +2952,9 @@
           {/if}
           <!-- 2026-05-14 codex review #3 fix: サイコロへ / フィーバー継続 も winner gate -->
           <!-- R14 P1 #2 fix: 入口 button を current chance owner で gate、 ダブロン 2 人目 chance で 2 人目 winner も開ける -->
-          {#if $game.pendingSaiKoro && !saiKoroOpened && (!onlineGameStarted || ((($game.pendingSaiKoro.chances?.[$game.pendingSaiKoro.currentIdx] as any)?.winner ?? $game.pendingSaiKoro.winner) === selfPlayer))}
+          {#if $game.pendingSaiKoro && !saiKoroOpened && (!onlineGameStarted || ((($game.pendingSaiKoro.chances?.[$game.pendingSaiKoro.currentIdx] as any)?.winner ?? $game.pendingSaiKoro.winner) === actorSeat))}
             <button on:click={() => { saiKoroOpened = true; }}>▶ サイコロへ</button>
-          {:else if $game.pendingFeverContinue && (!onlineGameStarted || $game.pendingFeverContinue.winner === selfPlayer)}
+          {:else if $game.pendingFeverContinue && (!onlineGameStarted || $game.pendingFeverContinue.winner === actorSeat)}
             <button on:click={() => game.continueFever()}>▶ フィーバー継続</button>
           {:else if state.finished}
             <button on:click={exportPaifu} disabled={!canSavePaifu}>📂 牌譜保存</button>
@@ -2942,10 +2978,14 @@
               {/if}
             {:else if onlineGameStarted && !$game.pendingSaiKoro}
               <!-- [2026-07-22 リョー要望] 全員が「次局へ」を押したら進む -->
+              {#if !onlineSpectator}
               <button disabled={selfNextRoundReady || !nextRoundReadySafe} on:click={sendNextRoundReady}>
                 {selfNextRoundReady ? `全員待ち [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]` : `▶ 次局へ [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]`}
               </button>
-              {#if $game.lastWinner !== null && $game.lastWinner === selfPlayer && $game.game.canAgariyame($game.lastWinner as PlayerId)}
+              {:else}
+              <span class="muted-hint">👁 観戦中 [{nextRoundReadyShownCount}/{nextRoundReadyTotal} 次局待ち]</span>
+              {/if}
+              {#if $game.lastWinner !== null && $game.lastWinner === actorSeat && $game.game.canAgariyame($game.lastWinner as PlayerId)}
                 <button on:click={() => game.agariyame()}>アガリ止め</button>
               {/if}
             {/if}
@@ -2977,7 +3017,7 @@
     <SaiKoroModal
       winnerName={onlineGameStarted ? seatDisplayNames[_chanceOwner] : null}
       winner={_chanceOwner}
-      canOperate={(!onlineGameStarted || _chanceOwner === selfPlayer) && (!onlineGameStarted || !!onlineWs)}
+      canOperate={(!onlineGameStarted || _chanceOwner === actorSeat) && (!onlineGameStarted || !!onlineWs)}
       recoveryNonce={saiKoroRecoveryNonce}
       chances={$game.pendingSaiKoro.chances}
       currentIdx={$game.pendingSaiKoro.currentIdx}
@@ -5141,5 +5181,42 @@
     padding: 5px 12px;
     font-weight: 700;
     cursor: pointer;
+  }
+  /* [2026-07-23 リョー要望 観戦モード] */
+  .spectator-wait {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 60vh;
+    color: #eef7ef;
+    text-align: center;
+  }
+  .spectator-banner {
+    position: fixed;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 400;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(20, 40, 28, 0.92);
+    border: 1px solid rgba(255, 224, 128, 0.5);
+    color: #ffe9ad;
+    border-radius: 999px;
+    padding: 4px 14px;
+    font-size: 13px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+  }
+  .spectator-banner button {
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.1);
+    color: inherit;
+    border-radius: 999px;
+    padding: 2px 10px;
+    cursor: pointer;
+    font-size: 12px;
   }
 </style>
