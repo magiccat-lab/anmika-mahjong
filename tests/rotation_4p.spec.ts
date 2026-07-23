@@ -107,6 +107,19 @@ test.describe('4人回し部屋', () => {
     await third.ctx.close();
   });
 
+  test('test control seam は通常起動の ws では 404 [Sol指定 negative]', async () => {
+    const internalBase = process.env.ANMIKA_E2E_WS_INTERNAL;
+    const internalSecret = process.env.ANMIKA_E2E_INTERNAL_SECRET;
+    test.skip(!internalBase || !internalSecret, 'runner 経由でのみ検証 [internal 情報が無い]');
+    // 正しい secret を添えても、testControlsEnabled でない本番相当起動では endpoint 自体が無い
+    const r = await fetch(`${internalBase}/internal/test/force-finish-match`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-anmika-internal-secret': internalSecret! },
+      body: JSON.stringify({ room_id: 'NOPE' }),
+    });
+    expect(r.status).toBe(404);
+  });
+
   test('通常3人部屋は rotation flag 無しで従来どおり [後方互換]', async ({ browser }) => {
     test.setTimeout(120_000);
     const host = await spawnClient(browser, 'rot-plain', 'ロテ無し');

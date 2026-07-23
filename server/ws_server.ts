@@ -110,6 +110,10 @@ export type WsRuntimeOptions = {
   turnTimeoutMs?: number;
   disconnectGraceMs?: number;
   nextRoundTimeoutMs?: number;
+  /** [2026-07-24 Sol設計] test 専用 control seam。env では有効化できず、
+   *  test harness entry [server/ws_server_test_harness.ts] だけが true を渡す。
+   *  production CLI entry [createWsRuntime()] では常に無効 = endpoint は 404 */
+  testControlsEnabled?: boolean;
   log?: boolean;
 };
 
@@ -1195,6 +1199,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
   const disconnectGraceMs = options.disconnectGraceMs ?? Number(process.env.ANMIKA_DISCONNECT_GRACE_MS || DEFAULT_DISCONNECT_GRACE_MS);
   const nextRoundTimeoutMs = options.nextRoundTimeoutMs ?? Number(process.env.ANMIKA_NEXT_ROUND_TIMEOUT_MS || DEFAULT_NEXT_ROUND_TIMEOUT_MS);
   const logEnabled = options.log ?? process.env.ANMIKA_WS_LOG !== '0';
+  // [Sol設計] env fallback を意図的に持たない [本番プロセスに露出させない]
+  const testControlsEnabled = options.testControlsEnabled === true;
   const rooms = new Map<string, Room>();
   const log = (...args: unknown[]) => { if (logEnabled) console.log(...args); };
   const warn = (...args: unknown[]) => { if (logEnabled) console.warn(...args); };
@@ -2244,6 +2250,44 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           broadcast(room, lobbyPayload(room));
         }
         res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}');
+      } catch (_) { res.writeHead(400); res.end('bad request'); }
+      return;
+    }
+    // [2026-07-24 4人回し, Sol設計] test-only: 現試合を即 terminal 化する control seam。
+    // testControlsEnabled [harness entry 起動] 以外では 404 [negative test あり]。
+    // internal secret gate は他の internal endpoint と共通 [handler 冒頭で検証済み]
+    if (req.method === 'POST' && req.url === '/internal/test/force-finish-match') {
+      if (!testControlsEnabled) { res.writeHead(404); res.end('not found'); return; }
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        const { room_id } = body;
+        if (typeof room_id !== 'string') { res.writeHead(400); res.end('bad request'); return; }
+        const room = rooms.get(room_id);
+        if (!room?.authority || !room.snapshot.started) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, reason: 'live room with authority required' }));
+          return;
+        }
+        await (room.queue = room.queue.then(async () => {
+          room.authority!.forceFinishMatchForTest();
+          if (room.deadlineTimer) { clearTimeout(room.deadlineTimer); room.deadlineTimer = null; }
+          if (room.nextRoundTimer) { clearTimeout(room.nextRoundTimer); room.nextRoundTimer = null; }
+          const commands = persistence.loadCommands(room.roomId);
+          const currentMembers = Array.from(room.members.values())
+            .sort((a, b) => a.seat - b.seat)
+            .map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected }));
+          for (const member of room.members.values()) {
+            sendSync(member.ws, room.snapshot, member.seat, room.authority, commands, currentMembers);
+          }
+          for (const spectator of room.spectators.values()) {
+            sendSync(spectator.ws, room.snapshot, SPECTATOR_SEAT, room.authority, commands, currentMembers);
+          }
+        }).catch((error) => warn('[anmika-ws] force-finish failed', error)));
+        log(`[anmika-ws] TEST force-finish-match room=${room_id}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
       } catch (_) { res.writeHead(400); res.end('bad request'); }
       return;
     }

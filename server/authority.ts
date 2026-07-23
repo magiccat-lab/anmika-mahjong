@@ -142,6 +142,37 @@ export class RoomAuthority {
     return (this.canonicalStore as any).takeCutins();
   }
 
+  /** [2026-07-24 4人回し, Sol設計] test-only: 現試合を即 terminal 化する。
+   *  rotation 境界 [finish POST → nextMatch → mapping 交換] の統合テスト専用 seam で、
+   *  ws 側の testControlsEnabled 起動 [test harness entry] からしか呼ばれない。
+   *  正規進行で東風1試合を終えると seed/返り東依存で rotation 回帰の信号が埋もれるため、
+   *  「終了済み authority fixture」を作る道具と割り切る [ゲームロジック検証には使わない]。
+   *  command log に残らない状態変更なので、restore/replay を跨ぐテストでは使用禁止。 */
+  forceFinishMatchForTest(): void {
+    const canonical = this.canonicalState();
+    canonical.game.state.finished = true;
+    canonical.roundEnded = true;
+    canonical.awaitingRonDecision = false;
+    canonical.awaitingFulou = false;
+    canonical.pendingFuyu = null;
+    canonical.pendingKinpei = null;
+    canonical.pendingKamiPochi = null;
+    canonical.pendingPochiSwap = null;
+    canonical.pendingFeverContinue = null;
+    canonical.pendingSaiKoro = null;
+    canonical.pendingQianggang = null;
+    this.game.state.finished = true;
+    this.roundEnded = true;
+    this.awaitingRonDecision = false;
+    this.awaitingFulou = false;
+    this.ronCandidates = [];
+    this.ronPassedPlayers = [];
+    this.ronDeclaredPlayers = [];
+    this.ponCandidates = [];
+    this.kanCandidates = [];
+    this.pendingQianggang = null;
+  }
+
   /** [2026-07-23 4人回し Phase2] canonical Game3 が積んだチップ精算 effect を drain する。
    *  ws_server が accept 毎に呼んで room 4-way delta を command に焼く。restore replay 後は
    *  drain して捨てる [保存済み delta を fold するため、再実行分を再課金しない]。

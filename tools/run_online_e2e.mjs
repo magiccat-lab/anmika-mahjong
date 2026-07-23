@@ -135,8 +135,15 @@ async function main() {
   let exitCode = 0;
   try {
     await waitForHttp(baseUrl);
-    run(playwrightCmd, ['test', 'tests/online.spec.ts', 'tests/lizhi_bugs.spec.ts', 'tests/rotation_4p.spec.ts'], {
-      env: { ANMIKA_BASE_URL: baseUrl, ANMIKA_E2E_SERVER_AUTH: '1' },
+    run(playwrightCmd, ['test', 'tests/online.spec.ts', 'tests/lizhi_bugs.spec.ts', 'tests/rotation_4p.spec.ts', 'tests/rotation_cycle.spec.ts'], {
+      // [2026-07-24 4人回し] rotation_4p の negative test [test seam が通常起動で 404] 用に
+      // runner の ws internal port と secret を渡す。rotation_cycle は自前 harness stack を張る
+      env: {
+        ANMIKA_BASE_URL: baseUrl,
+        ANMIKA_E2E_SERVER_AUTH: '1',
+        ANMIKA_E2E_WS_INTERNAL: `http://${host}:${wsPort + 1}`,
+        ANMIKA_E2E_INTERNAL_SECRET: secret,
+      },
     });
   } catch (e) {
     exitCode = 1;
