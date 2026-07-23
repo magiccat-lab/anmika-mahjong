@@ -1211,11 +1211,11 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         // [2026-07-23 リョー指示] チップリセットは全員の同意がないとできない。
         // host の checkbox 単独では発動せず、human 全席の同意 vote が揃った時だけ reset。
         // 切断中の human も「同意していない」扱い [勝手にリセットされない側に倒す]
-        const humanSeats = membersForAuthority(room)
-          .filter((member) => !member.is_cpu)
-          .map((member) => member.seat);
-        const allAgreed = humanSeats.length > 0
-          && humanSeats.every((seat) => room.chipResetVotes.has(seat));
+        // [2026-07-23 Sol 4周目 P1] connected 必須: 全員 true 後に1人切断しても
+        // 発動しない [仕様「切断中 human は不同意扱い」を判定式にも反映]
+        const humanMembers = Array.from(room.members.values()).filter((m) => !m.is_cpu);
+        const allAgreed = humanMembers.length > 0
+          && humanMembers.every((m) => m.connected && room.chipResetVotes.has(m.seat));
         action.resetChip = allAgreed;
         action.finalize = action.resetChip !== true;
         // [2026-07-22 リョー要望: 回り親] 次の試合は起家を1つ回す [server 決定、Sol設計D]
@@ -1774,6 +1774,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           const value = msg as Record<string, unknown>;
           const voteMember = Array.from(room.members.values()).find((m) => m.seat === payload.seat);
           if (!voteMember || voteMember.is_cpu) return;
+          // [2026-07-23 Sol 4周目 P2] 同意は試合終了ウィンドウ限定 [旧タブ/生 frame からの
+          // 事前同意を弾く。票の有効期間は nextRound/nextMatch accept clear と合わせて match 内]
+          if (room.authority?.canonicalState()?.game?.state?.finished !== true) return;
           if (value.value === true) room.chipResetVotes.add(payload.seat);
           else room.chipResetVotes.delete(payload.seat);
           broadcast(room, chipResetVotePayload(room));
@@ -1850,6 +1853,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       if (!current || current.generation !== generation || current.ws !== ws) return;
       current.ws = null;
       current.connected = false;
+      // [2026-07-23 Sol 4周目 P1] 切断者のチップリセット同意は失効 [不同意側に倒す]
+      if (room.chipResetVotes.delete(current.seat)) broadcast(room, chipResetVotePayload(room));
       broadcast(room, lobbyPayload(room));
       // [2026-07-22 全員ready] 切断で gate 対象が減るため、待ち状態を再評価
       if (room.nextRoundReadyRevision === room.snapshot.revision && room.nextRoundReadySeats.size > 0) {

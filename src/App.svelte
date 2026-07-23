@@ -1364,6 +1364,15 @@
         // [2026-07-23 リョー指示] チップリセット同意の進捗 [server broadcast]
         chipResetVoteSeats = Array.isArray(msg.seats) ? msg.seats : [];
         if (typeof msg.total === 'number' && msg.total > 0) chipResetVoteTotal = msg.total;
+        // [2026-07-23 Sol 4周目 P1] checkbox は server 票の鏡にする。reconnect で
+        // 旧 true 票が server に残ったまま unchecked 表示だと、host の通常
+        // 「次の試合へ」で予告なくリセットが発動し得た
+        if (onlineGameStarted && !onlineSpectator) {
+          const own = onlineRoomMeta?.mySeat;
+          if (own === 0 || own === 1 || own === 2) {
+            resetChipOnNextMatch = chipResetVoteSeats.includes(own);
+          }
+        }
       }
     };
     ws.onclose = () => {
