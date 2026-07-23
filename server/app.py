@@ -1498,6 +1498,8 @@ async def finish_match(request: Request):
         # [別 HTTP だと間に nextMatch が滑り込み、旧 match の chip_delta で
         #  新 match の events を保存し得た]
         authority_events = None
+        rotation_room = False
+        active_mapping = None
         try:
             async with httpx.AsyncClient(timeout=3) as cli:
                 resp = await cli.post(
@@ -1514,18 +1516,33 @@ async def finish_match(request: Request):
                                 status_code=409,
                                 detail="authority match is not finished",
                             )
-                        if set(auth_ledger.keys()) != set(chip_delta.keys()):
-                            raise HTTPException(
-                                status_code=400,
-                                detail="authority ledger member set mismatch",
-                            )
-                        for uid, delta in chip_delta.items():
-                            auth_val = auth_ledger.get(uid)
-                            if auth_val is None or int(delta) != int(auth_val):
+                        # [2026-07-24 4人回し Phase5, Sol設計(c)] rotation 部屋は server が
+                        # 確定した roomLedgerDelta [抜け番 dice 込み・全員 0 埋め完全 map] を
+                        # SSoT として保存する。client の 3-way game delta は dice の頭数が
+                        # 違うため照合対象にしない [server 確定化]
+                        rotation_room = ledger_data.get("rotationEnabled") is True
+                        room_ledger_delta = ledger_data.get("roomLedgerDelta")
+                        active_mapping = ledger_data.get("activeMapping")
+                        if rotation_room:
+                            if not isinstance(room_ledger_delta, dict) or not room_ledger_delta:
+                                raise HTTPException(
+                                    status_code=503,
+                                    detail="authority roomLedgerDelta unavailable for rotation room",
+                                )
+                            chip_delta = {str(k): int(v) for k, v in room_ledger_delta.items()}
+                        else:
+                            if set(auth_ledger.keys()) != set(chip_delta.keys()):
                                 raise HTTPException(
                                     status_code=400,
-                                    detail=f"chip_delta mismatch for {uid}: client={delta} authority={auth_val}",
+                                    detail="authority ledger member set mismatch",
                                 )
+                            for uid, delta in chip_delta.items():
+                                auth_val = auth_ledger.get(uid)
+                                if auth_val is None or int(delta) != int(auth_val):
+                                    raise HTTPException(
+                                        status_code=400,
+                                        detail=f"chip_delta mismatch for {uid}: client={delta} authority={auth_val}",
+                                    )
                         # ledger 検証を通った snapshot と同一時点の events だけを牌譜に採用
                         ev = ledger_data.get("events")
                         if isinstance(ev, list) and ev:
@@ -1578,7 +1595,20 @@ async def finish_match(request: Request):
             )
         # R7 P1 #7 / R14 P1 #5 / R22 P1 #4 fix: room_id+match_no UNIQUE + members_json snapshot
         members_snap_list: list[dict] = []
-        if sp and isinstance(sp.get("members"), list):
+        if rotation_room and isinstance(active_mapping, dict) and isinstance(active_mapping.get("gameToRoom"), list):
+            # [2026-07-24 4人回し Phase5, Sol設計(c)] members_json は現試合の active trio
+            # [game seat 契約]。start.members は試合1の trio のままなので使わない。
+            # 抜け番は行を作らない [gameplay 統計は active 3人だけ、資産 SSoT は chip_delta_json]
+            seat_rows_rot = c.execute(
+                "SELECT user_id, seat FROM room_members WHERE room_id=?", (room_id,)
+            ).fetchall()
+            user_by_room_seat = {r["seat"]: r["user_id"] for r in seat_rows_rot}
+            members_snap_list = [
+                {"user_id": user_by_room_seat[room_seat], "seat": game_seat}
+                for game_seat, room_seat in enumerate(active_mapping["gameToRoom"])
+                if room_seat in user_by_room_seat
+            ]
+        elif sp and isinstance(sp.get("members"), list):
             members_snap_list = list(sp["members"])
         elif snapshot_members:
             # [2026-07-23] 戦績集計に seat が要る。fallback 経路でも room_members から seat を補完
@@ -1614,11 +1644,17 @@ async def finish_match(request: Request):
                     "msg": f"match {next_match_no} already recorded for this room [concurrent insert]",
                 },
             ) from e
+        # [2026-07-24 4人回し Phase5] chip_total は chip_delta 全員 [抜け番の dice 分込み]、
+        # games_played は実際に打った active trio だけ増やす
+        played_uids = {m.get("user_id") for m in members_snap_list if isinstance(m, dict)}
+        if not played_uids:
+            played_uids = set(chip_delta.keys())  # legacy fallback [members 不明なら従来どおり全員 +1]
         for uid, delta in chip_delta.items():
             c.execute(
-                """UPDATE users SET chip_total = chip_total + ?, games_played = games_played + 1,
+                """UPDATE users SET chip_total = chip_total + ?,
+                                       games_played = games_played + ?,
                                        updated_at = datetime('now') WHERE user_id = ?""",
-                (int(delta), uid),
+                (int(delta), 1 if uid in played_uids else 0, uid),
             )
         # [2026-07-23 リョー要望] 戦績集計: paifu から per-user 統計を導出して同 transaction で保存。
         # 導出失敗は試合記録を壊さない [log のみ、recompute_stats.py で後追い可能]。
@@ -1713,11 +1749,35 @@ async def stats_summary(request: Request):
             """,
             (effective, effective),
         ).fetchall()
+        # [2026-07-24 4人回し Phase5, Sol設計(c)] chip 総計の SSoT は matches.chip_delta_json。
+        # match_player_stats.chip_delta は active trio しか持たず、rotation 部屋の
+        # 抜け番 dice 分が欠けるため、JSON fold で上書きする [gameplay 統計は従来どおり
+        # match_player_stats、chip 総計は matches、の二系統]
+        chip_rows = c.execute(
+            """
+            SELECT je.key AS user_id, SUM(CAST(je.value AS INTEGER)) AS chips
+            FROM matches m, json_each(m.chip_delta_json) je
+            WHERE (? = '' OR m.finished_at >= ?)
+            GROUP BY je.key
+            """,
+            (effective, effective),
+        ).fetchall()
+        chips_by_user = {r["user_id"]: int(r["chips"] or 0) for r in chip_rows}
+    players = [dict(r) for r in rows]
+    seen_users = set()
+    for row in players:
+        seen_users.add(row["user_id"])
+        if row["user_id"] in chips_by_user:
+            row["chip_delta"] = chips_by_user[row["user_id"]]
+    # gameplay 行が無い chip 参加者 [理論上: 全試合抜け番] も落とさない
+    for uid, chips in chips_by_user.items():
+        if uid not in seen_users and chips != 0:
+            players.append({"user_id": uid, "name": uid, "games": 0, "chip_delta": chips})
     return {
         "stats_since": stats_since,
         "effective_since": effective,
         "stats_version": match_stats.STATS_VERSION,
-        "players": [dict(r) for r in rows],
+        "players": players,
     }
 
 

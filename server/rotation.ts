@@ -65,11 +65,18 @@ export function nextMappingForMatch(
 ): RoomSeatMapping | null {
   if (!start.rotationEnabled) return null;
   const order = (start.roomMembers ?? []).map((member) => member.seat);
-  if (order.length !== 4) return null;
-  const initialIdx = start.initialMapping
-    ? order.indexOf(start.initialMapping.inactiveRoomSeat)
-    : order.length - 1;
-  return mappingFor(matchOrdinal, order, initialIdx >= 0 ? initialIdx : order.length - 1);
+  // [Sol Phase4/5 P1] fail closed: 4 distinct な room seat 0-3 でなければ null
+  // [呼出側は rotationEnabled で null なら nextMatch を明示 reject し、
+  //  旧 mapping のまま黙って進んで公平 rotation が止まる状態を作らない]
+  if (order.length !== 4 || new Set(order).size !== 4
+    || order.some((seat) => !Number.isInteger(seat) || seat < 0 || seat > 3)) return null;
+  let initialIdx = order.length - 1;
+  if (start.initialMapping) {
+    const idx = order.indexOf(start.initialMapping.inactiveRoomSeat);
+    if (idx < 0) return null; // initialMapping が roster と矛盾 [fail closed]
+    initialIdx = idx;
+  }
+  return mappingFor(matchOrdinal, order, initialIdx);
 }
 
 /** 精算 effect 列 → room seat キーの delta。

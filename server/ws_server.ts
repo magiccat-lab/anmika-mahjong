@@ -167,15 +167,19 @@ export function ledgerByUserId(
 }
 
 /** [2026-07-23 4人回し Phase5] 現試合の room ledger delta [room seat キー、抜け番の dice 分込み]。
- *  command log から現 matchId の _roomChipDelta だけを畳む [nextMatch resetChip は
- *  match 境界 command なので現試合分には現れない]。user_id キー版も返す。 */
+ *  [Sol Phase5 P0] persistence.loadCommands は matchId/roundId を 0 固定で復元するため、
+ *  matchId では絞れない。「最後の nextMatch command より後 = 現試合」で畳む
+ *  [nextMatch 自身は delta を持たず、resetChip も境界 command 側なので現試合分に現れない]。 */
 export function currentMatchRoomDelta(
   snapshot: CanonicalRoomSnapshot,
   commands: readonly AcceptedRoomCommand[],
 ): { bySeat: Record<string, number>; byUser: Record<string, number> } {
+  let currentMatchStart = 0;
+  commands.forEach((command, index) => {
+    if (command.action.type === 'nextMatch') currentMatchStart = index + 1;
+  });
   const bySeat: Record<string, number> = {};
-  for (const command of commands) {
-    if (command.matchId !== snapshot.matchId) continue;
+  for (const command of commands.slice(currentMatchStart)) {
     const delta = (command.action as { _roomChipDelta?: Record<string, number> })._roomChipDelta;
     if (!delta) continue;
     for (const [seat, value] of Object.entries(delta)) {
@@ -183,8 +187,11 @@ export function currentMatchRoomDelta(
       bySeat[seat] = (bySeat[seat] ?? 0) + value;
     }
   }
+  // [Sol Phase5 (c)] byUser は roster 全員の 0 埋め完全 map [matches.chip_delta_json の
+  // SSoT 形式。抜け番が精算 0 の試合でも「参加者として 0」が明示される]
   const byUser: Record<string, number> = {};
   const roster = snapshot.start?.roomMembers ?? snapshot.start?.members ?? [];
+  for (const member of roster) byUser[member.user_id] = 0;
   for (const [seat, value] of Object.entries(bySeat)) {
     const member = roster.find((m) => m.seat === Number(seat));
     if (member) byUser[member.user_id] = value;
@@ -1436,6 +1443,12 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         // action に焼く [appendAcceptedCommand の matchId 増加で交換される唯一の境界]。
         // 新試合の cpuSeats は新 mapping で投影する [旧 mapping だと席がズレる]
         const nextMapping = previous.start ? nextMappingForMatch(previous.start, previous.matchId + 1) : null;
+        // [Sol Phase4/5 P1] rotation 部屋で mapping を作れない [roster 破損等] のに
+        // match だけ進めると旧 mapping のまま公平 rotation が黙って止まる。明示 reject
+        // [例外にせず reason で返す = queue を壊さない]
+        if (previous.start?.rotationEnabled && !nextMapping) {
+          return { reason: 'rotation roster is invalid; cannot advance match' };
+        }
         if (nextMapping) action._nextMapping = nextMapping;
         const nextMatchMapping = nextMapping ?? previous.activeMapping ?? null;
         action.cpuSeats = Array.from(room.members.values())
