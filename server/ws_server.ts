@@ -23,9 +23,10 @@ import {
   type CommandAck,
   type OnlineSeatProjection,
   type RoomMemberSnapshot,
+  type RoomSeatMapping,
   type RoomStartSnapshot,
 } from './protocol';
-import { computeRoomChipDelta, foldRoomState, gameToRoomSeat, initialRoomChipLedger, roomToGameSeat } from './rotation';
+import { computeRoomChipDelta, foldRoomState, gameToRoomSeat, initialRoomChipLedger, nextMappingForMatch, roomToGameSeat } from './rotation';
 
 const DEFAULT_PORT = 8791;
 const DEFAULT_REACTION_TIMEOUT_MS = 15_000;
@@ -1084,6 +1085,12 @@ export function resolveActorSeat(room: Room, uid: string, seat: number, action: 
   // Phase4 の server control command 化で別経路になる]
   const gameSeat = roomToGameSeat(room.snapshot?.activeMapping ?? null, seat);
   if (gameSeat === null) {
+    // [2026-07-23 4人回し Phase4] host の nextMatch は room control。抜け番 host でも
+    // 出せるよう active game seat 0 を代行させる [nextMatch は席非依存の遷移で、
+    // fromUserId=host uid が監査痕跡に残る。envelope の commandId 冪等性も維持]
+    if (action.type === 'nextMatch' && uid === room.hostUserId) {
+      return { actorSeat: 0, actorRoomSeat: seat, reason: null };
+    }
     return { actorSeat: seat, actorRoomSeat: seat, reason: 'inactive seat cannot send game actions' };
   }
   const actorSeat = gameSeat;
@@ -1098,22 +1105,22 @@ export function resolveActorSeat(room: Room, uid: string, seat: number, action: 
 }
 
 function validateAction(room: Room, uid: string, seat: number, action: Record<string, unknown>) {
-  if (typeof action.type !== 'string') return { actorSeat: seat, reason: 'missing action.type' };
+  if (typeof action.type !== 'string') return { actorSeat: seat, actorRoomSeat: seat, reason: 'missing action.type' };
   const actor = resolveActorSeat(room, uid, seat, action);
   if (actor.reason) return actor;
   if (PLAYER_FIELD_ACTIONS.has(action.type)) {
     const target = action.player ?? actor.actorSeat;
     if (target !== actor.actorSeat) {
-      return { actorSeat: actor.actorSeat, reason: `${action.type}: player ${String(target)} != actor ${actor.actorSeat}` };
+      return { actorSeat: actor.actorSeat, actorRoomSeat: actor.actorRoomSeat, reason: `${action.type}: player ${String(target)} != actor ${actor.actorSeat}` };
     }
   }
   if (action.type === 'nextMatch' && uid !== room.hostUserId) {
-    return { actorSeat: actor.actorSeat, reason: 'nextMatch requires host' };
+    return { actorSeat: actor.actorSeat, actorRoomSeat: actor.actorRoomSeat, reason: 'nextMatch requires host' };
   }
   // [2026-07-22 リョー要望: 全員が次局へを押したら進む] client 直送の nextRound は廃止。
   // readyNextRound が全員分揃った時 [または timeout] に server だけが発行する [uid は偽装不可]
   if (action.type === 'nextRound' && uid !== SERVER_NEXT_ROUND_UID) {
-    return { actorSeat: actor.actorSeat, reason: 'nextRound advances after all players press ready' };
+    return { actorSeat: actor.actorSeat, actorRoomSeat: actor.actorRoomSeat, reason: 'nextRound advances after all players press ready' };
   }
   return actor;
 }
@@ -1304,6 +1311,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     fromUserId: string,
     actionInput: Record<string, unknown>,
     commandId: string,
+    actorRoomSeatHint?: number,
   ): { reason: string | null; command?: AcceptedRoomCommand; ack?: CommandAck } => {
     let previous = room.snapshot;
     const action = sanitizeIncomingAction(actionInput);
@@ -1371,13 +1379,26 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         action.finalize = action.resetChip !== true;
         // [2026-07-22 リョー要望: 回り親] 次の試合は起家を1つ回す [server 決定、Sol設計D]
         action.qijia = ((room.authority.game.state.qijia + 1) % 3) as 0 | 1 | 2;
-        action.cpuSeats = membersForAuthority(room)
+        // [2026-07-23 4人回し Phase4] rotation 部屋は次試合の mapping を server が算出して
+        // action に焼く [appendAcceptedCommand の matchId 増加で交換される唯一の境界]。
+        // 新試合の cpuSeats は新 mapping で投影する [旧 mapping だと席がズレる]
+        const nextMapping = previous.start ? nextMappingForMatch(previous.start, previous.matchId + 1) : null;
+        if (nextMapping) action._nextMapping = nextMapping;
+        const nextMatchMapping = nextMapping ?? previous.activeMapping ?? null;
+        action.cpuSeats = Array.from(room.members.values())
           .filter((member) => member.is_cpu)
-          .map((member) => member.seat);
+          .map((member) => roomToGameSeat(nextMatchMapping, member.seat))
+          .filter((seat): seat is number => seat !== null);
         delete action.chipLedger;
       }
       const beforeEffects = captureBeforeAction(room.authority);
-      const reason = room.authority.validateAndApply(actorSeat, action, membersForAuthority(room));
+      // [2026-07-23 4人回し Phase4] nextMatch は新試合の member 投影で適用する
+      const applyMembers = action.type === 'nextMatch' && action._nextMapping
+        ? Array.from(room.members.values())
+          .map((member) => ({ seat: roomToGameSeat(action._nextMapping as RoomSeatMapping, member.seat), is_cpu: member.is_cpu }))
+          .filter((member): member is AuthorityMember => member.seat !== null)
+        : membersForAuthority(room);
+      const reason = room.authority.validateAndApply(actorSeat, action, applyMembers);
       if (reason) {
         room.authority = restoreAuthority(previous, persistence.loadCommands(room.roomId));
         return { reason };
@@ -1401,7 +1422,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       commandId,
       actorSeat,
       // [2026-07-23 4人回し Phase3] 表示/監査用の room seat [replay は actorSeat=game seat のまま]
-      actorRoomSeat: gameToRoomSeat(previous.activeMapping ?? null, actorSeat),
+      // [Phase4] 抜け番 host の nextMatch 代行では逆写像が host の席にならないため hint 優先
+      actorRoomSeat: actorRoomSeatHint ?? gameToRoomSeat(previous.activeMapping ?? null, actorSeat),
       fromUserId,
       action,
     });
@@ -2024,6 +2046,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           payload.uid,
           envelope.action,
           envelope.commandId,
+          (validated as { actorRoomSeat?: number }).actorRoomSeat ?? payload.seat,
         );
         if (!accepted.command || !accepted.ack) {
           reject(ws, room, envelope.commandId, accepted.reason ?? 'action rejected');

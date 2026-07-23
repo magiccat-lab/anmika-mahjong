@@ -42,6 +42,22 @@ export function mappingFor(
   };
 }
 
+/** [2026-07-23 4人回し Phase4] nextMatch accept 直前に server が焼く次試合 mapping。
+ *  rotation 無効 / roomMembers 不整合なら null [3人部屋は mapping 無しのまま]。
+ *  初期抜け番は start.initialMapping から逆引き [無ければ order 末尾 = 4人目]。 */
+export function nextMappingForMatch(
+  start: RoomStartSnapshot,
+  matchOrdinal: number,
+): RoomSeatMapping | null {
+  if (!start.rotationEnabled) return null;
+  const order = (start.roomMembers ?? []).map((member) => member.seat);
+  if (order.length !== 4) return null;
+  const initialIdx = start.initialMapping
+    ? order.indexOf(start.initialMapping.inactiveRoomSeat)
+    : order.length - 1;
+  return mappingFor(matchOrdinal, order, initialIdx >= 0 ? initialIdx : order.length - 1);
+}
+
 /** 精算 effect 列 → room seat キーの delta。
  *  - oall: 支払いは他 active 2 人 [+ kind='dice' かつ mapping ありなら抜け番も] が perPayer ずつ、
  *    winner は頭数分を受け取る [perPayer 負 = 逆ぽっちは符号ごと反転し、抜け番が受け取る側になる]
