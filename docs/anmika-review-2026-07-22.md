@@ -131,3 +131,23 @@ Game3 純計算・reducer 内の fix は自動で共有される。
 揃った時だけ nextMatch で発動。host 独断・切断中・試合中の事前同意は全部不発側に倒す。
 旧「reset時 match POST スキップ」は廃止 [戦績DB欠損のため常時記録]。
 既知残課題: 終局4ケース [流局トビ/通常オーラス/返り東/アガリ止め] の ws-runtime 自動テストは api モック整備後。
+
+## 追記 (2026-07-23 午後): 6〜9周目 [リョー指示「もっとやって」の続行分]
+
+| 周 | 内容 | 結果 |
+|---|---|---|
+| 6 | 実機E2E復活 [run_online_e2e.mjs、port分離で本番共存] | spec側修正2件 [形式select追加のstrict違反 / dice-box化石] → **6/6 green** |
+| 7 | Sol新レンズ [persistence/restore/rewind・auth/token・deadline全分岐・room lifecycle] | P0 1 + P1 3 + P2 1 → aac5b95 全修正 |
+| 8 | Sol修正verify | P0残存1 [rewind ID fold配線漏れ] → d042843 修正 |
+| 9 | Sol最終verify | **clean** [収束] |
+
+7周目の実弾:
+- P0 rewind局頭境界 [nextMatch無視で2試合目第1局→前試合へ巻き戻り+ID乖離] → computeRewindPlan化+境界テスト4本
+- P1 **観戦が本番JWT経路で不成立** [verifyTokenがspectator flagを落とし4403 close。unit projectionテストでは捕まらない層] → flag復元+seat整合強制
+- P1 cleanup_old_roomsがNode purge未通知 [DB削除後もauthority生存、room_id再利用衝突]
+- P1 getRoom半初期化cache [fetch失敗でmatchMode永久tonpu] → room.ready promise化
+- P2 evictでready gate/同意票が再評価されず180s待ち → 直接整理
+
+学び: 静的レビュー+unitテストだけでは接続層 [token→branch分岐] のバグを検出できない。
+実機E2Eの常用化が効いた。E2E実行手順:
+`ANMIKA_E2E_PORT=18790 ANMIKA_WS_INTERNAL_PORT=18792 ANMIKA_WS_INTERNAL_BASE=http://127.0.0.1:18792 PYTHON=.venv/bin/python3 node tools/run_online_e2e.mjs`
