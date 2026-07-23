@@ -12,7 +12,10 @@
   export let onStart: () => void = () => {};
 
   type Member = { seat: number; user_id: string; username: string; avatar_url: string | null };
-  type Room = { room_id: string; host_user_id: string; status: string; match_mode?: string };
+  type Room = { room_id: string; host_user_id: string; status: string; match_mode?: string; rotation_enabled?: number | boolean };
+
+  // [2026-07-24 4人回し Phase6] 定員 = rotation 4 / 通常 3
+  $: capacity = room?.rotation_enabled ? 4 : 3;
 
   let room: Room | null = null;
   let members: Member[] = [];
@@ -122,11 +125,11 @@
 
   <div class="actions">
     {#if isHost}
-      <button class="start" on:click={start} disabled={members.length < 3}>
-        {members.length < 3 ? `${members.length}/3 人 揃ったら開始可能` : '▶ 開始'}
+      <button class="start" on:click={start} disabled={members.length < capacity}>
+        {members.length < capacity ? `${members.length}/${capacity} 人 揃ったら開始可能` : '▶ 開始'}
       </button>
     {:else}
-      <span class="waiting">ホストの開始を待機中… [{members.length}/3]</span>
+      <span class="waiting">ホストの開始を待機中… [{members.length}/{capacity}]</span>
     {/if}
     <button class="leave" on:click={leave}>
       {isHost ? '× 部屋を解散' : '← 退出'}

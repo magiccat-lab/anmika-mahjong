@@ -145,7 +145,7 @@
       </label>
       <!-- [2026-07-24 4人回し Phase6] 定員4で試合ごとに抜け番が回る。抜け番はサイコロ精算だけ参加 -->
       <label class="cpu-select" title="部屋に4人。試合ごとに1人が抜け番になり、サイコロ精算だけ参加する">
-        <input type="checkbox" bind:checked={rotationEnabled} /> 4人回し
+        <input class="chk-rotation" type="checkbox" bind:checked={rotationEnabled} /> 4人回し
       </label>
       <button class="create" on:click={createRoom}>＋ 新しい部屋を作る</button>
     </div>

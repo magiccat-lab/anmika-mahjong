@@ -135,7 +135,7 @@ async function main() {
   let exitCode = 0;
   try {
     await waitForHttp(baseUrl);
-    run(playwrightCmd, ['test', 'tests/online.spec.ts', 'tests/lizhi_bugs.spec.ts'], {
+    run(playwrightCmd, ['test', 'tests/online.spec.ts', 'tests/lizhi_bugs.spec.ts', 'tests/rotation_4p.spec.ts'], {
       env: { ANMIKA_BASE_URL: baseUrl, ANMIKA_E2E_SERVER_AUTH: '1' },
     });
   } catch (e) {

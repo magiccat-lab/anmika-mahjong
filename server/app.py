@@ -821,8 +821,10 @@ async def start_room(room_id: str, request: Request):
         members = c.execute(
             "SELECT COUNT(*) as n FROM room_members WHERE room_id=?", (room_id,)
         ).fetchone()
-        if members["n"] != 3:
-            raise HTTPException(status_code=400, detail=f"need 3 members, got {members['n']}")
+        # [2026-07-24 4人回し Phase6] rotation 部屋は 4 人で開始
+        _need = 4 if ("rotation_enabled" in room.keys() and room["rotation_enabled"]) else 3
+        if members["n"] != _need:
+            raise HTTPException(status_code=400, detail=f"need {_need} members, got {members['n']}")
         c.execute("UPDATE rooms SET status='playing' WHERE room_id=?", (room_id,))
         c.commit()
     return {"ok": True, "status": "playing"}
