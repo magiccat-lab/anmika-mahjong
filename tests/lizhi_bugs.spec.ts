@@ -28,8 +28,9 @@ serverAuthTest('bug 1 + 2 自走検査: lizhi button self filter + 河 lizhi-til
     await pB.goto(BASE);
     await pA.locator('button.entry-btn.online').click();
     await pB.locator('button.entry-btn.online').click();
-    await pA.locator('select').waitFor({ state: 'visible', timeout: 8000 });
-    await pA.locator('select').first().selectOption('1');
+    // [2026-07-23] 形式 select 追加で select が 2 個になった。CPU 数は class 指定
+    await pA.locator('select.sel-cpu-count').waitFor({ state: 'visible', timeout: 8000 });
+    await pA.locator('select.sel-cpu-count').selectOption('1');
     await pA.locator('button.create, button:has-text("新しい部屋")').first().click();
     await pA.waitForTimeout(2000);
     const rooms = await ctxA.request.get(`${BASE}/api/rooms`).then((r) => r.json());

@@ -79,6 +79,9 @@ type Room = {
   matchMode: 'tonpu' | 'hanchan';
   // [2026-07-23 観戦モード] uid → 閲覧専用接続
   spectators: Map<string, SpectatorConn>;
+  // [2026-07-23 Sol 7周目 P1] 初期化 [member/matchMode fetch] の完了 promise。
+  // publish [rooms.set] は同時接続共有のため fetch 前に行うが、利用側は必ず await する
+  ready?: Promise<void>;
   pendingStart: { qijia: number } | null;
   generation: number;
   queue: Promise<void>;
@@ -901,6 +904,29 @@ function actionRelay(
   };
 }
 
+// [2026-07-23 Sol 7周目 P0] rewind の局頭境界計算。nextRound だけでなく nextMatch も
+// 境界にし [2試合目第1局で前試合へ戻る事故]、matchId/roundId は kept 列から
+// appendAcceptedCommand と同じ遷移則で再算出する [旧実装は現 snapshot の ID を据え置き、
+// canonical 実体と protocol ID が別試合になって以後の action/POST/restore を壊した]
+export function computeRewindPlan(
+  commands: Array<Pick<AcceptedRoomCommand, 'revision' | 'action'>>,
+): { keepThrough: number; matchId: number; roundId: number } {
+  let keepThrough = 0;
+  for (const command of commands) {
+    const atype = (command.action as any)?.type;
+    if (atype === 'nextRound' || atype === 'nextMatch') keepThrough = command.revision;
+  }
+  let matchId = 1;
+  let roundId = 1;
+  for (const command of commands) {
+    if (command.revision > keepThrough) break;
+    const atype = (command.action as any)?.type;
+    if (atype === 'nextMatch') { matchId += 1; roundId = 1; }
+    else if (atype === 'nextRound') { roundId += 1; }
+  }
+  return { keepThrough, matchId, roundId };
+}
+
 function sendJson(ws: WebSocket | null, payload: unknown): void {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   try { ws.send(JSON.stringify(payload)); } catch { /* socket closed between check and send */ }
@@ -1039,6 +1065,12 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         || typeof value.seat !== 'number') return null;
       if (typeof value.exp !== 'number' || value.exp <= now) return null;
       if (typeof value.iat !== 'number' || value.iat > now + 30) return null;
+      // [2026-07-23 Sol 7周目 P1] spectator flag を落としていて観戦接続が JWT 本番経路で
+      // 一切成立しなかった [payload.spectator が常に undefined → member 再検証 4403]。
+      // seat と flag の整合も token 検証で強制する
+      const spectator = value.spectator === true;
+      if (spectator && value.seat !== -1) return null;
+      if (!spectator && value.seat !== 0 && value.seat !== 1 && value.seat !== 2) return null;
       return {
         uid: value.uid,
         username: typeof value.username === 'string' ? value.username : undefined,
@@ -1046,6 +1078,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         room_id: value.room_id,
         room_instance_id: value.room_instance_id,
         is_host: value.is_host === true,
+        spectator,
         iat: value.iat,
         exp: value.exp,
       };
@@ -1080,7 +1113,17 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
 
   const getRoom = async (roomId: string, roomInstanceId: string, hostUserId: string): Promise<Room> => {
     const cached = rooms.get(roomId);
-    if (cached?.snapshot.roomInstanceId === roomInstanceId) return cached;
+    if (cached?.snapshot.roomInstanceId === roomInstanceId) {
+      // [2026-07-23 Sol 7周目 P1] 初期化中/初期化失敗の半端 room を配らない。
+      // 失敗していたら map から外して接続側に投げ直させる [client は再接続 retry]
+      try {
+        await cached.ready;
+      } catch (error) {
+        if (rooms.get(roomId) === cached) rooms.delete(roomId);
+        throw error;
+      }
+      return cached;
+    }
     if (cached) {
       if (cached.deadlineTimer) clearTimeout(cached.deadlineTimer);
       if (cached.cleanupTimer) clearTimeout(cached.cleanupTimer);
@@ -1118,20 +1161,34 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     // Publish before the HTTP member lookup so simultaneous sockets share one
     // room object and therefore one command queue.
     rooms.set(roomId, room);
-    const roomInfo = await fetchRoomInfo(roomId);
-    room.matchMode = roomInfo.matchMode;
-    for (const member of roomInfo.members) {
-      const previous = room.members.get(member.user_id);
-      room.members.set(member.user_id, {
-        ...member,
-        ws: previous?.ws ?? null,
-        generation: previous?.generation ?? 0,
-        connected: previous?.connected ?? false,
-      });
-    }
-    // WSA: 復元した started room に deadline を再設定 [Node再起動後の自動進行停止を防ぐ]
-    if (room.authority && room.snapshot.started) {
-      scheduleRoomDeadline(room);
+    // [2026-07-23 Sol 7周目 P1] 初期化を promise 化。fetch 失敗時は map から外す
+    // [旧実装は半初期化 room が永久 cache され、matchMode が default tonpu のまま
+    //  次接続以降 fetch を skip していた]
+    room.ready = (async () => {
+      const roomInfo = await fetchRoomInfo(roomId);
+      room.matchMode = roomInfo.matchMode;
+      for (const member of roomInfo.members) {
+        const previous = room.members.get(member.user_id);
+        room.members.set(member.user_id, {
+          ...member,
+          ws: previous?.ws ?? null,
+          generation: previous?.generation ?? 0,
+          connected: previous?.connected ?? false,
+        });
+      }
+      // WSA: 復元した started room に deadline を再設定 [Node再起動後の自動進行停止を防ぐ]
+      if (room.authority && room.snapshot.started) {
+        scheduleRoomDeadline(room);
+      }
+    })();
+    try {
+      await room.ready;
+    } catch (error) {
+      if (rooms.get(roomId) === room) rooms.delete(roomId);
+      if (room.deadlineTimer) clearTimeout(room.deadlineTimer);
+      if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+      if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
+      throw error;
     }
     return room;
   };
@@ -1908,10 +1965,24 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         const room = rooms.get(room_id);
         if (room) {
           const member = room.members.get(user_id);
+          const evictedSeat = member?.seat;
           if (member?.ws) {
             try { member.ws.close(4410, 'evicted'); } catch (_) { /* noop */ }
           }
           room.members.delete(user_id);
+          // [2026-07-23 Sol 7周目 P2] close handler は member 削除済みで early return する
+          // ため、ここで ready gate / 同意票を直接整理する。旧実装は残り全員 ready 済みでも
+          // 180s timeout まで待たされた
+          if (typeof evictedSeat === 'number') {
+            room.nextRoundReadySeats.delete(evictedSeat);
+            if (room.chipResetVotes.delete(evictedSeat)) {
+              broadcast(room, chipResetVotePayload(room));
+            }
+            if (room.nextRoundReadyRevision === room.snapshot.revision && room.nextRoundReadySeats.size > 0) {
+              broadcast(room, nextRoundReadyPayload(room));
+              maybeAdvanceAllReady(room, room.nextRoundReadyRevision);
+            }
+          }
           broadcast(room, lobbyPayload(room));
         }
         res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}');
@@ -2037,16 +2108,16 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           return;
         }
         const commands = persistence.loadCommands(room_id);
-        let keepThrough = 0;
-        for (const command of commands) {
-          if ((command.action as any)?.type === 'nextRound') keepThrough = command.revision;
-        }
+        const plan = computeRewindPlan(commands);
+        const keepThrough = plan.keepThrough;
         const kept = commands.filter((command) => command.revision <= keepThrough);
         if (kept.length === commands.length) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, reason: 'already at round head', revision: keepThrough }));
           return;
         }
+        const rewoundMatchId = plan.matchId;
+        const rewoundRoundId = plan.roundId;
         let authority: RoomAuthority | null = null;
         try {
           authority = restoreAuthority(snapshot, kept);

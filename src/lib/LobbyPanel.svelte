@@ -128,7 +128,7 @@
     <div class="actions">
       <label class="cpu-select">
         CPU 同席:
-        <select bind:value={cpuCount}>
+        <select class="sel-cpu-count" bind:value={cpuCount}>
           <option value={0}>0 [友達 2 人 待ち]</option>
           <option value={1}>1 [友達 1 人 + CPU 1]</option>
           <option value={2}>2 [一人 + CPU 2]</option>
@@ -136,7 +136,7 @@
       </label>
       <label class="cpu-select">
         形式:
-        <select bind:value={matchMode}>
+        <select class="sel-match-mode" bind:value={matchMode}>
           <option value="tonpu">東風戦</option>
           <option value="hanchan">半荘戦</option>
         </select>

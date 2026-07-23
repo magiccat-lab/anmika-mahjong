@@ -36,8 +36,9 @@ async function spawnClient(browser: any, uid: string, name: string): Promise<Cli
 async function createRoomAs(host: Client, cpu_count: number): Promise<string> {
   await host.page.goto(BASE);
   await host.page.locator('button.entry-btn.online').click();
-  await host.page.locator('select').waitFor({ state: 'visible', timeout: 8000 });
-  await host.page.locator('select').first().selectOption(String(cpu_count));
+  // [2026-07-23] 形式 select [東風/半荘] 追加で select が 2 個になった。CPU 数は class 指定
+  await host.page.locator('select.sel-cpu-count').waitFor({ state: 'visible', timeout: 8000 });
+  await host.page.locator('select.sel-cpu-count').selectOption(String(cpu_count));
   await host.page.locator('button.create, button:has-text("新しい部屋")').first().click();
   await host.page.waitForTimeout(2000);
 
@@ -267,8 +268,9 @@ test.describe('online 対戦 e2e', () => {
       expect(aBtnText, 'A 側 [winner] は 振る button').toMatch(/振る/);
       expect(bBtnText, 'B 側 [非 winner] は 振り待ち button').toMatch(/振り待ち/);
 
-      // B 側で dice-box stage element が存在するか [dice-box が init されるための受け皿]
-      await expect(B.page.locator('#dicebox-stage')).toHaveCount(1);
+      // [2026-07-23] 旧 WebGL dice-box [#dicebox-stage] は 2026-07-15 に内製 CSS cube へ
+      // 置換済み [spec が旧実装前提で化石化していた]。非 winner 側の DiceCube 描画を見る
+      await expect(B.page.locator('.modal.sai .cube').first()).toBeVisible({ timeout: 5000 });
 
       // 両 client に同 roll を push [WS sync 模擬]、 B 側で displayD1/D2 が同値に反映されるか
       const pushRoll = `

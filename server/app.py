@@ -752,6 +752,10 @@ async def cleanup_old_rooms(request: Request):
         c.commit()
     for rid in ids:
         await _hub_purge_room(rid)
+        # [2026-07-23 Sol 7周目 P1] delete/leave と同様に Node authority も purge する。
+        # 旧実装は DB だけ消して Node room が生存し、既接続 socket が action を
+        # 続行できた上、4文字 room_id 再利用時に古い Node room と衝突した
+        await _notify_ws_purge(rid)
     return {
         "ok": True,
         "deleted_count": len(ids),
