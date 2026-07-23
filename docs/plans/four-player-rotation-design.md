@@ -3,12 +3,19 @@
 日付: 2026-07-23 / 対象HEAD: f009a10 / 状態: Phase 1-3 実装済み [Sol レビュー反映込み]
 リョー要件: 部屋に4人、順番に抜け番。抜け番はサイコロだけ受け取り/払い。観戦モードで部屋は見れる。
 
-進捗 (2026-07-23 深夜):
+進捗 (2026-07-24 01:25 全フェーズ完了・本番デプロイ済み):
 - Phase 1 chip effect seam: 0308974 [+ Sol P1 反映 49a7dcb]
 - Phase 2 protocol v3 + mapping 層 + 4-way fold: 812a64b [+ Sol P1×2 反映 b2d7ddb]
-- Phase 3 seat 契約分離 + ready 抜け番除外: 6715f79 + 28171ce
-- 残り: Phase 4 [rotation 決定 + server control command 化]、Phase 5 [matches POST/stats]、Phase 6 [UI/join]
-- 運用注意: snapshot schema v3 は旧 server で読めない。deploy 前 DB backup、v3 後は rollback せず前進修正
+- Phase 3 seat 契約分離 + ready 抜け番除外: 6715f79 + 28171ce [+ Sol P1×2+P2 反映 c136985]
+- Phase 4 rotation 決定 + 抜け番 host 代行: c137e92
+- Phase 5 match-result mapping-aware + roomLedgerDelta + python 側 Sol設計(c): e767938 + 5c6a7ff
+  [chip 総計 SSoT = matches.chip_delta_json の json_each fold / gameplay 統計 = match_player_stats 二系統]
+- Phase 6 部屋作成/join/start構築/UI: b2c70d6 [+ e2e発覚の start API 定員 fix 040cdc9 + Sol最終 951734c]
+- 2試合サイクル統合e2e [test control seam 方式、Sol設計]: 36c3329
+  [force-finish は testControlsEnabled 起動限定。通常起動 404 の negative test あり]
+- デプロイ: 2026-07-24 01:23 DB backup [data/backups/anmika-pre-4rotation-20260724T012305.sqlite3]
+  → deploy-app --execute 全 step 成功、api/ws/static active、公開 URL 200
+- 運用注意: snapshot schema v3 は旧 server で読めない。rollback せず前進修正 [backup から部屋再作成が復旧手順]
 
 ## 方針 (Sol設計回答 2026-07-23 01:41Z、原文は agmsg log id=274)
 
