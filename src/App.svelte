@@ -1265,6 +1265,8 @@
     // サイコロの応答待ちフラグも sync で解除できるよう nonce を進める
     nextRoundPressedLocal = false;
     nextRoundReadySeats = [];
+    // [2026-07-23 リョー指示] チップリセット同意も sync 正で復元 [server 再送が来る]
+    chipResetVoteSeats = [];
     saiKoroRecoveryNonce += 1;
     const projectedBaseline = snapshot.state?.store?.matchStartChipLedger;
     const baseline = projectedBaseline ? {
@@ -1358,6 +1360,10 @@
         // [2026-07-22 リョー要望] 全員ready制の進捗 [server broadcast]
         nextRoundReadySeats = Array.isArray(msg.seats) ? msg.seats : [];
         if (typeof msg.total === 'number' && msg.total > 0) nextRoundReadyTotal = msg.total;
+      } else if (msg.type === 'chipResetVote') {
+        // [2026-07-23 リョー指示] チップリセット同意の進捗 [server broadcast]
+        chipResetVoteSeats = Array.isArray(msg.seats) ? msg.seats : [];
+        if (typeof msg.total === 'number' && msg.total > 0) chipResetVoteTotal = msg.total;
       }
     };
     ws.onclose = () => {
@@ -1403,6 +1409,18 @@
   $: if (!$game.roundEnded) {
     if (nextRoundPressedLocal) nextRoundPressedLocal = false;
     if (nextRoundReadySeats.length > 0) nextRoundReadySeats = [];
+    // [2026-07-23 リョー指示] チップリセット同意は試合終了ウィンドウ限り
+    if (chipResetVoteSeats.length > 0) chipResetVoteSeats = [];
+    if (resetChipOnNextMatch && onlineGameStarted) resetChipOnNextMatch = false;
+  }
+  // [2026-07-23 リョー指示] チップリセットは全員の同意がないとできない [online]。
+  // checkbox = 自分の同意 vote。server が全 human 席の同意を集約して nextMatch で発動判定
+  let chipResetVoteSeats: number[] = [];
+  let chipResetVoteTotal = 1;
+  function sendChipResetVote(value: boolean) {
+    if (!onlineGameStarted || onlineSpectator) return;
+    if (!onlineWs || onlineWs.readyState !== WebSocket.OPEN) return;
+    try { onlineWs.send(JSON.stringify({ type: 'chipResetVote', value })); } catch { /* 再接続時に sync で復元 */ }
   }
   function sendNextRoundReady() {
     if (!nextRoundReadySafe || !onlineWs || onlineWs.readyState !== WebSocket.OPEN) return;
@@ -1737,7 +1755,14 @@
     //   → 3. nextMatch 実行」 に。 旧 code は POST が finalize 前 + await ナシで連打可能、
     //   ダブルクリックで二重 INSERT、 resetChip キャンセル後も POST 済 になってた
     if (resetChipOnNextMatch) {
-      if (!window.confirm('チップを 0 にリセットして次の試合へ進みます。 本当に？')) return;
+      // [2026-07-23 リョー指示] online のリセット発動は server 側の全員同意判定。
+      // host の確認ダイアログは状況を正しく伝える
+      const allAgreed = !onlineGameStarted || chipResetVoteSeats.length >= chipResetVoteTotal;
+      if (allAgreed) {
+        if (!window.confirm('チップを 0 にリセットして次の試合へ進みます。 本当に？')) return;
+      } else if (!window.confirm(
+        `チップリセットは全員同意 [今 ${chipResetVoteSeats.length}/${chipResetVoteTotal}] が揃うまで発動しない。リセットなしで次の試合へ進む？`,
+      )) return;
     }
     // R17 #2 + R18 #3 fix: 直前 試合 [room_id + match_no] の POST が済んでれば 二重 POST 回避。
     // events.length 依存は偶然一致 / リロードで baseline 失う問題があったので、
@@ -1754,7 +1779,10 @@
       && !alreadyPosted
       && onlineGameStarted && onlineRoomMeta?.isHost
       && currentRoomId && $game.game.state.finished
-      && !resetChipOnNextMatch  // chip reset 時は match 永続化スキップ
+      // [2026-07-23 リョー指示 全員同意制に伴う変更] 旧「chip reset 時は match 永続化
+      // スキップ」を廃止。reset の発動は server の全員同意判定になり host checkbox と
+      // 一致しない上、スキップすると戦績DBからその試合が消える。試合記録は常に残し、
+      // reset は次試合の ledger だけを 0 にする
       // [2026-07-23 総点検 P2] サイコロ等の未消化 pending があると getFinalScore が
       // dice 分を含まない時点で確定してしまう。全消化後に送る
       && !$game.pendingSaiKoro && !$game.pendingKinpei && !$game.pendingFuyu
@@ -2344,11 +2372,20 @@
         {#if state.finished}
           <!-- [2026-07-22 リョー報告: 終局時の表示と処理がされてない] online の半荘終了は
                この行が唯一の進行 UI。host は次の試合へ、guest は待ち表示 -->
+          <!-- [2026-07-23 リョー指示] チップリセットは全員の同意制。checkbox は全員に出す -->
+          {#if onlineGameStarted && !onlineSpectator}
+            <label style="display:inline-flex; align-items:center; gap:4px; font-size:13px;">
+              <input type="checkbox" bind:checked={resetChipOnNextMatch} on:change={() => sendChipResetVote(resetChipOnNextMatch)}>
+              チップリセット同意 [{chipResetVoteSeats.length}/{chipResetVoteTotal}]
+            </label>
+          {/if}
           {#if !onlineGameStarted || onlineRoomMeta?.isHost}
             <button class="next-btn" on:click={handleNextMatch}>▶ 次の試合へ</button>
-            <label style="display:inline-flex; align-items:center; gap:4px; font-size:13px;">
-              <input type="checkbox" bind:checked={resetChipOnNextMatch}>チップリセット
-            </label>
+            {#if !onlineGameStarted}
+              <label style="display:inline-flex; align-items:center; gap:4px; font-size:13px;">
+                <input type="checkbox" bind:checked={resetChipOnNextMatch}>チップリセット
+              </label>
+            {/if}
           {:else}
             <button class="next-btn" disabled>ホストの「次の試合へ」待ち</button>
           {/if}
@@ -2966,9 +3003,17 @@
           {:else if state.finished}
             <button on:click={exportPaifu} disabled={!canSavePaifu}>📂 牌譜保存</button>
             <button on:click={exportDiagnostics}>🩺 状態ダンプ</button>
-            <label style="display:inline-flex; align-items:center; gap:4px; font-size:14px;">
-              <input type="checkbox" bind:checked={resetChipOnNextMatch}>チップリセット
-            </label>
+            <!-- [2026-07-23 リョー指示] online は全員の同意 vote、solo は従来 checkbox -->
+            {#if onlineGameStarted && !onlineSpectator}
+              <label style="display:inline-flex; align-items:center; gap:4px; font-size:14px;">
+                <input type="checkbox" bind:checked={resetChipOnNextMatch} on:change={() => sendChipResetVote(resetChipOnNextMatch)}>
+                チップリセット同意 [{chipResetVoteSeats.length}/{chipResetVoteTotal}]
+              </label>
+            {:else if !onlineGameStarted}
+              <label style="display:inline-flex; align-items:center; gap:4px; font-size:14px;">
+                <input type="checkbox" bind:checked={resetChipOnNextMatch}>チップリセット
+              </label>
+            {/if}
             <!-- R15 P0 #4 fix: online は host のみ「次の試合へ」 表示。 ゲストが先押しで desync -->
             {#if !onlineGameStarted || onlineRoomMeta?.isHost}
               <button on:click={handleNextMatch}>▶ 次の試合へ</button>

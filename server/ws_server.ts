@@ -87,6 +87,8 @@ type Room = {
   nextRoundTimer: ReturnType<typeof setTimeout> | null;
   nextRoundReadyRevision: number | null;
   nextRoundReadySeats: Set<number>;
+  // [2026-07-23 リョー指示] チップリセット同意 vote [human 席]。全員揃った時だけ nextMatch で発動
+  chipResetVotes: Set<number>;
 };
 
 export type WsRuntimeOptions = {
@@ -1108,6 +1110,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       nextRoundTimer: null,
       nextRoundReadyRevision: null,
       nextRoundReadySeats: new Set<number>(),
+      chipResetVotes: new Set<number>(),
     };
     for (const member of snapshot.start?.members ?? []) {
       room.members.set(member.user_id, { ...member, ws: null, generation: 0, connected: false });
@@ -1205,9 +1208,15 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         previous = room.snapshot;
       }
       if (action.type === 'nextMatch') {
-        // The host may choose whether accumulated chips are reset.  All other
-        // settlement inputs are derived from canonical server state.
-        action.resetChip = action.resetChip === true;
+        // [2026-07-23 リョー指示] チップリセットは全員の同意がないとできない。
+        // host の checkbox 単独では発動せず、human 全席の同意 vote が揃った時だけ reset。
+        // 切断中の human も「同意していない」扱い [勝手にリセットされない側に倒す]
+        const humanSeats = membersForAuthority(room)
+          .filter((member) => !member.is_cpu)
+          .map((member) => member.seat);
+        const allAgreed = humanSeats.length > 0
+          && humanSeats.every((seat) => room.chipResetVotes.has(seat));
+        action.resetChip = allAgreed;
         action.finalize = action.resetChip !== true;
         // [2026-07-22 リョー要望: 回り親] 次の試合は起家を1つ回す [server 決定、Sol設計D]
         action.qijia = ((room.authority.game.state.qijia + 1) % 3) as 0 | 1 | 2;
@@ -1253,6 +1262,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         room.nextRoundTimer = null;
         room.nextRoundReadyRevision = null;
         room.nextRoundReadySeats = new Set();
+        // [2026-07-23] 局/試合が動いたらチップリセット同意も失効 [持ち越さない]
+        room.chipResetVotes = new Set();
       }
     } catch (error) {
       room.authority = restoreAuthority(previous, persistence.loadCommands(room.roomId));
@@ -1272,6 +1283,18 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
   const sendNextRoundReadyStateTo = (ws: WebSocket, room: Room) => {
     if (room.nextRoundReadyRevision !== room.snapshot.revision || room.nextRoundReadySeats.size === 0) return;
     sendJson(ws, nextRoundReadyPayload(room));
+  };
+
+  // [2026-07-23 リョー指示] チップリセットは全員の同意がないとできない
+  const chipResetVotePayload = (room: Room) => ({
+    type: 'chipResetVote',
+    seats: [...room.chipResetVotes].sort((a, b) => a - b),
+    total: Math.max(1, Array.from(room.members.values()).filter((m) => !m.is_cpu).length),
+  });
+
+  const sendChipResetVoteStateTo = (ws: WebSocket, room: Room) => {
+    if (room.chipResetVotes.size === 0) return;
+    sendJson(ws, chipResetVotePayload(room));
   };
 
   const issueServerNextRound = (room: Room, revision: number, actorSeat: number, fromRole: string) => {
@@ -1729,6 +1752,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         if ((msg as Record<string, unknown>)?.type === 'resync') {
           sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
           sendNextRoundReadyStateTo(ws, room);
+          sendChipResetVoteStateTo(ws, room);
           return;
         }
         if ((msg as Record<string, unknown>)?.type === 'start') {
@@ -1742,6 +1766,17 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           // [2026-07-23 総点検 P2] 拒否は typed nack で返す [client が楽観押下を戻せるように]
           if (reason) sendJson(ws, { type: 'readyNextRoundNack', reason, revision: room.snapshot.revision });
           else sendJson(ws, { type: 'readyNextRoundAck', revision: room.snapshot.revision });
+          return;
+        }
+        if ((msg as Record<string, unknown>)?.type === 'chipResetVote') {
+          // [2026-07-23 リョー指示] 各自の checkbox = 同意 vote [着席 human のみ、上書き可]。
+          // 全員 [接続有無を問わず全 human 席] 揃った時だけ nextMatch でリセット発動
+          const value = msg as Record<string, unknown>;
+          const voteMember = Array.from(room.members.values()).find((m) => m.seat === payload.seat);
+          if (!voteMember || voteMember.is_cpu) return;
+          if (value.value === true) room.chipResetVotes.add(payload.seat);
+          else room.chipResetVotes.delete(payload.seat);
+          broadcast(room, chipResetVotePayload(room));
           return;
         }
         if ((msg as Record<string, unknown>)?.type === 'stamp') {
@@ -1766,6 +1801,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           // old revision with today's match/round identifiers.
           sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
           sendNextRoundReadyStateTo(ws, room);
+          sendChipResetVoteStateTo(ws, room);
           return;
         }
         if (envelope.expectedVersion !== room.snapshot.revision
@@ -1774,6 +1810,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           reject(ws, room, envelope.commandId, 'version conflict');
           sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
           sendNextRoundReadyStateTo(ws, room);
+          sendChipResetVoteStateTo(ws, room);
           return;
         }
         const validated = validateAction(room, payload.uid, payload.seat, envelope.action);
@@ -1796,6 +1833,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           if (String(accepted.reason ?? '').includes('zimo already drawn')) {
             sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
             sendNextRoundReadyStateTo(ws, room);
+            sendChipResetVoteStateTo(ws, room);
           }
           return;
         }
@@ -1836,6 +1874,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     if (room.snapshot.started) {
       sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
       sendNextRoundReadyStateTo(ws, room);
+      sendChipResetVoteStateTo(ws, room);
       // [2026-07-21 監査 D-15 fix] 再接続時は手番 deadline を現在時刻から張り直す。
       // scheduleRoomDeadline は冒頭で旧 timer を clearTimeout するので、切断前の
       // 残り期限で復帰直後に auto-discard される事故を防ぐ [新世代で rebase]
