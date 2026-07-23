@@ -89,3 +89,30 @@
 
 - vitest 1348 passed (watchdog dead-code テスト4本を削除、第一ツモ不変条件3本を追加済み)
 - sp_baseline 6/6 green / build green
+
+## 追記 (2026-07-23 昼): オンライン特有バグの両面総点検 [1ea7d04..1a2677d]
+
+リョー指示「他にオンライン特有のバグがないか codex にも聞いてチェック」の結果。新規3件、全て c5868b1 で修正済み。
+
+| 重大度 | 発見 | 指摘 | 修正 |
+|---|---|---|---|
+| P1 | fable | nukiBei event の replacement [補充ツモ牌] が publicEventForSeat 素通りで全 client に漏洩 | 本人以外 null マスク + 4席可視性テスト |
+| P1 | Sol | finish_match の chip-ledger / room-events 別取得 TOCTOU [間に nextMatch で新旧 match 混在保存] | /internal/match-result 統合 [単一時点 snapshot] |
+| P1 | Sol | stats 書き込みが途中席例外で部分 commit | SAVEPOINT 原子化 + 故障注入テスト |
+| P2 | Sol | CPU pseudo member が公開集計に出る | 意図仕様として維持 [UI toggle 制御] |
+
+Sol 確認済み [新規指摘なし]: 観戦 seat=-1 の全配信経路 / changshu protocol / chipTransfer 旧牌譜互換。
+
+### 「CPU回しで直したバグはオンラインも直ってる」仮説の整理 (Sol 回答)
+
+ゲームロジック層は正しい: canonical authority は solo と同じ store/game3 reducer を回すため、
+Game3 純計算・reducer 内の fix は自動で共有される。
+ただしオンライン固有層は別物で、fix しても共有されない経路:
+(a) authority の validate mirror + canonical 二重適用 / actor gate
+(b) server の turnTimeout / reactionTimeout / CPU deadline driver [solo cpuActions と別実装]
+(c) rollSaiKoroDice の server 乱数 override
+(d) blind projection → hydrate [他家手牌/山を再構築しない]
+(e) nextRound all-ready / nextMatch fast-forward
+(f) action whitelist / envelope / revision / reconnect / replay
+(g) App の online 自動橋 / auto pass / auto win
+→ この層の変更は今後も個別にオンライン観点レビューを通すこと。
