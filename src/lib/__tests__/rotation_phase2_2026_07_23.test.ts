@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   computeRoomChipDelta,
   foldRoomState,
@@ -16,7 +16,7 @@ import {
   type RoomSeatMapping,
   type RoomStartSnapshot,
 } from '../../../server/protocol';
-import { createRoomAuthority } from '../../../server/authority';
+import { createRoomAuthority, RoomAuthority } from '../../../server/authority';
 import { restoreAuthority } from '../../../server/ws_server';
 import { applyChipFromLoser, applyChipOall, type ChipSettlementEffect, type ChipState } from '../game3/chip';
 import { defaultSanmaRule, generateTilePool } from '../shan3';
@@ -215,14 +215,17 @@ describe('authority sink 配線 [canonical drain + restore 再課金防止]', ()
     return generateTilePool(defaultSanmaRule()).map(String);
   }
 
-  it('takeCanonicalChipEffects は canonical store の sink を 1 回で drain する', () => {
+  it('takeCanonicalChipEffects は canonical sink を 1 回で drain し、mirror 側も同時に空にする', () => {
     const authority = createRoomAuthority({ preShuffledPool: pool(), qijia: 0 });
     const game = authority.canonicalState().game;
     game.applyChipOall(0, 2, { label: 'test', settlementKind: 'dice' });
+    authority.game.chipEffects.push({ kind: 'normal', form: 'oall', winner: 0, loser: null, base: 1, multiplier: 1, perPayer: 1, label: 'mirror stale copy' });
     const effects = authority.takeCanonicalChipEffects();
     expect(effects).toHaveLength(1);
     expect(effects[0].kind).toBe('dice');
     expect(authority.takeCanonicalChipEffects()).toHaveLength(0);
+    // [Sol Phase1レビュー] drain 契約は validation mirror の stale copy も残さない
+    expect(authority.game.chipEffects).toHaveLength(0);
   });
 
   it('restoreAuthority は replay 後に sink を空にして返す [直後の accept が二重に焼かない]', () => {
@@ -246,5 +249,40 @@ describe('authority sink 配線 [canonical drain + restore 再課金防止]', ()
     // restore 後に新たな精算が起きれば通常どおり 1 回だけ拾える
     restored!.canonicalState().game.applyChipOall(1, 3, { label: 'after', settlementKind: 'dice' });
     expect(restored!.takeCanonicalChipEffects()).toHaveLength(1);
+  });
+
+  it('replay 中に精算 effect が出る復元でも sink は空で返る [Sol Phase1 P1 の回帰仕様]', () => {
+    const shuffled = pool();
+    const start = startWith({ preShuffledPool: shuffled });
+    const source = createRoomAuthority({ preShuffledPool: shuffled, qijia: 0 });
+    const actor = source.currentPlayer();
+    expect(source.validateAndApply(actor, { type: 'tsumokiri' }, start.members)).toBeNull();
+    const snapshot = { ...createEmptyRoomSnapshot('room-d', 'inst'), started: true, start };
+    const commands = [cmd({ type: 'tsumokiri' }, 1)];
+    commands[0].actorSeat = actor;
+    // 適用成功のたびに canonical sink へ dice effect を積ませ、
+    // 「replay がチップ精算を再実行した」状況を本物の配線の上で再現する
+    const original = RoomAuthority.prototype.validateAndApply;
+    const spy = vi.spyOn(RoomAuthority.prototype, 'validateAndApply').mockImplementation(function (this: RoomAuthority, ...args: Parameters<RoomAuthority['validateAndApply']>) {
+      const reason = original.apply(this, args);
+      if (!reason) {
+        this.canonicalState().game.chipEffects.push({ kind: 'dice', form: 'oall', winner: 0, loser: null, base: 1, multiplier: 1, perPayer: 1, label: 'replayed settlement' });
+      }
+      return reason;
+    });
+    let restored: RoomAuthority | null;
+    try {
+      restored = restoreAuthority(snapshot, commands);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(restored).not.toBeNull();
+    // restoreAuthority 末尾の discard drain が無いと、この履歴分が次の live accept で
+    // そのまま command に焼かれて 4-way ledger の二重反映になる
+    expect(restored!.takeCanonicalChipEffects()).toHaveLength(0);
+    restored!.canonicalState().game.applyChipOall(2, 5, { label: '次のdice', settlementKind: 'dice' });
+    const next = restored!.takeCanonicalChipEffects();
+    expect(next).toHaveLength(1);
+    expect(next[0].label).toBe('次のdice');
   });
 });

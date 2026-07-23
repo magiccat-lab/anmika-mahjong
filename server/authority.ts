@@ -145,8 +145,11 @@ export class RoomAuthority {
   /** [2026-07-23 4人回し Phase2] canonical Game3 が積んだチップ精算 effect を drain する。
    *  ws_server が accept 毎に呼んで room 4-way delta を command に焼く。restore replay 後は
    *  drain して捨てる [保存済み delta を fold するため、再実行分を再課金しない]。
-   *  検証 mirror [this.game] 側の sink は syncFromCanonical で複製されるが読まれない。 */
+   *  [Sol Phase1レビュー] 検証 mirror [this.game] は syncFromCanonical が drain 前の
+   *  canonical を複製するため stale copy を持つ。読む者はいないが、drain 契約として
+   *  mirror 側も同時に空にする [片側だけ残る状態を作らない]。 */
   takeCanonicalChipEffects(): ChipSettlementEffect[] {
+    this.game.chipEffects = [];
     return this.canonicalState().game.takeChipEffects();
   }
 
