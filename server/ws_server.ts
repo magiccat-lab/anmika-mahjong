@@ -145,6 +145,51 @@ export function memberByGameSeat(room: Room, gameSeat: number) {
   return Array.from(room.members.values()).find((member) => member.seat === roomSeat);
 }
 
+/** [2026-07-23 4人回し Phase5] game seat キーの per-match ledger を user_id キーへ写像する。
+ *  start.members は試合1の game trio なので直引きせず、現 mapping で room seat に変換して
+ *  room member [roomMembers 優先] から user を引く [3人部屋は恒等で従来と同一] */
+export function ledgerByUserId(
+  snapshot: CanonicalRoomSnapshot,
+  gameSeatLedger: Record<string, number> | Record<number, number> | null | undefined,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!snapshot.start || !gameSeatLedger) return out;
+  const mapping = snapshot.activeMapping ?? null;
+  const roster = snapshot.start.roomMembers ?? snapshot.start.members;
+  for (const [seat, chips] of Object.entries(gameSeatLedger)) {
+    const roomSeat = gameToRoomSeat(mapping, Number(seat));
+    const member = roster.find((m) => m.seat === roomSeat);
+    if (member) out[member.user_id] = chips as number;
+  }
+  return out;
+}
+
+/** [2026-07-23 4人回し Phase5] 現試合の room ledger delta [room seat キー、抜け番の dice 分込み]。
+ *  command log から現 matchId の _roomChipDelta だけを畳む [nextMatch resetChip は
+ *  match 境界 command なので現試合分には現れない]。user_id キー版も返す。 */
+export function currentMatchRoomDelta(
+  snapshot: CanonicalRoomSnapshot,
+  commands: readonly AcceptedRoomCommand[],
+): { bySeat: Record<string, number>; byUser: Record<string, number> } {
+  const bySeat: Record<string, number> = {};
+  for (const command of commands) {
+    if (command.matchId !== snapshot.matchId) continue;
+    const delta = (command.action as { _roomChipDelta?: Record<string, number> })._roomChipDelta;
+    if (!delta) continue;
+    for (const [seat, value] of Object.entries(delta)) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+      bySeat[seat] = (bySeat[seat] ?? 0) + value;
+    }
+  }
+  const byUser: Record<string, number> = {};
+  const roster = snapshot.start?.roomMembers ?? snapshot.start?.members ?? [];
+  for (const [seat, value] of Object.entries(bySeat)) {
+    const member = roster.find((m) => m.seat === Number(seat));
+    if (member) byUser[member.user_id] = value;
+  }
+  return { bySeat, byUser };
+}
+
 /** A Shuvari player cannot waive a legal ron, even when their decision is
  * made by the disconnect/timeout watchdog.  Sending the generic pass here is
  * rejected by RoomAuthority and otherwise reschedules the same timeout
@@ -1818,6 +1863,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         recipientGameSeat: memberGameSeat,
         activeMapping: room.snapshot.activeMapping ?? null,
         roomChipLedger: room.snapshot.roomChipLedger ?? null,
+        // [Sol P1-2] client の onlineMembers は room seat 契約。start.members [game trio] と分離
+        roomMembers: Array.from(room.members.values())
+          .sort((a, b) => a.seat - b.seat)
+          .map(({ seat, user_id, username, is_cpu }) => ({ seat, user_id, username, is_cpu })),
       });
     }
     // [2026-07-23 観戦モード] 観戦者にも全 private マスクで start を配る
@@ -1833,6 +1882,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         revision: room.snapshot.revision,
         matchId: room.snapshot.matchId,
         roundId: room.snapshot.roundId,
+        // [2026-07-23 4人回し Phase3, Sol P2] member start と同じ契約 field [観戦は seat -1 / null]
+        recipientRoomSeat: SPECTATOR_SEAT,
+        recipientGameSeat: null,
+        activeMapping: room.snapshot.activeMapping ?? null,
+        roomChipLedger: room.snapshot.roomChipLedger ?? null,
+        roomMembers: Array.from(room.members.values())
+          .sort((a, b) => a.seat - b.seat)
+          .map(({ seat, user_id, username, is_cpu }) => ({ seat, user_id, username, is_cpu })),
       });
     }
     scheduleRoomDeadline(room);
@@ -2172,11 +2229,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         const matchLedger = state.game.state.finished
           ? authority.matchResultLedger()
           : state.game.chipLedger;
-        const ledger: Record<string, number> = {};
-        for (const [seat, chips] of Object.entries(matchLedger ?? {})) {
-          const member = snapshot.start.members.find((m) => m.seat === Number(seat));
-          if (member) ledger[member.user_id] = chips as number;
-        }
+        // [2026-07-23 4人回し Phase5] start.members 直引きをやめ mapping 写像で user を引く
+        const ledger = ledgerByUserId(snapshot, matchLedger ?? null);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, ledger, finished: state.game.state.finished }));
       } catch (_) { res.writeHead(400); res.end('bad request'); }
@@ -2205,11 +2259,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         const state = authority.canonicalState();
         const finished = state.game.state.finished === true;
         const matchLedger = finished ? authority.matchResultLedger() : state.game.chipLedger;
-        const ledger: Record<string, number> = {};
-        for (const [seat, chips] of Object.entries(matchLedger ?? {})) {
-          const member = snapshot.start.members.find((m) => m.seat === Number(seat));
-          if (member) ledger[member.user_id] = chips as number;
-        }
+        // [2026-07-23 4人回し Phase5] start.members 直引きをやめ mapping 写像で user を引く。
+        // rotation 部屋向けに、抜け番の dice 分を含む現試合の room ledger delta も同梱する
+        const ledger = ledgerByUserId(snapshot, matchLedger ?? null);
+        const roomDelta = currentMatchRoomDelta(snapshot, persistence.loadCommands(room_id));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           ok: true,
@@ -2217,6 +2270,11 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           ledger,
           matchId: snapshot.matchId ?? null,
           roomInstanceId: snapshot.roomInstanceId ?? null,
+          rotationEnabled: snapshot.start.rotationEnabled === true,
+          activeMapping: snapshot.activeMapping ?? null,
+          roomLedgerDelta: roomDelta.byUser,
+          roomLedgerDeltaBySeat: roomDelta.bySeat,
+          roomChipLedger: snapshot.roomChipLedger ?? null,
           events: (state.game.events ?? []).slice(0, 20000),
         }));
       } catch (_) { res.writeHead(400); res.end('bad request'); }

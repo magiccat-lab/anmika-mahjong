@@ -3,6 +3,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
   import Tile from './lib/Tile.svelte';
+  import { activeCpuGameSeats, hostGameSeat, memberAtGameSeat } from './lib/onlineSeats';
   import TileChecker from './lib/TileChecker.svelte';
   import ChipBreakdown from './lib/ChipBreakdown.svelte';
   import WallPanel from './lib/WallPanel.svelte';
@@ -1175,21 +1176,27 @@
   let onlineShouldReconnect = false;
 
   function seatName(seat: number): string {
-    const m = onlineMembers.find((x) => x.seat === seat);
+    // [2026-07-23 4人回し Phase3, Sol P1-2] 引数は game seat、onlineMembers は room seat 契約。
+    // mapping を必ず通して photo 直引きの別人表示を防ぐ [3人部屋は恒等]
+    const m = memberAtGameSeat(onlineMembers, onlineActiveMapping, seat);
     if (m) return m.username + (m.is_cpu ? ' [CPU]' : '');
     return `P${seat}`;
   }
 
   function initializeOnlineFromStart(ws: WebSocket, msg: any, protocol = { revision: 0, matchId: 1, roundId: 1 }): boolean {
-    onlineMembers = msg.members ?? [];
-    const hostMember = onlineMembers.find((m: any) => m.user_id === onlineRoomMeta?.hostUserId);
-    const hostSeat = hostMember?.seat as 0|1|2|undefined;
+    // [2026-07-23 4人回し Phase3, Sol P1-2] onlineMembers は room seat 契約の全員リストに統一。
+    // start.members [game seat の active trio] を直接載せると seatName(gameSeat) が
+    // room seat を直引きして non-identity mapping で別人になる。roomMembers 優先、
+    // 無い旧 server 応答 [3人部屋] は members = 恒等なのでそのまま使える
+    onlineMembers = msg.roomMembers ?? msg.members ?? [];
+    // CPU 席と host 席は game seat 契約 [mapping 写像で導出、host 抜け番は undefined]
+    const hostSeat = (hostGameSeat(onlineMembers, onlineActiveMapping, onlineRoomMeta?.hostUserId) ?? undefined) as 0|1|2|undefined;
     const initOpts: any = {
       ws,
       qijia: msg.qijia ?? 0,
       // [2026-07-23 changshu protocol] 東風/半荘は server start payload が持つ
       changshu: typeof msg.changshu === 'number' ? msg.changshu : undefined,
-      cpuSeats: onlineMembers.filter((m: any) => m.is_cpu).map((m: any) => m.seat),
+      cpuSeats: activeCpuGameSeats(onlineMembers, onlineActiveMapping),
       // [2026-07-23 4人回し Phase3] store へ渡す自席は game seat [3人部屋は mySeat と同値]
       mySeat: (onlineSeatInfoReceived
         ? (onlineGameSeat ?? undefined)
@@ -1251,6 +1258,21 @@
     if (fromSeat !== 0 && fromSeat !== 1 && fromSeat !== 2) {
       ws.send(JSON.stringify({ type: 'resync', expectedVersion: current.revision }));
       return;
+    }
+    // [2026-07-23 4人回し Phase3, Sol P1-1] seat 契約は revision 検証を通った受理 action
+    // だけが動かす [stale/gap/duplicate で mapping を触らない]。mapping epoch の
+    // 不整合 [server 側の焼き忘れ検出] は自己修復として resync に倒す
+    if (typeof msg.mappingEpoch === 'number' && Number.isInteger(msg.matchId)
+      && msg.mappingEpoch !== msg.matchId) {
+      ws.send(JSON.stringify({ type: 'resync', expectedVersion: current.revision }));
+      return;
+    }
+    absorbSeatContract(msg);
+    if (onlineSeatInfoReceived && !onlineSpectator) {
+      // mapping 交換 [nextMatch] で自席の game seat が変わり得る。次の _state hydrate より
+      // 先に store の受信席契約と盤面自席を atomic に更新する [遅れると hydrate 拒否 → resync 頼み]
+      game.setOnlineSeat((onlineGameSeat ?? -1) as 0 | 1 | 2 | -1);
+      selfPlayer = (onlineGameSeat === null ? 0 : onlineGameSeat) as 0 | 1 | 2;
     }
     const applied = game.applyOnlineRemoteAction(fromSeat, msg.action);
     if (msg.action?._state && applied !== true) {
@@ -1378,7 +1400,7 @@
       } else if (msg.type === 'lobby') {
         onlineMembers = msg.members ?? [];
       } else if (msg.type === 'action') {
-        absorbSeatContract(msg); // [Phase3] nextMatch の mapping 交換もこの経路で追従
+        // [Phase3 Sol P1-1] seat 契約の吸収は applyRevisionedAction 内の revision 検証後
         applyRevisionedAction(ws, msg);
       } else if (msg.type === 'reject') {
         console.warn('[online] command rejected', msg.reason, msg.commandId);

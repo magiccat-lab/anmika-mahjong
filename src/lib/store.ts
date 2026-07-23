@@ -880,6 +880,12 @@ export function createGameStore() {
       onlineMatchId = opts.matchId;
       onlineRoundId = opts.roundId;
     },
+    /** [2026-07-23 4人回し Phase3 Sol P1-1] nextMatch の mapping 交換で自席の game seat が
+     *  変わる時、次の _state hydrate より前に受信席契約を更新する [-1 = 抜け番/観戦]。
+     *  これ無しだと projection.recipientSeat !== myOnlineSeat で hydrate 拒否 → resync 頼みになる */
+    setOnlineSeat(seat: 0 | 1 | 2 | -1 | null): void {
+      myOnlineSeat = seat;
+    },
     /** Apply the server's seat-scoped canonical state. */
     hydrateOnlineProjection(projection: unknown): boolean {
       const ok = hydrateProjectionState(projection);
