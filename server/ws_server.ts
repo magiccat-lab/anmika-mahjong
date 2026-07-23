@@ -23,7 +23,9 @@ import {
   type CommandAck,
   type OnlineSeatProjection,
   type RoomMemberSnapshot,
+  type RoomStartSnapshot,
 } from './protocol';
+import { computeRoomChipDelta, foldRoomState, initialRoomChipLedger } from './rotation';
 
 const DEFAULT_PORT = 8791;
 const DEFAULT_REACTION_TIMEOUT_MS = 15_000;
@@ -288,6 +290,10 @@ export function restoreAuthority(
       throw new Error(`cannot restore room ${snapshot.roomId} at revision ${command.revision}: ${reason}`);
     }
   }
+  // [2026-07-23 4人回し Phase2] replay で再発行された精算 effect は捨てる。
+  // room ledger は command に焼かれた _roomChipDelta の fold が正で、ここで drain
+  // しないと次の live accept が全履歴分の delta を二重に焼く。
+  authority.takeCanonicalChipEffects();
   return authority;
 }
 
@@ -1294,6 +1300,13 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       } else if (drawData) {
         action._draw = drawData;
       }
+      // [2026-07-23 4人回し Phase2] canonical sink を accept 毎に必ず drain し
+      // [action 跨ぎの持ち越し・restore 後の再課金を封じる]、精算があれば
+      // accept 時点の mapping で room 4-way delta を command に焼く。
+      // fold 自体は appendAcceptedCommand [persist と同一 snapshot 遷移] が行う。
+      const chipEffects = room.authority.takeCanonicalChipEffects();
+      const roomChipDelta = computeRoomChipDelta(chipEffects, previous.activeMapping ?? null);
+      if (roomChipDelta) action._roomChipDelta = roomChipDelta;
     }
 
     const appended = appendAcceptedCommand(previous, {
@@ -1651,6 +1664,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       commands: [],
       revision: 0,
       updatedAt: now,
+      // [2026-07-23 4人回し Phase2] room ledger / mapping の初期値。3人部屋は
+      // mapping 無し [恒等写像扱い] で、fold 結果は game ledger と常に一致する
+      activeMapping: (start as RoomStartSnapshot).initialMapping ?? null,
+      roomChipLedger: initialRoomChipLedger(start),
     };
     persistence.resetRoom(room.snapshot);
     room.pendingStart = null;
@@ -2153,6 +2170,13 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           commands: kept,
           updatedAt: new Date().toISOString(),
         };
+        // [2026-07-23 4人回し Phase2] spread が持ち込む現在値は捨てた command の delta を
+        // 含むため、room ledger / mapping は kept 分だけを start から fold し直す
+        if (snapshot.start) {
+          const foldedRoom = foldRoomState(snapshot.start, kept);
+          rewound.roomChipLedger = foldedRoom.roomChipLedger;
+          rewound.activeMapping = foldedRoom.activeMapping;
+        }
         const dropped = persistence.rewindRoom(rewound, keepThrough);
         if (room) {
           room.authority = authority;

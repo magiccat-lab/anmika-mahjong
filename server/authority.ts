@@ -1,4 +1,5 @@
 import { Game3 } from '../src/lib/game3';
+import type { ChipSettlementEffect } from '../src/lib/game3/chip';
 import { createGameStore, type StoreState } from '../src/lib/store';
 import { get } from 'svelte/store';
 import { toCorePai } from '../src/lib/helpers';
@@ -139,6 +140,14 @@ export class RoomAuthority {
    * クリアする。ws_server が seat projection に載せて配った後に呼び、蓄積を防ぐ。 */
   takePendingCutins(): unknown[] {
     return (this.canonicalStore as any).takeCutins();
+  }
+
+  /** [2026-07-23 4人回し Phase2] canonical Game3 が積んだチップ精算 effect を drain する。
+   *  ws_server が accept 毎に呼んで room 4-way delta を command に焼く。restore replay 後は
+   *  drain して捨てる [保存済み delta を fold するため、再実行分を再課金しない]。
+   *  検証 mirror [this.game] 側の sink は syncFromCanonical で複製されるが読まれない。 */
+  takeCanonicalChipEffects(): ChipSettlementEffect[] {
+    return this.canonicalState().game.takeChipEffects();
   }
 
   isPostWinResolved(): boolean {
