@@ -1433,11 +1433,17 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     return { reason: null, command: appended.command, ack };
   };
 
+  // [2026-07-23 4人回し Phase3] ready 進行は active [game seat あり] の人間だけが対象。
+  // 抜け番は打牌に関与しないので、次局進行を握らせると 4人部屋が永久に進まない
+  const activeHumanMembers = (room: Room) =>
+    Array.from(room.members.values()).filter((m) => !m.is_cpu
+      && roomToGameSeat(room.snapshot.activeMapping ?? null, m.seat) !== null);
+
   const nextRoundReadyPayload = (room: Room) => ({
     type: 'nextRoundReady',
     revision: room.nextRoundReadyRevision,
     seats: [...room.nextRoundReadySeats].sort((a, b) => a - b),
-    total: Math.max(1, Array.from(room.members.values()).filter((m) => !m.is_cpu).length),
+    total: Math.max(1, activeHumanMembers(room).length),
   });
 
   const sendNextRoundReadyStateTo = (ws: WebSocket, room: Room) => {
@@ -1481,8 +1487,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
   const maybeAdvanceAllReady = (room: Room, revision: number) => {
     if (room.nextRoundReadyRevision !== revision || room.snapshot.revision !== revision) return;
     // 切断中の人間は押せないので gate から除外 [復帰しないケースは timeout fallback が拾う]
-    const required = Array.from(room.members.values())
-      .filter((m) => !m.is_cpu && m.connected)
+    // [Phase3] 抜け番も gate から除外 [active human の全押しで進む]
+    const required = activeHumanMembers(room)
+      .filter((m) => m.connected)
       .map((m) => m.seat);
     if (required.length === 0) return;
     if (!required.every((seat) => room.nextRoundReadySeats.has(seat))) return;
@@ -1496,6 +1503,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     if (revision !== room.snapshot.revision) return 'version conflict';
     const member = Array.from(room.members.values()).find((m) => m.seat === actorSeat);
     if (!member || member.is_cpu) return 'only seated players can ready next round';
+    // [2026-07-23 4人回し Phase3] 抜け番 [game seat 無し] は次局進行の当事者ではない
+    if (roomToGameSeat(room.snapshot.activeMapping ?? null, actorSeat) === null) {
+      return 'inactive seat cannot ready next round';
+    }
     if (room.nextRoundReadyRevision !== revision) {
       // [2026-07-23 Sol R2で露出] 旧 revision の押下者へ nack を返して楽観押下を戻させる。
       // 流局後処理等で revision が進むと先押しの票は破棄されるが、本人の UI は
