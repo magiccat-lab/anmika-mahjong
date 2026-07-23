@@ -116,3 +116,18 @@ Game3 純計算・reducer 内の fix は自動で共有される。
 (f) action whitelist / envelope / revision / reconnect / replay
 (g) App の online 自動橋 / auto pass / auto win
 → この層の変更は今後も個別にオンライン観点レビューを通すこと。
+
+## 追記 (2026-07-23 昼2): 5周チェック [リョー指示] とチップリセット全員同意制
+
+| 周 | 内容 | 結果 |
+|---|---|---|
+| 1 | 試合終了フロー追跡+検証テスト [finished→projection→hydrate→GameEndPanel、全席+観戦、nextMatch遷移] | match_end_flow 3本 green |
+| 2 | チップ lifecycle [baseline更新/finalize/reset/POST/WSA照合] | 欠陥なし [matchStartChipLedger は nextMatch accept で更新確認] |
+| 3 | 新機能の終了画面干渉 [観戦/戦績/牌譜/同意UI] | 欠陥なし |
+| 4 | Sol独立レビュー [f1fc1ae..eaa39d7] | 新規2件 P1 → 0cddab7 修正 [connected必須+切断票失効 / checkbox=server票の鏡] + P2 finished gate |
+| 5 | 全suite 1378 + check 0 err + deploy 疎通 | green |
+
+チップリセット全員同意制 [eaa39d7+0cddab7]: 全員に同意checkbox [n/m進捗]、connected な human 全席の同意が
+揃った時だけ nextMatch で発動。host 独断・切断中・試合中の事前同意は全部不発側に倒す。
+旧「reset時 match POST スキップ」は廃止 [戦績DB欠損のため常時記録]。
+既知残課題: 終局4ケース [流局トビ/通常オーラス/返り東/アガリ止め] の ws-runtime 自動テストは api モック整備後。
