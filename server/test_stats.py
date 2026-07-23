@@ -172,6 +172,46 @@ def test_seat_map_and_stat_rows():
     assert by_uid["CPU_x"]["seat"] == 2
 
 
+def test_savepoint_rolls_back_partial_stat_rows():
+    """[2026-07-23 Sol指摘 P1] 途中席の例外で部分行が残らない [全席 or 0行] の故障注入。"""
+    import sqlite3
+
+    from stats import ensure_tables, upsert_stat_row, build_stat_rows
+
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.execute("CREATE TABLE matches (match_id INTEGER PRIMARY KEY)")
+    c.execute("INSERT INTO matches(match_id) VALUES (1)")
+    ensure_tables(c)
+    rows = build_stat_rows(sample_paifu(), {"u0": 0, "u1": 1, "u2": 2}, {"u0": 0, "u1": 0, "u2": 0})
+    assert len(rows) == 3
+    try:
+        c.execute("SAVEPOINT match_stats")
+        try:
+            for i, row in enumerate(rows):
+                if i == 2:
+                    raise RuntimeError("故障注入 [3席目で死ぬ]")
+                upsert_stat_row(c, 1, row)
+            c.execute("RELEASE SAVEPOINT match_stats")
+        except Exception:
+            c.execute("ROLLBACK TO SAVEPOINT match_stats")
+            c.execute("RELEASE SAVEPOINT match_stats")
+            raise
+    except RuntimeError:
+        pass
+    c.commit()
+    n = c.execute("SELECT COUNT(*) FROM match_player_stats").fetchone()[0]
+    assert n == 0  # 部分 [2席分] が commit されない
+
+    # 正常系: 全席書けたら 3 行
+    c.execute("SAVEPOINT match_stats")
+    for row in rows:
+        upsert_stat_row(c, 1, row)
+    c.execute("RELEASE SAVEPOINT match_stats")
+    c.commit()
+    assert c.execute("SELECT COUNT(*) FROM match_player_stats").fetchone()[0] == 3
+
+
 def test_nagashi_hule_counts_as_tsumo_win():
     ev = qipai3() + [{
         "type": "hule", "player": 2, "isRon": False, "nagashi": True, "loser": None,

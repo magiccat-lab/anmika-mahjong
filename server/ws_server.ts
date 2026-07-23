@@ -508,6 +508,16 @@ function publicEventForSeat(event: any, recipientSeat: number): Record<string, u
   if (event?.type === 'zimo') {
     return { type: 'zimo', player: event.player, pai: event.player === recipientSeat ? event.pai : null };
   }
+  // [2026-07-23 名牌譜で追加した nukiBei event] replacement = 補充ツモ牌は本人以外に非公開。
+  // 抜いた北/金北そのもの [gold flag] は卓上公開情報なので残す
+  if (event?.type === 'nukiBei') {
+    return {
+      type: 'nukiBei',
+      player: event.player,
+      gold: event.gold === true,
+      replacement: event.player === recipientSeat ? (event.replacement ?? null) : null,
+    };
+  }
   return structuredClone(event);
 }
 
@@ -1894,9 +1904,50 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       } catch (_) { res.writeHead(400); res.end('bad request'); }
       return;
     }
+    // [2026-07-23 Sol指摘 P1 TOCTOU] chip-ledger と room-events を別 HTTP で取ると
+    // 間に nextMatch が滑り込み、旧 match の chip_delta + 新 match の events が混ざる。
+    // 1 handler 内の同期読みで {finished, ledger, events, matchId} を単一時点 snapshot として返す
+    if (req.method === 'POST' && req.url === '/internal/match-result') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        const { room_id } = body;
+        if (typeof room_id !== 'string') { res.writeHead(400); res.end('bad request'); return; }
+        const room = rooms.get(room_id);
+        const snapshot = room?.snapshot ?? persistence.loadSnapshot(room_id);
+        const authority = room?.authority
+          ?? (snapshot?.started ? restoreAuthority(snapshot, persistence.loadCommands(room_id)) : null);
+        if (!authority || !snapshot?.start) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, ledger: null, events: null, finished: false }));
+          return;
+        }
+        // ここから応答構築まで await を挟まない [event loop 1 tick 内 = 単一時点]
+        const state = authority.canonicalState();
+        const finished = state.game.state.finished === true;
+        const matchLedger = finished ? authority.matchResultLedger() : state.game.chipLedger;
+        const ledger: Record<string, number> = {};
+        for (const [seat, chips] of Object.entries(matchLedger ?? {})) {
+          const member = snapshot.start.members.find((m) => m.seat === Number(seat));
+          if (member) ledger[member.user_id] = chips as number;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          ok: true,
+          finished,
+          ledger,
+          matchId: snapshot.matchId ?? null,
+          roomInstanceId: snapshot.roomInstanceId ?? null,
+          events: (state.game.events ?? []).slice(0, 20000),
+        }));
+      } catch (_) { res.writeHead(400); res.end('bad request'); }
+      return;
+    }
     // [2026-07-23 リョー要望 名牌譜] authoritative 牌譜: canonical game.events の全量 dump。
     // host client の POST paifu は本人視点で他家 zimo 等がマスク済みのため、
     // 再生用の完全牌譜は authority から取る [finish_match が match INSERT 時に添付]
+    // [後方互換で残置。新経路は /internal/match-result]
     if (req.method === 'POST' && req.url === '/internal/room-events') {
       const chunks: Buffer[] = [];
       for await (const chunk of req) chunks.push(chunk as Buffer);

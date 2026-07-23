@@ -1472,10 +1472,15 @@ async def finish_match(request: Request):
             raise HTTPException(status_code=400, detail=f"chip_delta sum != 0 (got {total})")
         # WSA: Node authority の match-local ledger と必ず照合する。
         # authority 不在・未終了・通信失敗時は client 値を信用せず fail-closed。
+        # [2026-07-23 Sol指摘 P1 TOCTOU] ledger と authoritative 牌譜は
+        # /internal/match-result の単一時点 snapshot で同時に取る
+        # [別 HTTP だと間に nextMatch が滑り込み、旧 match の chip_delta で
+        #  新 match の events を保存し得た]
+        authority_events = None
         try:
             async with httpx.AsyncClient(timeout=3) as cli:
                 resp = await cli.post(
-                    f"{WS_INTERNAL_BASE}/internal/chip-ledger",
+                    f"{WS_INTERNAL_BASE}/internal/match-result",
                     json={"room_id": room_id},
                     headers={"x-anmika-internal-secret": INTERNAL_API_SECRET},
                 )
@@ -1500,6 +1505,10 @@ async def finish_match(request: Request):
                                     status_code=400,
                                     detail=f"chip_delta mismatch for {uid}: client={delta} authority={auth_val}",
                                 )
+                        # ledger 検証を通った snapshot と同一時点の events だけを牌譜に採用
+                        ev = ledger_data.get("events")
+                        if isinstance(ev, list) and ev:
+                            authority_events = ev
                     else:
                         raise HTTPException(
                             status_code=503,
@@ -1518,24 +1527,13 @@ async def finish_match(request: Request):
                 status_code=503,
                 detail="authority ledger service unavailable",
             ) from e
-        # [2026-07-23 リョー要望 名牌譜] authoritative 牌譜 [canonical events 全量] を取得。
-        # client POST の paifu は host 視点で他家ツモ等がマスク済みのため、
-        # 取れたら差し替える。失敗しても client paifu で続行 [non-fatal]
+        # [2026-07-23 リョー要望 名牌譜] authoritative 牌譜 [canonical events 全量]。
+        # ledger 検証と同一 snapshot から取得済み [/internal/match-result]。
+        # 取れなかった場合は client paifu で保存 [paifu_source=client]
         paifu_source = "client"
-        try:
-            async with httpx.AsyncClient(timeout=3) as cli:
-                ev_resp = await cli.post(
-                    f"{WS_INTERNAL_BASE}/internal/room-events",
-                    json={"room_id": room_id},
-                    headers={"x-anmika-internal-secret": INTERNAL_API_SECRET},
-                )
-                if ev_resp.status_code == 200:
-                    ev = ev_resp.json().get("events")
-                    if isinstance(ev, list) and ev:
-                        paifu = ev
-                        paifu_source = "authority"
-        except Exception as e:
-            log.warning("authority events fetch failed [non-fatal]: %s", e)
+        if authority_events is not None:
+            paifu = authority_events
+            paifu_source = "authority"
         # R20 #1 fix: match_uuid 必須 [client が deterministic 生成]、 既存 row check して
         # 同 uuid なら chip_total 二重加算せず 409 ack [冪等]
         if not match_uuid:
@@ -1602,19 +1600,30 @@ async def finish_match(request: Request):
                 (int(delta), uid),
             )
         # [2026-07-23 リョー要望] 戦績集計: paifu から per-user 統計を導出して同 transaction で保存。
-        # 導出失敗は試合記録を壊さない [log のみ、recompute_stats.py で後追い可能]
+        # 導出失敗は試合記録を壊さない [log のみ、recompute_stats.py で後追い可能]。
+        # [2026-07-23 Sol指摘 P1] 途中席で例外だと部分行が catch 後の commit で確定するため
+        # SAVEPOINT で stats 書き込みだけ原子化 [全席 or 0 行]
         try:
-            mrow = c.execute(
-                "SELECT match_id FROM matches WHERE room_id=? AND match_no=?",
-                (room_id, next_match_no),
-            ).fetchone()
-            seat_fb_rows = c.execute(
-                "SELECT user_id, seat FROM room_members WHERE room_id=?", (room_id,)
-            ).fetchall()
-            seat_fb = {r["user_id"]: r["seat"] for r in seat_fb_rows}
-            seat_by_user = match_stats.seat_map_from_members(members_snap_list, seat_fb)
-            for srow in match_stats.build_stat_rows(paifu, seat_by_user, chip_delta):
-                match_stats.upsert_stat_row(c, mrow["match_id"], srow)
+            c.execute("SAVEPOINT match_stats")
+            try:
+                mrow = c.execute(
+                    "SELECT match_id FROM matches WHERE room_id=? AND match_no=?",
+                    (room_id, next_match_no),
+                ).fetchone()
+                if mrow is None:
+                    raise RuntimeError("match row not found after INSERT")
+                seat_fb_rows = c.execute(
+                    "SELECT user_id, seat FROM room_members WHERE room_id=?", (room_id,)
+                ).fetchall()
+                seat_fb = {r["user_id"]: r["seat"] for r in seat_fb_rows}
+                seat_by_user = match_stats.seat_map_from_members(members_snap_list, seat_fb)
+                for srow in match_stats.build_stat_rows(paifu, seat_by_user, chip_delta):
+                    match_stats.upsert_stat_row(c, mrow["match_id"], srow)
+                c.execute("RELEASE SAVEPOINT match_stats")
+            except Exception:
+                c.execute("ROLLBACK TO SAVEPOINT match_stats")
+                c.execute("RELEASE SAVEPOINT match_stats")
+                raise
         except Exception:
             log.exception(
                 "match stats derivation failed [room=%s match_no=%s]", room_id, next_match_no

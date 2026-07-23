@@ -70,4 +70,20 @@ describe('観戦 projection [seat=-1]', () => {
     // 親の第一ツモは非公開 [seat 0 宛なら privateHand.zimo に載る]
     expect(projection.store?.lastZimo ?? null).toBeNull();
   });
+
+  it('nukiBei event の replacement [補充ツモ牌] は本人にしか配らない', () => {
+    // [2026-07-23 Sol発注チェックで発見] 名牌譜用に追加した nukiBei event が
+    // publicEventForSeat を素通りして補充牌が全 client に漏れていた
+    const a = createRoomAuthority({ preShuffledPool: pool(), qijia: 0 });
+    const state = a.canonicalState();
+    (state.game.events as any[]).push({ type: 'nukiBei', player: 1, gold: false, replacement: 'p7' });
+    const findNuki = (proj: any) =>
+      (proj.publicEvents as any[]).find((e) => e.type === 'nukiBei');
+    expect(findNuki(captureSeatProjection(a, 1)).replacement).toBe('p7');
+    expect(findNuki(captureSeatProjection(a, 0)).replacement).toBeNull();
+    expect(findNuki(captureSeatProjection(a, 2)).replacement).toBeNull();
+    expect(findNuki(captureSeatProjection(a, -1)).replacement).toBeNull();
+    // 抜き自体 [gold flag] は公開のまま
+    expect(findNuki(captureSeatProjection(a, 0)).gold).toBe(false);
+  });
 });
