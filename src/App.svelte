@@ -1360,6 +1360,15 @@
         // [2026-07-22 リョー要望] 全員ready制の進捗 [server broadcast]
         nextRoundReadySeats = Array.isArray(msg.seats) ? msg.seats : [];
         if (typeof msg.total === 'number' && msg.total > 0) nextRoundReadyTotal = msg.total;
+        // [2026-07-23 Sol R2で露出] 自分の押下が server 側の revision reset で消えていたら
+        // 楽観「全員待ち」表示を戻して再押下できるようにする [nack 補完の保険]
+        {
+          const own = onlineRoomMeta?.mySeat;
+          if (nextRoundPressedLocal && (own === 0 || own === 1 || own === 2)
+            && !nextRoundReadySeats.includes(own)) {
+            nextRoundPressedLocal = false;
+          }
+        }
       } else if (msg.type === 'chipResetVote') {
         // [2026-07-23 リョー指示] チップリセット同意の進捗 [server broadcast]
         chipResetVoteSeats = Array.isArray(msg.seats) ? msg.seats : [];

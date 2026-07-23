@@ -1391,6 +1391,15 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     const member = Array.from(room.members.values()).find((m) => m.seat === actorSeat);
     if (!member || member.is_cpu) return 'only seated players can ready next round';
     if (room.nextRoundReadyRevision !== revision) {
+      // [2026-07-23 Sol R2で露出] 旧 revision の押下者へ nack を返して楽観押下を戻させる。
+      // 流局後処理等で revision が進むと先押しの票は破棄されるが、本人の UI は
+      // ack 済みの「全員待ち」のまま再押下不能になり、全員 180s timeout まで固まっていた
+      for (const staleSeat of room.nextRoundReadySeats) {
+        const staleMember = Array.from(room.members.values()).find((m) => m.seat === staleSeat);
+        if (staleMember?.ws) {
+          sendJson(staleMember.ws, { type: 'readyNextRoundNack', reason: 'superseded revision', revision });
+        }
+      }
       room.nextRoundReadyRevision = revision;
       room.nextRoundReadySeats = new Set();
       if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
