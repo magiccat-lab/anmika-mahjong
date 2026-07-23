@@ -2134,6 +2134,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         const rewound: CanonicalRoomSnapshot = {
           ...snapshot,
           revision: keepThrough,
+          // [2026-07-23 Sol 8周目 P0] fold した ID を実際に snapshot へ配線する
+          // [7周目修正で計算だけして代入し忘れ、現 matchId/roundId が残っていた]
+          matchId: rewoundMatchId,
+          roundId: rewoundRoundId,
           commands: kept,
           updatedAt: new Date().toISOString(),
         };
