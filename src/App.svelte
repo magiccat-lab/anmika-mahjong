@@ -16,6 +16,7 @@
   import RoomPanel from './lib/RoomPanel.svelte';
   import EntryMenu from './lib/EntryMenu.svelte';
   import StatsPanel from './lib/StatsPanel.svelte';
+  import ReplayPanel from './lib/ReplayPanel.svelte';
   import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
@@ -1135,6 +1136,8 @@
   let appMode: 'menu' | 'started' = 'menu';
   // [2026-07-23 リョー要望] 戦績パネル [エントリ画面から開く]
   let statsPanelOpen = false;
+  // [2026-07-23 リョー要望] 名牌譜パネル
+  let replayPanelOpen = false;
   // [2026-07-23 リョー要望] 観戦モード: seat=-1 の閲覧専用接続。
   // store 側は myOnlineSeat=-1 で全 action 送信が gate され、server も action を受けない。
   // 盤面レイアウトの回転だけ selfPlayer=0 anchor で描く
@@ -2022,9 +2025,13 @@
     onSelectSolo={() => { appMode = 'started'; viewMode = 'single'; }}
     onSelectOnline={() => { appMode = 'started'; viewMode = 'online'; }}
     onSelectStats={() => { statsPanelOpen = true; }}
+    onSelectReplay={() => { replayPanelOpen = true; }}
   />
   {#if statsPanelOpen}
     <StatsPanel onClose={() => { statsPanelOpen = false; }} />
+  {/if}
+  {#if replayPanelOpen}
+    <ReplayPanel onClose={() => { replayPanelOpen = false; }} />
   {/if}
 {:else if viewMode === 'online' && !onlineGameStarted}
   {#if currentRoomId && onlineMe && onlineSpectator}

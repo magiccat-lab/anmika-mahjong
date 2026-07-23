@@ -1894,6 +1894,35 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       } catch (_) { res.writeHead(400); res.end('bad request'); }
       return;
     }
+    // [2026-07-23 リョー要望 名牌譜] authoritative 牌譜: canonical game.events の全量 dump。
+    // host client の POST paifu は本人視点で他家 zimo 等がマスク済みのため、
+    // 再生用の完全牌譜は authority から取る [finish_match が match INSERT 時に添付]
+    if (req.method === 'POST' && req.url === '/internal/room-events') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        const { room_id } = body;
+        if (typeof room_id !== 'string') { res.writeHead(400); res.end('bad request'); return; }
+        const room = rooms.get(room_id);
+        const snapshot = room?.snapshot ?? persistence.loadSnapshot(room_id);
+        const authority = room?.authority
+          ?? (snapshot?.started ? restoreAuthority(snapshot, persistence.loadCommands(room_id)) : null);
+        if (!authority) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, events: null }));
+          return;
+        }
+        const state = authority.canonicalState();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          ok: true,
+          finished: state.game.state.finished,
+          events: (state.game.events ?? []).slice(0, 20000),
+        }));
+      } catch (_) { res.writeHead(400); res.end('bad request'); }
+      return;
+    }
     // 事故復帰 [2026-07-20 リョー裁定: 落ちた局の冒頭から / PW は 1 個]
     // room は snapshot + 受理コマンド列で保持されているので、現局のコマンドを捨てて
     // replay し直せば局頭へ戻せる。局の境目は最後の nextRound コマンドで判る

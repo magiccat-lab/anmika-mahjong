@@ -3316,6 +3316,20 @@ function finalizePendingNukiBei(s: StoreState): StoreState {
     + (s.game.nukidoraGold[pending.player] ?? 0);
   const replacement = s.game.declareNukiBei(pending.player, pending.meta);
   s.lastZimo = replacement;
+  // [2026-07-23 名牌譜/戦績] 北抜きは今まで events に残らず、牌譜再生で手牌が
+  // 帳尻不能になっていた。確定 [抜き枚数が増えた] 時だけここで焼き込む
+  {
+    const nukiNow = (s.game.nukidora[pending.player] ?? 0)
+      + (s.game.nukidoraGold[pending.player] ?? 0);
+    if (nukiNow > nukiBefore) {
+      (s.game.events as any[]).push({
+        type: 'nukiBei',
+        player: pending.player,
+        gold: !!pending.meta?.gold,
+        replacement: replacement,
+      });
+    }
+  }
   if (replacement === null) {
     const nukiAfter = (s.game.nukidora[pending.player] ?? 0)
       + (s.game.nukidoraGold[pending.player] ?? 0);

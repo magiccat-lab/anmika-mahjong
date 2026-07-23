@@ -203,6 +203,13 @@ def init_db() -> None:
         # R22 P1 #4 fix: members_json 列追加 [試合開始時 member snapshot 永続化]
         if "members_json" not in cols:
             c.execute("ALTER TABLE matches ADD COLUMN members_json TEXT NOT NULL DEFAULT '[]'")
+        # [2026-07-23 リョー要望 名牌譜] 名局マーク + タイトル + 牌譜の出所
+        if "starred" not in cols:
+            c.execute("ALTER TABLE matches ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
+        if "title" not in cols:
+            c.execute("ALTER TABLE matches ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+        if "paifu_source" not in cols:
+            c.execute("ALTER TABLE matches ADD COLUMN paifu_source TEXT NOT NULL DEFAULT 'client'")
         room_cols = [r[1] for r in c.execute("PRAGMA table_info(rooms)").fetchall()]
         if "instance_id" not in room_cols:
             c.execute("ALTER TABLE rooms ADD COLUMN instance_id TEXT NOT NULL DEFAULT ''")
@@ -1511,6 +1518,24 @@ async def finish_match(request: Request):
                 status_code=503,
                 detail="authority ledger service unavailable",
             ) from e
+        # [2026-07-23 リョー要望 名牌譜] authoritative 牌譜 [canonical events 全量] を取得。
+        # client POST の paifu は host 視点で他家ツモ等がマスク済みのため、
+        # 取れたら差し替える。失敗しても client paifu で続行 [non-fatal]
+        paifu_source = "client"
+        try:
+            async with httpx.AsyncClient(timeout=3) as cli:
+                ev_resp = await cli.post(
+                    f"{WS_INTERNAL_BASE}/internal/room-events",
+                    json={"room_id": room_id},
+                    headers={"x-anmika-internal-secret": INTERNAL_API_SECRET},
+                )
+                if ev_resp.status_code == 200:
+                    ev = ev_resp.json().get("events")
+                    if isinstance(ev, list) and ev:
+                        paifu = ev
+                        paifu_source = "authority"
+        except Exception as e:
+            log.warning("authority events fetch failed [non-fatal]: %s", e)
         # R20 #1 fix: match_uuid 必須 [client が deterministic 生成]、 既存 row check して
         # 同 uuid なら chip_total 二重加算せず 409 ack [冪等]
         if not match_uuid:
@@ -1548,7 +1573,7 @@ async def finish_match(request: Request):
             ]
         try:
             c.execute(
-                "INSERT INTO matches(room_id, match_no, match_uuid, members_json, paifu_json, chip_delta_json, duration_sec) VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO matches(room_id, match_no, match_uuid, members_json, paifu_json, chip_delta_json, duration_sec, paifu_source) VALUES(?,?,?,?,?,?,?,?)",
                 (
                     room_id,
                     next_match_no,
@@ -1557,6 +1582,7 @@ async def finish_match(request: Request):
                     json.dumps(paifu),
                     json.dumps(chip_delta),
                     duration,
+                    paifu_source,
                 ),
             )
         except sqlite3.IntegrityError as e:
@@ -1694,6 +1720,96 @@ async def stats_set_since(request: Request):
         c.commit()
         v = _get_setting(c, "stats_since")
     return {"ok": True, "stats_since": v}
+
+
+# ---- routes: 牌譜 [2026-07-23 リョー要望 名牌譜] ----
+
+
+@app.get("/api/matches")
+async def list_matches(request: Request):
+    """試合一覧 [新しい順]。?starred=1 で名牌譜のみ。ログイン必須"""
+    u = current_user(request)
+    if not u:
+        raise HTTPException(status_code=401, detail="login required")
+    starred_only = (request.query_params.get("starred") or "") == "1"
+    try:
+        limit = min(100, max(1, int(request.query_params.get("limit") or 30)))
+    except Exception:
+        limit = 30
+    with db_conn() as c:
+        rows = c.execute(
+            f"""SELECT match_id, room_id, match_no, members_json, chip_delta_json,
+                       finished_at, starred, title, paifu_source, duration_sec
+                FROM matches
+                {"WHERE starred=1" if starred_only else ""}
+                ORDER BY match_id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            # 表示名解決 [members_json は user_id (+seat)]
+            try:
+                mm = json.loads(d.pop("members_json") or "[]")
+            except Exception:
+                mm = []
+            names = []
+            for m in mm:
+                uid = m.get("user_id") if isinstance(m, dict) else None
+                if not uid:
+                    continue
+                urow = c.execute(
+                    "SELECT COALESCE(display_name, username) AS n FROM users WHERE user_id=?",
+                    (uid,),
+                ).fetchone()
+                names.append({"user_id": uid, "seat": m.get("seat"), "name": urow["n"] if urow else uid})
+            d["members"] = names
+            out.append(d)
+    return {"matches": out}
+
+
+@app.get("/api/matches/{match_id}/paifu")
+async def get_match_paifu(match_id: int, request: Request):
+    """再生用の牌譜 [events 全量]。ログイン必須"""
+    u = current_user(request)
+    if not u:
+        raise HTTPException(status_code=401, detail="login required")
+    with db_conn() as c:
+        row = c.execute(
+            """SELECT match_id, room_id, match_no, members_json, chip_delta_json, paifu_json,
+                      finished_at, starred, title, paifu_source FROM matches WHERE match_id=?""",
+            (match_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="match not found")
+        d = dict(row)
+        for k, dst in (("paifu_json", "paifu"), ("members_json", "members"), ("chip_delta_json", "chip_delta")):
+            try:
+                d[dst] = json.loads(d.pop(k) or "null")
+            except Exception:
+                d[dst] = None
+    return d
+
+
+@app.post("/api/matches/{match_id}/star")
+async def star_match(match_id: int, request: Request):
+    """名牌譜マーク [starred/title]。ログイン済みなら誰でも [身内運用]"""
+    u = current_user(request)
+    if not u:
+        raise HTTPException(status_code=401, detail="login required")
+    body = await request.json()
+    starred = 1 if body.get("starred") else 0
+    title = str(body.get("title") or "").strip()[:80]
+    with db_conn() as c:
+        row = c.execute("SELECT match_id FROM matches WHERE match_id=?", (match_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="match not found")
+        c.execute(
+            "UPDATE matches SET starred=?, title=? WHERE match_id=?",
+            (starred, title, match_id),
+        )
+        c.commit()
+    return {"ok": True, "match_id": match_id, "starred": starred, "title": title}
 
 
 @app.get("/api/users/{user_id}")
