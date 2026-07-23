@@ -50,3 +50,6 @@ server/.venv/
 
 # local codex CLI workspace config
 .codex/
+
+# DB backups [deploy前の手動バックアップ置き場。コミット禁止]
+data/backups/
