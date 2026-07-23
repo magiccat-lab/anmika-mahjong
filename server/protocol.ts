@@ -201,6 +201,36 @@ export function validateCommandEnvelope(value: unknown): { envelope: ActionComma
  *  live accept [appendAcceptedCommand] と rewind/restore の再 fold が同じ規則を共有する。
  *  delta は accept 時点の mapping で room seat へ写像済みの値が action に焼かれている前提
  *  [mapping が後で回っても過去 command の再解釈が要らない]。 */
+/** [Sol Phase2 P1-①] fold に入る delta の fail-closed 検証。
+ *  live accept は server 計算値しか来ないので実質 assert、persist 破損や
+ *  sanitize 漏れの偽 delta はここで例外にして黙って ledger を汚さない。
+ *  精算は常に移転 [oall も fromLoser も] なので zero-sum が不変条件。 */
+function assertRoomChipDelta(delta: Record<string, number>): void {
+  let sum = 0;
+  for (const [seat, value] of Object.entries(delta)) {
+    if (!/^[0-3]$/.test(seat)) throw new Error(`room chip delta: invalid seat key ${seat}`);
+    if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value)) {
+      throw new Error(`room chip delta: non-integer value for seat ${seat}`);
+    }
+    sum += value;
+  }
+  if (sum !== 0) throw new Error(`room chip delta: not zero-sum (${sum})`);
+}
+
+/** [Sol Phase2 P1-①] mapping の shape 検証 [3 game seat が 0..3 の相異なる room seat、
+ *  抜け番はその補集合の 1 席]。 */
+function assertRoomSeatMapping(mapping: RoomSeatMapping): void {
+  const seats = Array.isArray(mapping.gameToRoom) ? mapping.gameToRoom : null;
+  if (!seats || seats.length !== 3) throw new Error('room mapping: gameToRoom must have 3 seats');
+  const all = [...seats, mapping.inactiveRoomSeat];
+  for (const seat of all) {
+    if (!Number.isInteger(seat) || seat < 0 || seat > 3) {
+      throw new Error(`room mapping: seat out of range ${seat}`);
+    }
+  }
+  if (new Set(all).size !== 4) throw new Error('room mapping: seats must be 4 distinct room seats');
+}
+
 export function applyRoomChipCommand(
   ledger: Record<string, number> | undefined,
   mapping: RoomSeatMapping | null | undefined,
@@ -210,9 +240,9 @@ export function applyRoomChipCommand(
   let nextMapping = mapping;
   const delta = (action as { _roomChipDelta?: Record<string, number> })._roomChipDelta;
   if (delta && typeof delta === 'object') {
+    assertRoomChipDelta(delta);
     nextLedger = { ...(nextLedger ?? {}) };
     for (const [seat, value] of Object.entries(delta)) {
-      if (typeof value !== 'number' || !Number.isFinite(value)) continue;
       nextLedger[seat] = (nextLedger[seat] ?? 0) + value;
     }
   }
@@ -223,7 +253,10 @@ export function applyRoomChipCommand(
     }
     // rotation 決定則 [Phase4] が server 決定値を action に焼く。境界は matchId 増加 command のみ
     const burned = (action as { _nextMapping?: RoomSeatMapping })._nextMapping;
-    if (burned && typeof burned === 'object') nextMapping = burned;
+    if (burned && typeof burned === 'object') {
+      assertRoomSeatMapping(burned);
+      nextMapping = burned;
+    }
   }
   return { ledger: nextLedger, mapping: nextMapping };
 }

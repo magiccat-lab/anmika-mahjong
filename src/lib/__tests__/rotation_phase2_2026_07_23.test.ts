@@ -17,7 +17,7 @@ import {
   type RoomStartSnapshot,
 } from '../../../server/protocol';
 import { createRoomAuthority, RoomAuthority } from '../../../server/authority';
-import { restoreAuthority } from '../../../server/ws_server';
+import { restoreAuthority, sanitizeIncomingAction, upgradeLegacySnapshotRoomLedger } from '../../../server/ws_server';
 import { applyChipFromLoser, applyChipOall, type ChipSettlementEffect, type ChipState } from '../game3/chip';
 import { defaultSanmaRule, generateTilePool } from '../shan3';
 
@@ -207,6 +207,82 @@ describe('room ledger fold [applyRoomChipCommand / appendAcceptedCommand / foldR
     expect(parsed.schemaVersion).toBe(3);
     expect(parsed.roomChipLedger).toBeUndefined();
     expect(parsed.activeMapping).toBeUndefined();
+  });
+});
+
+describe('偽装防御 [Sol Phase2 P1-①]', () => {
+  it('sanitizeIncomingAction が server 予約 field を剥がし、正規 field は残す', () => {
+    const forged = sanitizeIncomingAction({
+      type: 'discard',
+      pai: 'm1',
+      meta: { a: 1 },
+      _roomChipDelta: { '0': 100, '1': -100 },
+      _nextMapping: MAPPING_M1,
+      _blindState: { fake: true },
+      _draw: { fake: true },
+      _state: { fake: true },
+    });
+    expect(forged).toEqual({ type: 'discard', pai: 'm1', meta: { a: 1 } });
+  });
+
+  it('sanitize 済み action は appendAcceptedCommand で ledger を動かせない', () => {
+    const snapshot = {
+      ...createEmptyRoomSnapshot('room-e', 'inst'),
+      started: true,
+      roomChipLedger: { '0': 3, '1': -3, '2': 0 },
+      activeMapping: null,
+    };
+    const action = sanitizeIncomingAction({ type: 'discard', pai: 'm1', _roomChipDelta: { '0': 999, '1': -999 } });
+    const appended = appendAcceptedCommand(snapshot, { commandId: 'f1', actorSeat: 0, fromUserId: 'u0', action });
+    expect(appended.snapshot.roomChipLedger).toEqual({ '0': 3, '1': -3, '2': 0 });
+    expect(appended.command.action._roomChipDelta).toBeUndefined();
+  });
+
+  it('fold は不正 delta / 不正 mapping を fail closed で拒否する [黙って汚さない]', () => {
+    const ledger = { '0': 0, '1': 0, '2': 0, '3': 0 };
+    // zero-sum 破れ [偽装 or 永続破損]
+    expect(() => applyRoomChipCommand(ledger, MAPPING_M1, { type: 'discard', _roomChipDelta: { '0': 100, '1': -1 } })).toThrow(/zero-sum/);
+    // seat key 範囲外
+    expect(() => applyRoomChipCommand(ledger, MAPPING_M1, { type: 'discard', _roomChipDelta: { '9': 1, '0': -1 } })).toThrow(/seat key/);
+    // 非整数
+    expect(() => applyRoomChipCommand(ledger, MAPPING_M1, { type: 'discard', _roomChipDelta: { '0': 0.5, '1': -0.5 } })).toThrow(/non-integer/);
+    // mapping の重複席
+    expect(() => applyRoomChipCommand(ledger, MAPPING_M1, { type: 'nextMatch', _nextMapping: { gameToRoom: [0, 0, 1], inactiveRoomSeat: 2 } })).toThrow(/distinct/);
+    // 正常 delta は通る
+    const ok = applyRoomChipCommand(ledger, MAPPING_M1, { type: 'discard', _roomChipDelta: { '0': 2, '1': -1, '2': -1 } });
+    expect(ok.ledger).toEqual({ '0': 2, '1': -1, '2': -1, '3': 0 });
+  });
+});
+
+describe('legacy snapshot 移行 [Sol Phase2 P1-②]', () => {
+  function poolL(): string[] {
+    return generateTilePool(defaultSanmaRule()).map(String);
+  }
+
+  it('roomChipLedger 未定義の進行中部屋は canonical game ledger から seed される', () => {
+    const authority = createRoomAuthority({ preShuffledPool: poolL(), qijia: 0 });
+    // 既に chip 残高がある v2 部屋を再現
+    const game = authority.canonicalState().game;
+    game.chipLedger[0] = 12;
+    game.chipLedger[1] = -5;
+    game.chipLedger[2] = -7;
+    const legacy = { ...createEmptyRoomSnapshot('room-f', 'inst'), started: true };
+    delete (legacy as Record<string, unknown>).roomChipLedger;
+    const upgraded = upgradeLegacySnapshotRoomLedger(legacy, authority);
+    expect(upgraded).not.toBeNull();
+    expect(upgraded!.roomChipLedger).toEqual({ '0': 12, '1': -5, '2': -7 });
+    expect(upgraded!.activeMapping).toBeNull();
+    // 移行後の次精算 delta は既存残高の上に fold される [残高が消えない]
+    const after = applyRoomChipCommand(upgraded!.roomChipLedger, upgraded!.activeMapping, { type: 'discard', _roomChipDelta: { '1': 4, '0': -2, '2': -2 } });
+    expect(after.ledger).toEqual({ '0': 10, '1': -1, '2': -9 });
+  });
+
+  it('移行済み [roomChipLedger あり] / 未開始の部屋は再 seed しない', () => {
+    const authority = createRoomAuthority({ preShuffledPool: poolL(), qijia: 0 });
+    const seeded = { ...createEmptyRoomSnapshot('room-g', 'inst'), started: true, roomChipLedger: { '0': 1, '1': -1, '2': 0 } };
+    expect(upgradeLegacySnapshotRoomLedger(seeded, authority)).toBeNull();
+    const notStarted = { ...createEmptyRoomSnapshot('room-h', 'inst') };
+    expect(upgradeLegacySnapshotRoomLedger(notStarted, authority)).toBeNull();
   });
 });
 

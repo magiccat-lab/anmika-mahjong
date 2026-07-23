@@ -270,6 +270,39 @@ export function turnTimeoutAction(
   return pai ? { type: 'discard', pai } : null;
 }
 
+/** [2026-07-23 4人回し Phase2, Sol P1-①] server 計算専用の予約 field を client action から剥がす。
+ *  validateAndApply は未知 field を無視するため、合法 action に _roomChipDelta 等を同梱すると
+ *  そのまま command に焼かれ fold されてしまう [room ledger 偽装 / 偽 _blindState 配布]。
+ *  必ず accept 入口で delete し、server が計算した時だけ再付与する。 */
+export function sanitizeIncomingAction(actionInput: Record<string, unknown>): Record<string, unknown> {
+  const action = { ...actionInput };
+  delete action._roomChipDelta;
+  delete action._nextMapping;
+  delete action._blindState;
+  delete action._draw;
+  delete action._state;
+  return action;
+}
+
+/** [2026-07-23 4人回し Phase2, Sol P1-②] v1/v2 [rotation field 導入前] の進行中部屋の
+ *  one-shot 移行。roomChipLedger 未定義のまま載せると次 accept の delta fold が空 ledger
+ *  から始まり既存残高を無いことにするため、復元済み canonical game ledger を 3 席
+ *  room ledger として seed する [mapping null = 恒等]。移行不要なら null。 */
+export function upgradeLegacySnapshotRoomLedger(
+  snapshot: CanonicalRoomSnapshot,
+  authority: RoomAuthority | null,
+): CanonicalRoomSnapshot | null {
+  if (!snapshot.started || !authority || snapshot.roomChipLedger !== undefined) return null;
+  const gameLedger = authority.canonicalState().game.chipLedger;
+  return {
+    ...snapshot,
+    roomChipLedger: Object.fromEntries(
+      ([0, 1, 2] as const).map((seat) => [String(seat), gameLedger[seat] ?? 0]),
+    ),
+    activeMapping: snapshot.activeMapping ?? null,
+  };
+}
+
 export function restoreAuthority(
   snapshot: CanonicalRoomSnapshot,
   commands?: AcceptedRoomCommand[],
@@ -1143,11 +1176,18 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       persistence.resetRoom(snapshot);
     }
     const dbCommands = snapshot.started ? persistence.loadCommands(roomId) : [];
+    const restoredAuthority = restoreAuthority(snapshot, dbCommands);
+    const upgraded = upgradeLegacySnapshotRoomLedger(snapshot, restoredAuthority);
+    if (upgraded) {
+      snapshot = upgraded;
+      // saveSnapshot は snapshot 行のみ更新 [resetRoom は command log を全削除するので不可]
+      persistence.saveSnapshot(snapshot);
+    }
     const room: Room = {
       roomId,
       hostUserId,
       members: new Map(),
-      authority: restoreAuthority(snapshot, dbCommands),
+      authority: restoredAuthority,
       snapshot: { ...snapshot, commands: [] },
       matchMode: 'tonpu',
       spectators: new Map<string, SpectatorConn>(),
@@ -1218,7 +1258,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     commandId: string,
   ): { reason: string | null; command?: AcceptedRoomCommand; ack?: CommandAck } => {
     let previous = room.snapshot;
-    const action = { ...actionInput };
+    const action = sanitizeIncomingAction(actionInput);
     // actorSeat は envelope 検証時に確定済み。中継後は CPU 代理という transport
     // detail を残さず、その席が発した正規 command として全 client に適用させる。
     delete action.cpuRelay;
