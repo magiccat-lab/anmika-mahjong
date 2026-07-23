@@ -4,6 +4,7 @@
   // App.svelte から抽出 [2026-05-13 リョー指示の component 化、 1 ヶ所目]
   export let onSelectSolo: () => void = () => {};
   export let onSelectOnline: () => void = () => {};
+  export let onSelectStats: () => void = () => {};
 </script>
 
 <div class="entry-menu">
@@ -15,6 +16,10 @@
   </button>
   <button class="entry-btn online" on:click={onSelectOnline}>
     <span class="btn-main">🌐 対戦モード</span>
+  </button>
+  <!-- [2026-07-23 リョー要望] 戦績 [オンライン対戦の記録から集計] -->
+  <button class="entry-btn stats" on:click={onSelectStats}>
+    <span class="btn-main">📊 戦績</span>
   </button>
 </div>
 
@@ -73,6 +78,7 @@
   .entry-btn .btn-main { font-size: 1.15rem; font-weight: 700; line-height: 1.25; }
   .entry-btn.solo { background: #2a7; color: white; }
   .entry-btn.online { background: #27a; color: white; }
+  .entry-btn.stats { background: #7a5a1e; color: white; }
   .entry-btn:hover { transform: translateY(-2px); box-shadow: 0 7px 18px rgba(0, 0, 0, 0.4); filter: brightness(1.07); }
   .entry-btn:active { transform: translateY(0); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35); }
   .entry-btn:focus-visible { outline: 3px solid #ffd060; outline-offset: 3px; }

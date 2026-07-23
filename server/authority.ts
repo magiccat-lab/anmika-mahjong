@@ -41,6 +41,9 @@ type ValidationMirrorSnapshot = {
 export type RoomAuthorityInit = {
   preShuffledPool: string[];
   qijia: number;
+  // [2026-07-23 Sol設計 changshu protocol] 東風=1 / 半荘=2。部屋作成時の match_mode 由来で
+  // client の生 number は信用しない。未指定は Game3 default [東風]
+  changshu?: number;
 };
 
 const PLAYERS: PlayerId[] = [0, 1, 2];
@@ -106,11 +109,13 @@ export class RoomAuthority {
     this.game = new Game3({
       qijia: asPlayerId(init.qijia) ?? 0,
       preShuffledPool: init.preShuffledPool as Pai[],
+      changshu: init.changshu,
     });
     this.startKyoku();
     this.canonicalStore.reset({
       preShuffledPool: init.preShuffledPool,
       qijia: asPlayerId(init.qijia) ?? 0,
+      changshu: init.changshu,
     });
     this.canonicalStore.setOnlineReplayMode(true);
     this.matchStartChipLedger = { ...this.canonicalState().game.chipLedger };
@@ -120,6 +125,8 @@ export class RoomAuthority {
     this.game = new Game3({
       qijia: asPlayerId(init.qijia) ?? 0,
       preShuffledPool: init.preShuffledPool as Pai[],
+      // [2026-07-23] nextMatch は同 room の続き。未指定なら現在の changshu を維持
+      changshu: init.changshu ?? this.game.changshu,
     });
     this.startKyoku();
   }
@@ -900,6 +907,8 @@ export class RoomAuthority {
     this.resetMatch({
       qijia: typeof action.qijia === 'number' ? action.qijia : this.game.state.qijia,
       preShuffledPool: action.preShuffledPool,
+      // [2026-07-23] client action の changshu は読まない [server 側で room 固定値を維持]
+      changshu: this.game.changshu,
     });
     return null;
   }

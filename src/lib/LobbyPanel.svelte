@@ -15,6 +15,8 @@
   let loading = true;
   let error: string | null = null;
   let cpuCount = 0; // 0 = 友達 2 人待ち、 1 = 友達 1 人 + CPU 1、 2 = CPU 2
+  // [2026-07-23 リョー要望 東風戦設定] tonpu=東風 [東1〜東3+連荘/返り東] / hanchan=半荘
+  let matchMode: 'tonpu' | 'hanchan' = 'tonpu';
   export let onJoinRoom: (roomId: string, user: User) => void = () => {};
 
   async function refreshMe() {
@@ -39,7 +41,7 @@
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cpu_count: cpuCount }),
+        body: JSON.stringify({ cpu_count: cpuCount, match_mode: matchMode }),
       });
       if (!r.ok) throw new Error('create failed');
       const { room_id } = await r.json();
@@ -128,6 +130,13 @@
           <option value={0}>0 [友達 2 人 待ち]</option>
           <option value={1}>1 [友達 1 人 + CPU 1]</option>
           <option value={2}>2 [一人 + CPU 2]</option>
+        </select>
+      </label>
+      <label class="cpu-select">
+        形式:
+        <select bind:value={matchMode}>
+          <option value="tonpu">東風戦</option>
+          <option value="hanchan">半荘戦</option>
         </select>
       </label>
       <button class="create" on:click={createRoom}>＋ 新しい部屋を作る</button>

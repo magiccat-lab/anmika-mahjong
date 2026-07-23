@@ -28,6 +28,12 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+
+# [2026-07-23 リョー要望 戦績集計] paifu → per-user 統計の導出 [pure module]
+try:
+    from . import stats as match_stats
+except ImportError:  # `uvicorn app:app` を server/ から直接起動した場合
+    import stats as match_stats  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -179,7 +185,11 @@ def init_db() -> None:
             finished_at TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY(room_id) REFERENCES rooms(room_id)
         );
+
         """)
+        # [2026-07-23 リョー要望] 戦績集計 table 群 [match_player_stats / app_settings]。
+        # DDL の SSoT は server/stats.py [recompute_stats.py と共用]
+        match_stats.ensure_tables(c)
         # R14 P1 #5 fix: 旧 INDEX [idx_matches_room: room_id UNIQUE] を破棄、
         # room_id + match_no UNIQUE に切替。 既存 DB の migration も兼ねる
         c.execute("DROP INDEX IF EXISTS idx_matches_room")
@@ -196,6 +206,9 @@ def init_db() -> None:
         room_cols = [r[1] for r in c.execute("PRAGMA table_info(rooms)").fetchall()]
         if "instance_id" not in room_cols:
             c.execute("ALTER TABLE rooms ADD COLUMN instance_id TEXT NOT NULL DEFAULT ''")
+        # [2026-07-23 changshu protocol] 対局形式 [tonpu=東風 / hanchan=半荘]。既存 room は 東風
+        if "match_mode" not in room_cols:
+            c.execute("ALTER TABLE rooms ADD COLUMN match_mode TEXT NOT NULL DEFAULT 'tonpu'")
         for row in c.execute("SELECT room_id FROM rooms WHERE instance_id='' OR instance_id IS NULL").fetchall():
             c.execute(
                 "UPDATE rooms SET instance_id=? WHERE room_id=?",
@@ -457,6 +470,10 @@ async def create_room(request: Request):
         pass
     cpu_count = int(body.get("cpu_count", 0)) if isinstance(body, dict) else 0
     cpu_count = max(0, min(2, cpu_count))
+    # [2026-07-23 changshu protocol] 対局形式。whitelist 外は 東風 に丸める [client 数値は信用しない]
+    match_mode = body.get("match_mode") if isinstance(body, dict) else None
+    if match_mode not in ("tonpu", "hanchan"):
+        match_mode = "tonpu"
     # 1 user = 1 open 部屋 ホスト限定: 既に open があれば そっち返す [リョー指示 2026-05-13]
     with db_conn() as c:
         existing = c.execute(
@@ -472,6 +489,7 @@ async def create_room(request: Request):
             return {
                 "room_id": existing["room_id"],
                 "cpu_count": int(existing_cpu_count["n"] if existing_cpu_count else 0),
+                "match_mode": existing["match_mode"] if "match_mode" in existing.keys() else "tonpu",
                 "existing": True,
             }
     # R10 P2 #12 fix: room_id 衝突時 retry [4 文字 32^4 ~ 1M で稀だが、 同時 create で衝突可]
@@ -481,8 +499,8 @@ async def create_room(request: Request):
             candidate = _gen_room_id()
             try:
                 c.execute(
-                    "INSERT INTO rooms(room_id, instance_id, host_user_id) VALUES(?,?,?)",
-                    (candidate, _secrets.token_urlsafe(18), u["user_id"]),
+                    "INSERT INTO rooms(room_id, instance_id, host_user_id, match_mode) VALUES(?,?,?,?)",
+                    (candidate, _secrets.token_urlsafe(18), u["user_id"], match_mode),
                 )
                 room_id = candidate
                 break
@@ -509,7 +527,7 @@ async def create_room(request: Request):
                 (room_id, cpu_uid, seat),
             )
         c.commit()
-    return {"room_id": room_id, "cpu_count": cpu_count}
+    return {"room_id": room_id, "cpu_count": cpu_count, "match_mode": match_mode}
 
 
 @app.get("/api/rooms/{room_id}")
@@ -542,7 +560,9 @@ async def get_room_members_internal(room_id: str, request: Request):
     _require_internal_secret(request)
     room_id = room_id.strip().upper()
     with db_conn() as c:
-        room = c.execute("SELECT room_id FROM rooms WHERE room_id=?", (room_id,)).fetchone()
+        room = c.execute(
+            "SELECT room_id, match_mode FROM rooms WHERE room_id=?", (room_id,)
+        ).fetchone()
         if not room:
             raise HTTPException(status_code=404, detail="room not found")
         members = c.execute(
@@ -551,7 +571,8 @@ async def get_room_members_internal(room_id: str, request: Request):
                WHERE rm.room_id=? ORDER BY rm.seat""",
             (room_id,),
         ).fetchall()
-    return {"members": [dict(m) for m in members]}
+    # [2026-07-23 changshu protocol] ws authority が start 時に changshu へ変換する
+    return {"members": [dict(m) for m in members], "match_mode": room["match_mode"]}
 
 
 def _archive_or_delete_room(c: sqlite3.Connection, room_id: str) -> bool:
@@ -1510,7 +1531,15 @@ async def finish_match(request: Request):
         if sp and isinstance(sp.get("members"), list):
             members_snap_list = list(sp["members"])
         elif snapshot_members:
-            members_snap_list = [{"user_id": uid} for uid in sorted(snapshot_members)]
+            # [2026-07-23] 戦績集計に seat が要る。fallback 経路でも room_members から seat を補完
+            seat_rows = c.execute(
+                "SELECT user_id, seat FROM room_members WHERE room_id=?", (room_id,)
+            ).fetchall()
+            seat_of = {r["user_id"]: r["seat"] for r in seat_rows}
+            members_snap_list = [
+                {"user_id": uid, **({"seat": seat_of[uid]} if uid in seat_of else {})}
+                for uid in sorted(snapshot_members)
+            ]
         try:
             c.execute(
                 "INSERT INTO matches(room_id, match_no, match_uuid, members_json, paifu_json, chip_delta_json, duration_sec) VALUES(?,?,?,?,?,?,?)",
@@ -1540,6 +1569,24 @@ async def finish_match(request: Request):
                                        updated_at = datetime('now') WHERE user_id = ?""",
                 (int(delta), uid),
             )
+        # [2026-07-23 リョー要望] 戦績集計: paifu から per-user 統計を導出して同 transaction で保存。
+        # 導出失敗は試合記録を壊さない [log のみ、recompute_stats.py で後追い可能]
+        try:
+            mrow = c.execute(
+                "SELECT match_id FROM matches WHERE room_id=? AND match_no=?",
+                (room_id, next_match_no),
+            ).fetchone()
+            seat_fb_rows = c.execute(
+                "SELECT user_id, seat FROM room_members WHERE room_id=?", (room_id,)
+            ).fetchall()
+            seat_fb = {r["user_id"]: r["seat"] for r in seat_fb_rows}
+            seat_by_user = match_stats.seat_map_from_members(members_snap_list, seat_fb)
+            for srow in match_stats.build_stat_rows(paifu, seat_by_user, chip_delta):
+                match_stats.upsert_stat_row(c, mrow["match_id"], srow)
+        except Exception:
+            log.exception(
+                "match stats derivation failed [room=%s match_no=%s]", room_id, next_match_no
+            )
         # R14 P1 #5 fix: room.status は 'playing' のまま [次 試合 INSERT 通すため]、
         # 完全終了は 別 endpoint or 退室時に切替。
         # R16 P0 #1 fix: start_payloads は pop しない [次 nextMatch broadcast で
@@ -1547,6 +1594,100 @@ async def finish_match(request: Request):
         c.commit()
     return {"ok": True, "match_no": next_match_no}
     return {"ok": True}
+
+
+# ---- routes: stats [2026-07-23 リョー要望 戦績集計] ----
+
+
+def _get_setting(c: sqlite3.Connection, key: str, default: str = "") -> str:
+    row = c.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+@app.get("/api/stats/summary")
+async def stats_summary(request: Request):
+    """全 player の集計 [生カウント]。率の計算は client 側。
+
+    採用範囲はデフォルトで app_settings.stats_since 以降 [リョー指示: デバッグ完了後の
+    データから採用。未設定なら全期間]。?since=all で全期間、?since=<ISO> で任意起点。
+    """
+    u = current_user(request)
+    if not u:
+        raise HTTPException(status_code=401, detail="login required")
+    q_since = (request.query_params.get("since") or "").strip()
+    with db_conn() as c:
+        stats_since = _get_setting(c, "stats_since", "")
+        effective = "" if q_since == "all" else (q_since or stats_since)
+        rows = c.execute(
+            """
+            SELECT s.user_id,
+                   COALESCE(u.display_name, u.username, s.user_id) AS name,
+                   COUNT(*) AS games,
+                   SUM(s.incomplete) AS incomplete_matches,
+                   SUM(s.rounds) AS rounds,
+                   SUM(s.riichi) AS riichi,
+                   SUM(s.fever_riichi) AS fever_riichi,
+                   SUM(s.furo_rounds) AS furo_rounds,
+                   SUM(s.ankan) AS ankan,
+                   SUM(s.nuki) AS nuki,
+                   SUM(s.wins) AS wins,
+                   SUM(s.tsumo_wins) AS tsumo_wins,
+                   SUM(s.ron_wins) AS ron_wins,
+                   SUM(s.deal_ins) AS deal_ins,
+                   SUM(s.points_won) AS points_won,
+                   SUM(s.points_dealt_in) AS points_dealt_in,
+                   SUM(s.hule_chips) AS hule_chips,
+                   SUM(s.chip_delta) AS chip_delta,
+                   SUM(CASE WHEN s.placement=1 THEN 1 ELSE 0 END) AS place1,
+                   SUM(CASE WHEN s.placement=2 THEN 1 ELSE 0 END) AS place2,
+                   SUM(CASE WHEN s.placement=3 THEN 1 ELSE 0 END) AS place3,
+                   AVG(s.placement) AS avg_placement
+            FROM match_player_stats s
+            JOIN matches m ON m.match_id = s.match_id
+            LEFT JOIN users u ON u.user_id = s.user_id
+            WHERE (? = '' OR m.finished_at >= ?)
+            GROUP BY s.user_id
+            ORDER BY games DESC, chip_delta DESC
+            """,
+            (effective, effective),
+        ).fetchall()
+    return {
+        "stats_since": stats_since,
+        "effective_since": effective,
+        "stats_version": match_stats.STATS_VERSION,
+        "players": [dict(r) for r in rows],
+    }
+
+
+@app.post("/api/stats/since")
+async def stats_set_since(request: Request):
+    """戦績の採用開始日時 [stats_since] の切替。
+
+    [リョー指示] デバッグ完了後のデータから採用 — デバッグ完了宣言時に 'now' を叩く。
+    ANMIKA_ADMIN_USER_ID の user のみ [env 未設定なら常に 403、sqlite 直接更新で代替可]。
+    """
+    u = current_user(request)
+    admin_id = os.environ.get("ANMIKA_ADMIN_USER_ID", "")
+    if not u or not admin_id or u["user_id"] != admin_id:
+        raise HTTPException(status_code=403, detail="admin only")
+    body = await request.json()
+    value = str(body.get("since") or "").strip()
+    with db_conn() as c:
+        if value == "now":
+            c.execute(
+                "INSERT INTO app_settings(key, value, updated_at) VALUES('stats_since', datetime('now'), datetime('now')) "
+                "ON CONFLICT(key) DO UPDATE SET value=datetime('now'), updated_at=datetime('now')"
+            )
+        else:
+            # 空 = 全期間に戻す。値は matches.finished_at と同形式 [YYYY-MM-DD HH:MM:SS, UTC]
+            c.execute(
+                "INSERT INTO app_settings(key, value, updated_at) VALUES('stats_since', ?, datetime('now')) "
+                "ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime('now')",
+                (value, value),
+            )
+        c.commit()
+        v = _get_setting(c, "stats_since")
+    return {"ok": True, "stats_since": v}
 
 
 @app.get("/api/users/{user_id}")

@@ -16,6 +16,8 @@ export type RoomStartSnapshot = {
   qijia: number;
   members: RoomMemberSnapshot[];
   chipLedger?: Record<string, number>;
+  // [2026-07-23 changshu protocol] 東風=1 / 半荘=2 [部屋作成時の match_mode 由来]
+  changshu?: number;
 };
 
 export type SerializedOnlineHand = {
@@ -38,6 +40,8 @@ export type SerializedOnlineHand = {
 export type OnlineSeatProjection = {
   schemaVersion: 1;
   recipientSeat: number;
+  // [2026-07-23 changshu protocol] 部屋の対局設定 [client hydrate の source of truth]
+  gameConfig?: { changshu: number };
   gameState: Record<string, unknown>;
   shan: {
     paishu: number;

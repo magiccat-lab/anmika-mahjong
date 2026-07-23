@@ -12,7 +12,7 @@
   export let onStart: () => void = () => {};
 
   type Member = { seat: number; user_id: string; username: string; avatar_url: string | null };
-  type Room = { room_id: string; host_user_id: string; status: string };
+  type Room = { room_id: string; host_user_id: string; status: string; match_mode?: string };
 
   let room: Room | null = null;
   let members: Member[] = [];
@@ -100,7 +100,7 @@
 </script>
 
 <div class="room">
-  <h2>🀄 部屋 {roomId}</h2>
+  <h2>🀄 部屋 {roomId}{room?.match_mode === 'hanchan' ? ' [半荘戦]' : ' [東風戦]'}</h2>
   <p class="hint">招待リンク: <code>{shareLink()}</code> <button class="copy" on:click={copyLink}>📋 copy</button></p>
 
   <div class="members">

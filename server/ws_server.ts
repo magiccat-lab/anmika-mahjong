@@ -62,6 +62,8 @@ type Room = {
   members: Map<string, Member>;
   authority: RoomAuthority | null;
   snapshot: CanonicalRoomSnapshot;
+  // [2026-07-23] 部屋作成時の対局形式 [API が SSoT、start 時に changshu へ変換]
+  matchMode: 'tonpu' | 'hanchan';
   pendingStart: { qijia: number } | null;
   generation: number;
   queue: Promise<void>;
@@ -254,6 +256,8 @@ export function restoreAuthority(
   const authority = createRoomAuthority({
     preShuffledPool: snapshot.start.preShuffledPool,
     qijia: snapshot.start.qijia,
+    // [2026-07-23 changshu protocol] 東風/半荘は start snapshot が持つ [restore で default に戻さない]
+    changshu: snapshot.start.changshu,
   });
   const members = snapshot.start.members.map((member) => ({ seat: member.seat, is_cpu: member.is_cpu }));
   const cmds = commands ?? snapshot.commands;
@@ -639,6 +643,9 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
   return {
     schemaVersion: 1,
     recipientSeat,
+    // [2026-07-23 changshu protocol] client hydrate の source of truth [reconnect 初期化で
+    // current.game.changshu が default に引かれる Sol 指摘の穴を塞ぐ]
+    gameConfig: { changshu: game.changshu },
     gameState: structuredClone(game.state),
     shan: {
       paishu: game.shan.paishu,
@@ -1012,15 +1019,17 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     } catch { return null; }
   };
 
-  const fetchMembers = async (roomId: string): Promise<RoomMemberSnapshot[]> => {
-    if (!internalApiSecret) return [];
+  const fetchRoomInfo = async (
+    roomId: string,
+  ): Promise<{ members: RoomMemberSnapshot[]; matchMode: 'tonpu' | 'hanchan' }> => {
+    if (!internalApiSecret) return { members: [], matchMode: 'tonpu' };
     const response = await fetch(`${apiBase}/api/internal/rooms/${roomId}/members`, {
       headers: { 'X-Anmika-Internal-Secret': internalApiSecret },
     });
     if (!response.ok) throw new Error(`member authority returned ${response.status}`);
-    const data = await response.json() as { members?: Array<Record<string, unknown>> };
+    const data = await response.json() as { members?: Array<Record<string, unknown>>; match_mode?: unknown };
     if (!Array.isArray(data.members)) throw new Error('member authority response missing members');
-    return data.members
+    const members = data.members
       .filter((member) => typeof member.user_id === 'string' && typeof member.seat === 'number')
       .map((member) => ({
         seat: member.seat as number,
@@ -1028,6 +1037,12 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         username: typeof member.username === 'string' ? member.username : String(member.user_id),
         is_cpu: member.is_cpu === true || String(member.user_id).startsWith('CPU_'),
       }));
+    // [2026-07-23 changshu protocol] 対局形式は API の room record が SSoT
+    return { members, matchMode: data.match_mode === 'hanchan' ? 'hanchan' : 'tonpu' };
+  };
+
+  const fetchMembers = async (roomId: string): Promise<RoomMemberSnapshot[]> => {
+    return (await fetchRoomInfo(roomId)).members;
   };
 
   const getRoom = async (roomId: string, roomInstanceId: string, hostUserId: string): Promise<Room> => {
@@ -1052,6 +1067,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       members: new Map(),
       authority: restoreAuthority(snapshot, dbCommands),
       snapshot: { ...snapshot, commands: [] },
+      matchMode: 'tonpu',
       pendingStart: null,
       generation: 0,
       queue: Promise.resolve(),
@@ -1067,7 +1083,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     // Publish before the HTTP member lookup so simultaneous sockets share one
     // room object and therefore one command queue.
     rooms.set(roomId, room);
-    for (const member of await fetchMembers(roomId)) {
+    const roomInfo = await fetchRoomInfo(roomId);
+    room.matchMode = roomInfo.matchMode;
+    for (const member of roomInfo.members) {
       const previous = room.members.get(member.user_id);
       room.members.set(member.user_id, {
         ...member,
@@ -1501,7 +1519,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       return;
     }
     const now = new Date().toISOString();
-    const start = { preShuffledPool: serverShuffledPool(), qijia, members };
+    // [2026-07-23 changshu protocol] 対局形式は room record [API] 由来。client 数値は使わない
+    const changshu = room.matchMode === 'hanchan' ? 2 : 1;
+    const start = { preShuffledPool: serverShuffledPool(), qijia, members, changshu };
     room.authority = createRoomAuthority(start);
     room.snapshot = {
       ...room.snapshot,

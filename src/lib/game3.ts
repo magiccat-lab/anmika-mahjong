@@ -3972,6 +3972,25 @@ export class Game3 {
     result.chipBreakdown = [..._preBreakdown, ...this.chipBreakdown];
     result.chipTotal = this.chipLedger[winner] - chipBefore;
     const chipDelta = this.chipLedger[winner] - chipBefore;
+    // [2026-07-23 Sol設計 chipTransfer DTO] この和了の祝儀移動確定値を public field で焼き込む。
+    // UI は live chipLedger から再計算しない [後続のサイコロ/ダブロン2人目/後処理で after が
+    // 動くと「この和了の before」と混ざって表示が汚染される]。before はこの和了専用
+    // snapshot [_chipLedgerBeforeThis、ダブロン2人目でも1人目の影響を除外] を使う
+    {
+      const ctBefore = (result as any)._chipLedgerBeforeThis ?? this.preHuleSnapshot?.chipLedger ?? null;
+      if (ctBefore) {
+        (result as any).chipTransfer = {
+          v: 1,
+          before: { 0: ctBefore[0] ?? 0, 1: ctBefore[1] ?? 0, 2: ctBefore[2] ?? 0 },
+          after: { 0: this.chipLedger[0], 1: this.chipLedger[1], 2: this.chipLedger[2] },
+          delta: {
+            0: this.chipLedger[0] - (ctBefore[0] ?? 0),
+            1: this.chipLedger[1] - (ctBefore[1] ?? 0),
+            2: this.chipLedger[2] - (ctBefore[2] ?? 0),
+          },
+        };
+      }
+    }
     // ぽっちツモのサイコロは 2 系統が独立して存在する [リョー裁定 2026-07-17、65アンミカルール §4-1]:
     //  A) ぽっちツモ + その和了の祝儀 0 枚 → 救済サイコロ [一発は不要]
     //  B) 即ぽっちツモ [一発中] → サイコロ [祝儀の有無と無関係]
@@ -4037,6 +4056,14 @@ export class Game3 {
       defenBefore: beforeDefen,
       defenAfter: afterDefen,
       delta,
+      // [2026-07-23 Sol総点検] 戦績集計用の確定値焼き込み:
+      //  - chipTransfer: この和了の祝儀移動 [events だけでは後段 chip 移動を復元できない]
+      //  - defen: winnerGain [打点。delta は供託/本場込みで打点と混ざる]
+      //  - loser: 放銃者 [逆ぽっち反転時は delta の符号から放銃者を特定できない]
+      chipTransfer: (result as any).chipTransfer ?? null,
+      defen: winnerGain,
+      loser,
+      pochiReverse: isPochiReverse,
     } as any);
   }
 

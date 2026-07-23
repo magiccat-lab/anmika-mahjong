@@ -603,7 +603,9 @@ export function createGameStore() {
         shanRule: current.game.shanRule,
         qijia: projection.gameState.qijia,
         startingDefen: current.game.startingDefen,
-        changshu: current.game.changshu,
+        // [2026-07-23 Sol指摘] reconnect 直後は current.game が default 初期化で
+        // changshu が 1 に引かれる。projection.gameConfig を source of truth にする
+        changshu: Number((projection as any).gameConfig?.changshu ?? current.game.changshu),
       });
       ng.state = cloneWire(projection.gameState);
       ng.shan = Shan3.createBlind({
@@ -799,6 +801,7 @@ export function createGameStore() {
     /** オンライン対戦 接続 & game init */
     initOnlineGame(opts: {
       ws: WebSocket; qijia: 0|1|2; cpuSeats?: number[]; mySeat?: 0|1|2; isHost?: boolean; hostSeat?: 0|1|2; revision?: number; matchId?: number; roundId?: number;
+      changshu?: number;
       preShuffledPool?: string[];
       blindStart?: { hands: Record<0|1|2, string[]>; firstZimo: string; paishu: number; baopai: string[]; fubaopai: string[] | null; canDrawRinshan?: boolean; huapai?: Record<0|1|2, string[]>; goldHand?: Record<0|1|2, {p:number;s:number;z:number}>; pochiHand?: Record<0|1|2, Record<string, number>> };
     }) {
@@ -815,7 +818,7 @@ export function createGameStore() {
       let fp: any;
       if (opts.blindStart) {
         const bs = opts.blindStart;
-        ng = new Game3({ qijia: opts.qijia });
+        ng = new Game3({ qijia: opts.qijia, changshu: opts.changshu });
         ng.shan = Shan3.createBlind({
           rule: ng.shanRule,
           baopai: bs.baopai as any[],
@@ -826,7 +829,7 @@ export function createGameStore() {
         ng.initFromDeal({ hands: bs.hands as any, huapai: bs.huapai as any, goldHand: bs.goldHand as any, pochiHand: bs.pochiHand as any });
         fp = bs.firstZimo;
       } else {
-        ng = new Game3({ qijia: opts.qijia, preShuffledPool: opts.preShuffledPool });
+        ng = new Game3({ qijia: opts.qijia, preShuffledPool: opts.preShuffledPool, changshu: opts.changshu });
         ng.qipai();
         fp = ng.zimo();
       }
@@ -3175,7 +3178,7 @@ export function createGameStore() {
       }
       (this as any).reset({ preserveChip: !resetChip, preShuffledPool: opts.preShuffledPool, qijia: opts.qijia, cpuSeats: opts.cpuSeats });
     },
-    reset(opts: { preserveChip?: boolean; preShuffledPool?: string[]; qijia?: 0|1|2; cpuSeats?: number[] } = {}) {
+    reset(opts: { preserveChip?: boolean; preShuffledPool?: string[]; qijia?: 0|1|2; cpuSeats?: number[]; changshu?: number } = {}) {
       // 旧 game の chip ledger を保持する option [リョー指示 2026-05-12 次の試合へ default 持越し]
       let preservedChip: Record<0|1|2, number> | null = null;
       const currentState = get(store) as StoreState;
@@ -3191,8 +3194,10 @@ export function createGameStore() {
         });
       }
       // R12 P0 #1 fix: online で preShuffledPool / qijia を渡されたら 共有山で start
+      // [2026-07-23 changshu protocol] online [pool 指定] の reset は現 game の changshu を
+      // 継承する [nextMatch で東風/半荘設定が default に戻る Sol 指摘の穴]。solo は default 維持
       const ng = opts.preShuffledPool
-        ? new Game3({ qijia: (opts.qijia ?? 0) as any, preShuffledPool: opts.preShuffledPool })
+        ? new Game3({ qijia: (opts.qijia ?? 0) as any, preShuffledPool: opts.preShuffledPool, changshu: opts.changshu ?? currentState.game?.changshu })
         : new Game3();
       ng.qipai();
       const fp = ng.zimo();
@@ -3833,6 +3838,10 @@ function settleNagashiYakuman(g: Game3, winner: PlayerId): any {
     oya: g.currentOya,
     benbang: g.state.benbang,
   });
+  // [2026-07-23] 流し役満は applyHule を通らず events に一切残らなかった
+  // [戦績集計と牌譜再生から消える]。hule event + chipTransfer DTO をここでも焼き込む
+  const defenBefore = { 0: g.state.defen[0], 1: g.state.defen[1], 2: g.state.defen[2] };
+  const chipLedgerBefore = { 0: g.chipLedger[0], 1: g.chipLedger[1], 2: g.chipLedger[2] };
   for (const p of [0, 1, 2] as PlayerId[]) g.state.defen[p] += point.deltas[p];
 
   const chipBefore = g.chipLedger[winner];
@@ -3878,6 +3887,43 @@ function settleNagashiYakuman(g: Game3, winner: PlayerId): any {
     result.fuyuLog = reveal.fuyuLog.map((entry) => ({ ...entry }));
     result.fuyuKamiPochiPending = reveal.pendingChoice ? { ...reveal.pendingChoice } : null;
   }
+  // [2026-07-23] chipTransfer DTO [UI 表示と戦績集計の確定値] + hule event 焼き込み
+  result.chipTransfer = {
+    v: 1,
+    before: chipLedgerBefore,
+    after: { 0: g.chipLedger[0], 1: g.chipLedger[1], 2: g.chipLedger[2] },
+    delta: {
+      0: g.chipLedger[0] - chipLedgerBefore[0],
+      1: g.chipLedger[1] - chipLedgerBefore[1],
+      2: g.chipLedger[2] - chipLedgerBefore[2],
+    },
+  };
+  const defenAfter = { 0: g.state.defen[0], 1: g.state.defen[1], 2: g.state.defen[2] };
+  (g.events as any[]).push({
+    type: 'hule',
+    player: winner,
+    isRon: false,
+    isOya: winner === g.currentOya,
+    nagashi: true,
+    changbang: g.state.changbang,
+    jushu: g.state.jushu,
+    benbang: g.state.benbang,
+    qijia: g.state.qijia,
+    zhuangfeng: g.changfengZ - 1,
+    menfeng: g.zifengZ(winner) - 1,
+    hupai: [{ name: '流し役満', fanshu: '*' }],
+    defenBefore,
+    defenAfter,
+    delta: {
+      0: defenAfter[0] - defenBefore[0],
+      1: defenAfter[1] - defenBefore[1],
+      2: defenAfter[2] - defenBefore[2],
+    },
+    chipTransfer: result.chipTransfer,
+    defen: point.winnerGain,
+    loser: null,
+    pochiReverse: false,
+  });
   return result;
 }
 

@@ -15,6 +15,7 @@
   import LobbyPanel from './lib/LobbyPanel.svelte';
   import RoomPanel from './lib/RoomPanel.svelte';
   import EntryMenu from './lib/EntryMenu.svelte';
+  import StatsPanel from './lib/StatsPanel.svelte';
   import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
@@ -29,11 +30,14 @@
   import LizhiControls from './lib/LizhiControls.svelte';
   import { CUTIN_DURATION_MS, game, isFeverForcedTsumogiri, type StampId } from './lib/store';
   import type { PlayerId } from './lib/types';
+  import type { FeverCheck } from './lib/game3/feverLizhi';
   import { parseFulouList, fulouPhysicalFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
   import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint, buildDiagnosticDump } from './lib/store/paifuIo';
   import { serializeCanonical } from './lib/canonicalJson';
   import { isPositiveZ5, toCorePai } from './lib/helpers';
+  import { evaluateDrawNextBridge } from './lib/drawNextBridge';
+  import { buildChipTransferRows } from './lib/chipTransfer';
   import { getTingpaiList as tingpaiForShoupai } from './lib/game3/tingpai';
   import { feverWaitInfoFromLiveWall } from './lib/game3/feverLizhi';
   import { computeTileInventory, expectedInventory } from './lib/game3/inventory';
@@ -370,7 +374,12 @@
     return { text: `${seatDisplayNames[activePlayer as 0|1|2]} の手番`, tone: 'waiting' };
   }
 
-  $: actionStatus = (seatDisplayNames, describeActionStatus($game, currentPlayer, selfPlayer, ronCandidates, needsZimo, canTsumo));
+  let actionStatus: ActionStatus = { text: '', tone: 'waiting' } as ActionStatus;
+  $: {
+    // seatDisplayNames の変更 [ユーザー名到着] でも status 文言を再評価させる
+    void seatDisplayNames;
+    actionStatus = describeActionStatus($game, currentPlayer, selfPlayer, ronCandidates, needsZimo, canTsumo);
+  }
 
   // 牌譜 [event log] 全件
   $: events = $game.game.events;
@@ -991,7 +1000,7 @@
     : null) as LizhiPendingFlags | null;
   $: feverDapaiMap = $game.game.canLizhi(currentPlayer)
     ? $game.game.feverCandidatesByDapai(currentPlayer)
-    : new Map<string, { ok: boolean; tiles: string[]; tier: 1 | 2 | 3 | 4 }>();
+    : new Map<string, FeverCheck>();
   $: baseLizhiCandidateSet = new Set(
     baseLizhiCandidates.map((pai) => pai.replace(/[_*]$/, '')),
   );
@@ -1121,6 +1130,8 @@
   let viewMode: 'dev' | 'single' | 'online' = 'single';
   // app 起動時メニュー: 「一人回し / 対戦」 2 button、 リョー指示 2026-05-13
   let appMode: 'menu' | 'started' = 'menu';
+  // [2026-07-23 リョー要望] 戦績パネル [エントリ画面から開く]
+  let statsPanelOpen = false;
   let currentRoomId: string | null = null;
   let onlineMe: { user_id: string; username: string } | null = null;
   let onlineGameStarted = false;
@@ -1145,6 +1156,8 @@
     const initOpts: any = {
       ws,
       qijia: msg.qijia ?? 0,
+      // [2026-07-23 changshu protocol] 東風/半荘は server start payload が持つ
+      changshu: typeof msg.changshu === 'number' ? msg.changshu : undefined,
       cpuSeats: onlineMembers.filter((m: any) => m.is_cpu).map((m: any) => m.seat),
       mySeat: onlineRoomMeta?.mySeat as 0|1|2|undefined,
       isHost: !!onlineRoomMeta?.isHost,
@@ -1519,7 +1532,10 @@
   // オンラインで自分の手番なのに zimo が無い中間 state に落ちたら自動で進める
   // [drawNext は server 側 action として実装済み。単体モードは従来通り手動ボタン]
   let _autoDrawNextKey = '';
-  $: if (onlineGameStarted && needsZimo && currentPlayer === selfPlayer && !$game.roundEnded) {
+  // [2026-07-23 Sol総点検 P1] 判定窓 [槍槓/流局/サイコロ/リーチ宣言等] 中は橋をアームしない。
+  // 窓中に key を先消費すると、窓解除が events 長不変のとき同じ key で再発火できず
+  // 橋が死ぬ [本物の停止が直せなくなる]。timer 内判定も evaluateDrawNextBridge に一本化
+  $: if (onlineGameStarted && needsZimo && currentPlayer === selfPlayer && !$game.roundEnded && !progressControlsBlocked) {
     const rk = `${state.changbang}-${state.jushu}-${state.benbang}`;
     const k = `${rk}-${$game.game.events?.length ?? 0}`;
     if (k !== _autoDrawNextKey) {
@@ -1527,16 +1543,12 @@
       // [2026-07-22 Sol調査C P0] 発火時に全条件を再検証。400ms の間に正常 projection が
       // 届いていたら送らない [余計な drawNext が authority の reject/二重ツモ経路に入らない]
       setTimeout(() => {
-        const s: any = get(game);
-        if (!s || s.roundEnded) return;
-        const st = s.game.state;
-        if (`${st.changbang}-${st.jushu}-${st.benbang}` !== rk) return;
-        const cur = s.game.lunbanToPlayerId(st.lunban);
-        if (cur !== selfPlayer) return;
-        if (s.game.shoupai.get(cur)?._zimo != null) return;
-        if (s.lastZimo != null) return;
-        if (s.awaitingRonDecision || s.awaitingFulou || s.pendingFeverContinue || s.pendingFuyu
-          || s.pendingKinpei || s.pendingKamiPochi || s.pendingPochiSwap) return;
+        const verdict = evaluateDrawNextBridge(get(game), selfPlayer as PlayerId, rk);
+        if (verdict === 'rearm') {
+          if (_autoDrawNextKey === k) _autoDrawNextKey = '';
+          return;
+        }
+        if (verdict !== 'send') return;
         game.drawNext();
       }, 400);
     }
@@ -2000,7 +2012,11 @@
   <EntryMenu
     onSelectSolo={() => { appMode = 'started'; viewMode = 'single'; }}
     onSelectOnline={() => { appMode = 'started'; viewMode = 'online'; }}
+    onSelectStats={() => { statsPanelOpen = true; }}
   />
+  {#if statsPanelOpen}
+    <StatsPanel onClose={() => { statsPanelOpen = false; }} />
+  {/if}
 {:else if viewMode === 'online' && !onlineGameStarted}
   {#if currentRoomId && onlineMe}
     <RoomPanel
@@ -2760,17 +2776,16 @@
         {#if $game.lastHuleResult?.chipBreakdown?.length > 0}
           <ChipBreakdown breakdown={$game.lastHuleResult.chipBreakdown} total={$game.lastHuleResult.chipTotal ?? 0} />
         {/if}
-        <!-- [2026-07-22 リョー要望] 誰から誰に何枚 [result 添付の before ledger から算出] -->
-        {#if $game.lastHuleResult?._chipLedgerBeforeThis}
-          {@const _cb = $game.lastHuleResult._chipLedgerBeforeThis}
-          {@const _cd = [0, 1, 2].map((p) => ($game.game.chipLedger[p as PlayerId] ?? 0) - (_cb[p] ?? 0))}
+        <!-- [2026-07-22 リョー要望] 誰から誰に何枚。[2026-07-23 Sol設計] result.chipTransfer
+             [和了時に焼き込んだ確定値] から greedy 分解。live ledger 再計算は後続サイコロ/
+             ダブロン2人目で汚染され、全組合せ列挙は複数支払×複数受取で過大表示だった -->
+        {#if $game.lastHuleResult?.chipTransfer || $game.lastHuleResult?._chipLedgerBeforeThis}
+          {@const _cb = $game.lastHuleResult._chipLedgerBeforeThis ?? {}}
+          {@const _ctDelta = $game.lastHuleResult.chipTransfer?.delta
+            ?? { 0: ($game.game.chipLedger[0] ?? 0) - (_cb[0] ?? 0), 1: ($game.game.chipLedger[1] ?? 0) - (_cb[1] ?? 0), 2: ($game.game.chipLedger[2] ?? 0) - (_cb[2] ?? 0) }}
           <div class="chip-transfer">
-            {#each [0, 1, 2] as p}
-              {#each [0, 1, 2] as q}
-                {#if _cd[p] < 0 && _cd[q] > 0}
-                  <div class="ct-row">{seatDisplayNames[p as 0|1|2]}→{seatDisplayNames[q as 0|1|2]}: <strong>{Math.min(Math.abs(_cd[p]), Math.abs(_cd[q]))}枚</strong></div>
-                {/if}
-              {/each}
+            {#each buildChipTransferRows(_ctDelta) as row}
+              <div class="ct-row">{seatDisplayNames[row.from]}→{seatDisplayNames[row.to]}: <strong>{row.count}枚</strong></div>
             {/each}
           </div>
         {/if}
@@ -2888,16 +2903,14 @@
       {/if}
       {#if ($game.roundEnded || $game.pendingPingju || $game.pendingFeverContinue) && !$game.pendingKinpei}
         <div class="agari-actions">
-          {#if ($game.game.preHuleSnapshot || $game.lastHuleResult?._chipLedgerBeforeThis) && $game.lastWinner !== null}
+          {#if ($game.lastHuleResult?.chipTransfer || $game.game.preHuleSnapshot || $game.lastHuleResult?._chipLedgerBeforeThis) && $game.lastWinner !== null}
+            <!-- [2026-07-23 Sol設計] chipTransfer DTO 優先。fallback は旧 before-snapshot 再計算 -->
             {@const _ctBefore = ($game.game.preHuleSnapshot as any)?.chipLedger ?? $game.lastHuleResult?._chipLedgerBeforeThis ?? {}}
-            {@const chipDelta = [0,1,2].map(p => ($game.game.chipLedger[p as PlayerId] ?? 0) - (_ctBefore[p] ?? 0))}
+            {@const _ctDelta2 = $game.lastHuleResult?.chipTransfer?.delta
+              ?? { 0: ($game.game.chipLedger[0] ?? 0) - (_ctBefore[0] ?? 0), 1: ($game.game.chipLedger[1] ?? 0) - (_ctBefore[1] ?? 0), 2: ($game.game.chipLedger[2] ?? 0) - (_ctBefore[2] ?? 0) }}
             <div class="chip-transfer">
-              {#each [0,1,2] as p}
-                {#each [0,1,2] as q}
-                  {#if chipDelta[p] < 0 && chipDelta[q] > 0}
-                    <div class="ct-row">{seatDisplayNames[p as 0|1|2]}→{seatDisplayNames[q as 0|1|2]}: <strong>{Math.min(Math.abs(chipDelta[p]), Math.abs(chipDelta[q]))}枚</strong></div>
-                  {/if}
-                {/each}
+              {#each buildChipTransferRows(_ctDelta2) as row}
+                <div class="ct-row">{seatDisplayNames[row.from]}→{seatDisplayNames[row.to]}: <strong>{row.count}枚</strong></div>
               {/each}
             </div>
           {/if}
