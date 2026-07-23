@@ -23,6 +23,24 @@ export type ChipState = {
   pochiMultiplier: Record<PlayerId, PochiMultiplier | number>;
   chipLedger: Record<PlayerId, number>;
   chipBreakdown: ChipBreakdownEntry[];
+  /** [2026-07-23 4人回し Phase1] 精算確定 effect の sink。optional [テスト用の素 state 互換] */
+  chipEffects?: ChipSettlementEffect[];
+};
+
+/** [2026-07-23 4人回し Phase1, Sol設計] チップ精算の確定 effect。
+ *  4人回しの room-level 4-way ledger は「サイコロ精算だけ抜け番も頭数に入れる」ため、
+ *  ws 層が label 文字列に頼らず精算種別を判別できる型付きの発行点が要る。
+ *  perPayer = 倍率適用後の 1 人あたり支払額 [符号込み。逆ぽっち等は負]。 */
+export type ChipSettlementKind = 'dice' | 'normal';
+export type ChipSettlementEffect = {
+  kind: ChipSettlementKind;
+  form: 'oall' | 'fromLoser';
+  winner: PlayerId;
+  loser: PlayerId | null;
+  base: number;
+  multiplier: number;
+  perPayer: number;
+  label: string;
 };
 
 export type ChipMulOpts = {
@@ -33,7 +51,11 @@ export type ChipMulOpts = {
   mode?: 'tsumo' | 'ron';
 };
 
-export type ChipApplyOpts = ChipMulOpts & { label?: string };
+export type ChipApplyOpts = ChipMulOpts & {
+  label?: string;
+  /** [2026-07-23 4人回し Phase1] 精算種別。サイコロ精算の呼出だけ 'dice' を明示する */
+  settlementKind?: ChipSettlementKind;
+};
 
 function pochiChipMultiplier(v: unknown): number {
   if (v && typeof v === 'object' && typeof (v as any).chip === 'number') return (v as any).chip;
@@ -96,6 +118,17 @@ export function applyChipOall(
     if (p === target) st.chipLedger[p] += actualN * 2;
     else st.chipLedger[p] -= actualN;
   }
+  // [2026-07-23 4人回し Phase1] ledger 確定と同時に型付き effect を発行 [1精算=1発行]
+  st.chipEffects?.push({
+    kind: opts.settlementKind ?? 'normal',
+    form: 'oall',
+    winner: target,
+    loser: null,
+    base: n,
+    multiplier: m,
+    perPayer: actualN,
+    label: opts.label ?? '?',
+  });
 }
 
 /** ロン時の放銃者のみから N chip 徴収 */
@@ -114,4 +147,15 @@ export function applyChipFromLoser(
   st.chipBreakdown.push({ label: opts.label ?? '?', base: n, multiplier: m, total: actualN, mode: 'ron', multiplierParts: detail.parts });
   st.chipLedger[winner] += actualN;
   st.chipLedger[loser] -= actualN;
+  // [2026-07-23 4人回し Phase1] ledger 確定と同時に型付き effect を発行 [1精算=1発行]
+  st.chipEffects?.push({
+    kind: opts.settlementKind ?? 'normal',
+    form: 'fromLoser',
+    winner,
+    loser,
+    base: n,
+    multiplier: m,
+    perPayer: actualN,
+    label: opts.label ?? '?',
+  });
 }

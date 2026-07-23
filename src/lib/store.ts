@@ -2180,6 +2180,8 @@ export function createGameStore() {
               bypassFever: false,
               label: `🎲 ゾロ目連続特典 [${n},${n}] ×${consec}`,
               mode: chanceMode,
+              // [2026-07-23 4人回し Phase1] サイコロ精算 [抜け番も頭数に入る対象]
+              settlementKind: 'dice',
             });
             // 累積 zoroBonus [倍率込み実額、払いは負値] を summary 表示用に store
             // applyChipOall 直後の chipBreakdown 末尾 entry が今回 push 分
@@ -2212,6 +2214,8 @@ export function createGameStore() {
               bypassFever: false,
               label: `🎲 サイコロ ${chance.name} [${hits} hit × ${baseChip}]`,
               mode: (chance as any).mode ?? 'tsumo',
+              // [2026-07-23 4人回し Phase1] サイコロ精算 [抜け番も頭数に入る対象]
+              settlementKind: 'dice',
             });
             s.message = `🎲 サイコロチャンス ${chance.name}: ${hits} hit、 chip ${chipN} オール`;
           } else if (zoroBonusThisRoll === 0) {

@@ -36,6 +36,8 @@ export type PreHuleSnapshot = {
   qianggangPending: boolean;
   eventsLen: number;
   chipBreakdownLen: number;
+  /** [2026-07-23 4人回し Phase1] chipEffects の截断復元用 [旧 snapshot 互換で optional] */
+  chipEffectsLen?: number;
   fuyuRevealState: any;
 };
 
@@ -134,6 +136,7 @@ export function saveSnapshot(refs: SnapshotRefs): PreHuleSnapshot {
     qianggangPending: refs.game?.qianggangPending ?? false,
     eventsLen: (refs.game?.events ?? []).length,
     chipBreakdownLen: (refs.game?.chipBreakdown ?? []).length,
+    chipEffectsLen: (refs.game?.chipEffects ?? []).length,
     fuyuRevealState: refs.game?.fuyuRevealState
       ? JSON.parse(JSON.stringify(refs.game.fuyuRevealState))
       : { 0: null, 1: null, 2: null },
@@ -205,6 +208,10 @@ export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null
     refs.game.qianggangPending = snap.qianggangPending;
     if (Array.isArray(refs.game.events)) refs.game.events.length = snap.eventsLen;
     if (Array.isArray(refs.game.chipBreakdown)) refs.game.chipBreakdown.length = snap.chipBreakdownLen;
+    // [2026-07-23 4人回し Phase1] 投機評価の巻き戻しで effect も一緒に截断 [幻の精算を残さない]
+    if (Array.isArray(refs.game.chipEffects) && typeof snap.chipEffectsLen === 'number') {
+      refs.game.chipEffects.length = Math.min(refs.game.chipEffects.length, snap.chipEffectsLen);
+    }
     refs.game.fuyuRevealState = snap.fuyuRevealState
       ? JSON.parse(JSON.stringify(snap.fuyuRevealState))
       : { 0: null, 1: null, 2: null };

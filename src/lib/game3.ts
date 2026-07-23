@@ -159,7 +159,7 @@ function countPhysicalRedDora(sp: any, ronpai: string | null): number {
 import { canFeverLizhi as canFeverLizhiHelper, isFeverWaitExhausted as isFeverWaitExhaustedHelper, feverCandidatesByDapai as feverCandidatesByDapaiHelper, rainbowKanUpgradeTier, type FeverCheck } from './game3/feverLizhi';
 import { isKanpaman as isKanpamanHelper, doraIndicatorOf as doraIndicatorOfHelper } from './game3/yaku';
 import { tulipNeighbors } from './game3/tulip';
-import { computeChipMultiplier as computeChipMultiplierHelper, applyChipOall as applyChipOallHelper, applyChipFromLoser as applyChipFromLoserHelper, type ChipState as ChipStateT, type ChipBreakdownEntry } from './game3/chip';
+import { computeChipMultiplier as computeChipMultiplierHelper, applyChipOall as applyChipOallHelper, applyChipFromLoser as applyChipFromLoserHelper, type ChipState as ChipStateT, type ChipApplyOpts as ChipApplyOptsT, type ChipBreakdownEntry, type ChipSettlementEffect } from './game3/chip';
 import { getTingpaiList as getTingpaiListHelper, getTingpaiListBeforeZimo as getTingpaiListBeforeZimoHelper, canTsumoWithPochiSwap as canTsumoWithPochiSwapHelper, americanChitoiXiangting, americanChitoiComplete, countAmericanChitoiQuads } from './game3/tingpai';
 import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotHelper, type PreHuleSnapshot } from './game3/snapshot';
 import { applyFuyuChip as applyFuyuChipHelper, applyChipsOnHule as applyChipsOnHuleHelper, type HuleChipCtx, type FuyuAdvanceResult, type FuyuRevealState } from './game3/huleChip';
@@ -805,6 +805,16 @@ export class Game3 {
 
   /** chip 加算 breakdown [局結果 panel 表示用、 アガリ毎にリセット] */
   chipBreakdown: ChipBreakdownEntry[] = [];
+  /** [2026-07-23 4人回し Phase1] チップ精算の確定 effect sink。
+   *  authority が accept 毎に takeChipEffects() で drain して command へ焼く [Phase2]。
+   *  投機評価の巻き戻しは snapshot の chipEffectsLen 截断で守られる */
+  chipEffects: ChipSettlementEffect[] = [];
+  /** effect を取り出して sink を空にする [消費は 1 回きり] */
+  takeChipEffects(): ChipSettlementEffect[] {
+    const out = this.chipEffects;
+    this.chipEffects = [];
+    return out;
+  }
 
   /** chip helper 用の state ビュー [readonly では無く、 helper が直接 mutate] */
   private _chipState(): ChipStateT {
@@ -815,6 +825,8 @@ export class Game3 {
       pochiMultiplier: this.pochiMultiplier,
       chipLedger: this.chipLedger,
       chipBreakdown: this.chipBreakdown,
+      // [2026-07-23 4人回し Phase1] 精算 effect の sink [参照渡し。helper が発行を積む]
+      chipEffects: this.chipEffects,
     };
   }
 
@@ -830,12 +842,12 @@ export class Game3 {
     this.setPochiMultiplier(player, nextPochiMultiplier(this.pochiMultiplier[player], color));
   }
 
-  applyChipOall(target: PlayerId, n: number, opts: { bypassShuvari?: boolean; bypassFever?: boolean; bypassPochi?: boolean; label?: string; mode?: 'tsumo' | 'ron' } = {}): void {
+  applyChipOall(target: PlayerId, n: number, opts: ChipApplyOptsT = {}): void {
     applyChipOallHelper(this._chipState(), target, n, opts);
   }
 
   /** ロン時の放銃者のみから N chip 徴収 [面前役系 / 一発 / 裏ドラ等] */
-  applyChipFromLoser(winner: PlayerId, loser: PlayerId, n: number, opts: { bypassShuvari?: boolean; bypassFever?: boolean; bypassPochi?: boolean; label?: string; mode?: 'tsumo' | 'ron' } = {}): void {
+  applyChipFromLoser(winner: PlayerId, loser: PlayerId, n: number, opts: ChipApplyOptsT = {}): void {
     applyChipFromLoserHelper(this._chipState(), winner, loser, n, opts);
   }
 
