@@ -1935,6 +1935,19 @@ async def user_profile(user_id: str):
 
 _DIST_DIR = Path(__file__).resolve().parent.parent / "dist"
 
+# SPA 長寿タブ対策 [2026-07-22 リョー実害: 1日前のバンドルのタブで「直ってない」誤認]。
+# npm run build が dist/version.json を吐き、client [src/lib/versionWatch.ts] が定期照合する。
+# mount 済みの /assets などと違い単発ファイルなので明示 route が要る。
+# no-store: ここが cache されると差分検知そのものが死ぬ。
+@app.get("/version.json")
+async def _version_json():
+    headers = {"Cache-Control": "no-store, max-age=0"}
+    path = _DIST_DIR / "version.json"
+    if not path.exists():
+        # dev / build 前。client 側は 404 を黙って無視する
+        return JSONResponse(status_code=404, content={"detail": "no version.json"}, headers=headers)
+    return FileResponse(path, media_type="application/json", headers=headers)
+
 
 @app.get("/")
 async def index(request: Request):

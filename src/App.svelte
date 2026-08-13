@@ -45,6 +45,7 @@
   import { computeTileInventory, expectedInventory } from './lib/game3/inventory';
   import { countDisplayDora } from './lib/doraDisplay';
   import { findWhiteKanCandidate, isLizhiDiscardableCandidate, lizhiCandidatesForFlags, lizhiChoiceId, lizhiChoiceLabel, type LizhiPendingFlags } from './lib/lizhiUi';
+  import { startVersionWatch } from './lib/versionWatch';
 
   // スタンプ pallet 開閉 [自家「💬」 button 押下時 true]
   let stampPalletOpen = false;
@@ -60,25 +61,14 @@
   const uiBoardV2 = typeof window === 'undefined' || !new URLSearchParams(window.location.search).has('uiv1');
 
   // [2026-07-22 リョー実害: 古いバンドルのタブで「直ってない」誤認が多発]
-  // build 時に吐く version.json を60秒ごとに照合し、差分でリロード案内を出す
+  // build 時に吐く version.json を定期照合し、差分でリロード案内トーストを出す。
+  // 検知しても勝手にリロードはしない [対局中の操作を奪わない]。詳細は lib/versionWatch.ts
   let newVersionAvailable = false;
-  let _bootVersion: string | null = null;
-  function startVersionWatch() {
-    const check = async () => {
-      try {
-        const r = await fetch(`/version.json?ts=${Date.now()}`, { cache: 'no-store' });
-        if (!r.ok) return;
-        const j = await r.json();
-        const v = String(j?.v ?? '');
-        if (!v) return;
-        if (_bootVersion === null) { _bootVersion = v; return; }
-        if (v !== _bootVersion) newVersionAvailable = true;
-      } catch { /* offline等は無視 */ }
-    };
-    check();
-    setInterval(check, 60_000);
+  let newVersionToastDismissed = false;
+  if (typeof window !== 'undefined') {
+    const watch = startVersionWatch({ onNewVersion: () => { newVersionAvailable = true; } });
+    onDestroy(() => watch.stop());
   }
-  if (typeof window !== 'undefined') startVersionWatch();
 
   // [2026-07-22 リョー要望] オンラインは P0/P1 じゃなくユーザー名で表示する
   let seatDisplayNames: [string, string, string] = ['P0', 'P1', 'P2'];
@@ -3144,10 +3134,12 @@
     </div>
   {/if}
 
-  {#if newVersionAvailable}
-    <div class="new-version-toast" role="alert">
+  <!-- 対局中でも無視できる通知にとどめる [modal / 強制リロード禁止]。閉じたら次の起動まで出さない -->
+  {#if newVersionAvailable && !newVersionToastDismissed}
+    <div class="new-version-toast" role="status">
       <span>新しいバージョンがある。リロードで反映してくれ</span>
       <button on:click={() => location.reload()}>🔄 リロード</button>
+      <button class="dismiss" title="あとで" aria-label="あとで" on:click={() => (newVersionToastDismissed = true)}>✕</button>
     </div>
   {/if}
 
@@ -5330,6 +5322,11 @@
     padding: 5px 12px;
     font-weight: 700;
     cursor: pointer;
+  }
+  .new-version-toast button.dismiss {
+    background: transparent;
+    color: #ffd060;
+    padding: 5px 6px;
   }
   /* [2026-07-23 リョー要望 観戦モード] */
   .spectator-wait {
