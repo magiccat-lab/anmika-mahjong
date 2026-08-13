@@ -6,9 +6,19 @@
   export let waitRemain: number = 0;
   export let shanRemain: number = 0;
   export let onSelect: (use: boolean) => void;
+
+  // 2026-08-13 手順F: shell を Sheet へ統合 [寸法・色は従来値をそのまま渡す]
+  import Sheet from './Sheet.svelte';
 </script>
 
-<div class="modal fuyu">
+<Sheet
+  ariaLabel="フィーバー中の冬使用選択"
+  tone="dark"
+  size="standard"
+  top="min(22%, 48px)"
+  border="3px solid skyblue"
+  z={1010}
+>
   <div class="title">❄️ フィーバー中、 冬を使う？ [{winnerName ?? `player ${winner}`}]</div>
   <div class="info">
     <div class="info-row">残り待ち牌: <strong>{waitRemain}</strong> 枚</div>
@@ -18,29 +28,9 @@
     <button class="primary" on:click={() => onSelect(true)}>使う [アリス発動 + フィーバー終了]</button>
     <button class="secondary" on:click={() => onSelect(false)}>保留 [継続]</button>
   </div>
-</div>
+</Sheet>
 
 <style>
-  .modal {
-    position: fixed;
-    /* 2026-07-22 SP対応: 低背でも収まるよう固定寸法を流体化 [PC は従来寸法に収束] */
-    top: min(22%, 48px);
-    left: 50%;
-    transform: translateX(-50%);
-    background: #222;
-    color: #fff;
-    padding: clamp(12px, 4dvh, 22px) clamp(16px, 5dvw, 28px);
-    z-index: 1010;
-    border-radius: 10px;
-    font-family: 'Noto Sans JP', sans-serif;
-    min-width: min(460px, 88dvw);
-    max-width: 94dvw;
-    max-height: 86dvh;
-    overflow-y: auto;
-    box-sizing: border-box;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-  }
-  .modal.fuyu { border: 3px solid skyblue; }
   .title { font-weight: bold; margin-bottom: 14px; font-size: 20px; }
   .info { margin: 10px 0 16px; display: flex; gap: 24px; }
   .info-row { font-size: 17px; }

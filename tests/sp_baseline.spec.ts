@@ -23,11 +23,10 @@ function intersects(a: Box, b: Box): boolean {
   return !(a.bottom <= b.top || b.bottom <= a.top || a.right <= b.left || b.right <= a.left);
 }
 
-// 2026-07-22 から v2 がデフォルト ['/']、旧レイアウトは ?uiv1=1 の退避ハッチ。
-// 旧層を削除する手順F まで、両方が同じ幾何不変条件を満たすことを常時検証する
+// 2026-08-13 手順F: 旧レイアウト層と ?uiv1=1 退避ハッチを削除したので v2 単独。
+// FLAGS の形は残す [将来また並行レイアウトを足す時のため]
 const FLAGS = [
   { name: 'v2', query: '/' },
-  { name: 'legacy', query: '/?uiv1=1' },
 ];
 
 for (const fl of FLAGS)

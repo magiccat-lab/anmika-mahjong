@@ -8,9 +8,19 @@
   export let onSelect: (target: 'haru' | 'natsu' | 'aki' | 'fuyu' | null) => void;
   /** true: フィーバー時、 保留可。 false: 通常アガリ、 保留不可 [リョー指示 2026-05-12] */
   export let allowHold: boolean = false;
+
+  // 2026-08-13 手順F: shell を Sheet へ統合 [寸法・色は従来値をそのまま渡す]
+  import Sheet from './Sheet.svelte';
 </script>
 
-<div class="modal kinpei">
+<Sheet
+  ariaLabel="金北 強化対象選択"
+  tone="dark"
+  size="compact"
+  top="min(30%, 64px)"
+  border="2px solid gold"
+  z={1000}
+>
   <div class="title">🎁 金北 強化対象選択 [{winnerName ?? `player ${winner}`}]{allowHold ? '' : ' [必須]'}</div>
   {#if preview}
     <div class="preview">現時点: {preview.fanshu !== undefined ? `${preview.fanshu}翻` : '役満'} / {(preview.hupai ?? []).map((h) => h.name).join('・')}</div>
@@ -32,26 +42,9 @@
       <button class="hold" on:click={() => onSelect(null)}>保留 [今局のみ]</button>
     {/if}
   </div>
-</div>
+</Sheet>
 
 <style>
-  .modal {
-    position: fixed;
-    top: min(30%, 64px);
-    left: 50%;
-    transform: translateX(-50%);
-    background: #222;
-    color: #fff;
-    padding: 12px 16px;
-    z-index: 1000;
-    border-radius: 8px;
-    font-family: 'Noto Sans JP', sans-serif;
-    max-width: 94dvw;
-    max-height: 86dvh;
-    overflow-y: auto;
-    box-sizing: border-box;
-  }
-  .modal.kinpei { border: 2px solid gold; }
   .preview { font-size: 11px; color: #ffe9ad; margin-bottom: 8px; max-width: 420px; line-height: 1.5; }
   .title { font-weight: bold; margin-bottom: 8px; font-size: 13px; }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; }

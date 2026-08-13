@@ -65,10 +65,20 @@
 - E. modal SP 適合 — **サイズ流体化まで済** [ぽっち開示/Fuyu/SaiKoro/Kinpei。
   ぽっち選択2種は元から流体]。Sheet 共通 shell への構造統合は F と同時にやる
   [旧 !important 層が生きている間は二重管理になるだけのため]
-- F. 旧層一括除去 — **soak 待ち**。2026-07-22 に v2 をデフォルト化 [?uiv1=1 が退避ハッチ]。
-  リョーが v2 で数日回して問題なければ: 旧 @media 2層 + 全体 tile override +
-  !important 群 + ハッチ削除、agari-unified-panel の低背フルスクリーン規則を
-  v2 セクションへ移植、Sheet shell 統合
+- F. 旧層一括除去 — **2026-08-13 実施 [一部残]**。
+  - 済: 旧 @media 2層削除 [v2 が上書きしていなかった宣言は v2 セクションの
+    「手順F 移植分」へ値そのまま移植]、`?uiv1=1` ハッチ削除 [ui-board-v2 は常時 ON]、
+    河の旧 absolute 配置 + inline 絶対座標 + `4vmin !important` 削除、
+    `center-board` の `translateY(-12vh)` hack 削除、
+    agari-unified-panel / `.modal.sai` の低背フルスクリーン規則を v2 セクションへ移植
+  - 一部: Sheet shell 統合 — `src/lib/Sheet.svelte` を新設し ぽっち選択2種 /
+    FuyuModal / KinpeiModal を移行。SaiKoroModal と RoundEndPanel は未移行
+    [SaiKoro は App 側の `:global(.modal.sai)` !important 層が厚く、
+     RoundEnd は元から「最後」の予定]
+  - 未: **全体 tile override** [`main.mode-single :global(.tile.size-md/.size-sm)`] は
+    残した。v2 は手牌/河/ドラ/抜きの4文脈しか牌サイズを指定しておらず、
+    左右家 vtile・フーロ・ぽっち選択 modal・フィーバー待ちサイドバーが今もこれに依存する。
+    消す前に文脈ごとの `--tile-md-*` / `--tile-sm-*` 指定へ置き換えること
 
 ## デスクトップパリティ [v2 デフォルト化の前提、確認済み]
 

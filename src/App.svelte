@@ -9,6 +9,7 @@
   import WallPanel from './lib/WallPanel.svelte';
   import DebugLogPanel from './lib/DebugLogPanel.svelte';
   import ZimoHistory from './lib/ZimoHistory.svelte';
+  import Sheet from './lib/Sheet.svelte';
   import FuyuModal from './lib/FuyuModal.svelte';
   import KinpeiModal from './lib/KinpeiModal.svelte';
   import SaiKoroModal from './lib/SaiKoroModal.svelte';
@@ -56,9 +57,8 @@
     game.sendStamp(actorSeat as PlayerId, id);
   }
 
-  // SP再設計 v2 [docs/sp-ui-redesign.md]: 2026-07-22 リョー承認で v2 をデフォルト化。
-  // ?uiv1=1 が旧レイアウトへの退避ハッチ [数日 soak して問題なければ旧層ごと削除 = 手順F]
-  const uiBoardV2 = typeof window === 'undefined' || !new URLSearchParams(window.location.search).has('uiv1');
+  // SP再設計 v2 [docs/sp-ui-redesign.md]: 2026-07-22 デフォルト化 → 2026-08-13 手順F で
+  // 旧レイアウト層と ?uiv1=1 退避ハッチを削除。ui-board-v2 は常時 ON [class は CSS 用に固定]。
 
   // [2026-07-22 リョー実害: 古いバンドルのタブで「直ってない」誤認が多発]
   // build 時に吐く version.json を定期照合し、差分でリロード案内トーストを出す。
@@ -2176,7 +2176,7 @@
     <button class="mode-toggle" on:click={() => { viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>← オフラインに戻る</button>
   </div>
 {:else}
-<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class:ui-board-v2={uiBoardV2} class:spectating={onlineSpectator} on:contextmenu={onContextMenuTsumokiri}>
+<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class="ui-board-v2" class:spectating={onlineSpectator} on:contextmenu={onContextMenuTsumokiri}>
   <!-- [2026-07-23 リョー要望 観戦モード] 閲覧専用の明示バナー -->
   {#if onlineSpectator && onlineGameStarted}
     <div class="spectator-banner">
@@ -2386,56 +2386,52 @@
       <KinpeiModal preview={$game.pendingKinpei.preview ?? null} winnerName={onlineGameStarted ? seatDisplayNames[$game.pendingKinpei.winner] : null} winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
     {/if}
     {#if $game.pendingKamiPochi && (!onlineGameStarted || $game.pendingKamiPochi.decisionOwners.includes(actorSeat)) && !fxPresentationBusy}
-      <div class="pochi-choice-backdrop" role="presentation">
-        <dialog open class="pochi-choice-modal" aria-label="神ぽっちの牌選択">
-          <h2>神ぽっち</h2>
-          <p>
-            P{$game.pendingKamiPochi.winner}・{$game.pendingKamiPochi.context === 'fuyu' ? `冬 ${$game.pendingKamiPochi.tier === 'lower' ? '下段' : '上段'}` : 'ドラ表示'}
-            の正ぽっちを取る牌を選択
-          </p>
-          <!-- 2026-07-20 リョー報告: どの牌に取るかは手牌を見ないと決められないのに
-               modal が手牌を覆っていた。裏に透かすだけだと小さいので手牌を modal 内に出す -->
-          <div class="pochi-choice-hand">
-            <span class="pochi-choice-hand-label">自分の手牌</span>
+      <Sheet ariaLabel="神ぽっちの牌選択" tone="light" size="wide" backdrop="hand-peek" top="12px" border="2px solid #e9c95c" z={9401}>
+        <h2 class="pochi-choice-title">神ぽっち</h2>
+        <p class="pochi-choice-note">
+          P{$game.pendingKamiPochi.winner}・{$game.pendingKamiPochi.context === 'fuyu' ? `冬 ${$game.pendingKamiPochi.tier === 'lower' ? '下段' : '上段'}` : 'ドラ表示'}
+          の正ぽっちを取る牌を選択
+        </p>
+        <!-- 2026-07-20 リョー報告: どの牌に取るかは手牌を見ないと決められないのに
+             modal が手牌を覆っていた。裏に透かすだけだと小さいので手牌を modal 内に出す -->
+        <div class="pochi-choice-hand">
+          <span class="pochi-choice-hand-label">自分の手牌</span>
+          <div class="pochi-choice-hand-tiles">
+            {#each shoupai0 as pai}
+              <Tile {pai} size="sm" />
+            {/each}
+          </div>
+          {#if fulou0.length > 0}
+            <span class="pochi-choice-hand-label">副露</span>
             <div class="pochi-choice-hand-tiles">
-              {#each shoupai0 as pai}
+              {#each fulou0.flatMap((m) => m.tiles) as pai}
                 <Tile {pai} size="sm" />
               {/each}
             </div>
-            {#if fulou0.length > 0}
-              <span class="pochi-choice-hand-label">副露</span>
-              <div class="pochi-choice-hand-tiles">
-                {#each fulou0.flatMap((m) => m.tiles) as pai}
-                  <Tile {pai} size="sm" />
-                {/each}
-              </div>
-            {/if}
-          </div>
-          <div class="pochi-choice-grid">
-            {#each $game.pendingKamiPochi.candidates as pai}
-              <button type="button" class="pochi-choice-tile" aria-label={`${pai} に取る`} on:click={() => game.selectKamiPochi(pai, $game.pendingKamiPochi?.occurrenceKey)}>
-                <Tile {pai} size="md" />
-              </button>
-            {/each}
-          </div>
-        </dialog>
-      </div>
+          {/if}
+        </div>
+        <div class="pochi-choice-grid">
+          {#each $game.pendingKamiPochi.candidates as pai}
+            <button type="button" class="pochi-choice-tile" aria-label={`${pai} に取る`} on:click={() => game.selectKamiPochi(pai, $game.pendingKamiPochi?.occurrenceKey)}>
+              <Tile {pai} size="md" />
+            </button>
+          {/each}
+        </div>
+      </Sheet>
     {/if}
     {#if $game.pendingPochiSwap && (!onlineGameStarted || $game.pendingPochiSwap.decisionOwners.includes(actorSeat)) && !fxPresentationBusy}
-      <div class="pochi-choice-backdrop" role="presentation">
-        <dialog open class="pochi-choice-modal" aria-label="ぽっちの高目選択">
-          <h2>{$game.pendingPochiSwap.kind === 'deka' ? 'でかぽっち' : '白ぽっち'} 高目選択</h2>
-          <p>祝儀期待値が同率の候補から選択</p>
-          <div class="pochi-choice-grid">
-            {#each $game.pendingPochiSwap.candidates as candidate}
-              <button type="button" class="pochi-choice-tile" aria-label={`${candidate.target} に取る`} on:click={() => game.selectPochiSwap(candidate.target)}>
-                <Tile pai={candidate.target} size="md" />
-                <small>{candidate.expectedChip}枚期待</small>
-              </button>
-            {/each}
-          </div>
-        </dialog>
-      </div>
+      <Sheet ariaLabel="ぽっちの高目選択" tone="light" size="wide" backdrop="hand-peek" top="12px" border="2px solid #e9c95c" z={9401}>
+        <h2 class="pochi-choice-title">{$game.pendingPochiSwap.kind === 'deka' ? 'でかぽっち' : '白ぽっち'} 高目選択</h2>
+        <p class="pochi-choice-note">祝儀期待値が同率の候補から選択</p>
+        <div class="pochi-choice-grid">
+          {#each $game.pendingPochiSwap.candidates as candidate}
+            <button type="button" class="pochi-choice-tile" aria-label={`${candidate.target} に取る`} on:click={() => game.selectPochiSwap(candidate.target)}>
+              <Tile pai={candidate.target} size="md" />
+              <small>{candidate.expectedChip}枚期待</small>
+            </button>
+          {/each}
+        </div>
+      </Sheet>
     {/if}
     <!-- 2026-07-16 リョー指示: solo の CPU 和了サイコロは人間の確認までモーダルも進行も止める -->
     <!-- 2026-07-19 codex指摘: cpuWinAck=false は cpuStepImpl 経由 [dev 含む全ローカルモード] で立つのに
@@ -2667,25 +2663,25 @@
       </div>
       <!-- 4 方向 河ゾーン [雀魂風、 6 牌/行で wrap]、 各 player の向きに合わせて回転 -->
       <!-- SP再設計 手順D [docs/sp-ui-redesign.md]: --hr/--hc は論理座標 [段/列]。
-           旧レイアウトは従来通り inline top/left で絶対配置 [変数は未使用で無害]、
-           v2 は inline offset を無効化して grid 配置にこの変数を使う -->
+           [2026-08-13 手順F] 旧レイアウト用の inline 絶対座標 [top/left/right/bottom]
+           は削除。v2 の 6列固定 grid がこの変数だけで座標を決める -->
       <div class="hez hez-bottom">
         {#each he0 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {Math.floor(i / 6) * 6}vmin; left: {(i % 6) * 5.5}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6};">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
       </div>
       <div class="hez hez-left">
         {#each he1 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; top: {(i % 6) * 5.5}vmin; right: {Math.floor(i / 6) * 6}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6};">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
       </div>
       <div class="hez hez-right">
         {#each he2 as t, i}
-          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6}; bottom: {(i % 6) * 5.5}vmin; left: {Math.floor(i / 6) * 6}vmin;">
+          <span class="hez-tile {t.endsWith('_') ? 'lizhi-tile' : ''} {t.includes('#n') ? 'naki-tile' : ''} {t.includes('#t') ? 'tsumogiri-tile' : ''}" style="--hr: {Math.floor(i / 6)}; --hc: {i % 6};">
             <Tile pai={t.replace(/(#[nt])+|_$/g, '')} size="md" />
           </span>
         {/each}
@@ -3648,7 +3644,7 @@
   }
 
   /* 中央 卓 / 河ゾーン / 得点ボックス [雀魂風]
-     center-board ごと translateY で上にシフト [score-box / 河 tile 同期] */
+     [2026-08-13 手順F] translateY(-12vh) の持ち上げ hack は廃止 [v2 は行内で完結] */
   main.mode-single .center-board {
     grid-area: center;
     position: relative;
@@ -3656,8 +3652,6 @@
     align-items: center;
     justify-content: center;
     overflow: visible;
-    /* score-box と 河 を P0 抜きハイ直下まで上げる [リョー指示 2026-05-12] */
-    transform: translateY(-12vh);
   }
   /* ロン choice panel: 白bg 上半分ロン / 下半分スキップ [リョー指示 2026-05-12] */
   main.mode-single .center-board .ron-choice-panel {
@@ -3802,20 +3796,14 @@
   main.mode-single .score-box .score-side.shuvari { background: rgba(255, 80, 80, 0.25); }
   main.mode-single .score-box .score-side.fever { background: rgba(255, 160, 60, 0.3); }
   /* 河ゾーン: 中央 score-box の周囲に 4 方向の捨て牌 */
-  /* 4 方向河ゾーン [雀魂風]: 6 tiles per row、 player の向きに合わせて回転、 外側が下 [tile bottom edge は外向き] */
+  /* 4 方向河ゾーン [雀魂風]: 6 tiles per row、 player の向きに合わせて回転、 外側が下 [tile bottom edge は外向き]
+     [2026-08-13 手順F] 旧 absolute 配置 [top: calc(50% + 19vmin) 等] と vmin 固定寸法は
+     v2 の board-stage grid が全部上書きしていたので削除。向きの回転だけ残す */
   main.mode-single .hez {
-    position: absolute;
     display: grid;
     gap: 2px;
   }
-  /* 河ゾーン共通: 小さめで score-box 外側に配置、 vmin で scale [リョー指示 2026-05-12] */
-  main.mode-single .hez {
-    position: absolute;
-  }
   main.mode-single .hez .hez-tile {
-    position: absolute;
-    width: 4vmin;
-    height: 5.5vmin;
     display: block;
   }
   /* hez 内の Tile を wrapper 中央に絶対配置 [lizhi 回転時の center 揃え] */
@@ -3824,43 +3812,19 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: 4vmin !important;
-    height: 5.5vmin !important;
   }
-  /* P0 自家 [下]: score-box 真下 [14vmin + 1vmin gap]、 face up
-     幅は score-box [28vmin] に揃え + 6 牌で 5vmin spacing、 lizhi 横倒し時 被らないように */
-  main.mode-single .hez-bottom {
-    top: calc(50% + 19vmin);
-    left: 50%;
-    transform: translateX(-50%);
-    width: 30vmin;
-    height: 20vmin;
-  }
+  /* P0 自家 [下]: face up */
   main.mode-single .hez-bottom .hez-tile.lizhi-tile {
     transform: rotate(90deg);
   }
-  /* P1 上家 [左]: score-box 左 */
-  main.mode-single .hez-left {
-    top: 50%;
-    right: calc(50% + 19vmin);
-    transform: translateY(-50%);
-    width: 20vmin;
-    height: 30vmin;
-  }
+  /* P1 上家 [左] */
   main.mode-single .hez-left .hez-tile {
     transform: rotate(90deg);
   }
   main.mode-single .hez-left .hez-tile.lizhi-tile {
     transform: rotate(180deg);
   }
-  /* P2 下家 [右]: score-box 右 */
-  main.mode-single .hez-right {
-    top: 50%;
-    left: calc(50% + 19vmin);
-    transform: translateY(-50%);
-    width: 20vmin;
-    height: 30vmin;
-  }
+  /* P2 下家 [右] */
   main.mode-single .hez-right .hez-tile {
     transform: rotate(-90deg);
   }
@@ -4358,7 +4322,12 @@
   main:not(.mode-single) .seat { display: contents; }
 
   /* 手牌 tile size レスポンシブ [スマホ-first、 リョー指示 2026-05-12]
-     P0 自家手牌は 14 枚で viewport 幅一杯利用するために計算式で size override */
+     P0 自家手牌は 14 枚で viewport 幅一杯利用するために計算式で size override
+     [2026-08-13 手順F] この「全体 tile override」は残した。v2 は手牌 / 河 / ドラ /
+     抜き の 4 文脈しか牌サイズを指定しておらず、左右家の vtile・フーロ・
+     ぽっち選択 modal・フィーバー待ちサイドバーの牌は今もここに依存している。
+     消すと Tile.svelte の fallback [32x44] に落ちて縮むので、先に文脈ごとの
+     --tile-md-xx / --tile-sm-xx 指定へ置き換えてから消すこと */
   main.mode-single :global(.tile.size-md) {
     width: min(6vmin, calc(100vw / 22));
     height: calc(min(6vmin, calc(100vw / 22)) * 1.375);
@@ -4370,18 +4339,6 @@
     height: calc(min(4.5vmin, calc(100vw / 28)) * 1.4);
     min-width: 18px;
     min-height: 26px;
-  }
-  main.mode-single :global(.tile.size-md .tile-img),
-  main.mode-single :global(.tile.size-sm .tile-img) {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
-  main.mode-single .hez .hez-tile {
-    width: 5.5vmin;
-    height: 7.5vmin;
-    min-width: 24px;
-    min-height: 34px;
   }
 
   /* solo mode 統合アガリ panel [打点 + 祝儀 を 1 wrapper、 左右並び] */
@@ -4793,109 +4750,9 @@
   main.mode-single :global(.lizhibang-label),
   main.mode-single :global(.paishu-label) { color: #b0b0b0 !important; }
 
-  /* 狭い横画面では操作欄をアイコン中心にし、ドラ表示との重なりを防ぐ。 */
-  @media (max-width: 900px) and (orientation: landscape) {
-    main.mode-single {
-      grid-template-columns: 15vmin minmax(0, 1fr) 15vmin;
-      gap: 4px;
-    }
-    main.mode-single .dora-row {
-      grid-template-columns: auto minmax(56px, 1fr) auto;
-      gap: 5px;
-      padding: 2px 4px;
-    }
-    main.mode-single .turn-status {
-      max-width: 150px;
-      padding: 3px 7px;
-      gap: 4px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      font-size: 11px;
-    }
-    main.mode-single .dora-main { gap: 3px; }
-    main.mode-single .dora-label { font-size: 11px; }
-    main.mode-single .dora-row .settings-group {
-      gap: 6px;
-      font-size: 11px;
-    }
-    main.mode-single .dora-row .settings-group label { gap: 2px; }
-    main.mode-single .dora-row .settings-group input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
-    }
-    main.mode-single .table-setting-btn {
-      min-width: 34px;
-      min-height: 32px;
-      padding: 4px 8px;
-    }
-    main.mode-single .settings-label { display: none; }
-  }
-
-  /* 高さの低いスマホ横画面でも、中央得点と自家手牌を画面内へ収める。 */
-  @media (max-height: 500px) and (orientation: landscape) {
-    /* 手牌最優先 [2026-07-15 Galaxy S24 実機報告]: 実効高 ~340px では
-     * score-box の min 200px が場を食い潰し、自家手牌の行が viewport 外へ
-     * 押し出されて全く見えなくなる。中央行を minmax(0,1fr) で圧縮可能にし、
-     * 中央スコアの正方形は 34vmin まで縮める。 */
-    main.mode-single {
-      grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-    }
-    main.mode-single .center-board { min-height: 0; }
-    main.mode-single .nuki-row { padding: 1px 4px; gap: 2px; }
-    /* [2026-07-22 リョー報告: 抜き box と中央スコアが被る] -12vh の持ち上げ
-       [リョー指示 2026-05-12、広い画面用] は低背だと抜き行に食い込む。ほぼ無効化 */
-    main.mode-single .center-board { transform: translateY(-1vh); }
-    main.mode-single .nuki { min-height: 0; padding-top: 14px; }
-    main.mode-single .nuki-label { font-size: 10px; top: 2px; }
-    main.mode-single .seat-bottom { min-height: 42px; }
-    /* 和了パネル: 低背だと 11vh/16vh 挟みで窓が~200pxになり、役・祝儀の
-     * 計算式がスクロール下に沈んで「出ない」ように見える。ほぼ全画面化する */
-    main.mode-single .agari-unified-panel,
-    main.mode-single :global(.modal.sai) {
-      top: 8px !important;
-      bottom: 8px !important;
-      left: 8px !important;
-      right: 8px !important;
-      padding: 10px 12px !important;
-      gap: 8px !important;
-    }
-    /* [2026-07-21 リョー実機報告] 旧 118px 正方 + 列min 62/66/62 [計190px] は
-       列が箱からあふれて P1 と中央が重なり P2 が見切れていた。
-       列は minmax(0,1fr) で必ず箱に収め、箱は横長にして文字を収める */
-    main.mode-single .score-box {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
-      grid-template-rows: 20px minmax(0, 1fr) minmax(46px, 0.9fr);
-      width: max(46vmin, 196px);
-      height: max(34vmin, 138px);
-      min-width: 0;
-      min-height: 0;
-    }
-    main.mode-single .score-box .score-side.score-top {
-      padding: 2px 0;
-      font-size: 11px;
-    }
-    main.mode-single .score-box .score-side.score-left,
-    main.mode-single .score-box .score-side.score-right { padding: 1px; overflow: hidden; }
-    main.mode-single .score-box .score-side.score-bottom {
-      align-self: stretch;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      padding: 1px 3px;
-      overflow: hidden;
-    }
-    main.mode-single .score-box .sname { font-size: 10px; letter-spacing: 0; white-space: nowrap; }
-    main.mode-single .score-box .sval { font-size: 14px; letter-spacing: 0; }
-    main.mode-single .score-box .ssub { margin-top: 0; font-size: 8px; line-height: 1.1; }
-    main.mode-single .score-box .score-side.is-oya .sname::before {
-      margin-bottom: 0;
-      font-size: 9px;
-    }
-    main.mode-single .score-box .benbang { font-size: 11px; }
-    main.mode-single .score-box .paishu { font-size: 13px; }
-    main.mode-single .seat-bottom { gap: 2px; }
-    main.mode-single .seat-bottom > :global(section.player) { padding: 2px 4px !important; }
-  }
+  /* [2026-08-13 手順F] 旧レイアウト用の @media パッチ 2層 [max-width:900px landscape /
+     max-height:500px landscape] はここにあったが削除した。v2 が上書きしていなかった
+     宣言だけは v2 セクション末尾の「手順F 移植分」へ引き継いである。 */
 
   /* スマホ縦向きでは卓が欠けるため、誤操作できる半端な盤面を見せず案内する。 */
   @media (max-width: 700px) and (orientation: portrait) {
@@ -4942,37 +4799,11 @@
   }
 
   /* 2026-07-20 リョー要望: 神ぽっち等の選択中も手牌を確認できるようにする。
-     modal を上寄せ + 高さを抑え、暗幕は下側を薄くして卓の手牌を透かす */
-  .pochi-choice-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 9400;
-    display: grid;
-    place-items: start center;
-    padding: 12px 16px;
-    background: linear-gradient(
-      to bottom,
-      rgba(5, 17, 12, 0.72) 0%,
-      rgba(5, 17, 12, 0.72) 58%,
-      rgba(5, 17, 12, 0.20) 76%,
-      rgba(5, 17, 12, 0.06) 100%
-    );
-  }
-  .pochi-choice-modal {
-    width: min(720px, calc(100vw - 32px));
-    max-height: min(62vh, 560px);
-    overflow: auto;
-    box-sizing: border-box;
-    padding: 18px;
-    border: 2px solid #e9c95c;
-    border-radius: 14px;
-    background: #f8f4e7;
-    color: #173126;
-    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
-    text-align: center;
-  }
-  .pochi-choice-modal h2,
-  .pochi-choice-modal p {
+     modal を上寄せ + 高さを抑え、暗幕は下側を薄くして卓の手牌を透かす
+     [2026-08-13 手順F] shell [暗幕 + パネル枠] は Sheet.svelte へ移動。
+     ここには中身の見た目だけ残す */
+  .pochi-choice-title,
+  .pochi-choice-note {
     margin: 0 0 10px;
   }
   .pochi-choice-grid {
@@ -5147,37 +4978,29 @@
     main.mode-single.ui-board-v2 .score-box .score-side.score-top { padding: 1px 0; }
   }
 
-  /* 河: inline の絶対座標を無効化し、--hr/--hc の論理座標で 6列固定 grid に配置。
-     wrapper は回転後の占有寸法 [縦河は w=牌高, h=牌幅] でセルを切る */
+  /* 河: --hr/--hc の論理座標で 6列固定 grid に配置。
+     wrapper は回転後の占有寸法 [縦河は w=牌高, h=牌幅] でセルを切る。
+     [2026-08-13 手順F] 旧層の絶対配置オフセット [top:calc(50%+19vmin) 等] と
+     inline 絶対座標を消したので、それを打ち消すための auto 群も不要になった */
   main.mode-single.ui-board-v2 .hez {
     position: relative;
-    /* 旧層の絶対配置オフセット [top:calc(50%+19vmin) 等] を無効化。
-       relative では offset が生きてズレるため明示 auto が必須 */
-    top: auto;
-    left: auto;
-    right: auto;
-    bottom: auto;
-    transform: none;
-    width: auto;
-    height: auto;
     display: grid;
     gap: 2px;
   }
+  /* [2026-08-13 手順F] 旧 inline 絶対座標を markup ごと消したので
+     top/left/right/bottom の auto !important 打ち消しは不要になった */
   main.mode-single.ui-board-v2 .hez .hez-tile {
     position: relative;
-    top: auto !important;
-    left: auto !important;
-    right: auto !important;
-    bottom: auto !important;
     width: auto;
     height: auto;
     min-width: 0;
     min-height: 0;
   }
-  /* 旧層の 4vmin !important を上書き [F で旧層ごと消すまでの暫定] */
+  /* [2026-08-13 手順F] 旧層の 4vmin !important を消したので !important 不要。
+     残る競合は全体 tile override [main.mode-single .tile.size-md] だけで、詳細度で勝つ */
   main.mode-single.ui-board-v2 .hez .hez-tile :global(.tile.size-md) {
-    width: var(--river-tile-w) !important;
-    height: var(--river-tile-h) !important;
+    width: var(--river-tile-w);
+    height: var(--river-tile-h);
   }
   main.mode-single.ui-board-v2 .hez-bottom {
     grid-area: hb;
@@ -5257,6 +5080,77 @@
   }
   main.mode-single.ui-board-v2 .center-board .ron-choice-panel .skip-half {
     font-size: clamp(11px, calc(var(--score-side) * 0.115), 19px);
+  }
+
+  /* ---- 手順F [2026-08-13]: 旧 @media パッチ 2層から v2 へ移植した分 ----
+     旧層は `main.mode-single` 素で当たっていたため v2 でも生きていた。v2 が
+     上書きしていなかった宣言だけをここへ移し、値はそのまま維持する [見た目不変]。
+     置き場所が下の 420px ブロックより前なのは意図的 [同詳細度なので後勝ちを避ける]。 */
+  @media (max-width: 900px) and (orientation: landscape) {
+    main.mode-single.ui-board-v2 { gap: 4px; }
+    main.mode-single.ui-board-v2 .dora-row {
+      grid-template-columns: auto minmax(56px, 1fr) auto;
+    }
+    main.mode-single.ui-board-v2 .turn-status {
+      max-width: 150px;
+      padding: 3px 7px;
+      gap: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 11px;
+    }
+    main.mode-single.ui-board-v2 .dora-main { gap: 3px; }
+    main.mode-single.ui-board-v2 .dora-label { font-size: 11px; }
+    main.mode-single.ui-board-v2 .dora-row .settings-group {
+      gap: 6px;
+      font-size: 11px;
+    }
+    main.mode-single.ui-board-v2 .dora-row .settings-group label { gap: 2px; }
+    main.mode-single.ui-board-v2 .dora-row .settings-group input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+    }
+    main.mode-single.ui-board-v2 .table-setting-btn {
+      min-width: 34px;
+      min-height: 32px;
+      padding: 4px 8px;
+    }
+    main.mode-single.ui-board-v2 .settings-label { display: none; }
+  }
+  @media (max-height: 500px) and (orientation: landscape) {
+    main.mode-single.ui-board-v2 .nuki-row { gap: 2px; }
+    main.mode-single.ui-board-v2 .seat-bottom { min-height: 42px; gap: 2px; }
+    main.mode-single.ui-board-v2 .seat-bottom > :global(section.player) { padding: 2px 4px !important; }
+    main.mode-single.ui-board-v2 .score-box .score-side.score-bottom {
+      align-self: stretch;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    main.mode-single.ui-board-v2 .score-box .score-side.is-oya .sname::before {
+      margin-bottom: 0;
+      font-size: 9px;
+    }
+    /* 和了パネル / サイコロ modal: 低背だと 11vh/16vh 挟みで窓が ~200px になり、
+       役・祝儀の計算式がスクロール下に沈んで「出ない」ように見える。ほぼ全画面化する。
+       [docs 手順F: agari-unified-panel の低背フルスクリーン規則を v2 へ移植] */
+    main.mode-single.ui-board-v2 .agari-unified-panel {
+      top: 8px;
+      bottom: 8px;
+      left: 8px;
+      right: 8px;
+      padding: 10px 12px;
+      gap: 8px;
+    }
+    /* .modal.sai 側は基底規則が !important 付きなので、こちらも !important を保つ */
+    main.mode-single.ui-board-v2 :global(.modal.sai) {
+      top: 8px !important;
+      bottom: 8px !important;
+      left: 8px !important;
+      right: 8px !important;
+      padding: 10px 12px !important;
+      gap: 8px !important;
+    }
   }
 
   /* ---- 手順D-1c: 低背端末の行ダイエット第2段 [340px 級で center を最大化] ----
