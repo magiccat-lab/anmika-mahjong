@@ -410,6 +410,9 @@ export function processKakanQianggangWindow(
       return { s, handled: true };
     }
     // 全 CPU 役なしで ron 失敗 → 加槓 通常進行
+    // [2026-09-02 硬化] 槍槓評価用に立てた lastDapai を残すと App のツモボタンが `!lastDapai` ゲートで消える
+    // [大明槓側 fulouActions.ts は 07-22 に同じ処置済み]
+    s.lastDapai = null;
   }
   if (humanRonCands.length > 0) {
     enterQianggangStage(s, { player, mianzi, kakanPai });
@@ -1890,7 +1893,12 @@ export function createGameStore() {
           result = s.game.hule(winner as any);
         }
         if (!result) {
+          // [2026-09-02 硬化] lastWinner を立てたまま抜けると tsumo()/ron() の連打防止ガードが以後ずっと
+          // 無言 no-op になり、「ツモ和了／打牌を選択」表示のまま何も押せない [リョー報告の形]。宣言前へ戻す
           s.message = `player ${winner} 再計算失敗`;
+          s.lastWinner = null;
+          s.lastHuleResult = null;
+          s.game.kinpeiTarget[winner as 0|1|2] = null;
           return { ...s };
         }
         {
@@ -1906,6 +1914,9 @@ export function createGameStore() {
           result = choice.result;
           if (!result) {
             s.message = `player ${winner} 金北・神ぽっち選択後の再計算失敗`;
+            s.lastWinner = null;
+            s.lastHuleResult = null;
+            s.game.kinpeiTarget[winner as 0|1|2] = null;
             return { ...s };
           }
         }
