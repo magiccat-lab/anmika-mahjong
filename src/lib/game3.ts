@@ -1601,6 +1601,11 @@ export class Game3 {
     }
     if (!candidates || candidates.length === 0) return null;
     candidates = candidates.filter((c: string) => toCorePai(c.replace(/[_*]$/, '')) !== 'z4');
+    // [2026-09-02 停止監査] 他家のオープン立直の待ち牌は dapai() が拒否する [手牌全部が当たり牌のとき以外]。
+    // CPU / server 代行がそれを選ぶと reject → 同じ期限を張り直す永久ループで卓が止まっていた
+    // [128k step fuzz で 14 件、全部この型]。禁止牌は候補から外す [全部禁止なら判定側が false を返すので残る]
+    const legal = candidates.filter((c: string) => !this.isOpenReachWaitDiscardForbidden(player, c.replace(/[_*]$/, '')));
+    if (legal.length > 0) candidates = legal;
     if (candidates.length === 0) return null;
     // フィーバー立直中: フィーバー player 以外は ツモ切り強制 [AI も従う]
     //   ただし z4 [北] は dapai 不可 [抜き北 path に任せる]、 ここでは候補から除外済の

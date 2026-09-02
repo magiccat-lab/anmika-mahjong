@@ -1871,13 +1871,31 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           scheduleRoomDeadline(room);
           return;
         }
-        const result = acceptAction(
+        const actorUid = member?.user_id ?? `deadline-seat-${current}`;
+        let result = acceptAction(
           room,
           current,
-          member?.user_id ?? `deadline-seat-${current}`,
+          actorUid,
           action,
           `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
         );
+        // [2026-09-02 停止監査] 代行 action が reject されると同じ期限を無音で張り直し続け、卓が永久に
+        // 止まる [実例: オープン立直の待ち牌を pickBestDiscard が選ぶ]。理由を残し、打牌なら
+        // 他の合法牌を順に試して進行を優先する [engine 側の候補除外が本命、ここは保険]
+        if (!result.command) {
+          warn(`[anmika-ws] deadline action rejected room=${room.roomId} seat=${current} reason=${(result as { reason?: string }).reason ?? '?'} action=${JSON.stringify(action)}`);
+          if (action.type === 'discard') {
+            const liveGame = room.authority?.game;
+            const sp = liveGame?.shoupai.get(current);
+            let fallbacks: string[] = [];
+            try { fallbacks = ((sp?.get_dapai?.(false) ?? []) as string[]).map((c) => c.replace(/[_*]$/, '')); } catch { fallbacks = []; }
+            for (const pai of fallbacks) {
+              if (pai === action.pai || toCorePai(pai) === 'z4') continue;
+              result = acceptAction(room, current, actorUid, { type: 'discard', pai }, `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`);
+              if (result.command) break;
+            }
+          }
+        }
         if (result.command) broadcastAction(room, result.command);
         scheduleRoomDeadline(room);
       }).catch((error) => warn('[anmika-ws] turn deadline failed', error));
