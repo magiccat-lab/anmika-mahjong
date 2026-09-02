@@ -598,7 +598,15 @@ export function createGameStore() {
       if (myOnlineSeat === null || projection.recipientSeat !== myOnlineSeat) return false;
       if (!projection.gameState || !projection.shan || !projection.fields || !projection.store) return false;
       // [2026-07-23 観戦モード] seat=-1 [席なし] は privateHand を持たない正規 projection
-      if ((projection.recipientSeat !== -1 && !projection.privateHand) || !projection.publicHands || !projection.rivers) return false;
+      // [2026-09-02 yuma] 試合終了 [finished] は配牌前で shoupai が無く、旧 server は privateHand=null を
+      // 配る。ここで拒否すると resync → 同じ投影 → 拒否 の無限往復になる [8/9 6U1V の正体]。
+      // finished のときだけ空手牌で受け入れる [新 server は空手牌を配るので通常ここは通らない]
+      const finishedWithoutHand = projection.gameState?.finished === true && !projection.privateHand;
+      if ((projection.recipientSeat !== -1 && !projection.privateHand && !finishedWithoutHand) || !projection.publicHands || !projection.rivers) return false;
+      const emptyWireHand = () => ({
+        bingpai: { _: 0, m: Array(10).fill(0), p: Array(10).fill(0), s: Array(10).fill(0), z: Array(8).fill(0), anmika: null },
+        fulou: [], zimo: null, anmikaZimo: null, anmikaFulou: [], anmikaFulouPhysical: [],
+      });
 
       const current = get(store) as StoreState;
       const ng = new Game3({
@@ -683,7 +691,7 @@ export function createGameStore() {
       ng.shoupai = new Map();
       for (const player of [0, 1, 2] as const) {
         const serialized = player === myOnlineSeat
-          ? projection.privateHand
+          ? (projection.privateHand ?? emptyWireHand())
           : projection.publicHands[player] ?? projection.publicHands[String(player)];
         ng.shoupai.set(player, player === myOnlineSeat ? restoreHand(serialized) : restorePublicHand(serialized));
       }

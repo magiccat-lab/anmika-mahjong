@@ -1164,6 +1164,46 @@
   let onlineReconnectAttempt = 0;
   let onlineReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let onlineShouldReconnect = false;
+  // [2026-09-02 yuma] resync の無限往復ガード。hydrate 拒否 → resync → sync → 拒否 … が
+  // 無間隔で回ると server は sync 毎に卓を作り直し [ws.log 3.5GB の正体]、client も固まる。
+  // 間隔を指数で開け、上限で止めてリロードを促す。sync/action が正常に入ったら streak を戻す
+  let onlineResyncStreak = 0;
+  let onlineResyncTimer: ReturnType<typeof setTimeout> | null = null;
+  let onlineResyncStalled = false;
+  const ONLINE_RESYNC_MAX_STREAK = 8;
+  function requestOnlineResync(ws: WebSocket, expectedVersion: number): void {
+    if (onlineResyncStalled) return;
+    if (onlineResyncTimer) return; // 送信予約済み [連打はまとめる]
+    onlineResyncStreak += 1;
+    if (onlineResyncStreak > ONLINE_RESYNC_MAX_STREAK) {
+      onlineResyncStalled = true;
+      console.error('[online] resync loop stalled; reload required', { expectedVersion, streak: onlineResyncStreak });
+      return;
+    }
+    const delay = onlineResyncStreak <= 1 ? 0 : Math.min(5000, 250 * (2 ** (onlineResyncStreak - 2)));
+    onlineResyncTimer = setTimeout(() => {
+      onlineResyncTimer = null;
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: 'resync', expectedVersion }));
+    }, delay);
+  }
+  function markOnlineSyncHealthy(): void {
+    onlineResyncStreak = 0;
+    onlineResyncStalled = false;
+    onlineReconnectAttempt = 0;
+    // 正常な sync/start/action が入ったら予約済みの resync は不要 [codex review P2]
+    if (onlineResyncTimer) { clearTimeout(onlineResyncTimer); onlineResyncTimer = null; }
+  }
+  // server 側の終端 close code [ws_server.ts の ws.close(4xxx, ...)]。
+  // 4001 は同一ユーザーの新しいタブに置き換えられた旧タブ宛。再接続すると新旧タブが
+  // 互いを追い出し合う別のピンポンになる [codex review P1]
+  const ONLINE_TERMINAL_CLOSE_CODES = new Set([4001, 4002, 4401, 4403, 4404, 4410]);
+  let onlineTerminalClose: { code: number; reason: string } | null = null;
+  function resetOnlineResyncGuard(): void {
+    if (onlineResyncTimer) clearTimeout(onlineResyncTimer);
+    onlineResyncTimer = null;
+    markOnlineSyncHealthy();
+  }
 
   function seatName(seat: number): string {
     // [2026-07-23 4人回し Phase3, Sol P1-2] 引数は game seat、onlineMembers は room seat 契約。
@@ -1241,12 +1281,12 @@
     if (!Number.isInteger(msg.revision)) return;
     if (msg.revision <= current.revision) return;
     if (msg.revision !== current.revision + 1) {
-      ws.send(JSON.stringify({ type: 'resync', expectedVersion: current.revision }));
+      requestOnlineResync(ws, current.revision);
       return;
     }
     const fromSeat = msg.from_seat;
     if (fromSeat !== 0 && fromSeat !== 1 && fromSeat !== 2) {
-      ws.send(JSON.stringify({ type: 'resync', expectedVersion: current.revision }));
+      requestOnlineResync(ws, current.revision);
       return;
     }
     // [2026-07-23 4人回し Phase3, Sol P1-1] seat 契約は revision 検証を通った受理 action
@@ -1254,7 +1294,7 @@
     // 不整合 [server 側の焼き忘れ検出] は自己修復として resync に倒す
     if (typeof msg.mappingEpoch === 'number' && Number.isInteger(msg.matchId)
       && msg.mappingEpoch !== msg.matchId) {
-      ws.send(JSON.stringify({ type: 'resync', expectedVersion: current.revision }));
+      requestOnlineResync(ws, current.revision);
       return;
     }
     absorbSeatContract(msg);
@@ -1266,7 +1306,7 @@
     }
     const applied = game.applyOnlineRemoteAction(fromSeat, msg.action);
     if (msg.action?._state && applied !== true) {
-      ws.send(JSON.stringify({ type: 'resync', expectedVersion: current.revision }));
+      requestOnlineResync(ws, current.revision);
       return;
     }
     if (msg.action?.type === 'nextMatch') {
@@ -1277,6 +1317,7 @@
         2: started?.chipLedger?.[2] ?? 0,
       };
     }
+    markOnlineSyncHealthy();
     game.setOnlineProtocolState({
       ws,
       revision: msg.revision,
@@ -1288,7 +1329,7 @@
   function applyCanonicalSync(ws: WebSocket, snapshot: any): void {
     if (!snapshot?.started || !snapshot.start) return;
     if (!initializeOnlineFromStart(ws, snapshot.start)) {
-      ws.send(JSON.stringify({ type: 'resync', expectedVersion: 0 }));
+      requestOnlineResync(ws, 0);
       return;
     }
     // [2026-07-22 Sol指摘 P1] start.members は開始時点の stale。reconnect 後の
@@ -1297,7 +1338,7 @@
       onlineMembers = snapshot.currentMembers;
     }
     if (!snapshot.state || !game.hydrateOnlineProjection(snapshot.state)) {
-      ws.send(JSON.stringify({ type: 'resync', expectedVersion: 0 }));
+      requestOnlineResync(ws, 0);
       return;
     }
     // [2026-07-23 総点検 P2] sync を正として ready 押下表示をリセット [server の
@@ -1325,6 +1366,7 @@
       roundId: snapshot.roundId,
     });
     matchStartChipLedger = baseline;
+    markOnlineSyncHealthy();
   }
 
   function scheduleOnlineReconnect(): void {
@@ -1343,6 +1385,8 @@
     onlineShouldReconnect = true;
     const roomAtConnect = currentRoomId;
     const generation = ++onlineSocketGeneration;
+    if (onlineResyncTimer) { clearTimeout(onlineResyncTimer); onlineResyncTimer = null; } // 旧 socket 宛の予約は捨てる
+    onlineTerminalClose = null;
     let token = '';
     let wsBase = '';
     try {
@@ -1369,7 +1413,9 @@
     onlineWs = ws;
     ws.onopen = () => {
       if (generation !== onlineSocketGeneration) { ws.close(); return; }
-      onlineReconnectAttempt = 0;
+      // [2026-09-02 yuma] attempt のリセットは open ではなく sync/start が正常に入った時
+      // [markOnlineSyncHealthy]。server は open 後に 4403 等で切るので、ここで戻すと
+      // backoff が常に 500ms に潰れて「open→close」を毎秒2回、何日でも回していた
       if (onlineRoomMeta?.isHost) ws.send(JSON.stringify({ type: 'start', qijia: 0 }));
     };
     ws.onmessage = (event) => {
@@ -1382,7 +1428,8 @@
           matchId: msg.matchId ?? 1,
           roundId: msg.roundId ?? 1,
         });
-        if (!initialized) ws.send(JSON.stringify({ type: 'resync', expectedVersion: 0 }));
+        if (!initialized) requestOnlineResync(ws, 0);
+        else markOnlineSyncHealthy();
       } else if (msg.type === 'sync') {
         absorbSeatContract(msg); // [Phase3] sync top-level に recipient seat 契約
         absorbSeatContract(msg.snapshot); // activeMapping / roomChipLedger は snapshot 側
@@ -1430,15 +1477,27 @@
         }
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (generation !== onlineSocketGeneration) return;
       onlineWs = null;
+      // [2026-09-02 yuma] server が意図して切った終端 code は再接続しない。
+      // 4001 新タブに置換 / 4002 部屋差し替え / 4401 token 不正 / 4403 席・部屋不一致 / 4404 部屋消滅 / 4410 追放。
+      // 再接続で状況は変わらず、部屋消滅 [TF1F] では reconnect 毎に server が卓を復元し直して
+      // 内部 API 642 回 + 配牌ログ数百MB を焼いていた
+      if (ONLINE_TERMINAL_CLOSE_CODES.has(event.code)) {
+        onlineShouldReconnect = false;
+        onlineTerminalClose = { code: event.code, reason: event.reason || '' };
+        console.warn('[online] terminal close, not reconnecting', { code: event.code, reason: event.reason });
+        return;
+      }
       scheduleOnlineReconnect();
     };
     ws.onerror = () => { /* onclose handles retry */ };
   }
   function disconnectOnline() {
     onlineShouldReconnect = false;
+    resetOnlineResyncGuard();
+    onlineTerminalClose = null;
     onlineSocketGeneration += 1;
     if (onlineReconnectTimer) clearTimeout(onlineReconnectTimer);
     onlineReconnectTimer = null;
@@ -3131,6 +3190,18 @@
   {/if}
 
   <!-- 対局中でも無視できる通知にとどめる [modal / 強制リロード禁止]。閉じたら次の起動まで出さない -->
+  {#if onlineResyncStalled || onlineTerminalClose}
+    <div class="new-version-toast" role="alert">
+      <span>
+        {#if onlineTerminalClose}
+          オンライン接続が切れました [{onlineTerminalClose.code}{onlineTerminalClose.reason ? ` ${onlineTerminalClose.reason}` : ''}]。ロビーから入り直してください
+        {:else}
+          盤面の同期に失敗し続けています。再読み込みしてください
+        {/if}
+      </span>
+      <button on:click={() => location.reload()}>再読み込み</button>
+    </div>
+  {/if}
   {#if newVersionAvailable && !newVersionToastDismissed}
     <div class="new-version-toast" role="status">
       <span>新しいバージョンがある。リロードで反映してくれ</span>

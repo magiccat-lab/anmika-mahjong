@@ -482,6 +482,21 @@ function maskBlindStart(state: BlindStartState, recipientSeat: number): Record<s
   };
 }
 
+/** [2026-09-02 yuma] 試合終了 [finished] で配牌前の shoupai が空のとき、自席 privateHand が null になり
+ *  client の hydrate [store.ts hydrateProjectionState] が「席ありなのに手牌無し」で拒否 → resync 無限往復
+ *  になっていた [8/9 6U1V: 東風終了の nextRound 直後に 3 人とも固まり、結果画面も次の試合も出ない]。
+ *  席ありの投影では null の代わりに空手牌 [枚数 0] を配る */
+function emptyPrivateHand(): Record<string, unknown> {
+  return {
+    bingpai: { _: 0, m: Array(10).fill(0), p: Array(10).fill(0), s: Array(10).fill(0), z: Array(8).fill(0), anmika: null },
+    fulou: [],
+    zimo: null,
+    anmikaZimo: null,
+    anmikaFulou: [],
+    anmikaFulouPhysical: [],
+  };
+}
+
 function serializePrivateHand(sp: any): Record<string, unknown> | null {
   if (!sp?._bingpai) return null;
   const bp = sp._bingpai;
@@ -803,7 +818,7 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       canDrawRinshan: game.shan.canDrawRinshan,
       fuyuRevealed: [...(shan._fuyuRevealed ?? [])],
     },
-    privateHand: own === null ? null : serializePrivateHand(game.shoupai.get(own)),
+    privateHand: own === null ? null : (serializePrivateHand(game.shoupai.get(own)) ?? emptyPrivateHand()),
     publicHands,
     rivers: {
       0: [...(game.he.get(0)?._pai ?? [])],
@@ -1077,6 +1092,21 @@ function broadcastAction(room: Room, command: AcceptedRoomCommand): void {
   room.authority?.takePendingCutins();
 }
 
+// [2026-09-02 yuma] blind 化のための tempAuth [= Game3 構築 = 配牌] を sync 毎に作っていた。
+// client の resync 連打で毎秒数十回の配牌が走り、CPU と stdout ログ [ws.log 3.5GB] を食った。
+// start の pool は試合中不変なので、pool 配列の identity + qijia で 1 回だけ計算して使い回す
+type BlindStartData = ReturnType<typeof captureBlindStart>;
+const blindStartCache = new WeakMap<object, { qijia: number; poolLength: number; data: BlindStartData }>();
+function blindStartFor(start: NonNullable<CanonicalRoomSnapshot['start']>): BlindStartData {
+  const pool = start.preShuffledPool as unknown as object;
+  const cached = blindStartCache.get(pool);
+  if (cached && cached.qijia === start.qijia && cached.poolLength === start.preShuffledPool.length) return cached.data;
+  const tempAuth = createRoomAuthority({ preShuffledPool: start.preShuffledPool, qijia: start.qijia });
+  const data = captureBlindStart(tempAuth);
+  blindStartCache.set(pool, { qijia: start.qijia, poolLength: start.preShuffledPool.length, data });
+  return data;
+}
+
 function sendSync(
   ws: WebSocket | null,
   snapshot: CanonicalRoomSnapshot,
@@ -1094,8 +1124,7 @@ function sendSync(
   const payload = fullCommands ? { ...snapshot, commands: fullCommands } : snapshot;
   let sanitizedStart = payload.start;
   if (sanitizedStart && sanitizedStart.preShuffledPool?.length > 0) {
-    const tempAuth = createRoomAuthority({ preShuffledPool: sanitizedStart.preShuffledPool, qijia: sanitizedStart.qijia });
-    const blindData = captureBlindStart(tempAuth);
+    const blindData = blindStartFor(sanitizedStart);
     sanitizedStart = {
       ...sanitizedStart,
       preShuffledPool: [],
@@ -1468,7 +1497,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       const applyMembers = action.type === 'nextMatch' && action._nextMapping
         ? Array.from(room.members.values())
           .map((member) => ({ seat: roomToGameSeat(action._nextMapping as RoomSeatMapping, member.seat), is_cpu: member.is_cpu }))
-          .filter((member): member is AuthorityMember => member.seat !== null)
+          .filter((member): member is { seat: number; is_cpu: boolean } => member.seat !== null)
         : membersForAuthority(room);
       const reason = room.authority.validateAndApply(actorSeat, action, applyMembers);
       if (reason) {
@@ -2062,14 +2091,36 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     if (previous?.ws && previous.ws !== ws) previous.ws.close(4001, 'replaced by newer connection');
     room.members.set(payload.uid, member);
 
+    // [2026-09-02 yuma] client の hydrate 失敗 → resync → sync → 失敗 … が無間隔で往復すると
+    // sync 毎の投影計算で server が焼ける [8/9 の 6U1V で 3 日間、毎秒数十回]。同一接続の
+    // resync は RESYNC_MIN_INTERVAL_MS に 1 回へ間引く。遅延側は必ず 1 回送るので取りこぼしは無い
+    const RESYNC_MIN_INTERVAL_MS = 300;
+    let lastSyncSentAt = 0;
+    let pendingResyncTimer: ReturnType<typeof setTimeout> | null = null;
+    const sendMemberSync = () => {
+      lastSyncSentAt = Date.now();
+      sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
+      sendNextRoundReadyStateTo(ws, room);
+      sendChipResetVoteStateTo(ws, room);
+    };
     const handleMessage = (data: RawData) => {
       room.queue = room.queue.then(async () => {
         let msg: unknown;
         try { msg = JSON.parse(data.toString()); } catch { return; }
         if ((msg as Record<string, unknown>)?.type === 'resync') {
-          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
-          sendNextRoundReadyStateTo(ws, room);
-          sendChipResetVoteStateTo(ws, room);
+          const sinceLast = Date.now() - lastSyncSentAt;
+          if (sinceLast < RESYNC_MIN_INTERVAL_MS) {
+            if (!pendingResyncTimer) {
+              pendingResyncTimer = setTimeout(() => {
+                pendingResyncTimer = null;
+                room.queue = room.queue.then(async () => {
+                  if (ws.readyState === WebSocket.OPEN) sendMemberSync();
+                }).catch((error) => warn(`[anmika-ws] deferred resync room=${room.roomId}`, error));
+              }, RESYNC_MIN_INTERVAL_MS - sinceLast);
+            }
+            return;
+          }
+          sendMemberSync();
           return;
         }
         if ((msg as Record<string, unknown>)?.type === 'start') {
@@ -2122,7 +2173,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           // The retrying client may have missed commands accepted after its
           // original one. A full canonical sync is safe and avoids relaying an
           // old revision with today's match/round identifiers.
-          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
+          sendMemberSync(); // [2026-09-02] 直送 sync も lastSyncSentAt を更新し、直後の resync 連打を間引く対象にする
           sendNextRoundReadyStateTo(ws, room);
           sendChipResetVoteStateTo(ws, room);
           return;
@@ -2131,7 +2182,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           || envelope.matchId !== room.snapshot.matchId
           || envelope.roundId !== room.snapshot.roundId) {
           reject(ws, room, envelope.commandId, 'version conflict');
-          sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
+          sendMemberSync(); // [2026-09-02] 直送 sync も lastSyncSentAt を更新し、直後の resync 連打を間引く対象にする
           sendNextRoundReadyStateTo(ws, room);
           sendChipResetVoteStateTo(ws, room);
           return;
@@ -2155,7 +2206,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           // 欠けて needsZimo 停止している張本人。reject だけ返すと ▶ツモ も
           // 400ms橋 も全部弾かれて詰むため、最新 projection を送って自己修復させる
           if (String(accepted.reason ?? '').includes('zimo already drawn')) {
-            sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
+            sendMemberSync(); // [2026-09-02] 直送 sync も lastSyncSentAt を更新し、直後の resync 連打を間引く対象にする
             sendNextRoundReadyStateTo(ws, room);
             sendChipResetVoteStateTo(ws, room);
           }
@@ -2170,6 +2221,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     for (const data of earlyMessages) handleMessage(data);
 
     ws.on('close', () => {
+      if (pendingResyncTimer) { clearTimeout(pendingResyncTimer); pendingResyncTimer = null; }
       const current = room.members.get(payload.uid);
       if (!current || current.generation !== generation || current.ws !== ws) return;
       current.ws = null;

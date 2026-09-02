@@ -11,7 +11,12 @@ import Majiang from '@kobalab/majiang-core';
  *    他家の getTingpaiList / ロン候補等の隠し情報が console から漏れる公平性問題防止
  *  - Playwright [navigator.webdriver=true] は test 用に強制 ON 維持 */
 export function isDebugEnabled(): boolean {
-  if (typeof window === 'undefined') return true;
+  // [2026-09-02 yuma] node [ws_server / vitest] は既定 OFF。本番 ws の stdout に Game3 の
+  // 配牌ダンプが無条件で出続け、ws.log が 3.5GB になった。ANMIKA_SERVER_DEBUG=1 の時だけ ON
+  if (typeof window === 'undefined') {
+    const env = (globalThis as any).process?.env;
+    return env?.ANMIKA_SERVER_DEBUG === '1';
+  }
   const w = window as any;
   const isPlaywright = typeof navigator !== 'undefined' && (navigator as any).webdriver === true;
   if (isPlaywright) return w.__ANMIKA_DEBUG__ !== false;

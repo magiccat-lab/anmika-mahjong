@@ -240,7 +240,17 @@ def init_db() -> None:
 async def lifespan(app: FastAPI):
     init_db()
     log.info("anmika server start, DB=%s, OAuth client=%s", DB_PATH, DISCORD_CLIENT_ID[:8])
-    yield
+    # [2026-09-02 yuma] 放置部屋の自動掃除。手動 cleanup は host しか呼べず、7/22 の playing 部屋が
+    # 41 日ロビーに居座っていた [観戦ボタンの対象として返り続ける]
+    sweeper = asyncio.create_task(_stale_room_sweeper())
+    try:
+        yield
+    finally:
+        sweeper.cancel()
+        try:
+            await sweeper
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 app = FastAPI(title="anmika-mahjong online", version="0.1.0", lifespan=lifespan)
@@ -734,6 +744,42 @@ async def delete_room(room_id: str, request: Request):
     await _hub_purge_room(room_id)
     await _notify_ws_purge(room_id)
     return {"ok": True, "deleted": deleted, "archived": not deleted}
+
+
+STALE_ROOM_SWEEP_INTERVAL_SEC = int(os.environ.get("ANMIKA_STALE_ROOM_SWEEP_SEC", "1800"))
+STALE_ROOM_MAX_AGE_HOURS = int(os.environ.get("ANMIKA_STALE_ROOM_MAX_AGE_HOURS", "24"))
+
+
+async def sweep_stale_rooms(max_age_hours: int = STALE_ROOM_MAX_AGE_HOURS) -> list[str]:
+    """open / playing のまま max_age_hours 超え放置された部屋を archive [matches 有り] or delete する。
+    host の手動 cleanup [POST /api/rooms/cleanup] と同じ後処理 [hub purge + Node purge] を通す。
+    戻り値は処理した room_id。lobby 一覧は open/playing しか返さないので、ここで落とせば消える"""
+    with db_conn() as c:
+        rows = c.execute(
+            "SELECT room_id FROM rooms WHERE status IN ('open', 'playing') AND created_at < datetime('now', ?)",
+            (f"-{int(max_age_hours)} hours",),
+        ).fetchall()
+        ids = [r["room_id"] for r in rows]
+        for rid in ids:
+            _archive_or_delete_room(c, rid)
+        c.commit()
+    for rid in ids:
+        await _hub_purge_room(rid)
+        await _notify_ws_purge(rid)
+    if ids:
+        log.info("[stale_room_sweep] archived/deleted %d room(s): %s", len(ids), ",".join(ids))
+    return ids
+
+
+async def _stale_room_sweeper() -> None:
+    while True:
+        try:
+            await sweep_stale_rooms()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - 掃除失敗で API を落とさない
+            log.exception("[stale_room_sweep] failed")
+        await asyncio.sleep(max(60, STALE_ROOM_SWEEP_INTERVAL_SEC))
 
 
 @app.post("/api/rooms/cleanup")
