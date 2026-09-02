@@ -1227,6 +1227,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
   const turnTimeoutMs = options.turnTimeoutMs ?? Number(process.env.ANMIKA_TURN_TIMEOUT_MS || DEFAULT_TURN_TIMEOUT_MS);
   const disconnectGraceMs = options.disconnectGraceMs ?? Number(process.env.ANMIKA_DISCONNECT_GRACE_MS || DEFAULT_DISCONNECT_GRACE_MS);
   const nextRoundTimeoutMs = options.nextRoundTimeoutMs ?? Number(process.env.ANMIKA_NEXT_ROUND_TIMEOUT_MS || DEFAULT_NEXT_ROUND_TIMEOUT_MS);
+  // [2026-09-02 codex監査 P0] active 3席に人間がいない部屋 [4人回しで host が抜け番 + CPU 3席 等] は
+  // ready を押せる者が存在せず局終了で永久停止する。その時だけ server がこの待ち時間で次局へ進める
+  const noActiveHumanNextRoundMs = Number(process.env.ANMIKA_NO_HUMAN_NEXT_ROUND_MS || 2000);
   const logEnabled = options.log ?? process.env.ANMIKA_WS_LOG !== '0';
   // [Sol設計] env fallback を意図的に持たない [本番プロセスに露出させない]
   const testControlsEnabled = options.testControlsEnabled === true;
@@ -1799,6 +1802,17 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       // ・未押下メンバーの切断確定時は close handler が gate を再評価して進める
       // ・全員切断は cleanup → 復元後に再押下できる [ready 状態は sync で再配布]
       // ため、0押下自動進行という H-02 の穴埋めはもう不要 [仕様違反side effectだけが残る]
+      //
+      // [2026-09-02 codex監査 P0] 例外: active 3席に人間が一人もいない [4人回しで host が抜け番 +
+      // CPU 3席、全 active 人間の追放 等] と ready gate の required が空で誰も進められない。
+      // 試合が続く限り server が短い timer で nextRound を代行する [host の抜け番中でも卓が回る]
+      if (!canonical.game.state.finished && activeHumanMembers(room).length === 0 && authority.isPostWinResolved()) {
+        const revision = room.snapshot.revision;
+        const actorRoomSeat = room.snapshot.activeMapping?.gameToRoom?.[0] ?? 0;
+        room.deadlineTimer = setTimeout(() => {
+          issueServerNextRound(room, revision, actorRoomSeat, 'no-active-human');
+        }, noActiveHumanNextRoundMs);
+      }
       return;
     }
 
