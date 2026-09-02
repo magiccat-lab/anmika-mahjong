@@ -53,3 +53,7 @@ server/.venv/
 
 # DB backups [deploy前の手動バックアップ置き場。コミット禁止]
 data/backups/
+# [2026-09-02] ws authoritative store は本番の生データ。git checkout/stash で巻き戻さないため untrack
+data/anmika.sqlite3
+data/anmika.sqlite3-shm
+data/anmika.sqlite3-wal
