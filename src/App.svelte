@@ -549,6 +549,45 @@
     downloadJson(buildDiagnosticDump($game), `stuck_${Date.now()}.json`);
   }
 
+  // [2026-09-02 リョー指示] バグ通報。状態ダンプを本文と一緒に server へ送る [ドリオのバグ報告と同じ導線]。
+  // solo はダンプが唯一の再現材料、online は room/revision から server 側 journal で復元できる。
+  // 届いた分は SECRETARY の scheduler が拾って調査タスクにする [docs/bug_report_pipeline.md]
+  let bugReportBusy = false;
+  async function reportBug() {
+    if (bugReportBusy) return;
+    const comment = window.prompt('何が起きたか一言 [例: ツモ和了と出てるのにツモが押せない]');
+    if (comment === null) return;
+    if (!comment.trim()) { alert('本文が空です'); return; }
+    bugReportBusy = true;
+    try {
+      let revision: number | null = null;
+      try { revision = onlineGameStarted ? game.getOnlineProtocolState().revision : null; } catch { revision = null; }
+      const body = {
+        comment: comment.trim(),
+        mode: onlineSpectator ? 'spectate' : (onlineGameStarted ? 'online' : 'solo'),
+        room_id: currentRoomId ?? '',
+        revision,
+        seat: onlineRoomMeta?.mySeat ?? null,
+        version: (window as any).__ANMIKA_BUILD_VERSION__ ?? '',
+        ua: navigator.userAgent,
+        dump: buildDiagnosticDump($game),
+      };
+      const res = await fetch('/api/bugreport', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => '')}`);
+      const data = await res.json().catch(() => ({}));
+      alert(`送った [${data.report ?? 'ok'}]。調査して返す`);
+    } catch (error) {
+      console.error('[bugreport] failed', error);
+      alert('送れなかった。状態ダンプを落として Discord に貼ってくれ');
+    } finally {
+      bugReportBusy = false;
+    }
+  }
+
   // ポッチ開封演出中は自家手牌のツモ牌 [末尾] の色を伏せる [2026-07-16 リョー報告:
   // 「ポッチ何かな」演出中に手牌側で色が即バレしてた]
   const POCHI_COLORED_KEYS = new Set(['z5b', 'z5r', 'z5g', 'z5y', 'bu', 'br', 'bg', 'by']);
@@ -2559,6 +2598,7 @@
       <button on:click={() => game.reset()}>初期化</button>
       <button on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : (onlineGameStarted ? 'オンライン対局の牌譜保存は未対応です' : '安全な手番開始時に保存できます')}>牌譜保存</button>
       <button on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]">状態ダンプ</button>
+      <button on:click={reportBug} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる">🐛 バグ通報</button>
       {#if onlineGameStarted && currentRoomId}
         <button on:click={requestRewind} disabled={rewindBusy} title="オンラインで事故った時、この局の冒頭まで巻き戻す [PW 必要]">🔧 局頭に戻す</button>
       {/if}
@@ -2624,6 +2664,7 @@
           <!-- 2026-07-22 リョー指示: 局中の オンライン対戦 button は撤去 [入口は menu のみ]。
                牌譜保存も局中は状態ダンプと重複扱いで撤去 [終局画面の保存は残す] -->
           <button class="table-setting-btn save" on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ">🩺 <span class="settings-label">状態ダンプ</span></button>
+          <button class="table-setting-btn save" on:click={reportBug} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報">🐛 <span class="settings-label">バグ通報</span></button>
           <!-- 打牌アドバイス [2026-07-21 リョー要望]: CPU戦のみ。初版は header 内 action-row に
                置いて single モードの display:none で丸ごと消えていた -->
           <button class="table-setting-btn advice" class:advice-on={adviceOpen} on:click={() => adviceOpen = !adviceOpen} title="CPUと同じ評価で候補打牌を表示" aria-label="打牌の助言">💡 <span class="settings-label">助言</span></button>
@@ -3145,6 +3186,7 @@
           {:else if state.finished}
             <button on:click={exportPaifu} disabled={!canSavePaifu}>📂 牌譜保存</button>
             <button on:click={exportDiagnostics}>🩺 状態ダンプ</button>
+            <button on:click={reportBug} disabled={bugReportBusy}>🐛 バグ通報</button>
             <!-- [2026-07-23 リョー指示] online は全員の同意 vote、solo は従来 checkbox -->
             {#if onlineGameStarted && !onlineSpectator}
               <label style="display:inline-flex; align-items:center; gap:4px; font-size:14px;">

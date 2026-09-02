@@ -783,6 +783,74 @@ async def _stale_room_sweeper() -> None:
         await asyncio.sleep(max(60, STALE_ROOM_SWEEP_INTERVAL_SEC))
 
 
+# ---------------------------------------------------------------------------
+# バグ通報 [2026-09-02 リョー指示「オンドリみたいにバグ通報が来たら shun が直せるように」]
+# 画面の 🐛 バグ通報 が本文 + 状態ダンプ [buildDiagnosticDump] + online なら room/revision を送る。
+# 日付ごとの jsonl に積むだけ。SECRETARY の scheduler job [anmika_bugreport] が拾って shun の
+# 調査タスクにする。詳細は docs/bug_report_pipeline.md
+# ---------------------------------------------------------------------------
+BUGREPORT_DIR = Path(os.environ.get("ANMIKA_BUGREPORT_DIR", str(DB_PATH.parent / "bugreports")))
+_BUGREPORT_MAX_BYTES = 1024 * 1024   # 状態ダンプ込み。牌譜 3 局分でも数十 KB
+_BUGREPORT_MAX_PER_DAY = 400
+_BUGREPORT_RATE: dict[str, list[float]] = {}
+
+
+def _bugreport_rate_ok(ip: str, now: float, limit: int = 10, window_sec: float = 600.0) -> bool:
+    hits = [t for t in _BUGREPORT_RATE.get(ip, []) if now - t < window_sec]
+    if len(hits) >= limit:
+        _BUGREPORT_RATE[ip] = hits
+        return False
+    hits.append(now)
+    _BUGREPORT_RATE[ip] = hits
+    return True
+
+
+@app.post("/api/bugreport")
+async def save_bug_report(request: Request):
+    ip = (request.client.host if request.client else "?") or "?"
+    if not _bugreport_rate_ok(ip, _time.time()):
+        return JSONResponse({"error": "too many requests"}, status_code=429)
+    raw = await request.body()
+    if len(raw) > _BUGREPORT_MAX_BYTES:
+        return JSONResponse({"error": "report too large"}, status_code=413)
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "invalid payload"}, status_code=400)
+    comment = str(payload.get("comment") or "").strip()
+    if not comment:
+        return JSONResponse({"error": "comment required"}, status_code=400)
+    u = current_user(request)
+    record = {
+        "saved_at": _time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "user_id": str((u or {}).get("user_id") or payload.get("user_id") or "anon")[:64],
+        "username": str((u or {}).get("username") or "")[:64],
+        "comment": comment[:2000],
+        "mode": str(payload.get("mode") or "")[:16],          # solo / online / spectate
+        "room_id": str(payload.get("room_id") or "")[:16],
+        "revision": payload.get("revision") if isinstance(payload.get("revision"), int) else None,
+        "seat": payload.get("seat") if isinstance(payload.get("seat"), int) else None,
+        "version": str(payload.get("version") or "")[:64],
+        "ua": str(payload.get("ua") or "")[:200],
+        # solo は client の状態ダンプが唯一の再現材料。online は room/revision から server 側 journal で復元できる
+        "dump": payload.get("dump"),
+    }
+    day = _time.strftime("%Y%m%d")
+    path = BUGREPORT_DIR / f"{day}.jsonl"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        lines.append(json.dumps(record, ensure_ascii=False))
+        path.write_text("\n".join(lines[-_BUGREPORT_MAX_PER_DAY:]) + "\n", encoding="utf-8")
+    except OSError as exc:
+        log.warning("bugreport save failed: %s", exc)
+        return JSONResponse({"error": "save failed"}, status_code=500)
+    log.info("[bugreport] saved %s#%d mode=%s room=%s rev=%s", path.name, len(lines) - 1, record["mode"], record["room_id"], record["revision"])
+    return JSONResponse({"ok": True, "report": f"{path.name}#{len(lines) - 1}"})
+
+
 @app.post("/api/rooms/cleanup")
 async def cleanup_old_rooms(request: Request):
     """R11 user 報告: 古い部屋 一括削除

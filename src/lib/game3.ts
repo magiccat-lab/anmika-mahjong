@@ -1304,7 +1304,11 @@ export class Game3 {
       }
     }
     // でかぽっち: リーチ一発で p1/p2 ツモ → ぽっちカットイン + 色倍率
-    if (this.lizhi.has(player) && this.yifaActive[player] && !this.shan.lastZimoPochi) {
+    // [2026-09-02 リョー裁定] 待ちに本物の p1/p2 が含まれる [本待ち] なら通常ツモ。白待ちの逆ぽっち回避と同型。
+    // 旧実装は本待ちでも黄扱い [逆払い] にしていた
+    const dekapochiCandidate = this.lizhi.has(player) && this.yifaActive[player] && (corePai === 'p1' || corePai === 'p2');
+    const isRealWaitDeka = dekapochiCandidate && this.getTingpaiListBeforeZimo(player).includes(corePai);
+    if (dekapochiCandidate && !isRealWaitDeka && !this.shan.lastZimoPochi) {
       if (corePai === 'p1') {
         this.shan.lastZimoPochi = 'green';
       } else if (corePai === 'p2') {
@@ -1314,7 +1318,7 @@ export class Game3 {
       }
     }
     // 直前ツモ情報を保存 [ツモ切り時の色判定用]
-    const isDekapochi = this.lizhi.has(player) && this.yifaActive[player] && (corePai === 'p1' || corePai === 'p2');
+    const isDekapochi = dekapochiCandidate && !isRealWaitDeka;
     this.lastZimoInfo = {
       player,
       pai,
@@ -2774,8 +2778,10 @@ export class Game3 {
     }
     // でかぽっち オールマイティ: リーチ一発 + ツモ牌 p1/p2 → swap 試行 [高め取り]
     const zimoCore = sp._zimo ? toCorePai(sp._zimo) : null;
+    // [2026-09-02 リョー裁定] 本待ち [ツモ前の待ちに p1/p2 が含まれる] は通常和了。swap 上書きも でかぽっち役も付けない
     const isDekapochiEligible = !ronpai && this.lizhi.has(player) && this.yifaActive[player]
-      && (zimoCore === 'p1' || zimoCore === 'p2');
+      && (zimoCore === 'p1' || zimoCore === 'p2')
+      && !this.getTingpaiListBeforeZimo(player).includes(zimoCore);
     if (isDekapochiEligible && zimoCore) {
       const fromSuit = zimoCore[0];
       const fromNum = parseInt(zimoCore[1]);
