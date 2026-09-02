@@ -2095,10 +2095,11 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     // sync 毎の投影計算で server が焼ける [8/9 の 6U1V で 3 日間、毎秒数十回]。同一接続の
     // resync は RESYNC_MIN_INTERVAL_MS に 1 回へ間引く。遅延側は必ず 1 回送るので取りこぼしは無い
     const RESYNC_MIN_INTERVAL_MS = 300;
+    // 壁時計 [Date.now] は WSL2 で数十秒ごとに 1 秒強飛ぶ実測あり。負の経過時間で trailing が遅れないよう単調時計を使う
     let lastSyncSentAt = 0;
     let pendingResyncTimer: ReturnType<typeof setTimeout> | null = null;
     const sendMemberSync = () => {
-      lastSyncSentAt = Date.now();
+      lastSyncSentAt = performance.now();
       sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
       sendNextRoundReadyStateTo(ws, room);
       sendChipResetVoteStateTo(ws, room);
@@ -2108,7 +2109,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         let msg: unknown;
         try { msg = JSON.parse(data.toString()); } catch { return; }
         if ((msg as Record<string, unknown>)?.type === 'resync') {
-          const sinceLast = Date.now() - lastSyncSentAt;
+          const sinceLast = performance.now() - lastSyncSentAt;
           if (sinceLast < RESYNC_MIN_INTERVAL_MS) {
             if (!pendingResyncTimer) {
               pendingResyncTimer = setTimeout(() => {
