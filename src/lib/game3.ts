@@ -2555,6 +2555,15 @@ export class Game3 {
         const newFubaopai = this.kamiPochiEffectiveIndicators_(player, 'fubaopai', [...(this.shan.fubaopai ?? [])])
           .map(normalizeBaopaiForMajiang);
         const newParam = { ...param, baopai: newBaopai, fubaopai: this.lizhi.has(player) ? newFubaopai : param.fubaopai };
+        // [2026-05-21 fix] 神ぽっち適用後の param を保持、 後続の 白ぽっち / でかぽっち
+        // オールマイティ swap path がこの修正済 baopai/fubaopai を使い続けるように。 旧 code は
+        // param 更新せず → swap が原 fubaopai で計算 → 神ぽっち ura ドラ消える bug。
+        // [2026-09-03 リョー報告: フィーバー最初の 2p ツモだけ表ドラの神ぽっちが無効] 旧 code は
+        // 「再 hule が成功した時だけ param 更新」だった。でかぽっち [p1/p2 ツモ] は swap して
+        // 初めて和了形になるので base も再 hule も null → param が素の表示列のまま swap path に
+        // 渡り、選択済み神ぽっちのドラが丸ごと落ちていた。再 hule の成否と無関係に先に更新する。
+        param.baopai = newBaopai;
+        if (this.lizhi.has(player)) param.fubaopai = newFubaopai;
         let kamiApplied = false;
         try {
           const spForHule = sp.clone();
@@ -2567,11 +2576,6 @@ export class Game3 {
               result.hupai = result.hupai ?? [];
               const choices = selectedKamiDora.map((occurrence) => `${occurrence.key}→${occurrence.target}`).join(', ');
               result.hupai.push({ name: `神ぽっち [${choices}]`, fanshu: 0 });
-              // [2026-05-21 fix] 神ぽっち適用後の param を保持、 後続の 白ぽっちオールマイティ
-              // swap path がこの修正済 baopai/fubaopai を使い続けるように。 旧 code は param 更新せず
-              // → swap が原 fubaopai で計算 → 神ぽっち ura ドラ消える bug。
-              param.baopai = newBaopai;
-              if (this.lizhi.has(player)) param.fubaopai = newFubaopai;
               kamiApplied = true;
             }
           }
@@ -2844,6 +2848,15 @@ export class Game3 {
         const color = zimoCore === 'p1' ? '緑' : '黄';
         result.hupai.push({ name: `でかぽっち オールマイティ [${best._dekapochiSwap}] (${color})`, fanshu: 0 });
       }
+    }
+    // [2026-09-03 リョー報告] 白ぽっち / でかぽっち の swap path は候補 result で丸ごと
+    // 差し替えるため、神ぽっち section が付けたラベルが落ちる [ドラ翻は上で param を
+    // 更新済みなので候補側の再 hule が数えている]。差し替えられていたら貼り直す。
+    if (selectedKamiDora.length > 0 && result
+        && !(result.hupai ?? []).some((h: any) => String(h.name).startsWith('神ぽっち'))) {
+      const choices = selectedKamiDora.map((occurrence) => `${occurrence.key}→${occurrence.target}`).join(', ');
+      result.hupai = result.hupai ?? [];
+      result.hupai.push({ name: `神ぽっち [${choices}]`, fanshu: 0 });
     }
     // アンミカ独自: 7m を ヤオチュー牌として扱う再判定
     // majiang-core の判定で役無し or 通常役のみ → 「7m を 1m として扱う」 国士 / 清老頭等を後付け
