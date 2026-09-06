@@ -1994,7 +1994,15 @@ export class Game3 {
         result = [[]];
       }
       if (!result || result.length === 0) {
-        return this.canTsumoByHuleResult(player);
+        // [2026-09-07 バグ通報 20260907_0 「青ぽっちツモ無視された」] ここで即 return すると
+        // 下の ぽっち / でかぽっち オールマイティ判定が到達不能になり、リーチ後のぽっちツモは
+        // hule() が成功するかどうかだけに依存する。hule() が何かの理由で null を返すと
+        // 「和了不可」扱いになり、自動ツモ切り [autoLizhiInline / auto tsumokiri scheduler] が
+        // 和了牌をそのまま河に捨ててしまう。ルール 2-3 の「リーチ後のぽっちはオールマイティ
+        // [強制高め取り]」は無条件なので、hule() が駄目でも swap 判定へ落とす。
+        // リーチ中限定なので 立直 の役は必ず付き、ここで true にしても 役なし詰みにはならない。
+        if (this.canTsumoByHuleResult(player)) return true;
+        return this.canTsumoByPochiAlmighty(player, sp, dbg);
       }
       if (result && result.length > 0) {
         // [2026-05-15 bug C fix] 北 [z4] 単騎: 役満絡み [字一色 / 大三元 / 国士 等] でない限り
@@ -2031,6 +2039,13 @@ export class Game3 {
         return true;
       }
     } catch { /* ignore */ }
+    return this.canTsumoByPochiAlmighty(player, sp, dbg);
+  }
+
+  /** リーチ後の ぽっち / でかぽっち オールマイティ だけでツモ和了できるか
+   *  [ルール 2-3: リーチ後のぽっちはオールマイティ、強制高め取り]。
+   *  hule() 経由の判定が通らなかった時の最後の砦。 */
+  private canTsumoByPochiAlmighty(player: PlayerId, sp: any, dbg: Record<string, unknown>): boolean {
     // [2026-05-21 fix] _zimo は z5b/r/g/y 等 raw colored pochi で入る [commit 4d1f476f]、
     // toCorePai 経由で正規化。 以下 z5 比較は 全て同パターンで修正。
     if (this.lizhi.has(player) && sp._zimo && toCorePai(sp._zimo) === 'z5') {
