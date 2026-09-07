@@ -415,6 +415,9 @@ export function buildCanonicalPaifuSnapshot(state: StoreState, timestamp = new D
         chipBreakdown: g.chipBreakdown,
         discardLog: g.discardLog,
         justNukidBei: g.justNukidBei,
+        missedRonTemp: g.missedRonTemp,
+        missedRonPermanent: g.missedRonPermanent,
+        pendingRonWindow: g.pendingRonWindow,
         lizhi: Array.from(g.lizhi),
         doubleLizhi: Array.from(g.doubleLizhi),
         openLizhi: Array.from(g.openLizhi),
@@ -522,6 +525,7 @@ function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreSt
     'feverDeclareTing', 'feverTier', 'feverPendingShuvari', 'feverSaiAwarded',
     'shuvariActive', 'shuvariUsed',
     'lateShuvariWindow',
+    'missedRonTemp', 'missedRonPermanent',
   ];
   for (const field of recordFields) {
     if (fields[field] !== undefined) (ng as any)[field] = cloneCanonical(fields[field]);
@@ -536,6 +540,8 @@ function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreSt
   ng.doubleLizhi = new Set(fields.doubleLizhi ?? []);
   ng.openLizhi = new Set(fields.openLizhi ?? []);
   ng.feverDeclareDapaiPlayer = fields.feverDeclareDapaiPlayer ?? null;
+  // 旧牌譜には無いので既定は「開いているロン受付なし」
+  ng.pendingRonWindow = fields.pendingRonWindow ?? null;
   ng.tobiChipPaid = !!fields.tobiChipPaid;
 
   // A portable paifu must describe exactly one physical copy of every tile.

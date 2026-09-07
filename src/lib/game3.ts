@@ -430,6 +430,18 @@ export class Game3 {
   /** 席別の第一巡状態。天和・地和・人和を他家の打牌から独立して判定する。 */
   firstTurnState: FirstTurnState = createFirstTurnState();
 
+  /** 見逃しフリテン [2026-09-07 リョー裁定「フィーバー中はフリテン無視、他は一般麻雀ルール」]。
+   *  同巡内フリテン: ロン可能な牌を見逃したら、自分の次のツモまでロン不可。
+   *  ツモ和了は妨げない [フリテンはロンだけを止める]。 */
+  missedRonTemp: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false };
+
+  /** リーチ後の見逃し = 局終了までロン不可 [永久フリテン]。qipai で解除。 */
+  missedRonPermanent: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false };
+
+  /** まだロン受付が閉じていない直前の打牌。次の dapai / zimo が来た時点で
+   *  「その牌をロンできたのに見逃した」player にフリテンを付けて閉じる。 */
+  pendingRonWindow: { player: PlayerId; pai: string } | null = null;
+
   /** 旧牌譜・テスト互換。新規ロジックは firstTurnState と席別 predicate を使う。 */
   get diyizimo(): boolean { return hasAnyFirstTurnEligibility(this.firstTurnState); }
   set diyizimo(value: boolean) {
@@ -1175,6 +1187,9 @@ export class Game3 {
   /** 配牌 [13 枚 × 3 人]、 同時に金牌 / 華牌の player 別カウント */
   qipai(): void {
     this.firstTurnState = createFirstTurnState();
+    this.missedRonTemp = { 0: false, 1: false, 2: false };
+    this.missedRonPermanent = { 0: false, 1: false, 2: false };
+    this.pendingRonWindow = null;
     this.kamiPochiDoraChoices = { 0: {}, 1: {}, 2: {} };
     this.fuyuRevealState = { 0: null, 1: null, 2: null };
     this.pochiSwapChoice = { 0: null, 1: null, 2: null };
@@ -1228,6 +1243,10 @@ export class Game3 {
   /** 現 lunban 家のツモ */
   zimo(): Pai | null {
     if (this.shan.paishu === 0) return null;
+    // ツモが起きた = 直前の打牌へのロン権は消えた。見逃しを確定させてから、
+    // これからツモる player の同巡内フリテンを解除する [リーチ後の永久分は残す]
+    this.closeRonWindow();
+    this.missedRonTemp[this.lunbanToPlayerId(this.state.lunban)] = false;
     // 宣言牌がロンされず次ツモに到達した時点でFEVERと保留中シュバリを確定する。
     if (this.feverDeclareDapaiPlayer !== null) {
       this.confirmFeverDeclaration(this.feverDeclareDapaiPlayer);
@@ -1415,6 +1434,8 @@ export class Game3 {
   }
 
   dapai(pai: Pai, meta?: { gold?: boolean; pochi?: 'blue' | 'red' | 'green' | 'yellow' }): void {
+    // 新しい打牌が起きた = 直前の打牌へのロン権は消えた [副露を挟んだ場合もここで閉じる]
+    this.closeRonWindow();
     // R8 P0 #3 fix: 加槓 window は dapai 時点で必ず clear、 嶺上ツモ後の通常打牌に
     // qianggang: true が付く誤判定を防ぐ
     this.qianggangPending = false;
@@ -1508,6 +1529,8 @@ export class Game3 {
     const isTsumogiri = this.lastZimoInfo.player === player && this.lastZimoInfo.pai === paiForHand;
     this.discardLog[player].push({ pai: paiForHand, gold: isGold, pochi: pochiColor, tsumogiri: isTsumogiri });
     this.events.push({ type: 'dapai', player, pai: paiForHand });
+    // この打牌のロン受付を開く [見逃しフリテン判定用]。次の dapai / zimo で閉じる
+    this.pendingRonWindow = { player, pai: paiForHand };
     // 注: justNukidBei は ここで clear しない。 dapai 開始時点で clear すると
     //     直後の getPonCandidates [store 側] が flag false で 抜き直後 dapai を
     //     ポン可と誤判定する [ルール 2-4 「抜き直後の他家ポン不可」 違反]。
@@ -2149,6 +2172,30 @@ export class Game3 {
     return true;
   }
 
+  /** 開いているロン受付を閉じ、見逃した player にフリテンを付ける。
+   *  次の打牌 / 次のツモが起きた時点で、その牌のロン権は消えている。
+   *  - 全員: 同巡内フリテン [自分の次のツモまでロン不可]
+   *  - リーチ者: 和了放棄なので局終了まで永久フリテン
+   *  フィーバー中の判定 skip は canRon 側 [ルール 5-3、リョー裁定 2026-09-07] */
+  closeRonWindow(): void {
+    const w = this.pendingRonWindow;
+    this.pendingRonWindow = null;
+    if (!w) return;
+    for (const p of [0, 1, 2] as PlayerId[]) {
+      if (p === w.player) continue;
+      if (this.missedRonPermanent[p]) continue;
+      let couldRon = false;
+      try {
+        couldRon = this.canRon(p, w.pai as Pai, w.player);
+      } catch {
+        couldRon = false;
+      }
+      if (!couldRon) continue;
+      this.missedRonTemp[p] = true;
+      if (this.lizhi.has(p)) this.missedRonPermanent[p] = true;
+    }
+  }
+
   /** ロン和了判定 [other player が pai で和了可能か、 厳密フリテン check 込み]
    *  白ぽっち オールマイティ: リーチ済 + ロン牌 z5 で 通常 hule 役なしなら swap 試行 */
   canRon(player: PlayerId, pai: Pai, fromPlayer: PlayerId | null = null): boolean {
@@ -2208,6 +2255,8 @@ export class Game3 {
       const baseTile = anmikaTileKind;
       const tingNorm = new Set(ting.map(baseTile));
       const myHe = this.he.get(player);
+      // 見逃しフリテン [同巡内 / リーチ後の永久]。フィーバー中は skip [ルール 5-3]
+      if (!this.feverActive[player] && (this.missedRonTemp[player] || this.missedRonPermanent[player])) return false;
       // フィーバー中はフリテン判定 skip [ルール 5-3 何度でもアガリ可能]
       if (myHe?._pai && !this.feverActive[player]) {
         for (const discarded of myHe._pai as string[]) {
