@@ -330,6 +330,23 @@ function countNiji(sp: any, ronpai: string | null): number {
   return n;
 }
 
+/** 打点ランク祝儀の判定に使う基本点。夏の段上げ [_basePointOverride] を含める */
+function rankChipBase(result: any): number {
+  const override = Number(result?._basePointOverride);
+  if (Number.isFinite(override) && override > 0) return override;
+  const fanshu = Number(result?.fanshu ?? 0);
+  const fu = Number(result?.fu ?? 30);
+  if (fanshu >= 24) return 12000;
+  if (fanshu >= 18) return 10000;
+  if (fanshu >= 13) return 8000;
+  if (fanshu >= 11) return 6000;
+  if (fanshu >= 8) return 4000;
+  if (fanshu >= 6) return 3000;
+  if (fanshu >= 5) return 2000;
+  const raw = fu * Math.pow(2, fanshu + 2);
+  return raw >= 1920 ? 2000 : raw;
+}
+
 export function applyChipsOnHule(
   ctx: HuleChipCtx,
   result: any,
@@ -541,16 +558,19 @@ export function applyChipsOnHule(
     });
     // 本役満 13翻超過 chip ボーナス [ツモ・ロン共通]
     applyExcessHanChip('役満');
-  } else if (result.fanshu !== undefined && result.fanshu >= 11) {
+  } else if (result.fanshu !== undefined && rankChipBase(result) >= 6000) {
     // 打点ランク chip [リョー指示 2026-05-12]:
-    //   3 倍満 [11-12 翻]: ツモ 3 オール / ロン 6 from loser
-    //   役満 [13-17 数え]: ツモ 5 オール / ロン 10 from loser
-    //   5 倍満 [18-23]: ツモ 7 オール / ロン 14 from loser
-    //   6 倍満 [24+]: ツモ 9 オール / ロン 18 from loser
-    if (result.fanshu >= 13) {
+    //   3 倍満 [6000]: ツモ 3 オール / ロン 6 from loser
+    //   役満 [8000、13-17 数え]: ツモ 5 オール / ロン 10 from loser
+    //   5 倍満 [10000]: ツモ 7 オール / ロン 14 from loser
+    //   6 倍満 [12000]: ツモ 9 オール / ロン 18 from loser
+    // [2026-09-14] 翻ではなく基本点で見る。夏はランクを 1 段上げるので、
+    // 翻で見ると夏ぶんのランク祝儀が出ない [裁定「夏は向こうにあわせる」]
+    if (rankChipBase(result) >= 8000) {
       let rankTsumo: number, rankRon: number, rankLabel: string;
-      if (result.fanshu >= 24) { rankTsumo = 9; rankRon = 18; rankLabel = '6 倍満'; }
-      else if (result.fanshu >= 18) { rankTsumo = 7; rankRon = 14; rankLabel = '5 倍満'; }
+      const rb = rankChipBase(result);
+      if (rb >= 12000) { rankTsumo = 9; rankRon = 18; rankLabel = '6 倍満'; }
+      else if (rb >= 10000) { rankTsumo = 7; rankRon = 14; rankLabel = '5 倍満'; }
       else { rankTsumo = 5; rankRon = 10; rankLabel = '役満 [数え]'; }
       if (loser === null) ctx.applyChipOall(winner, rankTsumo, { label: rankLabel });
       else ctx.applyChipFromLoser(winner, loser, rankRon, { label: rankLabel });

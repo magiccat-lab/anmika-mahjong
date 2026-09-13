@@ -284,6 +284,12 @@ export function isFeverWaitExhausted(
       .map(normalizedWaitCore)
       .filter((p) => p !== 'z5'));
     if (waits.size === 0) return true;
+    // [2026-09-14 リョー「より良い方を採用して」] ぽっちはオールマイティなので、
+    // 山に 1 枚でも残っていれば待ちは切れていない。
+    // 旧実装はぽっちを残数から外していたため、ぽっちが残っていても FEVER が
+    // 「待ち牌全消失」で早く終わっていた [norosh1 の牌譜 481 局面で向こうは続いていた]。
+    // 「ぽっちだけが待ち」の手は従来どおり打ち切る [上の waits.size === 0]
+    if (liveWall.some((p) => toCorePai(p) === 'z5')) return false;
     return !liveWall.some((p) => waits.has(normalizedWaitCore(p)));
   }
   const baseTile = normalizedWaitCore;

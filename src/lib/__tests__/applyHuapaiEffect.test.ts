@@ -45,7 +45,9 @@ describe('Game3 applyHuapaiEffect', () => {
     expect(result.hupai.some((h: any) => h.name.startsWith('冬'))).toBe(true);
   });
 
-  it('夏金北 [natsu=1 + kinpeiTarget=natsu] で 夏 2 段相当', () => {
+  // [2026-09-14 リョー裁定「夏は向こうにあわせる」] 夏 1 枚に金北を当てても段は増えない。
+  // 金北が夏に効くのは 夏 2 枚以上の時の ×4 だけ [旧: 夏金北単体 = 夏夏相当 2 段]
+  it('夏金北 [natsu=1 + kinpeiTarget=natsu] は 夏 1 枚と同じ 1 段だけ', () => {
     const g = new Game3();
     g.qipai();
     const player = 0 as PlayerId;
@@ -54,10 +56,9 @@ describe('Game3 applyHuapaiEffect', () => {
     g.goldHand[player] = { p: 0, s: 0, z: 1 };
     const result = { fanshu: 1, fu: 30, hupai: [] } as any;
     g.applyHuapaiEffect(result, player);
-    // 夏単体 1 → 夏金北で natsu=2 相当 = 2 段ランクアップ
-    // fanshu 1 → Lv1 → Lv3 [3 翻]
-    expect(result.fanshu).toBe(3);
-    expect(result.hupai.some((h: any) => h.name.includes('夏金北'))).toBe(true);
+    // 1 翻 30 符 = 480 点 [満貫未満] なので 1 翻上がって 2 翻
+    expect(result.fanshu).toBe(2);
+    expect(result.hupai.some((h: any) => h.name.startsWith('夏'))).toBe(true);
   });
 
   it('夏夏金北 [natsu>=2 + kinpeiTarget=natsu] では打点 ランクアップ skip [base ×4 は別 path]', () => {
@@ -103,16 +104,27 @@ describe('Game3 applyHuapaiEffect', () => {
   });
 
   // [2026-05-23 audit [10] regression] 夏金北 [夏 1 + 金北] = 2 ランクアップ
-  it('夏金北 [natsu=1 + kinpeiTarget=natsu] は 2 ランクアップ', () => {
+  it('満貫に届いたら翻ではなくランクが 1 段上がる [ルールブック 2-2 の梯子]', () => {
     const g = new Game3();
     g.qipai();
     const player = 0 as PlayerId;
     g.huapai[player] = ['f2'];
-    g.kinpeiTarget[player] = 'natsu';
-    g.goldHand[player] = { p: 0, s: 0, z: 1 };
-    const result = { fanshu: 1, fu: 30, hupai: [] } as any;
+    // 5 翻 = 満貫 2000。夏 1 枚で 跳満 3000 へ
+    const result = { fanshu: 5, fu: 30, hupai: [] } as any;
     g.applyHuapaiEffect(result, player);
-    expect(result.fanshu).toBe(3);
+    expect(result.fanshu).toBe(5);            // 翻は動かさない
+    expect(result._basePointOverride).toBe(3000);
+  });
+
+  it('満貫未満は翻が 1 つ上がる [4 翻 25 符 = 1600 点は満貫ではない]', () => {
+    const g = new Game3();
+    g.qipai();
+    const player = 0 as PlayerId;
+    g.huapai[player] = ['f2'];
+    const result = { fanshu: 4, fu: 25, hupai: [] } as any;
+    g.applyHuapaiEffect(result, player);
+    expect(result.fanshu).toBe(5);            // 5 翻 = 満貫
+    expect(result._basePointOverride).toBeUndefined();
   });
 
   it('リーチ中なら fubaopai の華も hua candidate に含む', () => {

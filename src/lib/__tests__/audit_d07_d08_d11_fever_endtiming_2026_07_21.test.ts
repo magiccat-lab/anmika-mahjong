@@ -32,8 +32,11 @@ function feverExhaustedGame(): { g: Game3; player: PlayerId } {
   g.feverActive[player] = true;
   g.feverTier[player] = 2;
   g.feverDeclareTing[player] = ['s9'];
-  // 待ち牌 s9 を山から完全に除去して待ち枯れ状態にする
-  (g.shan as any)._pai = ((g.shan as any)._pai as string[]).filter((p) => p !== 's9');
+  // 待ち牌 s9 を山から完全に除去して待ち枯れ状態にする。
+  // [2026-09-14] ぽっちはオールマイティなので山に残っていると待ちが切れない。
+  // この fixture は「待ち枯れ」を作るのが目的なので、ぽっちも抜く
+  (g.shan as any)._pai = ((g.shan as any)._pai as string[])
+    .filter((p) => p !== 's9' && !String(p).startsWith('z5'));
   return { g, player };
 }
 

@@ -370,6 +370,21 @@ function handUsesBeiMaterial(sp: any, ronpai: Pai | null = null): boolean {
 
 // fanshuLevel / LEVEL_TO_FANSHU は helpers.ts に移動 [import 済]
 
+/** 夏の梯子 [ルールブック 2-2]。満貫から上は 1 段ずつ */
+const NATSU_LADDER = [2000, 3000, 4000, 6000, 8000, 10000, 12000];
+/** 夏を当てる前の基本点。settlement.computeSanmaBase の override 無し版と同じ規則 */
+function natsuBaseOf(fanshu: number, fu: number): number {
+  if (fanshu >= 24) return 12000;
+  if (fanshu >= 18) return 10000;
+  if (fanshu >= 13) return 8000;
+  if (fanshu >= 11) return 6000;
+  if (fanshu >= 8) return 4000;
+  if (fanshu >= 6) return 3000;
+  if (fanshu >= 5) return 2000;
+  const raw = fu * Math.pow(2, fanshu + 2);
+  return raw >= 1920 ? 2000 : raw;
+}
+
 export class Game3 {
   state: GameState;
   shan: Shan3;
@@ -3235,7 +3250,9 @@ export class Game3 {
     const isNatsuKinpei = this.kinpeiTarget[player] === 'natsu';
     const natsuKinpeiActive = natsu >= 2 && isNatsuKinpei;  // 夏夏金北 [×4]
     if (natsuKinpeiActive) (result as any)._pointPaymentMultiplier = 4;
-    const natsuEffect = natsu + (isNatsuKinpei && natsu === 1 ? 1 : 0);  // 夏金北単体 = natsu=2 相当
+    // [2026-09-14 リョー裁定「夏は向こうにあわせる」] 夏 1 枚に金北を当てても段は増えない。
+    // 金北が夏に効くのは 夏 2 枚以上の時の ×4 だけ [旧実装は 夏金北単体を 夏夏相当にしていた]
+    const natsuEffect = natsu;
     // 夏: 打点ランクアップ N 段 [マンガン未満なら直接マンガン、 マンガン以降は段階アップ]
     if (natsuEffect > 0 && !natsuKinpeiActive && (result.damanguan ?? 0) > 0) {
       const beforeBase = Number((result as any)._basePointOverride) > 0
@@ -3253,14 +3270,29 @@ export class Game3 {
         fanshu: 0,
       });
     } else if (natsuEffect > 0 && !natsuKinpeiActive && result.fanshu !== undefined) {
+      // [2026-09-14 リョー裁定「夏は向こうにあわせる」] ルールブック 2-2 の梯子どおりに 1 段ずつ上げる。
+      //   1ハン→2ハン→…→満貫→跳満→倍満→三倍満→役満→五倍満→六倍満
+      // 満貫未満は 1 翻ずつ、満貫に届いたらランクを 1 段ずつ。
+      // 旧実装は fanshuLevel [4 翻なら符に関係なく満貫扱い] を使っていたため、
+      // 4 翻 25 符 [1600 点 = 満貫未満] を満貫と見て 1 段多く上げていた。
       const beforeFan = result.fanshu;
-      const beforeLevel = fanshuLevel(beforeFan, result.fu ?? 30);
-      const afterLevel = Math.min(beforeLevel + natsuEffect, LEVEL_TO_FANSHU.length - 1);
-      const afterFan = LEVEL_TO_FANSHU[afterLevel] || beforeFan + natsuEffect;
+      const fu = result.fu ?? 30;
+      let fan = beforeFan;
+      let overrideBase: number | null = null;
+      for (let i = 0; i < natsuEffect; i++) {
+        const cur: number = overrideBase ?? natsuBaseOf(fan, fu);
+        if (cur < NATSU_LADDER[0]) { fan += 1; continue; }
+        const idx = NATSU_LADDER.indexOf(cur);
+        overrideBase = idx >= 0 && idx + 1 < NATSU_LADDER.length ? NATSU_LADDER[idx + 1] : cur;
+      }
       const labelN = natsuEffect === 1 ? '夏' : natsuEffect === 2 ? '夏夏' : `夏×${natsuEffect}`;
-      const kinpeiNote = isNatsuKinpei && natsu === 1 ? ' [夏金北]' : '';
-      result.hupai.push({ name: `${labelN}${kinpeiNote} [打点ランクアップ Lv${beforeLevel}→${afterLevel} ${beforeFan}→${afterFan}翻相当]`, fanshu: afterFan - beforeFan });
-      result.fanshu = afterFan;
+      const afterBase = overrideBase ?? natsuBaseOf(fan, fu);
+      result.hupai.push({
+        name: `${labelN} [打点ランクアップ ${natsuBaseOf(beforeFan, fu)}→${afterBase}基本点]`,
+        fanshu: fan - beforeFan,
+      });
+      result.fanshu = fan;
+      if (overrideBase !== null) (result as any)._basePointOverride = overrideBase;
     }
 
     // 春効果は applyChipsOnHule 側で集計 [二重表示防止のため、 ここでは push しない]

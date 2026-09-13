@@ -28,7 +28,10 @@ describe('D-12: FEVER 待ち枯れの再判定', () => {
   it('待ち牌が山から消えていれば次ツモ前に流局する', () => {
     const s = armFeverSingleWait();
     const g = s.game;
-    (g.shan as any)._pai = ((g.shan as any)._pai as string[]).filter((p) => toCorePai(p) !== 's9');
+    // [2026-09-14] ぽっちはオールマイティなので山に残っていると待ちは切れない。
+    // 「待ち牌全消失」を作るのが目的なので、ぽっちも抜く
+    (g.shan as any)._pai = ((g.shan as any)._pai as string[])
+      .filter((p) => toCorePai(p) !== 's9' && toCorePai(p) !== 'z5');
     const after = confirmPendingFeverBeforeDraw(s);
     expect(after.pendingPingju || after.roundEnded).toBe(true);
     expect(String(after.message)).toContain('待ち牌全消失');
