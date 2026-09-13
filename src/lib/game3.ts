@@ -164,6 +164,7 @@ import { computeChipMultiplier as computeChipMultiplierHelper, applyChipOall as 
 import { getTingpaiList as getTingpaiListHelper, getTingpaiListBeforeZimo as getTingpaiListBeforeZimoHelper, canTsumoWithPochiSwap as canTsumoWithPochiSwapHelper, americanChitoiXiangting, americanChitoiComplete, countAmericanChitoiQuads } from './game3/tingpai';
 import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotHelper, type PreHuleSnapshot } from './game3/snapshot';
 import { applyFuyuChip as applyFuyuChipHelper, applyChipsOnHule as applyChipsOnHuleHelper, type HuleChipCtx, type FuyuAdvanceResult, type FuyuRevealState } from './game3/huleChip';
+import { normalHanForYakuman } from './game3/coreNormalHan';
 import { physicalDiscardCandidates, resolvePhysicalDiscardPai, restorePhysicalHandState, snapshotPhysicalHandState } from './game3/tileIdentity';
 import { evaluateWinPoints } from './game3/settlement';
 import {
@@ -2821,6 +2822,8 @@ export class Game3 {
           // R13 P1 #7 fix: ron 時は ronpaiSwapped = z5 [元の ronpai] のまま、 swap に書換しない
           const ronpaiSwapped = ronpaiWithDir;
           let r = Majiang.Util.hule(spClone, ronpaiSwapped, param);
+          // [2026-09-14] 13 翻超過の母数を数え直す時に、採点に使った実際の牌姿が要る
+          if (r) { (r as any)._spUsed = spClone; (r as any)._ronpaiUsed = ronpaiSwapped; }
           if ((!r || !((r.fanshu !== undefined) || ((r.damanguan ?? 0) > 0) || (r.hupai ?? []).some((h: any) => h.fanshu === '*' || h.fanshu === '**')))
             && americanChitoiComplete(spClone, ronpai ? ronpaiWithDir : null)) {
             const quadCount = countAmericanChitoiQuads(spClone, ronpai ? ronpaiWithDir : null);
@@ -2894,6 +2897,7 @@ export class Game3 {
           spClone._bingpai[ss][nn] += 1;
           spClone._zimo = swap;
           let r = Majiang.Util.hule(spClone, null, param);
+          if (r) { (r as any)._spUsed = spClone; (r as any)._ronpaiUsed = null; }
           if ((!r || !((r.fanshu !== undefined) || ((r.damanguan ?? 0) > 0)))
             && americanChitoiComplete(spClone)) {
             r = { hupai: [{ name: '七対子', fanshu: 2 }], fu: 25, fanshu: 2, damanguan: 0, defen: 0, fenpei: [0, 0, 0, 0] };
@@ -2970,6 +2974,7 @@ export class Game3 {
         }
         const ronpaiSub = ronpaiIsM7 ? ('m1' + ronpaiWithDir!.slice(2)) : ronpaiWithDir;
         const r7 = Majiang.Util.hule(spClone7, ronpaiSub, param);
+        if (r7) { (r7 as any)._spUsed = spClone7; (r7 as any)._ronpaiUsed = ronpaiSub; }
         if (r7 && r7.hupai) {
           const upgradeNames = ['全帯幺', '純全帯幺', '清老頭', '混老頭'];
           const hasUpgrade = r7.hupai.some((h: any) => upgradeNames.some(n => h.name?.includes(n)));
@@ -2993,6 +2998,7 @@ export class Game3 {
         const spClone = sp.clone();
         spClone._bingpai.z[4] += (this.nukidora[player] ?? 0) + (this.nukidoraGold[player] ?? 0);
         const fallback = Majiang.Util.hule(spClone, ronpaiWithDir, param);
+        if (fallback) { (fallback as any)._spUsed = spClone; (fallback as any)._ronpaiUsed = ronpaiWithDir; }
         if (fallback && fallback.hupai) {
           const hasYakuman = (fallback.damanguan ?? 0) > 0
             || fallback.hupai.some((h: any) => ['字一色', '大四喜', '小四喜', '国士無双'].some(n => h.name?.includes(n)));
@@ -3049,22 +3055,48 @@ export class Game3 {
     // 抜きドラ加算 [アンミカ: 1 枚 = 1 翻、 4 枚抜きで 8 翻 [+4 ボーナス]]
     //   通常 z4 + 金北 [nukidoraGold] 両方カウント
     const nuki = (this.nukidora[player] ?? 0) + (this.nukidoraGold[player] ?? 0);
+    // 裏 / 表 ドラ表に z3 [西] indicator [→ z4 北 ドラ] が出てる場合、 抜き北も追加ドラとして count
+    // [リョー指示 2026-05-11: 西捲れ + 北抜き済 で 抜きドラ枚数分の ドラ翻 を加算]
+    const baopaiHasZ3 = (this.shan.baopai ?? []).filter((p: any) => toCorePai(p) === 'z3').length;
+    const fubaopaiHasZ3 = this.lizhi.has(player)
+      ? (this.shan.fubaopai ?? []).filter((p: any) => toCorePai(p) === 'z3').length : 0;
+    // [2026-09-14 リョー裁定 2「つける」] 裏ドラ表示の西で増える北ドラは、裏ドラとして祝儀も付く。
+    // 翻は 北ドラ の entry にまとめて出すが、祝儀の枚数だけ別口で数える [役満でも付く]
+    if (fubaopaiHasZ3 > 0 && nuki > 0) result._chipUradoraFromNuki = fubaopaiHasZ3 * nuki;
     if (nuki > 0 && result.fanshu !== undefined) {
       result.hupai = result.hupai ?? [];
       const fanAdd = nuki >= 4 ? 8 : nuki;
       result.hupai.push({ name: nuki >= 4 ? '抜きドラ ×4 [8翻]' : `抜きドラ ×${nuki}`, fanshu: fanAdd });
       result.fanshu += fanAdd;
-      // 裏 / 表 ドラ表に z3 [西] indicator [→ z4 北 ドラ] が出てる場合、 抜き北も追加ドラとして count
-      // [リョー指示 2026-05-11: 西捲れ + 北抜き済 で 抜きドラ枚数分の ドラ翻 を加算]
-      const isLizhiAgari = this.lizhi.has(player);
-      const baopaiHasZ3 = (this.shan.baopai ?? []).filter((p: any) => toCorePai(p) === 'z3').length;
-      const fubaopaiHasZ3 = isLizhiAgari ? (this.shan.fubaopai ?? []).filter((p: any) => toCorePai(p) === 'z3').length : 0;
       const extraNukiDora = (baopaiHasZ3 + fubaopaiHasZ3) * nuki;
       if (extraNukiDora > 0) {
         result.hupai.push({ name: `北ドラ [西indicator ×${baopaiHasZ3 + fubaopaiHasZ3} × 抜き ${nuki}]`, fanshu: extraNukiDora });
         result.fanshu += extraNukiDora;
       }
     }
+    // [2026-09-14 リョー裁定 1「はらう」] 本役満でも 13 翻超過の祝儀を払う。
+    // majiang-core は役満が出ると通常役を捨てるので、母数のハン数が result に残らない。
+    // vendor copy [coreNormalHan] で「役満を除いた通常役」を数え直して母数に渡す。
+    // 嵌八萬のようにうちが後から役満を足す手は result.hupai 側に通常役が残っているので、
+    // huleChip 側で大きい方を採る [二重に足さない]。
+    if (isYakuman) {
+      try {
+        // ぽっち置換や m7→m1 置換で和了った手は、置換後の牌姿でないと分解できない
+        const spForCount = (result as any)._spUsed ?? sp;
+        const ronForCount = (result as any)._ronpaiUsed !== undefined ? (result as any)._ronpaiUsed : ronpaiWithDir;
+        const coreHan = normalHanForYakuman(spForCount, ronForCount, param);
+        // 抜きドラ / 北ドラ は役満だと上の block を通らないので、母数にだけ足す
+        const nukiFan = nuki > 0 ? (nuki >= 4 ? 8 : nuki) : 0;
+        const nukiDoraFan = (baopaiHasZ3 + fubaopaiHasZ3) * nuki;
+        if (coreHan > 0) result._excessHanBase = coreHan + nukiFan + nukiDoraFan;
+      } catch {
+        // 牌姿が majiang-core で分解できない手 [嵌八萬のぽっち埋め等] は従来どおり
+      }
+    }
+    // 採点に使った牌姿は result に残さない。ws_server が structuredClone するので
+    // 関数を持つ Shoupai が付いたままだと DataCloneError になる [2026-09-14 fuzz で検出]
+    delete (result as any)._spUsed;
+    delete (result as any)._ronpaiUsed;
     // [2026-05-15 fix bug A] majiang-core hule.js の 「ドラ」 / 「裏ドラ」 count に
     // 0 牌複数枚漏れバグ あり [hule.js L570 / L588 `m.replace(/0/, '5')` に g flag 無、
     // suitstr 内の 2 つ目以降の '0' が 5 として match されない]。 anmika 側で補正:

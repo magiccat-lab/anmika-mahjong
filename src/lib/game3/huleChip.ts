@@ -427,9 +427,10 @@ export function applyChipsOnHule(
     else ctx.applyChipOall(winner, 1, { label: '一発' });
   }
   const uradora = (result.hupai ?? []).find((h: any) => h.name === '裏ドラ');
-  const uradoraCount = (uradora && typeof uradora.fanshu === 'number' && uradora.fanshu > 0)
+  // [2026-09-14 裁定 2] 裏ドラ表示の西で増える北ドラも裏ドラの祝儀を出す
+  const uradoraCount = ((uradora && typeof uradora.fanshu === 'number' && uradora.fanshu > 0)
     ? uradora.fanshu
-    : Number(result._chipUradora ?? 0);
+    : Number(result._chipUradora ?? 0)) + Number(result._chipUradoraFromNuki ?? 0);
   if (uradoraCount > 0) {
     const lbl = `裏ドラ ×${uradoraCount}`;
     if (loser !== null) ctx.applyChipFromLoser(winner, loser, uradoraCount, { label: lbl });
@@ -508,7 +509,10 @@ export function applyChipsOnHule(
         && h.name.startsWith('嵌八萬')
         && typeof h.fanshu !== 'number',
     ) ? 8 : 0;
-    return baseFanshu + kanpamanAsEight - natsuBoostFan;
+    // [2026-09-14 裁定 1] 本役満は majiang-core が通常役を捨てるので、
+    // game3 が vendor copy で数え直した母数を載せてくる。大きい方を採る
+    const vendorBase = Number(result._excessHanBase ?? 0);
+    return Math.max(baseFanshu, vendorBase) + kanpamanAsEight - natsuBoostFan;
   };
   const applyExcessHanChip = (kind: '役満' | '数え役満'): void => {
     const eligibleFanshu = excessHanFanshu();
