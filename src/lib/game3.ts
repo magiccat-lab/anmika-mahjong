@@ -5073,12 +5073,14 @@ export class Game3 {
       ? this.feverDeclareTing[player]
       : this.getTingpaiList(player);
     const liveWall = this.shan.isBlind ? undefined : ([...((this.shan as any)._pai ?? [])] as string[]);
+    const reserve = this.shan.isBlind ? undefined : ([...((this.shan as any)._rinshan ?? [])] as string[]);
     return isFeverWaitExhaustedHelper(
       waits,
       this.shoupai as any,
       this.he as any,
       [...(this.shan.baopai ?? [])],
       liveWall,
+      reserve,
     );
   }
 

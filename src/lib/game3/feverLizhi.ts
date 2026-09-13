@@ -275,6 +275,8 @@ export function isFeverWaitExhausted(
   heAll: Map<number, any>,
   baopai: string[],
   liveWall?: string[],
+  /** 王牌の補充列 [Shan3._rinshan]。山の華を引くとここから 1 枚ずつ補充される */
+  reserve?: string[],
 ): boolean {
   if (ting.length === 0) return true;
   // 配置が分かる権威側では、見えている枚数からの推定ではなく生牌領域を直接見る。
@@ -284,13 +286,24 @@ export function isFeverWaitExhausted(
       .map(normalizedWaitCore)
       .filter((p) => p !== 'z5'));
     if (waits.size === 0) return true;
-    // [2026-09-14 リョー「より良い方を採用して」] ぽっちはオールマイティなので、
-    // 山に 1 枚でも残っていれば待ちは切れていない。
-    // 旧実装はぽっちを残数から外していたため、ぽっちが残っていても FEVER が
-    // 「待ち牌全消失」で早く終わっていた [norosh1 の牌譜 481 局面で向こうは続いていた]。
-    // 「ぽっちだけが待ち」の手は従来どおり打ち切る [上の waits.size === 0]
-    if (liveWall.some((p) => toCorePai(p) === 'z5')) return false;
-    return !liveWall.some((p) => waits.has(normalizedWaitCore(p)));
+    // ぽっちは待ち牌として数えない。ルールブック 5-3
+    // 「白ぽっちのみ残りの場合は待ちが山にあるとみなさない」
+    // [2026-09-14: 向こうはぽっちでも続けていたが、ルールブックはうちの側]
+    if (liveWall.some((p) => waits.has(normalizedWaitCore(p)))) return false;
+    // [2026-09-14] 山に華が残っていると、引いた時に王牌から補充される。
+    // その補充牌に待ちかぽっちがあれば、まだ待ちは切れていない。
+    // 補充牌自身が華ならさらにもう 1 枚めくれるので、その分も辿る
+    // [向こうはココで続けていた。牌譜 251 局面の主因]
+    if (Array.isArray(reserve) && reserve.length > 0) {
+      let pulls = liveWall.filter((p) => String(p).startsWith('f')).length;
+      for (let i = 0; i < reserve.length && pulls > 0; i++) {
+        const p = reserve[i];
+        pulls -= 1;
+        if (String(p).startsWith('f')) { pulls += 1; continue; }   // 華の補充でもう 1 枚
+        if (waits.has(normalizedWaitCore(p))) return false;        // ぽっちは 5-3 により数えない
+      }
+    }
+    return true;
   }
   const baseTile = normalizedWaitCore;
   let totalRemain = 0;
