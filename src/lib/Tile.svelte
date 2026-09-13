@@ -7,6 +7,8 @@
   /** 表示サイズ: 'sm'=22x30 [header / inline]、 'md'=32x44 [手牌]、 'lg'=40x55 [debug 等] */
   export let size: 'sm' | 'md' | 'lg' = 'md';
 
+  import { prefs } from './prefs';
+
   // pai 表記 → public/tiles/ 内の SVG ファイル名
   function paiSvg(p: string): string | null {
     if (!p) return null;
@@ -91,6 +93,18 @@
   $: svg = paiSvg(pai);
   $: isRed = pai && pai[1] === '0';
   $: isRainbow = pai === 'np3' || pai === 'ns3' || pai === 'nz3';
+
+  // [2026-09-14] 色彩調整。ぽっち 4 色・赤ドラ・金は色だけで区別されているので、
+  // 設定が入っている時は右上に記号を重ねる [色が見分けにくい人向け]。
+  const MARKS: Record<string, string> = {
+    z5b: '青', z5r: '赤', z5g: '緑', z5y: '黄',
+    bu: '青', br: '赤', bg: '緑', by: '黄',
+    gp: '金', gs: '金', gN: '金',
+    np3: '虹', ns3: '虹', nz3: '虹',
+  };
+  $: assistMark = $prefs.colorAssist
+    ? (MARKS[pai] ?? (isRed ? '赤' : ''))
+    : '';
 </script>
 
 <span class="tile {face} size-{size}" class:red={isRed} class:rainbow={isRainbow}>
@@ -101,10 +115,14 @@
   {:else}
     <span class="tile-text">{paiLabel(pai)}</span>
   {/if}
+  {#if face === 'up' && assistMark}
+    <span class="assist-mark" aria-hidden="true">{assistMark}</span>
+  {/if}
 </span>
 
 <style>
   .tile {
+    position: relative;
     display: inline-block;
     margin: 1px;
     border: 1px solid #888;
@@ -114,6 +132,23 @@
     overflow: hidden;
     vertical-align: middle;
   }
+  /* [2026-09-14] 色彩調整の記号。牌の絵を隠さないよう右上に小さく重ねる */
+  .assist-mark {
+    position: absolute;
+    top: 0;
+    right: 0;
+    min-width: 9px;
+    padding: 0 1px;
+    font-size: 8px;
+    line-height: 1.1;
+    font-weight: 700;
+    color: #111;
+    background: rgba(255, 255, 255, 0.88);
+    border-bottom-left-radius: 3px;
+    pointer-events: none;
+  }
+  .tile.size-lg .assist-mark { font-size: 10px; min-width: 11px; }
+
   /* SP再設計 手順B [docs/sp-ui-redesign.md]: サイズを CSS custom props の正式APIに。
      fallback は従来の固定値なので、変数未設定の既存画面は見た目不変。
      v2 レイアウトが文脈ごとに --tile-*-w/h を設定してスケールさせる */

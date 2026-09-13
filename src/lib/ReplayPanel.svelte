@@ -21,6 +21,8 @@
   let error: string | null = null;
   let matches: MatchRow[] = [];
   let starredOnly = false;
+  // [2026-09-14] 名前・タイトル・部屋で絞る。一覧が伸びると目で探せない
+  let nameQuery = '';
 
   // viewer state
   let viewing: MatchRow | null = null;
@@ -31,6 +33,20 @@
   let autoTimer: any = null;
   let showHands = true;
   let titleDraft = '';
+
+  // 絞り込みは取得済みの一覧に対してかける [サーバーへの往復を増やさない]
+  $: visibleMatches = (() => {
+    const q = nameQuery.trim().toLowerCase();
+    if (!q) return matches;
+    return matches.filter((m) => {
+      const hay = [
+        m.title ?? '',
+        m.room_id ?? '',
+        ...(m.members ?? []).map((x) => x.name ?? ''),
+      ].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  })();
 
   async function loadList() {
     loading = true;
@@ -128,6 +144,7 @@
     {#if !viewing}
       <div class="list-meta">
         <label class="toggle"><input type="checkbox" bind:checked={starredOnly} on:change={loadList} /> ⭐ 名牌譜のみ</label>
+        <input class="name-search" type="search" placeholder="名前・タイトル・部屋で絞る" bind:value={nameQuery} />
         <button class="flat-btn" on:click={loadList}>↻ 更新</button>
       </div>
       {#if loading}
@@ -136,9 +153,11 @@
         <p class="note">{error}</p>
       {:else if matches.length === 0}
         <p class="note">{starredOnly ? '名牌譜はまだない。再生画面の ⭐ で登録できる' : 'まだ試合記録がない'}</p>
+      {:else if visibleMatches.length === 0}
+        <p class="note">「{nameQuery}」に当たる試合はない</p>
       {:else}
         <ul class="match-list">
-          {#each matches as m (m.match_id)}
+          {#each visibleMatches as m (m.match_id)}
             <li>
               <button class="match-row" on:click={() => openMatch(m)}>
                 <span class="m-id">{m.starred ? '⭐' : '・'} 部屋{m.room_id} 第{m.match_no}試合</span>
@@ -239,6 +258,17 @@
   }
   .replay-head { display: flex; align-items: center; gap: 8px; }
   .replay-head h2 { margin: 4px auto 4px 0; font-size: 1.3rem; color: #ffe9ad; }
+  .name-search {
+    flex: 1 1 140px;
+    min-width: 0;
+    padding: 3px 8px;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: #10201a;
+    color: #e8f0ea;
+    font-size: 12px;
+  }
+
   .flat-btn {
     border: 1px solid rgba(255, 255, 255, 0.25);
     background: rgba(255, 255, 255, 0.08);

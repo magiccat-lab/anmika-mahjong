@@ -8,6 +8,7 @@
   //   - カットイン背景 ダンガンロンパ風 + cutin SE 同時再生 + デカく出す
   import { onMount, onDestroy } from 'svelte';
   import Tile from './Tile.svelte';
+  import { playSound } from './prefs';
   export let player: number;
   export let color: 'blue' | 'red' | 'green' | 'yellow';
   export let isCpu: boolean = false;
@@ -32,12 +33,9 @@
   const NEUTRAL_ACCENT = '#ffffff';
   $: currentAccent = revealed ? colorHex(color) : NEUTRAL_ACCENT;
 
+  // [2026-09-14] ミュート設定を見る。prefs.muted なら鳴らさない。
   function playSE(src: string, volume = 0.6): void {
-    try {
-      const a = new Audio(src);
-      a.volume = volume;
-      a.play().catch(() => {});
-    } catch (e) {}
+    playSound(src, volume);
   }
 
   // mount 直後 cutin SE 鳴らす [カットイン演出と同期]

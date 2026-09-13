@@ -24,6 +24,7 @@
 
   import { onDestroy } from 'svelte';
   import DiceCube from './DiceCube.svelte';
+  import { playSound } from './prefs';
 
   $: chance = chances[currentIdx];
   // 表示は「演出が着地した分」だけ [spin 中に結果 text が先バレしない]
@@ -80,13 +81,9 @@
     stopDrumAudio();
   });
 
+  // [2026-09-14] ミュート設定を見る。prefs.muted なら鳴らさない。
   function playSE(src: string, volume = 0.6): HTMLAudioElement | null {
-    try {
-      const a = new Audio(src);
-      a.volume = volume;
-      a.play().catch(() => {});
-      return a;
-    } catch (e) { return null; }
+    return playSound(src, volume);
   }
 
   function startNextSpin() {

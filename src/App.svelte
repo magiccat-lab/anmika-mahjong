@@ -19,6 +19,9 @@
   import EntryMenu from './lib/EntryMenu.svelte';
   import StatsPanel from './lib/StatsPanel.svelte';
   import ReplayPanel from './lib/ReplayPanel.svelte';
+  import RulesPanel from './lib/RulesPanel.svelte';
+  import SettingsPanel from './lib/SettingsPanel.svelte';
+  import { prefs } from './lib/prefs';
   import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
@@ -1169,6 +1172,9 @@
   let statsPanelOpen = false;
   // [2026-07-23 リョー要望] 名牌譜パネル
   let replayPanelOpen = false;
+  // [2026-09-14] 説明書と画面設定
+  let rulesPanelOpen = false;
+  let settingsPanelOpen = false;
   // [2026-07-23 リョー要望] 観戦モード: seat=-1 の閲覧専用接続。
   // store 側は myOnlineSeat=-1 で全 action 送信が gate され、server も action を受けない。
   // 盤面レイアウトの回転だけ selfPlayer=0 anchor で描く
@@ -2221,12 +2227,20 @@
     onSelectOnline={() => { appMode = 'started'; viewMode = 'online'; }}
     onSelectStats={() => { statsPanelOpen = true; }}
     onSelectReplay={() => { replayPanelOpen = true; }}
+    onSelectRules={() => { rulesPanelOpen = true; }}
+    onSelectSettings={() => { settingsPanelOpen = true; }}
   />
   {#if statsPanelOpen}
     <StatsPanel onClose={() => { statsPanelOpen = false; }} />
   {/if}
   {#if replayPanelOpen}
     <ReplayPanel onClose={() => { replayPanelOpen = false; }} />
+  {/if}
+  {#if rulesPanelOpen}
+    <RulesPanel onClose={() => { rulesPanelOpen = false; }} />
+  {/if}
+  {#if settingsPanelOpen}
+    <SettingsPanel onClose={() => { settingsPanelOpen = false; }} />
   {/if}
 {:else if viewMode === 'online' && !onlineGameStarted}
   {#if currentRoomId && onlineMe && onlineSpectator}
@@ -2322,6 +2336,9 @@
           ⏱️ CPU 2.5 秒ラグ
         </label>
       {/if}
+      <!-- [2026-09-14] 対局中からも説明書と画面設定を開ける -->
+      <button class="mode-toggle" on:click={() => { rulesPanelOpen = true; }}>📖 説明書</button>
+      <button class="mode-toggle" on:click={() => { settingsPanelOpen = true; }}>⚙️ 設定</button>
     </h1>
     <HeaderInfo
       changbang={state.changbang}
@@ -2335,6 +2352,23 @@
       currentPlayer={currentPlayer}
       lastZimo={lastZimo}
     />
+    {#if rulesPanelOpen}
+      <RulesPanel onClose={() => { rulesPanelOpen = false; }} />
+    {/if}
+    {#if settingsPanelOpen}
+      <SettingsPanel onClose={() => { settingsPanelOpen = false; }} />
+    {/if}
+    <!-- [2026-09-14] 画面設定の「山を見る」が入っている時だけ、対局中も山を出す -->
+    {#if $prefs.showWall}
+      <section class="wall-view">
+        <WallPanel
+          wall={(($game.game.shan as any)._pai ?? [])}
+          rinshan={(($game.game.shan as any)._rinshan ?? [])}
+          baopai={[...$game.game.shan.displayBaopai]}
+          fubaopai={[...($game.game.shan.displayFubaopai ?? [])]}
+        />
+      </section>
+    {/if}
     <div class="defen">
       {#each PLAYERS as p}
         <PlayerStatus
@@ -3475,6 +3509,17 @@
   }
   /* section.paifu-load / replay-* / section.debug-log は PaifuLoadPanel /
      DebugLogPanel に集約済 */
+  /* [2026-09-14] 画面設定の「山を見る」で対局中に出す山。debug-log とは別枠 */
+  section.wall-view {
+    margin: 6px 0 8px;
+    padding: 6px 10px;
+    background: #1b2a21;
+    color: #bfe3cb;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    font-size: 11px;
+  }
+  section.wall-view :global(h2) { color: #cfe3d5; margin: 0 0 4px; font-size: 12px; }
   section.debug-log {
     margin-top: 16px;
     padding: 8px 12px;
