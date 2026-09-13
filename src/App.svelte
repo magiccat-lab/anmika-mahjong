@@ -21,7 +21,7 @@
   import ReplayPanel from './lib/ReplayPanel.svelte';
   import RulesPanel from './lib/RulesPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
-  import { prefs } from './lib/prefs';
+  import { prefs, ANMIKA_RULE_VERSION } from './lib/prefs';
   import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
@@ -1175,6 +1175,12 @@
   // [2026-09-14] 説明書と画面設定
   let rulesPanelOpen = false;
   let settingsPanelOpen = false;
+  // [2026-09-14] ?replay=<id> で開かれたら、メニューではなく牌譜を直接出す。
+  // 公開牌譜のリンクを踏んだ人が 3 手たどらずに局面へ着く
+  if (typeof window !== 'undefined'
+      && new URLSearchParams(window.location.search).has('replay')) {
+    replayPanelOpen = true;
+  }
   // [2026-07-23 リョー要望] 観戦モード: seat=-1 の閲覧専用接続。
   // store 側は myOnlineSeat=-1 で全 action 送信が gate され、server も action を受けない。
   // 盤面レイアウトの回転だけ selfPlayer=0 anchor で描く
@@ -1809,10 +1815,10 @@
     e.preventDefault();
     game.tsumokiri(selfPlayer as PlayerId);
   }
-  function readAutoTsumokiriToken(): AutoTsumokiriToken | null {
-    const snap = get(game);
-    const player = snap.game.lunbanToPlayerId(snap.game.state.lunban);
-    const phaseReady = (viewMode === 'single' || onlineGameStarted)
+  /** 自動操作を出してよい局面か [自動ツモ切り / 自動抜き で共通]。
+   *  modal・演出・宣言待ちが 1 つでも立っていたら出さない。 */
+  function isAutoActionPhaseReady(snap: ReturnType<typeof get<typeof game>>, player: PlayerId): boolean {
+    return (viewMode === 'single' || onlineGameStarted)
       && !snap.roundEnded
       && !snap.awaitingRonDecision
       && !snap.awaitingFulou
@@ -1831,8 +1837,16 @@
       // falsy 判定だと P0 の宣言牌選択中に無効な自動ツモ切り timer を張っていた
       && snap.lizhiPending === null
       && player === actorSeat
-      && !!snap.lastZimo
-      && !snap.game.canTsumo(player);
+      && !!snap.lastZimo;
+  }
+
+  function readAutoTsumokiriToken(): AutoTsumokiriToken | null {
+    const snap = get(game);
+    const player = snap.game.lunbanToPlayerId(snap.game.state.lunban);
+    const phaseReady = isAutoActionPhaseReady(snap, player as PlayerId)
+      && !snap.game.canTsumo(player)
+      // [2026-09-14] 自動抜きが動く局面はそちらに譲る [抜いてから切る]
+      && !(autoNukiEnabled && snap.game.canNukiBei(player as PlayerId));
     // [2026-07-21 リョー報告 stuck dump] フィーバー強制ツモ切りの人間手番は選択の
     // 余地が無いのに手動待ちで、進行が止まって見えた。リーチ中と同じ扱いで自動対象に
     // 含める。北ツモ [canNukiBei] の時だけ抜き/ツモ切りの選択が残るため自動しない
@@ -1862,6 +1876,36 @@
     fire: (expectedPlayer) => game.tsumokiri(expectedPlayer),
   });
   onDestroy(() => autoTsumokiriScheduler.cancel());
+
+  // [2026-09-14 画面設定「自動抜き」] 自分の手番で北が抜ける状態なら自動で抜く。
+  // 抜くか切るかは本来 流し役満 を狙う時の判断なので、既定は off。
+  // 自動ツモ切りと同じ scheduler に載せて、modal・演出中は出さない。
+  let autoNukiEnabled = false;
+  $: autoNukiEnabled = $prefs.autoNuki;
+  function readAutoNukiToken(): AutoTsumokiriToken | null {
+    if (!autoNukiEnabled) return null;
+    const snap = get(game);
+    const player = snap.game.lunbanToPlayerId(snap.game.state.lunban);
+    if (!isAutoActionPhaseReady(snap, player as PlayerId)) return null;
+    if (snap.game.canTsumo(player)) return null;      // 和了れる時は人に任せる
+    if (!snap.game.canNukiBei(player as PlayerId)) return null;
+    const stateNow = snap.game.state;
+    const revision = [
+      stateNow.changbang,
+      stateNow.jushu,
+      stateNow.benbang,
+      stateNow.lunban,
+      snap.game.events?.length ?? 0,
+      snap.lastZimo,
+    ].join(':');
+    return { player, revision, delayMs: 500 };
+  }
+  const autoNukiScheduler = createAutoTsumokiriScheduler({
+    delayMs: 500,
+    readCurrent: readAutoNukiToken,
+    fire: () => game.nukiBei(),
+  });
+  onDestroy(() => autoNukiScheduler.cancel());
 
   // 事故復帰 [2026-07-20 リョー要望]: オンラインで詰まった時、落ちた局の冒頭へ戻す。
   // 巻き戻しは全員の進行に影響するので PW [サーバー側の環境変数 1 個] で保護する。
@@ -2007,7 +2051,8 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ room_id: currentRoomId, paifu, chip_delta: chipDelta, match_uuid: matchUuid }),
+          // [2026-09-14] どのルール版で打たれた牌譜かを残す [公開リンクを配るため]
+          body: JSON.stringify({ room_id: currentRoomId, paifu, chip_delta: chipDelta, match_uuid: matchUuid, rule_version: ANMIKA_RULE_VERSION }),
         });
         if (!r.ok) {
           const detail = await r.text().catch(() => '');
@@ -2215,9 +2260,14 @@
     void $game.pendingFuyu; void $game.pendingKinpei; void $game.pendingKamiPochi; void $game.pendingPochiSwap; void $game.pendingSaiKoro;
     void $game.pendingFeverContinue; void $game.lizhiPending; void $game.lastZimo;
     void $game.game.events.length; void canTsumo;
+    void autoNukiEnabled;
     const token = readAutoTsumokiriToken();
     if (token) autoTsumokiriScheduler.schedule(token);
     else autoTsumokiriScheduler.cancel();
+    // [2026-09-14] 自動抜きも同じ phase 依存で予約し直す
+    const nukiToken = readAutoNukiToken();
+    if (nukiToken) autoNukiScheduler.schedule(nukiToken);
+    else autoNukiScheduler.cancel();
   }
 </script>
 

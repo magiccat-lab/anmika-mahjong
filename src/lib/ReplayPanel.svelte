@@ -14,6 +14,8 @@
     starred: number;
     title: string;
     paifu_source: string;
+    is_public?: number;
+    rule_version?: string;
     members: Array<{ user_id: string; seat: number | null; name: string }>;
   };
 
@@ -23,6 +25,9 @@
   let starredOnly = false;
   // [2026-09-14] 名前・タイトル・部屋で絞る。一覧が伸びると目で探せない
   let nameQuery = '';
+  // [2026-09-14] 公開牌譜。ログインしていない時は公開ぶんだけ出す
+  let publicOnly = false;
+  let shareNote = '';
 
   // viewer state
   let viewing: MatchRow | null = null;
@@ -53,8 +58,17 @@
     error = null;
     try {
       const r = await fetch(`/api/matches${starredOnly ? '?starred=1' : ''}`, { credentials: 'include' });
-      if (r.status === 401) { error = 'Discord ログインすると見れる'; matches = []; return; }
+      if (r.status === 401) {
+        // 未ログインでも公開ぶんは読める
+        publicOnly = true;
+        const pr = await fetch('/api/matches/public');
+        if (!pr.ok) { error = 'Discord ログインすると全部見れる'; matches = []; return; }
+        matches = (await pr.json()).matches ?? [];
+        if (matches.length === 0) error = '公開された牌譜はまだない [ログインすると全部見れる]';
+        return;
+      }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      publicOnly = false;
       matches = (await r.json()).matches ?? [];
     } catch (e: any) {
       error = `読み込み失敗: ${e?.message ?? e}`;
@@ -62,7 +76,7 @@
       loading = false;
     }
   }
-  onMount(loadList);
+  onMount(async () => { await loadList(); await openFromUrl(); });
   onDestroy(() => { if (autoTimer) clearInterval(autoTimer); });
 
   async function openMatch(m: MatchRow) {
@@ -125,6 +139,57 @@
     }
   }
 
+  async function savePublic(isPublic: boolean) {
+    if (!viewing) return;
+    try {
+      const r = await fetch(`/api/matches/${viewing.match_id}/public`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public: isPublic }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      viewing.is_public = isPublic ? 1 : 0;
+      viewing = viewing;
+      matches = matches.map((m) => (m.match_id === viewing!.match_id ? { ...m, is_public: viewing!.is_public } : m));
+    } catch (e: any) {
+      error = `公開設定の保存に失敗: ${e?.message ?? e}`;
+    }
+  }
+
+  /** いま見ている局面の URL をコピーする。開くと同じ局・同じ手数から始まる。 */
+  async function copyShareLink() {
+    if (!viewing) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('replay', String(viewing.match_id));
+    url.searchParams.set('round', String(roundIdx));
+    url.searchParams.set('step', String(stepIdx));
+    const text = url.toString();
+    try {
+      await navigator.clipboard.writeText(text);
+      shareNote = 'この局面の URL をコピーした';
+    } catch {
+      shareNote = text;
+    }
+    setTimeout(() => { shareNote = ''; }, 4000);
+  }
+
+  // [2026-09-14] ?replay=<id>&round=&step= で局面を直接開く
+  async function openFromUrl() {
+    if (typeof window === 'undefined') return;
+    const q = new URLSearchParams(window.location.search);
+    const id = Number(q.get('replay'));
+    if (!Number.isFinite(id) || id <= 0) return;
+    const row = matches.find((m) => m.match_id === id)
+      ?? ({ match_id: id, room_id: '?', match_no: 0, finished_at: '', starred: 0,
+            title: '', paifu_source: '', members: [] } as MatchRow);
+    await openMatch(row);
+    const r = Number(q.get('round'));
+    const st = Number(q.get('step'));
+    if (Number.isFinite(r) && r >= 0 && r < rounds.length) roundIdx = r;
+    if (Number.isFinite(st) && st >= 0 && st < (rounds[roundIdx]?.steps.length ?? 0)) stepIdx = st;
+  }
+
   $: currentStep = rounds[roundIdx]?.steps[stepIdx] ?? null;
   $: stepCount = rounds[roundIdx]?.steps.length ?? 0;
   const memberName = (m: MatchRow, seat: number): string =>
@@ -172,6 +237,7 @@
       <div class="viewer">
         <div class="viewer-meta">
           <span>部屋{viewing.room_id} 第{viewing.match_no}試合</span>
+          {#if viewing.rule_version}<span class="rule-ver">ルール {viewing.rule_version}</span>{/if}
           <input class="title-input" placeholder="名局タイトル [任意]" bind:value={titleDraft} maxlength="80" />
           {#if viewing.starred}
             <button class="flat-btn" on:click={() => saveStar(false)}>⭐ 解除</button>
@@ -179,6 +245,16 @@
           {:else}
             <button class="flat-btn" on:click={() => saveStar(true)}>⭐ 名牌譜に保存</button>
           {/if}
+          <!-- [2026-09-14] 公開とリンク共有。既定は非公開 -->
+          {#if !publicOnly}
+            {#if viewing.is_public}
+              <button class="flat-btn" on:click={() => savePublic(false)}>🌐 公開中 [やめる]</button>
+            {:else}
+              <button class="flat-btn" on:click={() => savePublic(true)}>🔒 非公開 [公開する]</button>
+            {/if}
+          {/if}
+          <button class="flat-btn" on:click={copyShareLink}>🔗 この局面のリンク</button>
+          {#if shareNote}<span class="share-note">{shareNote}</span>{/if}
         </div>
         <div class="viewer-controls">
           <select bind:value={roundIdx} on:change={() => { stepIdx = 0; stopAuto(); }}>
@@ -268,6 +344,28 @@
     color: #e8f0ea;
     font-size: 12px;
   }
+
+  .rule-ver {
+
+    font-size: 11px;
+
+    color: #9fb3a6;
+
+    white-space: nowrap;
+
+  }
+
+
+  .share-note {
+
+    font-size: 11px;
+
+    color: #9fe3b5;
+
+    word-break: break-all;
+
+  }
+
 
   .flat-btn {
     border: 1px solid rgba(255, 255, 255, 0.25);

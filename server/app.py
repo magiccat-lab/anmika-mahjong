@@ -211,6 +211,12 @@ def init_db() -> None:
             c.execute("ALTER TABLE matches ADD COLUMN title TEXT NOT NULL DEFAULT ''")
         if "paifu_source" not in cols:
             c.execute("ALTER TABLE matches ADD COLUMN paifu_source TEXT NOT NULL DEFAULT 'client'")
+        # [2026-09-14 リョー要望] 牌譜の公開。既定は非公開で、出すものだけ 1 にする
+        if "is_public" not in cols:
+            c.execute("ALTER TABLE matches ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0")
+        # [2026-09-14] どのルール版で打たれた牌譜か。公開リンクを配るので要る
+        if "rule_version" not in cols:
+            c.execute("ALTER TABLE matches ADD COLUMN rule_version TEXT NOT NULL DEFAULT ''")
         room_cols = [r[1] for r in c.execute("PRAGMA table_info(rooms)").fetchall()]
         if "instance_id" not in room_cols:
             c.execute("ALTER TABLE rooms ADD COLUMN instance_id TEXT NOT NULL DEFAULT ''")
@@ -1527,6 +1533,7 @@ async def finish_match(request: Request):
     # R20 #1 fix: client が match_uuid 生成、 server は room_id+match_uuid UNIQUE で
     # 重複 INSERT [リトライ / リロード] を 確実に reject [409]、 chip_total 二重加算防止
     match_uuid = (body.get("match_uuid") or "").strip()
+    rule_version = str(body.get("rule_version") or "").strip()[:40]
     if not room_id or paifu is None:
         raise HTTPException(status_code=400, detail="room_id / paifu required")
     if not isinstance(chip_delta, dict):
@@ -1753,7 +1760,7 @@ async def finish_match(request: Request):
             ]
         try:
             c.execute(
-                "INSERT INTO matches(room_id, match_no, match_uuid, members_json, paifu_json, chip_delta_json, duration_sec, paifu_source) VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO matches(room_id, match_no, match_uuid, members_json, paifu_json, chip_delta_json, duration_sec, paifu_source, rule_version) VALUES(?,?,?,?,?,?,?,?,?)",
                 (
                     room_id,
                     next_match_no,
@@ -1763,6 +1770,7 @@ async def finish_match(request: Request):
                     json.dumps(chip_delta),
                     duration,
                     paifu_source,
+                    rule_version,
                 ),
             )
         except sqlite3.IntegrityError as e:
@@ -1960,7 +1968,7 @@ async def list_matches(request: Request):
     with db_conn() as c:
         rows = c.execute(
             f"""SELECT match_id, room_id, match_no, members_json, chip_delta_json,
-                       finished_at, starred, title, paifu_source, duration_sec
+                       finished_at, starred, title, paifu_source, duration_sec, is_public
                 FROM matches
                 {"WHERE starred=1" if starred_only else ""}
                 ORDER BY match_id DESC LIMIT ?""",
@@ -1989,20 +1997,63 @@ async def list_matches(request: Request):
     return {"matches": out}
 
 
+@app.get("/api/matches/public")
+async def list_public_matches(request: Request):
+    """公開された試合の一覧。ログイン不要。
+    [2026-09-14] 牌譜を人に見せられるようにする。既定は非公開なので、
+    ここに出るのは is_public=1 を立てたものだけ。"""
+    try:
+        limit = min(100, max(1, int(request.query_params.get("limit") or 30)))
+    except Exception:
+        limit = 30
+    with db_conn() as c:
+        rows = c.execute(
+            """SELECT match_id, room_id, match_no, members_json, finished_at,
+                      starred, title, paifu_source, duration_sec
+               FROM matches WHERE is_public=1
+               ORDER BY match_id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                mm = json.loads(d.pop("members_json") or "[]")
+            except Exception:
+                mm = []
+            names = []
+            for m in mm:
+                uid = m.get("user_id") if isinstance(m, dict) else None
+                if not uid:
+                    continue
+                urow = c.execute(
+                    "SELECT COALESCE(display_name, username) AS n FROM users WHERE user_id=?",
+                    (uid,),
+                ).fetchone()
+                names.append({"user_id": uid, "seat": m.get("seat"), "name": urow["n"] if urow else uid})
+            d["members"] = names
+            d["is_public"] = 1
+            out.append(d)
+    return {"matches": out}
+
+
 @app.get("/api/matches/{match_id}/paifu")
 async def get_match_paifu(match_id: int, request: Request):
-    """再生用の牌譜 [events 全量]。ログイン必須"""
+    """再生用の牌譜 [events 全量]。
+    [2026-09-14] is_public=1 の試合はログイン不要で読める。それ以外は従来どおりログイン必須。"""
     u = current_user(request)
-    if not u:
-        raise HTTPException(status_code=401, detail="login required")
     with db_conn() as c:
         row = c.execute(
             """SELECT match_id, room_id, match_no, members_json, chip_delta_json, paifu_json,
-                      finished_at, starred, title, paifu_source FROM matches WHERE match_id=?""",
+                      finished_at, starred, title, paifu_source, is_public, rule_version
+                      FROM matches WHERE match_id=?""",
             (match_id,),
         ).fetchone()
         if not row:
+            # 未ログインで存在も伏せる必要は無い [身内運用] が、非公開の有無は漏らさない
             raise HTTPException(status_code=404, detail="match not found")
+        if not u and not row["is_public"]:
+            raise HTTPException(status_code=401, detail="login required")
         d = dict(row)
         for k, dst in (("paifu_json", "paifu"), ("members_json", "members"), ("chip_delta_json", "chip_delta")):
             try:
@@ -2010,6 +2061,24 @@ async def get_match_paifu(match_id: int, request: Request):
             except Exception:
                 d[dst] = None
     return d
+
+
+@app.post("/api/matches/{match_id}/public")
+async def set_match_public(match_id: int, request: Request):
+    """牌譜の公開 / 非公開を切り替える。ログイン済みなら誰でも [身内運用]。
+    [2026-09-14] 既定は非公開。ここで 1 にしたものだけが /api/matches/public に出る。"""
+    u = current_user(request)
+    if not u:
+        raise HTTPException(status_code=401, detail="login required")
+    body = await request.json()
+    is_public = 1 if body.get("public") else 0
+    with db_conn() as c:
+        row = c.execute("SELECT match_id FROM matches WHERE match_id=?", (match_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="match not found")
+        c.execute("UPDATE matches SET is_public=? WHERE match_id=?", (is_public, match_id))
+        c.commit()
+    return {"ok": True, "match_id": match_id, "is_public": is_public}
 
 
 @app.post("/api/matches/{match_id}/star")
