@@ -158,6 +158,7 @@ function countPhysicalRedDora(sp: any, ronpai: string | null): number {
 }
 import { canFeverLizhi as canFeverLizhiHelper, isFeverWaitExhausted as isFeverWaitExhaustedHelper, feverCandidatesByDapai as feverCandidatesByDapaiHelper, rainbowKanUpgradeTier, type FeverCheck } from './game3/feverLizhi';
 import { isKanpaman as isKanpamanHelper, doraIndicatorOf as doraIndicatorOfHelper } from './game3/yaku';
+import { correctedFuForM7 } from './game3/fu7m';
 import { tulipNeighbors } from './game3/tulip';
 import { computeChipMultiplier as computeChipMultiplierHelper, applyChipOall as applyChipOallHelper, applyChipFromLoser as applyChipFromLoserHelper, type ChipState as ChipStateT, type ChipApplyOpts as ChipApplyOptsT, type ChipBreakdownEntry, type ChipSettlementEffect } from './game3/chip';
 import { getTingpaiList as getTingpaiListHelper, getTingpaiListBeforeZimo as getTingpaiListBeforeZimoHelper, canTsumoWithPochiSwap as canTsumoWithPochiSwapHelper, americanChitoiXiangting, americanChitoiComplete, countAmericanChitoiQuads } from './game3/tingpai';
@@ -3027,6 +3028,7 @@ export class Game3 {
     };
     this.applyAnmikaYakuPostProcess(result, player, ronpai !== null, agariPaiForPost, fromPlayer, ronpai, param);
     (result as any)._anmikaPostProcessApplied = true;
+    this.applyM7YaojiuFu(result, sp, ronpaiWithDir, param);
     if (handUsesBeiMaterial(sp, ronpai) && !resultAllowsBeiMaterial(result)) {
       dlog('[hule reject] 北を手牌構成に使用できない役', { player, ronpai, hupai: result.hupai, fanshu: result.fanshu, damanguan: result.damanguan });
       return null;
@@ -3237,6 +3239,28 @@ export class Game3 {
 
   /** アンミカ独自役の post-process [3-1 高ハン役 + 3-2 役満]
    *  majiang-core 標準にない役を hupai に追加 / damanguan 上書き */
+  /** 7萬の刻子 / 槓子を么九として符を数え直す [リョー裁定 2026-09-13]。
+   *  majiang-core は么九を面子文字列の `[z19]` で見ているので m777 に当たらず、
+   *  中張の 4 / 16 符になってしまう。詳細と数え方は `game3/fu7m.ts`。
+   *  `computeSanmaBase` が result.fu をそのまま読むので、ここを直せば打点まで追従する。 */
+  applyM7YaojiuFu(result: any, sp: any, ronpaiWithDir: string | null, param: any): void {
+    if (!result || typeof result.fu !== 'number') return;
+    // 役満は符が打点に効かないが、表示は揃えたいので符だけは直す。
+    if (result.fu === 25) return; // 七対子は固定 25 符で刻子を持たない
+    let decompositions: string[][];
+    try {
+      decompositions = Majiang.Util.hule_mianzi(sp, ronpaiWithDir) ?? [];
+    } catch { return; }
+    const fixed = correctedFuForM7(decompositions, result.fu, {
+      zhuangfeng: param?.zhuangfeng ?? 0,
+      menfeng: param?.menfeng ?? 0,
+      rule: param?.rule ?? null,
+    });
+    if (fixed === null) return;
+    dlog('[m7 fu]', { before: result.fu, after: fixed });
+    result.fu = fixed;
+  }
+
   applyAnmikaYakuPostProcess(result: any, player: PlayerId, isRon: boolean, agariPai: string | null = null, fromPlayer: PlayerId | null = null, ronpaiOrig: string | null = null, huleParam: any = null): void {
     if (!result || !result.hupai) return;
     const sp = this.shoupai.get(player);
