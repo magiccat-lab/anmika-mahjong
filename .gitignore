@@ -57,3 +57,6 @@ data/backups/
 data/anmika.sqlite3
 data/anmika.sqlite3-shm
 data/anmika.sqlite3-wal
+
+# norosh1.com の公開牌譜 (6,000 局 350MB) と bundle。突き合わせ監査の入力、repo に入れない [2026-09-13]
+data/norosh/
