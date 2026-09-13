@@ -482,6 +482,39 @@ export function applyChipsOnHule(
     }
   }
 
+  // 13翻超過 chip ボーナスの対象翻数。
+  // 「役満以外でハン数を計算して 13翻超えたら超過枚数分 chip」、夏の段上げ分は除く。
+  // 夏 fanshu 加算分を除外: hupai 中の「夏 [打点ランクアップ ...翻相当]」entry の fanshu 合計を引く
+  const excessHanFanshu = (): number => {
+    const natsuBoostFan = (result.hupai ?? [])
+      .filter((h: any) => typeof h.name === 'string' && h.name.startsWith('夏 ') && h.name.includes('ランクアップ'))
+      .reduce((s: number, h: any) => s + (typeof h.fanshu === 'number' ? h.fanshu : 0), 0);
+    // 役満以外で集計した fanshu。result.fanshu が無ければ個別役の数字を合算する。
+    const baseFanshu = typeof result.fanshu === 'number'
+      ? result.fanshu
+      : (result.hupai ?? [])
+        .filter((h: any) => typeof h.fanshu === 'number')
+        .reduce((s: number, h: any) => s + h.fanshu, 0);
+    // [2026-09-13 リョー「役満の時にハンスウオーバーを計算するときに8パンで計算してるよね」]
+    // 嵌八萬はツモだと本役満化して fanshu が '*' になるため、この合算から丸ごと落ちていた。
+    // 超過ハンの母数としては ロン時と同じ 8 翻で数える。
+    const kanpamanAsEight = (result.hupai ?? []).some(
+      (h: any) => typeof h.name === 'string'
+        && h.name.startsWith('嵌八萬')
+        && typeof h.fanshu !== 'number',
+    ) ? 8 : 0;
+    return baseFanshu + kanpamanAsEight - natsuBoostFan;
+  };
+  const applyExcessHanChip = (kind: '役満' | '数え役満'): void => {
+    const eligibleFanshu = excessHanFanshu();
+    if (eligibleFanshu <= 13) return;
+    const bonusN = eligibleFanshu - 13;
+    const via = loser === null ? 'ツモ' : 'ロン';
+    const label = `${kind}${via} 13翻超過 ×${bonusN} [夏除く]`;
+    if (loser === null) ctx.applyChipOall(winner, bonusN, { label });
+    else ctx.applyChipFromLoser(winner, loser, bonusN, { label });
+  };
+
   const dama = result.damanguan ?? 0;
   if (dama > 0) {
     const tsumoChips = [5, 5, 7, 9][Math.min(dama, 3)] ?? 5;
@@ -498,23 +531,7 @@ export function applyChipsOnHule(
       mode: loser === null ? 'tsumo' : 'ron',
     });
     // 本役満 13翻超過 chip ボーナス [ツモ・ロン共通]
-    // 「役満以外でハン数を計算して 13翻超えたら超過枚数分 chip」、 夏除く
-    // 夏 fanshu 加算分を除外: hupai 中の 「夏 [打点ランクアップ ...翻相当]」 entry の fanshu 合計を引く
-    const natsuBoostFan = (result.hupai ?? [])
-      .filter((h: any) => typeof h.name === 'string' && h.name.startsWith('夏 ') && h.name.includes('ランクアップ'))
-      .reduce((s: number, h: any) => s + (typeof h.fanshu === 'number' ? h.fanshu : 0), 0);
-    // 役満以外で集計した fanshu。result.fanshu が無ければ個別役の数字を合算する。
-    const baseFanshu = typeof result.fanshu === 'number'
-      ? result.fanshu
-      : (result.hupai ?? [])
-        .filter((h: any) => typeof h.fanshu === 'number')
-        .reduce((s: number, h: any) => s + h.fanshu, 0);
-    const eligibleFanshu = baseFanshu - natsuBoostFan;
-    if (eligibleFanshu > 13) {
-      const bonusN = eligibleFanshu - 13;
-      if (loser === null) ctx.applyChipOall(winner, bonusN, { label: `役満ツモ 13翻超過 ×${bonusN} [夏除く]` });
-      else ctx.applyChipFromLoser(winner, loser, bonusN, { label: `役満ロン 13翻超過 ×${bonusN} [夏除く]` });
-    }
+    applyExcessHanChip('役満');
   } else if (result.fanshu !== undefined && result.fanshu >= 11) {
     // 打点ランク chip [リョー指示 2026-05-12]:
     //   3 倍満 [11-12 翻]: ツモ 3 オール / ロン 6 from loser
@@ -528,6 +545,9 @@ export function applyChipsOnHule(
       else { rankTsumo = 5; rankRon = 10; rankLabel = '役満 [数え]'; }
       if (loser === null) ctx.applyChipOall(winner, rankTsumo, { label: rankLabel });
       else ctx.applyChipFromLoser(winner, loser, rankRon, { label: rankLabel });
+      // [2026-09-13 リョー裁定「数えにも払うよ」] 13翻超過ボーナスは本役満だけでなく
+      // 数え役満にも払う。norosh1 も数え役満に払っていて、そちらと一致する
+      applyExcessHanChip('数え役満');
     } else {
       if (loser === null) ctx.applyChipOall(winner, 3, { label: '3 倍満', mode: 'tsumo' });
       else ctx.applyChipFromLoser(winner, loser, 6, { label: '3 倍満', mode: 'ron' });

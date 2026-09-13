@@ -2560,6 +2560,9 @@ export class Game3 {
       // This fallback has already counted every physical 5 (normal/red/gold).
       // The later majiang-core zero-tile deficit repair must not run again.
       (result as any)._anmikaCompleteDoraCount = true;
+      // [2026-09-13 norosh 監査] この path は上で kamiPochiEffectiveIndicators_ を通して
+      // 神ぽっち選択を表示列へ反映済み。後段の手動合流がもう一度足すと二重計上になる。
+      (result as any)._anmikaKamiPochiDoraCounted = true;
       for (const yaku of fallbackYaku.yakuman) {
         result.hupai.push(yaku);
         result.damanguan += 1;
@@ -2648,25 +2651,37 @@ export class Game3 {
         // 特殊牌が手牌にあると Majiang.Util.hule 再実行は牌姿非対応で失敗し、
         // 選択済み神ぽっちドラが無言で消えていた。再hule が採用されなかった場合は
         // 既存 result に手動でドラ翻を合流させる [アメリカ七対子 path 2449 と同じ考え方]
-        if (!kamiApplied && result && result.fanshu !== undefined) {
-          let addCnt = 0;
+        // [2026-09-13 norosh 突き合わせ監査] ここに 2 つの誤りがあった。
+        //  1) 裏ドラ表示牌由来 [source === 'fubaopai'] の神ぽっちも「ドラ」entry へ足していた。
+        //     翻の合計は合うので気付きにくいが、裏ドラは 1 枚 1 チップ [huleChip.ts:427 が
+        //     '裏ドラ' の entry を読む] なので、表に化けると祝儀が丸ごと落ちる
+        //  2) アメリカ七対子のように majiang-core を bypass して自前でドラを数える path は
+        //     既に神ぽっち選択を反映済みなので、ここで足すと二重計上 [翻が +4 ほど膨らむ]
+        if (!kamiApplied && result && result.fanshu !== undefined
+            && !(result as any)._anmikaKamiPochiDoraCounted) {
+          let addOmote = 0;
+          let addUra = 0;
           for (const occurrence of selectedKamiDora) {
-            if (occurrence.source === 'fubaopai' && !this.lizhi.has(player)) continue;
-            addCnt += this.countDoraFromIndicator(
+            const isUra = occurrence.source === 'fubaopai';
+            if (isUra && !this.lizhi.has(player)) continue;
+            const cnt = this.countDoraFromIndicator(
               sp, normalizeBaopaiForMajiang(this.doraIndicatorOf(occurrence.target!)), ronpai);
+            if (isUra) addUra += cnt; else addOmote += cnt;
           }
           // base 計算は正ぽっち表示牌を除外済みなので、選択ドラを足すだけでよい
-          const delta = addCnt;
-          if (delta !== 0) {
+          const mergeDora = (name: 'ドラ' | '裏ドラ', delta: number) => {
+            if (delta === 0) return;
             result.hupai = result.hupai ?? [];
-            const doraEntry = result.hupai.find((h: any) => h.name === 'ドラ' && typeof h.fanshu === 'number');
-            if (doraEntry) {
-              doraEntry.fanshu = Math.max(0, doraEntry.fanshu + delta);
+            const entry = result.hupai.find((h: any) => h.name === name && typeof h.fanshu === 'number');
+            if (entry) {
+              entry.fanshu = Math.max(0, entry.fanshu + delta);
             } else if (delta > 0) {
-              result.hupai.push({ name: 'ドラ', fanshu: delta });
+              result.hupai.push({ name, fanshu: delta });
             }
             result.fanshu = Math.max(0, result.fanshu + delta);
-          }
+          };
+          mergeDora('ドラ', addOmote);
+          mergeDora('裏ドラ', addUra);
           const choices = selectedKamiDora.map((occurrence) => `${occurrence.key}→${occurrence.target}`).join(', ');
           result.hupai.push({ name: `神ぽっち [${choices}]`, fanshu: 0 });
         }
