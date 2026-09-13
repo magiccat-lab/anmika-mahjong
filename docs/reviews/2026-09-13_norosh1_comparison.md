@@ -54,6 +54,10 @@ rounds[] = {round, honba, initialState:{gameState, wall}, actions[], scoreResult
 - `actions[]` の type: DRAW / DRAW_FLOWER / DRAW_NORTH / PASS / DISCARD / PON / KAN_ADDED /
   RIICHI / TSUMO / RON / NEXT_ROUND / DECLARE_DICE_TARGET / ROLL_DICE / GOLD_NORTH
 - `diceResults[]` に出目が入っている
+- 牌エンコード (codex 解析): `honor` 8/9/10/11 = 春/夏/秋/冬、`special` は `num:0` +
+  `pocchiColor` で色白、金北は `honor` 4 の `variant:"gold"`
+- `GOLD_NORTH` は北抜きではなく、未使用の `goldNorths` に対する強化で `targets[]` を選ぶ動作。
+  `DRAW_NORTH` とは別物
 - `scoreResults` に `yaku[] / totalHan / fu / rankName / baseScore / basicChips / bonusChips / diceChances`
 
 **山も出目も action も全部あるので、決定論リプレイができる。**
@@ -112,20 +116,34 @@ Ui = {..., sanshoku:`三色同順`, ...}   // ラベル対応表で sanshoku = �
 
 #### (B) サイコロチャンスの対象・レートの差
 
-norosh1 の全 39 項目 (`Wi`):
+> 2026-09-13 訂正: 初版はうちの `addSai()` を正規表現で拾ったため、
+> `hasFulou ? 35 : 70` のような三項演算の呼び出しを取りこぼしていた
+> (codex 指摘)。下は取り直した全量。
 
-- 140: 天和地和 / 人和 / 八連荘 / カラス / **三色同順**
-- 70: 裸単騎 / 国士 / 国士13面 / 四暗刻 / 四暗刻単騎 / 大三元 / 小四喜 / 大四喜 / 字一色 /
-  清老頭 / 緑一色 / 四槓子 / 四連刻 / 大車輪 / 三風 / 間八萬 / 萬子混一色 / 九蓮 / 純正九蓮 /
-  八華四北 / 八華 / 四華四北 / **四華** / 四北 / 白暗カン / オールスター / 三色同刻 / 三連刻 /
-  **アメリカ七対子** / ぽっち即ツモ / ぽっち0枚ツモ / **春無し流局** / **流し役満** / **全員ノーテン**
+うちの `addSai()` 全量 (`game3.ts`):
 
-うちの `addSai()` 呼び出しは 10 箇所 (三連刻 / 三色同刻 / オールスター / 四華四北:2 / 四北 /
-白暗カンアガリ / 八華:1 / 八華:2 / kanpaman:789-extra 70 / kanpaman:789-ron 140) +
-汎用の本役満パス。
+| 対象 | うちのレート |
+|---|---|
+| カラス / 八連荘 / 天和 / 地和 / 人和 | 140 (`YAKUMAN_SAI_BASE`) |
+| その他本役満 (汎用) | 70 |
+| 嵌八萬+789 ロン / 追加 | 140 / 70 |
+| 四華 | 面前70 / 食35 (`game3.ts:3863`) |
+| 四華四北 | 1本目 面前70:食35 + 2本目 70 |
+| 八華 / 八華四北 | 70 ×2 / 70 ×3 |
+| 四北 / 白暗カン / オールスター / 三連刻 / 三色同刻 | 70 |
 
-太字が「うちに対応が見当たらない」候補。ただし**うちは汎用役満サイコロパスがあるので、
-grep だけでは判定しきれない**。ここは 3-3 のリプレイ差分で潰すべき。
+norosh1 の `Wi` (全39項目) と突き合わせて、**うちに見当たらないのは以下**:
+
+| 項目 | norosh1 |
+|---|---|
+| **三色同順** | 140 |
+| **アメリカ七対子** | 70 (うちは役 4翻×種類数 はあるがサイコロ無し) |
+| **春無し流局** | 70 |
+| **流し役満** | 70 |
+| **全員ノーテン** | 70 |
+
+役満系 (国士 / 四暗刻 / 大三元 / 大車輪 / 三風 / 萬子混一色 / 裸単騎 / 九蓮 など) は
+うちの「その他本役満 70」で吸収されているので差ではない。
 
 #### (C) ルールオプションでうちに見当たらないもの
 
@@ -151,7 +169,7 @@ norosh1 の `ruleSet` (対局 JSON にそのまま入っている):
 | `winterChipMenzen` / `winterChipOpen` | 2 / 1 (門前と鳴きで差) | `chip_spec.md:45` は「冬 +2/枚オール」一律。**要確認** |
 | `shubaNagareChips` | 10 | シュバリーチ流局時の罰符。`chip_spec.md` に記載なし。**要確認** |
 | `haruNashiRyukyokuBase/ExpBase` | 4 / 2 (4×2^n) | 春無し流局チップ。記載なし。**要確認** |
-| `consecutiveWinCoef/ExpBase` | 2 / 2 (2×2^n) | 連荘ボーナスチップ。記載なし。**要確認** |
+| `consecutiveWinCoef/ExpBase` | 2 / 2 | 「連荘」か「連勝」か不明。UI は「連勝」表記で `initialAllGameState.consecutiveWins` は名前キー。**2×2^n の連荘ボーナスと断定しない** (codex 指摘) |
 | `goldNorthCount` | **2** | `shan3.ts:502` は**金北 1 枚**。**要確認、影響大** |
 | `man7Count/pin7Count/sou7Count` | 4 / 4 / 4 | 同じはず (要確認) |
 | `pocchi` 4色 各1 | 同じ | ✓ |
@@ -182,6 +200,9 @@ mahazan_ron 8 / mahazan_tsumo 8 (ツモは役満扱いの分岐あり)
 ### 3-3. 静的 grep では潰しきれない部分
 
 上の表は minify 済み bundle の読み取りとうちの grep で作った。
+**bundle に入っているのは採点関数までで、局進行と流局精算はサーバー側**にある (codex 確認)。
+そのため `shubaNagareChips` / `haruNashiRyukyoku*` / `consecutiveWin*` は
+定数が見えるだけで発動条件が確定できない。
 **符計算・複合役の優先順位・ぽっち逆払い・フィーバー段・ダブロン・返り東の細部は
 静的比較では無理**。ここは実データで当てるしかない。
 
