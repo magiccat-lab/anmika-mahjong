@@ -4322,7 +4322,30 @@ export class Game3 {
     const ctx = this._huleChipCtx();
     if (beforeDefen) ctx.beforeDefen = beforeDefen;
     ctx.ronpai = (result as any)._ronpaiForChip ?? null;
+    this.markYakumanOnlyChips_(result, winner, ctx.ronpai ?? null);
     applyChipsOnHuleHelper(ctx, result, winner, loser);
+  }
+
+  /** [2026-09-14 norosh 監査] 本役満は majiang-core が hupai を役満の entry だけに
+   *  差し替えるので、一発 と 裏ドラ の entry が消える。huleChip はその entry を見て
+   *  祝儀を出すため、役満を和了ると 一発 1 枚と 裏ドラ N 枚が黙って落ちていた
+   *  [赤 5 / 金 5 / 虹 / 抜きドラ は手牌から数えるので役満でも残る]。
+   *  chip 用の枚数だけ別口で result に載せる。翻数には触らない。 */
+  markYakumanOnlyChips_(result: any, winner: PlayerId, ronpai: string | null): void {
+    if (!result || (result.damanguan ?? 0) <= 0) return;
+    const hupai: any[] = result.hupai ?? [];
+    if (!hupai.some((h: any) => h.name === '一発') && this.lizhi.has(winner) && this.yifaActive[winner]) {
+      result._chipIppatsu = true;
+    }
+    if (hupai.some((h: any) => h.name === '裏ドラ') || !this.lizhi.has(winner)) return;
+    const sp = this.shoupai.get(winner);
+    if (!sp) return;
+    let count = 0;
+    for (const indicator of this.kamiPochiEffectiveIndicators_(winner, 'fubaopai', [...(this.shan.fubaopai ?? [])])) {
+      if (typeof indicator !== 'string' || indicator.startsWith('f')) continue;
+      count += this.countDoraFromIndicator(sp, normalizeBaopaiForMajiang(indicator), ronpai);
+    }
+    if (count > 0) result._chipUradora = count;
   }
 
   /** 最多牌 [手牌の bingpai で枚数最大の pai key、 例 'm9'、 同点なら数牌優先] */

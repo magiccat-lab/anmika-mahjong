@@ -420,15 +420,20 @@ export function applyChipsOnHule(
   const nukiTotal = nukiRegular + nukiGold;
   if (nukiTotal > 0) payByMode(nukiTotal, '抜きドラ ×' + nukiTotal);
 
-  if ((result.hupai ?? []).some((h: any) => h.name === '一発')) {
+  // 本役満は hupai が役満の entry だけに差し替わるので、一発 / 裏ドラ は
+  // game3.markYakumanOnlyChips_ が別口で載せた枚数を使う [翻は付かない、祝儀だけ]
+  if ((result.hupai ?? []).some((h: any) => h.name === '一発') || result._chipIppatsu) {
     if (loser !== null) ctx.applyChipFromLoser(winner, loser, 1, { label: '一発' });
     else ctx.applyChipOall(winner, 1, { label: '一発' });
   }
   const uradora = (result.hupai ?? []).find((h: any) => h.name === '裏ドラ');
-  if (uradora && typeof uradora.fanshu === 'number' && uradora.fanshu > 0) {
-    const lbl = `裏ドラ ×${uradora.fanshu}`;
-    if (loser !== null) ctx.applyChipFromLoser(winner, loser, uradora.fanshu, { label: lbl });
-    else ctx.applyChipOall(winner, uradora.fanshu, { label: lbl });
+  const uradoraCount = (uradora && typeof uradora.fanshu === 'number' && uradora.fanshu > 0)
+    ? uradora.fanshu
+    : Number(result._chipUradora ?? 0);
+  if (uradoraCount > 0) {
+    const lbl = `裏ドラ ×${uradoraCount}`;
+    if (loser !== null) ctx.applyChipFromLoser(winner, loser, uradoraCount, { label: lbl });
+    else ctx.applyChipOall(winner, uradoraCount, { label: lbl });
   }
 
   // 表示された華も和了時に抜いた扱い。裏はリーチ和了時だけ含める。
