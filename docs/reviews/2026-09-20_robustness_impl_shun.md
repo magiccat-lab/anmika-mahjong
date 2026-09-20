@@ -8,7 +8,7 @@ outcome: 堅牢性レビュー (yuma) の実装。codex 検討済み。A のゲ�
 
 リョー「codex にも検討させた上で駿に直させて。進行不能とかならんようにしてね」(アンミカ ch)。
 元レビューは `2026-09-20_robustness_review_yuma.md`。codex の実装前レビューは
-`tmp/anmika-robust-out/review.md` (git 管理外。要点は下に引く)。
+`2026-09-20_codex_review_robustness.md` (全文。要点は下に引く)。
 
 ## 入れたもの
 
