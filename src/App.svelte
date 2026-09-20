@@ -2408,7 +2408,9 @@
     {#if settingsPanelOpen}
       <SettingsPanel onClose={() => { settingsPanelOpen = false; }} />
     {/if}
-    <!-- [2026-09-14] 画面設定の「山を見る」が入っている時だけ、対局中も山を出す -->
+    <!-- [2026-09-14] 画面設定の「山を見る」が入っている時だけ、対局中も山を出す
+         [2026-09-20] 牌面は出さない [reveal=false]。ツモ順・嶺上・裏ドラは伏せ牌と枚数だけ。
+         表ドラは公開情報なのでそのまま -->
     {#if $prefs.showWall}
       <section class="wall-view">
         <WallPanel
@@ -2416,6 +2418,7 @@
           rinshan={(($game.game.shan as any)._rinshan ?? [])}
           baopai={[...$game.game.shan.displayBaopai]}
           fubaopai={[...($game.game.shan.displayFubaopai ?? [])]}
+          reveal={false}
         />
       </section>
     {/if}

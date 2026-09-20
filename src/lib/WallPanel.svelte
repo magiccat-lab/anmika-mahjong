@@ -1,19 +1,22 @@
 ﻿
 <script lang="ts">
-  // 山構成 panel [debug 用]
+  // 山構成 panel。reveal=true は debug / 牌譜再生用で牌面を出す。
+  // reveal=false [対局中の「山を見る」] は枚数と伏せ牌だけ。
+  // [2026-09-20 リョー報告「ツモ牌ネタバレしてる」: 対局中の山がツモ順の牌面を出していた]
   import Tile from './Tile.svelte';
   export let wall: string[];     // live wall のみ [末尾から通常ツモ]
   export let rinshan: string[] = [];
   export let baopai: string[];
   export let fubaopai: string[];
+  export let reveal: boolean = true;
 </script>
 
 <h2>🗻 山構成 [生牌 {wall.length} 枚 / 王牌 {rinshan.length + baopai.length + fubaopai.length} 枚]</h2>
 <div class="wall-panel">
   <div class="row">
-    <strong>ツモ順 [末尾→先頭]:</strong>
+    <strong>{reveal ? 'ツモ順 [末尾→先頭]:' : '生牌 [伏せ]:'}</strong>
     <span class="inline-tiles">
-      {#each [...wall].reverse() as t}<Tile pai={t} size="sm" />{/each}
+      {#each [...wall].reverse() as t}<Tile pai={reveal ? t : ''} face={reveal ? 'up' : 'down'} size="sm" />{/each}
     </span>
   </div>
   <div class="row">
@@ -21,7 +24,7 @@
     <span class="inline-tiles wangpai">
       {#each rinshan as t, i}
         <span class="wp-tile">
-          <Tile pai={t} size="sm" />
+          <Tile pai={reveal ? t : ''} face={reveal ? 'up' : 'down'} size="sm" />
           <div class="wp-tag">嶺{i}</div>
         </span>
       {/each}
@@ -34,7 +37,7 @@
     </span>
     <strong>裏ドラ:</strong>
     <span class="inline-tiles">
-      {#each fubaopai as t}<Tile pai={t} size="sm" />{/each}
+      {#each fubaopai as t}<Tile pai={reveal ? t : ''} face={reveal ? 'up' : 'down'} size="sm" />{/each}
     </span>
   </div>
 </div>
