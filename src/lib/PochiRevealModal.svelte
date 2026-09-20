@@ -115,9 +115,9 @@
     width: 190px; height: 90px; margin-left: 12px; padding: 0; transform: translateY(-50%);
     border: 0; border-bottom: 2px solid #d9b453; background-color: #102b25f5;
     display: grid; place-items: center;
-    font-family: 'FX Kana', 'Noto Sans JP', sans-serif; font-weight: 900;
+    font-family: 'FX Kana', 'Noto Sans JP', sans-serif; font-weight: 400;
     font-size: 32px; line-height: 1; letter-spacing: 0.04em;
-    cursor: pointer; color: #d9b453; animation: captionIn .24s ease-out; }
+    cursor: pointer; color: #d9b453 !important; animation: captionIn .24s ease-out; }
   .pochi-caption::before { content: attr(data-owner); position: absolute; top: 4px; left: 12px;
     font-size: 10px; letter-spacing: .12em; }
   .pochi-caption::after { content: attr(data-result); position: absolute; bottom: 7px; left: 12px;

@@ -2160,6 +2160,10 @@ if _DIST_DIR.exists():
         app.mount("/sounds", StaticFiles(directory=str(_DIST_DIR / "sounds")), name="sounds")
     if (_DIST_DIR / "tiles").exists():
         app.mount("/tiles", StaticFiles(directory=str(_DIST_DIR / "tiles")), name="tiles")
+    # [2026-09-20] 演出の語に使うサブセットフォント。mount が無いと 404 で font-face が
+    # error になり、黙ってシステムのフォントに落ちる (画面は出るので気づけない)
+    if (_DIST_DIR / "fonts").exists():
+        app.mount("/fonts", StaticFiles(directory=str(_DIST_DIR / "fonts")), name="fonts")
 
     @app.get("/favicon.svg")
     async def _favicon_svg():

@@ -54,11 +54,13 @@
   .from-left { --fx-x: 5%; --fx-y: 45%; --word-shift: 0%; --entry: -12px; }
   .from-right { --fx-x: 95%; --fx-y: 45%; --word-shift: -100%; --entry: 12px; }
   /* [2026-09-20 リョー「フォントとか全然ちゃうやん」] 手書きの SVG パスをやめ、
-     サブセットの実フォントで出す。字形が案と揃い、語を足しても崩れない */
+     サブセットの実フォントで出す。字形が案と揃い、語を足しても崩れない。
+     color の !important は App.svelte の main.mode-single が色を !important で
+     撒いているため。実画素を測って白のままなのを確認してから付けた */
   .fx-word { position: absolute; left: var(--fx-x); top: var(--fx-y);
-    font-family: 'FX Kana', 'Noto Sans JP', sans-serif; font-weight: 900;
+    font-family: 'FX Kana', 'Noto Sans JP', sans-serif; font-weight: 400;
     font-size: clamp(26px, 4.4vw, 40px); line-height: 1.1; white-space: nowrap;
-    color: #d9b453; letter-spacing: 0.06em; padding: 4px 14px 6px;
+    color: #d9b453 !important; letter-spacing: 0.06em; padding: 4px 14px 6px;
     background: #102b25ed; border-bottom: 2px solid #d9b453; opacity: 0;
     transform: translate(var(--word-shift), -50%);
     animation: wordIn calc(var(--fx-dur) - 100ms) cubic-bezier(.22,1,.36,1) 100ms forwards; }
