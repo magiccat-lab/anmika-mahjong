@@ -18,7 +18,9 @@ export default defineConfig({
       // ANMIKA_DB_PATH を渡さないと server/app.py:80-84 の既定で
       // server/data/anmika.db = 本番 DB を開く。ポートを変えただけでは隔離にならない
       // [codex ANMIKA-ROBUST-01 §4 の指摘]
-      command: 'ANMIKA_TEST_AUTH=1 ANMIKA_DB_PATH=tmp/e2e/anmika-e2e.db python -m uvicorn server.app:app --host 127.0.0.1 --port 18790',
+      // 素の python には jwt が無い。本番と同じ server/.venv を使う
+      // (start_prod.sh の PY と同じ)
+      command: 'ANMIKA_TEST_AUTH=1 ANMIKA_DB_PATH=tmp/e2e/anmika-e2e.db server/.venv/bin/python -m uvicorn server.app:app --host 127.0.0.1 --port 18790',
       port: 18790,
       reuseExistingServer: false,
       timeout: 15_000,
