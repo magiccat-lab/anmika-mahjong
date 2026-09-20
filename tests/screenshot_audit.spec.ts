@@ -35,7 +35,9 @@ test('screenshot audit: menu / table / cutin / round end', async ({ page }) => {
   let gotPingju = false;
   for (let i = 0; i < 2400 && !gotHule; i++) {
     await page.waitForTimeout(120);
-    if (!gotCutin && (await page.locator('.cutin-overlay').count()) > 0) {
+    // [2026-09-20 E+F] overlay の class は .cutin-overlay から .fx になった。
+    // 古いまま残すと「カットインが一度も出なかった」を黙って通す
+    if (!gotCutin && (await page.locator('.fx').count()) > 0) {
       await page.waitForTimeout(350);
       await page.screenshot({ path: `${OUT}/03_cutin.png` });
       gotCutin = true;

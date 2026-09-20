@@ -1,174 +1,160 @@
 <script lang="ts">
-  import type { CutinPayload } from './store';
+  import { createEventDispatcher } from 'svelte';
+  import { CUTIN_TIER, cutinDurationMs, type CutinPayload } from './store';
 
   export let cutin: CutinPayload | null;
 
+  const dispatch = createEventDispatcher<{ skip: { ts: number } }>();
+
+  // [2026-09-20 リョー選択 E+F] 全幅の黒帯 + 巨大文字 (現行) をやめ、
+  // 宣言した席の側に寄せた小さい帯 (案 F) と、その席から広がる光の輪 (案 E) にした。
+  // 文字は読める最小限。卓の中央は覆わない (原則 2)。
   const LABELS: Record<CutinPayload['id'], string> = {
-    reach: 'リーチ！',
-    ron: 'ロン！',
-    tsumo: 'ツモ！',
-    fever: 'フィーバー！',
-    kan: 'カン！',
-    pon: 'ポン！',
+    reach: 'リーチ',
+    ron: 'ロン',
+    tsumo: 'ツモ',
+    fever: 'フィーバー',
+    kan: 'カン',
+    pon: 'ポン',
   };
 
+  /** 演出の起点。P1 が上家 (左端)、P2 が下家 (右端)、それ以外は自分 (下)。 */
   function seatClass(seat?: 0 | 1 | 2): string {
     if (seat === 1) return 'from-left';
     if (seat === 2) return 'from-right';
     return 'from-bottom';
   }
 
-  // [2026-07-23 Sol調査: ポッチ演出割り込み] cutin の finish/pump タイマーは
-  // App.svelte [85行付近、CUTIN_DURATION_MS] が単一所有者。
-  // 旧: ここにも 1850ms+pump があり二重管理 → 双方が playNextCutin を撃って
-  // queue を 2 個消費し、カットインが途中で食われて「表示が短い」の一因になっていた。
-  // この component は表示専用にする
+  $: tier = cutin ? CUTIN_TIER[cutin.id] : 'light';
+  $: durationMs = cutinDurationMs(cutin?.id);
+  // スキップできるのは 重 だけ (原則 6)。軽と中は 0.7〜1.2 秒で消えるので
+  // 触れるようにすると打牌のタップを食う
+  $: skippable = tier === 'heavy';
+
+  function onSkip(): void {
+    if (cutin && skippable) dispatch('skip', { ts: cutin.ts });
+  }
+
+  // [2026-07-23 Sol調査: ポッチ演出割り込み] finish/pump のタイマーは App.svelte が
+  // 単一所有者。この component は表示と「スキップしたい」の通知だけで、
+  // 自分では queue を進めない (二重管理で演出が食われた事故がある)
 </script>
 
 {#if cutin}
   {#key cutin.ts}
-    <div class="cutin-overlay cutin-{cutin.id} {seatClass(cutin.seat)}" aria-hidden="true">
-      <div class="cutin-band">
-        <div class="cutin-line line-top"></div>
-        <div class="cutin-text">{LABELS[cutin.id]}</div>
-        <div class="cutin-line line-bottom"></div>
-        <div class="cutin-sheen"></div>
-      </div>
-      {#if cutin.id === 'fever'}
-        <div class="cutin-flash"></div>
-      {/if}
+    <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+    <div
+      class="fx fx-{cutin.id} fx-{tier} {seatClass(cutin.seat)}"
+      class:fx-skippable={skippable}
+      style="--fx-dur: {durationMs}ms"
+      aria-hidden="true"
+      on:click={onSkip}
+    >
+      <div class="fx-ring ring-a"></div>
+      <div class="fx-ring ring-b"></div>
+      <div class="fx-band"><span class="fx-text">{LABELS[cutin.id]}</span></div>
     </div>
   {/key}
 {/if}
 
 <style>
-  /* 2026-07-20 リョー指摘 [ダサい/カラフル過ぎ] で刷新:
-     原色グラデ帯+白ストライプ → 黒帯+差し色1色の静かな作りへ。
-     表示時間 1.8s は App/store のタイマー [1850ms] と対なので変えない */
-  .cutin-overlay {
+  /* 2026-09-20 演出ゼロベース再検討 (リョー選択 E+F)。
+     原則: 事実が先・卓を隠さない・軽中重の3段・色は金1つ・transform と opacity だけ。
+     mix-blend / filter / blur は使わない (スマホで一番重い描画だった) */
+  .fx {
     position: fixed;
     inset: 0;
     z-index: 800;
     pointer-events: none;
-    display: grid;
-    place-items: center;
     overflow: hidden;
+    /* 起点。席ごとに上書きする */
+    --fx-x: 50%;
+    --fx-y: 76%;
+    --accent: #d9b453;
+  }
+  .fx-skippable { pointer-events: auto; cursor: pointer; }
+
+  /* 色は金 1 つ (原則 4)。カン/ポンの青緑は廃止した */
+  .fx-fever { --accent: #e0a53e; }
+
+  .from-left { --fx-x: 6%; --fx-y: 50%; --band-x: -16px; }
+  .from-right { --fx-x: 94%; --fx-y: 50%; --band-x: 16px; }
+  .from-bottom { --fx-x: 28%; --fx-y: 78%; --band-x: 0; }
+
+  /* --- E 光の輪: 席から広がる。transform と opacity だけ --- */
+  .fx-ring {
+    position: absolute;
+    left: var(--fx-x);
+    top: var(--fx-y);
+    width: 26vmin;
+    height: 26vmin;
+    margin: -13vmin 0 0 -13vmin;
+    border: 1px solid var(--accent);
+    border-radius: 50%;
     opacity: 0;
-    animation: cutinFade 1.8s ease-in-out forwards;
+    transform: scale(0.25);
+    animation: fxRing var(--fx-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
   }
+  .ring-b { animation-delay: 120ms; }
 
-  /* 2026-07-21 リョー指摘 [ロン/ツモの青赤きもい]: 種別の色分けをやめ金一色に統一。
-     区別は文字だけで足りる。フィーバーだけ僅かに暖色寄り */
-  .cutin-reach { --accent: #d9b453; }
-  .cutin-ron { --accent: #d9b453; }
-  .cutin-tsumo { --accent: #d9b453; }
-  .cutin-fever { --accent: #e0a53e; }
-  .cutin-kan { --accent: #4a90d9; }
-  .cutin-pon { --accent: #4aa96c; }
-
-  .cutin-band {
-    position: relative;
-    width: 100vw;
-    min-height: clamp(110px, 18vh, 170px);
-    display: grid;
-    grid-template-rows: auto 1fr auto;
-    place-items: center;
-    padding: 10px 0;
-    overflow: hidden;
-    background: linear-gradient(
-      180deg,
-      rgba(6, 8, 12, 0) 0%,
-      rgba(6, 8, 12, 0.88) 16%,
-      rgba(6, 8, 12, 0.88) 84%,
-      rgba(6, 8, 12, 0) 100%
-    );
-    animation: bandIn 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  /* --- F 現行の圧縮版: 帯を 1/3 にして宣言席の側へ寄せる --- */
+  .fx-band {
+    position: absolute;
+    left: var(--fx-x);
+    top: var(--fx-y);
+    transform: translate(-50%, -50%);
+    padding: 0.28em 1.1em;
+    border-left: 2px solid var(--accent);
+    background: rgba(6, 8, 12, 0.82);
+    opacity: 0;
+    animation: fxBand var(--fx-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
   }
+  .from-left .fx-band { transform: translate(-10%, -50%); }
+  .from-right .fx-band { transform: translate(-90%, -50%); border-left: none; border-right: 2px solid var(--accent); }
 
-  .cutin-line {
-    width: min(66vw, 640px);
-    height: 1px;
-    background: linear-gradient(90deg, transparent, var(--accent), transparent);
-    opacity: 0.85;
-    animation: lineGrow 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  }
-
-  .cutin-text {
+  .fx-text {
     color: #f4f2ec;
-    font-weight: 800;
-    font-size: clamp(46px, 8.5vw, 110px);
-    line-height: 1.2;
-    letter-spacing: 0.22em;
-    padding-left: 0.22em;
+    font-weight: 700;
+    /* 現行は 46〜110px。読める最小限まで落として卓を隠さない */
+    font-size: clamp(18px, 3.4vw, 30px);
+    letter-spacing: 0.16em;
+    padding-left: 0.16em;
     white-space: nowrap;
-    text-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.8),
-      0 0 26px color-mix(in srgb, var(--accent) 45%, transparent);
-    animation: textIn 1.8s ease-out forwards;
+  }
+  /* 重 (フィーバー) だけ一段大きい */
+  .fx-heavy .fx-text { font-size: clamp(26px, 5vw, 46px); }
+  .fx-heavy .fx-ring { width: 40vmin; height: 40vmin; margin: -20vmin 0 0 -20vmin; }
+
+  @keyframes fxRing {
+    0% { opacity: 0; transform: scale(0.25); }
+    18% { opacity: 0.85; }
+    100% { opacity: 0; transform: scale(1.9); }
   }
 
-  /* 一度だけ通る控えめな光沢 */
-  .cutin-sheen {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      100deg,
-      transparent 42%,
-      rgba(255, 255, 255, 0.09) 50%,
-      transparent 58%
-    );
-    transform: translateX(-120%);
-    animation: sheenSweep 1.0s ease-out 0.3s forwards;
+  @keyframes fxBand {
+    0% { opacity: 0; transform: translate(calc(-50% + var(--band-x, 0px)), -50%); }
+    14% { opacity: 1; transform: translate(-50%, -50%); }
+    78% { opacity: 1; transform: translate(-50%, -50%); }
+    100% { opacity: 0; transform: translate(-50%, -50%); }
+  }
+  /* 左右寄せは基準位置が違うので、帯の keyframe を席ごとに上書きする */
+  .from-left .fx-band { animation-name: fxBandLeft; }
+  .from-right .fx-band { animation-name: fxBandRight; }
+
+  @keyframes fxBandLeft {
+    0% { opacity: 0; transform: translate(calc(-10% - 16px), -50%); }
+    14% { opacity: 1; transform: translate(-10%, -50%); }
+    78% { opacity: 1; transform: translate(-10%, -50%); }
+    100% { opacity: 0; transform: translate(-10%, -50%); }
+  }
+  @keyframes fxBandRight {
+    0% { opacity: 0; transform: translate(calc(-90% + 16px), -50%); }
+    14% { opacity: 1; transform: translate(-90%, -50%); }
+    78% { opacity: 1; transform: translate(-90%, -50%); }
+    100% { opacity: 0; transform: translate(-90%, -50%); }
   }
 
-  .cutin-flash {
-    position: absolute;
-    inset: 0;
-    background: rgba(255, 255, 255, 0.22);
-    mix-blend-mode: screen;
-    animation: feverFlash 1.8s ease-out forwards;
-  }
-
-  .from-left .cutin-band { --slide-x: -34vw; --slide-y: 0; }
-  .from-right .cutin-band { --slide-x: 34vw; --slide-y: 0; }
-  .from-bottom .cutin-band { --slide-x: 0; --slide-y: 22vh; }
-  .cutin-fever .cutin-band { --slide-x: 0; --slide-y: 0; }
-
-  @keyframes cutinFade {
-    0% { opacity: 0; }
-    8% { opacity: 1; }
-    80% { opacity: 1; }
-    100% { opacity: 0; }
-  }
-
-  @keyframes bandIn {
-    0% { transform: translate(var(--slide-x, 0), var(--slide-y, 0)); }
-    16% { transform: translate(0, 0); }
-    82% { transform: translate(0, 0); }
-    100% { transform: translate(calc(var(--slide-x, 0) * -0.12), calc(var(--slide-y, 0) * -0.1)); }
-  }
-
-  @keyframes textIn {
-    0% { opacity: 0; letter-spacing: 0.34em; }
-    14% { opacity: 1; letter-spacing: 0.22em; }
-    100% { opacity: 1; letter-spacing: 0.22em; }
-  }
-
-  @keyframes lineGrow {
-    0% { transform: scaleX(0); }
-    18% { transform: scaleX(1); }
-    100% { transform: scaleX(1); }
-  }
-
-  @keyframes sheenSweep {
-    0% { transform: translateX(-120%); }
-    100% { transform: translateX(120%); }
-  }
-
-  @keyframes feverFlash {
-    0% { opacity: 0; }
-    10% { opacity: 0.5; }
-    24% { opacity: 0; }
-    100% { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    .fx-ring { animation: none; opacity: 0; }
   }
 </style>

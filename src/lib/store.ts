@@ -70,6 +70,31 @@ const _STAMP_ID_SET: Set<string> = new Set(STAMP_IDS);
 export const STAMP_DURATION_MS = 1500;
 export const CUTIN_DURATION_MS = 1800;
 export type CutinId = 'reach' | 'ron' | 'tsumo' | 'fever' | 'kan' | 'pon';
+
+/** 演出の重さ 3 段 [2026-09-20 演出ゼロベース再検討 原則 3、リョー選択 E+F]。
+ *  軽: 宣言と鳴き。その場で消える / 中: 和了 / 重: フィーバー。
+ *  尺を tier で決めるので CUTIN_DURATION_MS 固定はやめる [互換のため export は残す]。 */
+export const CUTIN_TIER: Record<CutinId, 'light' | 'mid' | 'heavy'> = {
+  reach: 'light',
+  pon: 'light',
+  kan: 'light',
+  ron: 'mid',
+  tsumo: 'mid',
+  fever: 'heavy',
+};
+
+export const CUTIN_TIER_DURATION_MS: Record<'light' | 'mid' | 'heavy', number> = {
+  light: 700,
+  mid: 1200,
+  heavy: 1800,
+};
+
+/** この演出を何ミリ秒出すか。App の pump / watchdog と表示側で同じ値を使う。 */
+export function cutinDurationMs(id: CutinId | null | undefined): number {
+  if (!id) return CUTIN_DURATION_MS;
+  return CUTIN_TIER_DURATION_MS[CUTIN_TIER[id] ?? 'heavy'] ?? CUTIN_DURATION_MS;
+}
+
 export type CutinPayload = { id: CutinId; ts: number; seat?: PlayerId };
 
 export interface StoreState {
