@@ -302,6 +302,22 @@ export class Shan3 {
     return this._fubaopai ? this._fubaopai.slice(0, this._committedFubaopaiLen) : null;
   }
 
+  /** 王牌のうち、まだ誰にも見えていない物理牌 [嶺上 + 未公開のドラ表 + 未公開の裏ドラ]。
+   *
+   *  フィーバーの待ち残り枚数をこれ込みで数えるため [リョー裁定 2026-09-20
+   *  「王牌も含んだ枚数で」]。live wall だけで数えると「山に無い = 王牌に居る」が
+   *  引き算で分かってしまう。王牌を足すと「見えていない枚数」になり、その漏れが消える。
+   *  公開済みのドラ表は盤面に出ているので含めない [含めると見えている牌を残りと数える]。
+   *  blind [online の projection] では現物を持たないので空を返す。 */
+  get concealedDeadWall(): Pai[] {
+    if (this._blind) return [];
+    return [
+      ...this._rinshan,
+      ...this._baopai.slice(this._committedBaopaiLen),
+      ...(this._fubaopai ? this._fubaopai.slice(this._committedFubaopaiLen) : []),
+    ];
+  }
+
   /** 直前の zimo で引いた華牌 [f1-f4]、 空配列なら華牌引かなかった */
   lastDrawnHuapai: Pai[] = [];
 

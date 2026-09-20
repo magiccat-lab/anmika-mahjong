@@ -24,9 +24,15 @@ function normalizedWaitCore(pai: string): string {
   return normalized === 'm1' ? 'm7' : normalized;
 }
 
-/** 宣言時に固定した待ちごとの「現在の生牌領域」だけを集計する。
- *  裏ドラ・嶺上など王牌内の現物は残数に含めず、赤・金・虹の有無も
- *  推測ではなく live wall の物理牌から判定する。 */
+/** 宣言時に固定した待ちごとの「まだ見えていない枚数」を集計する。
+ *
+ *  第2引数には **live wall + 王牌の未公開分** を渡す [リョー裁定 2026-09-20
+ *  「王牌も含んだ枚数で」]。live wall だけで数えていた頃は、待ち牌が王牌に
+ *  落ちた瞬間に残り枚数が減るので「山に無い = 王牌に居る」が引き算で分かった。
+ *  王牌込みなら数字の意味が「見えていない枚数」になり、その漏れが消える。
+ *  赤・金・虹の有無も同じ集合の現物から判定する。
+ *
+ *  関数名は互換のため据え置き。呼び出し側が渡す集合が変わった。 */
 export function feverWaitInfoFromLiveWall(ting: string[], liveWall: string[]): FeverWaitWallInfo[] {
   const seen = new Set<string>();
   const rows: FeverWaitWallInfo[] = [];

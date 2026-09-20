@@ -600,7 +600,12 @@ function confirmedFeverWaitInfo(game: any): {
   waitInfo: FeverWaitPublicInfo[];
   waitsByDeclarer: Map<0 | 1 | 2, Set<string>>;
 } {
-  const liveWall = [...((game.shan as any)._pai ?? [])] as string[];
+  // [リョー裁定 2026-09-20] 王牌の未公開分も込みで数える。client (App.svelte の
+  // feverWaitInfo) と同じ集合にしないと solo と online で数字が食い違う
+  const liveWall = [
+    ...((game.shan as any)._pai ?? []),
+    ...((game.shan as any).concealedDeadWall ?? []),
+  ] as string[];
   const waitInfo: FeverWaitPublicInfo[] = [];
   const waitsByDeclarer = new Map<0 | 1 | 2, Set<string>>();
   for (const player of [0, 1, 2] as const) {

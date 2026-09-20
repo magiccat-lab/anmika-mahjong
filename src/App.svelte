@@ -34,7 +34,7 @@
   import StampPopup from './lib/StampPopup.svelte';
   import CutinOverlay from './lib/CutinOverlay.svelte';
   import LizhiControls from './lib/LizhiControls.svelte';
-  import { CUTIN_DURATION_MS, game, isFeverForcedTsumogiri, type StampId, type StoreState } from './lib/store';
+  import { CUTIN_DURATION_MS, cutinDurationMs, game, isFeverForcedTsumogiri, type StampId, type StoreState } from './lib/store';
   import type { PlayerId } from './lib/types';
   import type { FeverCheck } from './lib/game3/feverLizhi';
   import { parseFulouList, fulouPhysicalFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
@@ -88,14 +88,22 @@
   }
   $: if (typeof window !== 'undefined' && $game.cutin && cutinTimer === null) {
     const ts = $game.cutin.ts;
+    // [2026-09-20 E+F] 尺は演出の重さで決める。軽 0.7 / 中 1.2 / 重 1.8 秒
+    const durationMs = cutinDurationMs($game.cutin.id);
     cutinTimer = setTimeout(() => {
       cutinTimer = null;
       game.finishCutin(ts);
-    }, CUTIN_DURATION_MS);
+    }, durationMs);
   }
   onDestroy(() => {
     if (cutinTimer !== null) clearTimeout(cutinTimer);
   });
+  /** [2026-09-20 原則 6] 重い演出はタップで即終了。タイマーの所有者は App のままで、
+   *  overlay は「押された」を知らせるだけ。ここで自分の予約を畳んでから畳む */
+  function onCutinSkip(event: CustomEvent<{ ts: number }>): void {
+    if (cutinTimer !== null) { clearTimeout(cutinTimer); cutinTimer = null; }
+    game.finishCutin(event.detail.ts);
+  }
   // [2026-07-23 Sol調査: ポッチ演出割り込み] 演出は排他で直列に出す
   // [cutin → 白ぽっち開示 → 選択モーダル → サイコロ]。
   // 主因は PochiReveal が独立キュー + z-index 9999 で他演出を覆っていた事
@@ -965,11 +973,15 @@
     const tings: string[] = $game.game.feverActive[player as 0|1|2]
       ? ($game.game.feverDeclareTing?.[player as 0|1|2] ?? [])
       : (($game.game as any).getTingpaiList?.(player) ?? []);
-    // 王牌内の伏せ牌を「残り」と誤表示しないよう、権威側と同じく
-    // live wall の物理牌だけを数える。赤・金・虹の有無も現物から出す。
+    // [リョー裁定 2026-09-20] 王牌も含んだ枚数で出す。live wall だけで数えると
+    // 待ち牌が王牌に落ちた時に残りが減り、「山に無い = 王牌に居る」が引き算で分かる。
+    // 未公開の王牌を足すと数字の意味が「見えていない枚数」になる。権威側と同じ集合。
     return feverWaitInfoFromLiveWall(
       tings,
-      [...((($game.game.shan as any)._pai ?? []) as string[])],
+      [
+        ...((($game.game.shan as any)._pai ?? []) as string[]),
+        ...(($game.game.shan.concealedDeadWall ?? []) as string[]),
+      ],
     );
   }
 
@@ -1955,7 +1967,7 @@
         cutinWatchdogTimer = setTimeout(() => {
           game.finishCutin(stuckCutin.ts);
           game.playNextCutin();
-        }, CUTIN_DURATION_MS * 3);
+        }, cutinDurationMs(stuckCutin.id) * 3);
       }
     }
   }
@@ -2905,7 +2917,7 @@
     <div class="stamp-slot stamp-slot-p0"><StampPopup stamp={$game.stamps[0]} /></div>
     <div class="stamp-slot stamp-slot-p2"><StampPopup stamp={$game.stamps[2]} /></div>
   </div>
-  <CutinOverlay cutin={$game.cutin} />
+  <CutinOverlay cutin={$game.cutin} on:skip={onCutinSkip} />
 
   <div class="seat seat-bottom" style="position:relative">
     {#if viewMode === 'single'}
