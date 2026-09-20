@@ -84,6 +84,27 @@ anmika が要求するのは 1223 (yuma の HOME にある)。今回は
 で回した。secretary 側の監査 2 回目 #7 で HF のキャッシュは共有にしたが、
 playwright は手付かず。次にやるならそこ。
 
+## codex への発注 (ANMIKA-FX-02、2026-09-20 15:5x 送信・返答待ち)
+
+リョー「ポンの文字だせー、codex に gptimage2 使いながらデザイン案考えさせて
+コード化させれば？ポッチもね」。帯の中が**ゴシック体の素の文字**なのが不満点。
+
+| 項目 | 内容 |
+|---|---|
+| ID | ANMIKA-FX-02 |
+| 宛先 | codex (team secretary) |
+| 依頼 | カットインの「語」の見せ方を image_gen (gpt-image-2) で 3〜5 案、ぽっち開封を 2〜3 案。contact sheet 1 枚 + 第一候補の実装まで |
+| 成果物 | `tmp/fx02-out/` (contact sheet / README.md / shots) |
+| 状態 | **発注済・返答待ち** |
+
+渡した制約 (外すと差し戻し): 卓を隠さない / 色は金 1 つ / transform と opacity だけ /
+3 DOM 以内 / 尺 3 段は store と両方 / 絵文字なし / webfont は self-host で数字を出す。
+
+壊してはいけない物として、overlay が表示専用である事 (タイマーは App が単一所有者)、
+ぽっちの閉じ方 3 重、screenshot_audit の `.fx` selector を明記した。
+
+commit はさせない。差分で受けてこちらが検収してから入れる。
+
 ## まだやっていない
 
 - 和了の「牌 → 開示 → 演出」の順番入れ替え (yuma の doc 4 章)。hule 経路 4 か所に
