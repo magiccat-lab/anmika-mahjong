@@ -73,6 +73,9 @@ const LIVE_GAMEPLAY_ACTIONS = new Set([
   'nukiBei',
   'lizhi',
   'shuvari',
+  // [2026-09-20 堅牢性レビュー 4.2-1] 宣言牌を選び直す取消。ここに無かったので
+  // authority が `unknown action type` で reject し、client は宣言待ちのまま詰んでいた
+  'cancelLizhi',
 ]);
 
 function asPlayerId(value: number): PlayerId | null {
@@ -269,6 +272,8 @@ export class RoomAuthority {
           reason = this.applyLizhi(actor, action.opts); break;
         case 'shuvari':
           reason = this.applyShuvari(actor, action.player); break;
+        case 'cancelLizhi':
+          reason = this.applyCancelLizhi(actor); break;
         case 'nextRound':
           reason = this.applyNextRound(action); break;
         case 'nextMatch':
@@ -405,6 +410,7 @@ export class RoomAuthority {
       case 'stamp': break;
       case 'discard': store.discard(action.pai, action.meta); break;
       case 'lizhi': store.lizhi(action.opts ?? {}); break;
+      case 'cancelLizhi': store.cancelLizhi(); break;
       case 'shuvari': store.shuvari(action.player ?? actor); break;
       case 'tsumo': store.tsumo(); break;
       case 'ron': store.ron(action.player ?? actor); break;
@@ -556,7 +562,10 @@ export class RoomAuthority {
     if (state.roundEnded || state.pendingPingju) {
       return `${type}: round is ended`;
     }
-    if (state.lizhiPending !== null && type !== 'discard') {
+    // 宣言中に許すのは 2 つだけ: 宣言牌を打つ (discard) か、宣言をやめる (cancelLizhi)。
+    // cancelLizhi を除外していなかったので「打つ牌を選び直す」出口が塞がっていた
+    // [2026-09-20 堅牢性レビュー 4.2-1]
+    if (state.lizhiPending !== null && type !== 'discard' && type !== 'cancelLizhi') {
       return `${type}: riichi discard is pending`;
     }
     return null;
@@ -913,6 +922,33 @@ export class RoomAuthority {
     // canonical store). This ensures feverCheck and feverDapai are computed
     // from the post-discard hand, not the pre-discard hand.
     this.pendingLizhiOpts = { open, shuvari, fever };
+    return null;
+  }
+
+  /** リーチ宣言の取消 [2026-09-20 堅牢性レビュー 4.2-1]。
+   *
+   *  lizhi は 2 段階で、宣言牌を打つまで engine 側は何も確定していない
+   *  (applyLizhi は pendingLizhiOpts を立てるだけ)。だから取消は pending を
+   *  畳むだけで安全に戻る。canonical 側の store.cancelLizhi() と同じ検査を張る:
+   *
+   *  - 現在手番の本人だけ (canonical は lizhiPending === player を見る。
+   *    宣言は手番でしか出せないので、この 2 つは同じ席を指す)
+   *  - 鳴き / ロンの応答待ちが立っている間は触らない (他の live action と同じ)
+   *  - そもそも pending が無ければ reject。client の二重送信で状態を壊さない
+   */
+  private applyCancelLizhi(actor: PlayerId): string | null {
+    const currentErr = this.requireCurrent(actor, 'cancelLizhi');
+    if (currentErr) return currentErr;
+    const pendingErr = this.requireNoReactionPending('cancelLizhi');
+    if (pendingErr) return pendingErr;
+    if (!this.pendingLizhiOpts) return `cancelLizhi: player ${actor} has no pending lizhi`;
+    // canonical の宣言者と突き合わせる。mirror だけを見て通すと canonical 側が
+    // no-op になり、mutation token が動かず結局 reject される
+    // [codex ANMIKA-ROBUST-01 §2]。P0 は 0 なので truthy 判定にしない
+    const declarer = this.canonicalState().lizhiPending;
+    if (declarer === null) return `cancelLizhi: canonical has no pending lizhi`;
+    if (declarer !== actor) return `cancelLizhi: actor ${actor} is not the declarer ${declarer}`;
+    this.pendingLizhiOpts = null;
     return null;
   }
 
