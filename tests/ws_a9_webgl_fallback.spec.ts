@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { defaultSanmaRule, generateTilePool } from '../src/lib/shan3';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:8790';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18790';
 
 test.use({
   launchOptions: {

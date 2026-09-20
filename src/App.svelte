@@ -34,7 +34,7 @@
   import StampPopup from './lib/StampPopup.svelte';
   import CutinOverlay from './lib/CutinOverlay.svelte';
   import LizhiControls from './lib/LizhiControls.svelte';
-  import { CUTIN_DURATION_MS, game, isFeverForcedTsumogiri, type StampId } from './lib/store';
+  import { CUTIN_DURATION_MS, game, isFeverForcedTsumogiri, type StampId, type StoreState } from './lib/store';
   import type { PlayerId } from './lib/types';
   import type { FeverCheck } from './lib/game3/feverLizhi';
   import { parseFulouList, fulouPhysicalFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
@@ -1817,7 +1817,7 @@
   }
   /** 自動操作を出してよい局面か [自動ツモ切り / 自動抜き で共通]。
    *  modal・演出・宣言待ちが 1 つでも立っていたら出さない。 */
-  function isAutoActionPhaseReady(snap: ReturnType<typeof get<typeof game>>, player: PlayerId): boolean {
+  function isAutoActionPhaseReady(snap: StoreState, player: PlayerId): boolean {
     return (viewMode === 'single' || onlineGameStarted)
       && !snap.roundEnded
       && !snap.awaitingRonDecision
