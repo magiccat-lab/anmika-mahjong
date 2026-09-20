@@ -95,7 +95,33 @@ playwright は手付かず。次にやるならそこ。
 | 宛先 | codex (team secretary) |
 | 依頼 | カットインの「語」の見せ方を image_gen (gpt-image-2) で 3〜5 案、ぽっち開封を 2〜3 案。contact sheet 1 枚 + 第一候補の実装まで |
 | 成果物 | `tmp/fx02-out/` (contact sheet / README.md / shots) |
-| 状態 | **発注済・返答待ち** |
+| 状態 | **納品・検収済 (003dd06 で取り込み)** |
+
+### 納品と検収 (2026-09-20 16:0x)
+
+codex は 比較画像 4 案 + ぽっち 3 案を `tmp/fx02-out/contact-sheet.png` に出し、
+第一候補 **A (金の線の文字図案) + P1 (牌の横に添える文字と印)** を実装した。
+
+- `src/lib/fxArtwork.ts` 新設。6 語 + 白ぽっちの専用 SVG パスを data URI で持つ。
+  **追加フォント無し・初回表示の追加通信 0 件**。案の差し替えはこの map か artwork prop
+- bundle: JS 557.14 → 558.07KB (+0.93)、CSS 107.94 → 107.18KB (-0.76)
+- 制約 (卓を隠さない / 金 1 色 / transform と opacity / 3 DOM / 尺据え置き / 絵文字なし) は
+  読んで確認した。App と store のタイマー・watchdog・queue は未変更、ぽっちの閉じ方 3 重も維持
+
+**codex 側で未達だった検収をこちらで実施**した。codex 環境は localhost socket が EPERM、
+Chromium も sandbox で起動できず、全 vitest と実画面が取れないと自己申告していた。
+
+| 検査 | 結果 |
+|---|---|
+| npm run check | 0 errors |
+| vitest 高速 | 1,534 緑 (6 skip) |
+| 実画面 915x412 | ポン / ロン / フィーバー / ぽっち開封前後を撮って目視 |
+
+**検収でこちらが直した物**: ぽっちの札が中央の点数パネルに重なっていた
+(`--anchor-x` 28% → 18%、狭い画面は 17%)。実画面を撮るまで気づけない型。
+
+codex が `screenshot_audit.spec.ts` に「カットインを一度以上観測する」の assert を
+足したのは良い。これが無いと演出が出なくても黙って通る。
 
 渡した制約 (外すと差し戻し): 卓を隠さない / 色は金 1 つ / transform と opacity だけ /
 3 DOM 以内 / 尺 3 段は store と両方 / 絵文字なし / webfont は self-host で数字を出す。
