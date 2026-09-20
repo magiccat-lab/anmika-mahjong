@@ -1,3 +1,16 @@
+/* 演出の語だけに使うサブセット [2026-09-20 リョー「フォントとか全然ちゃうやん」]。
+   Noto Sans JP 900 の必要 22 グリフだけ 7.6KB。self-host (SIL OFL 1.1)。
+   取り方と増やし方は public/fonts/README.md。
+   font-display: block = 読み込み前は出さない。演出は 0.7 秒なので、
+   違う字で出てから入れ替わるより、少し遅れて正しい字が出る方がいい */
+@font-face {
+  font-family: 'FX Kana';
+  src: url('/fonts/fx-notosansjp-900-subset.woff2') format('woff2');
+  font-weight: 900;
+  font-style: normal;
+  font-display: block;
+}
+
 :root {
   --text: #1a1820;
   --text-h: #08060d;

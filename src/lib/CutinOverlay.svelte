@@ -6,8 +6,7 @@
 
   const dispatch = createEventDispatcher<{ skip: { ts: number } }>();
 
-  import { FX_ARTWORK, FX_LABELS } from './fxArtwork';
-  export let artwork = FX_ARTWORK;
+  import { FX_LABELS } from './fxArtwork';
 
   /** 演出の起点。P1 が上家 (左端)、P2 が下家 (右端)、それ以外は自分 (下)。 */
   function seatClass(seat?: 0 | 1 | 2): string {
@@ -42,7 +41,7 @@
       on:click={onSkip}
     >
       <div class="fx-ring"></div>
-      <img class="fx-word" src={artwork[cutin.id]} alt={FX_LABELS[cutin.id]} draggable="false" />
+      <span class="fx-word">{FX_LABELS[cutin.id]}</span>
     </div>
   {/key}
 {/if}
@@ -54,14 +53,16 @@
   .fx-skippable { pointer-events: auto; cursor: pointer; }
   .from-left { --fx-x: 5%; --fx-y: 45%; --word-shift: 0%; --entry: -12px; }
   .from-right { --fx-x: 95%; --fx-y: 45%; --word-shift: -100%; --entry: 12px; }
+  /* [2026-09-20 リョー「フォントとか全然ちゃうやん」] 手書きの SVG パスをやめ、
+     サブセットの実フォントで出す。字形が案と揃い、語を足しても崩れない */
   .fx-word { position: absolute; left: var(--fx-x); top: var(--fx-y);
-    width: clamp(86px, 13vw, 142px); height: 68px; object-fit: contain;
-    padding: 5px 9px; box-sizing: border-box; background: #102b25ed;
-    border-bottom: 1px solid #d9b453; opacity: 0;
+    font-family: 'FX Kana', 'Noto Sans JP', sans-serif; font-weight: 900;
+    font-size: clamp(26px, 4.4vw, 40px); line-height: 1.1; white-space: nowrap;
+    color: #d9b453; letter-spacing: 0.06em; padding: 4px 14px 6px;
+    background: #102b25ed; border-bottom: 2px solid #d9b453; opacity: 0;
     transform: translate(var(--word-shift), -50%);
     animation: wordIn calc(var(--fx-dur) - 100ms) cubic-bezier(.22,1,.36,1) 100ms forwards; }
-  .fx-reach .fx-word { width: clamp(120px, 18vw, 180px); }
-  .fx-heavy .fx-word { width: clamp(180px, 27vw, 250px); height: 76px; }
+  .fx-heavy .fx-word { font-size: clamp(30px, 5.4vw, 50px); }
   .fx-ring { position: absolute; left: var(--fx-x); top: var(--fx-y);
     width: 92px; height: 92px; margin: -46px;
     border: 1px solid #d9b453; border-radius: 50%; opacity: 0;

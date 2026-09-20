@@ -36,7 +36,11 @@ test('FX02: all six words, three seats, three DOM, queue and heavy skip', async 
     await page.clock.runFor(350);
     await expect(page.locator('.fx')).toBeVisible();
     expect(await page.locator('.fx *').count()).toBe(2);
-    expect(await page.locator('.fx-word').evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+    // [2026-09-20] 語は img からサブセットフォントの実テキストになった。
+    // 「字が出ているか」は、語が入っていて幅を持っている事で見る
+    const word = page.locator('.fx-word');
+    expect((await word.innerText()).trim().length).toBeGreaterThan(0);
+    expect((await word.boundingBox())!.width).toBeGreaterThan(20);
     await shot(page, `fx02-${id}`);
     if (id === 'fever') await page.locator('.fx').click({ position: { x: 10, y: 10 } });
     else await page.clock.runFor(1300);

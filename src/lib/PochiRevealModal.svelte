@@ -2,8 +2,7 @@
 <script lang="ts">
   // FX-02 P1: compact tile and original vector caption. Close safeguards stay independent.
   import { onMount, onDestroy } from 'svelte';
-  import { POCHI_ARTWORK } from './fxArtwork';
-  export let artwork = POCHI_ARTWORK;
+
   import { playSound } from './prefs';
   export let player: number;
   export let color: 'blue' | 'red' | 'green' | 'yellow';
@@ -87,10 +86,10 @@
   tabindex="-1" on:click={reveal} on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); reveal(); } }}>
   <button class="pochi-tile" data-seal={revealed ? (isPositive(color) ? '正' : '逆') : ''} class:revealed style:--pochi={revealed ? colorHex(color) : 'transparent'}
     aria-label={revealed ? `${colorLabel(color)}ぽっち・閉じる` : '白ぽっちをめくる'}></button>
-  <button class="pochi-caption" style:background-image={`url("${artwork}")`}
+  <button class="pochi-caption"
     data-owner={`${seatLabel} の引き`}
-    data-result={revealed ? `${colorLabel(color)}ぽっち   ${isPositive(color) ? '正' : '逆'}   / 閉じる` : (isCpu ? '白ぽっち / めくり中' : '白ぽっち / タップでめくる')}
-    aria-label={revealed ? '開示を閉じる' : '白ぽっちをめくる'}></button>
+    data-result={revealed ? `${colorLabel(color)}ぽっち   ${isPositive(color) ? '正' : '逆'}   / 閉じる` : (isCpu ? 'めくり中' : 'タップでめくる')}
+    aria-label={revealed ? '開示を閉じる' : '白ぽっちをめくる'}>白ぽっち</button>
 </div>
 
 <style>
@@ -110,10 +109,14 @@
     border-radius: 50%; background: #102b25; color: #d9b453;
     font: inherit; font-size: 17px; line-height: 25px; }
   .pochi-tile.revealed::after { content: ''; inset: 31px 20px; border-radius: 50%; background: var(--pochi); }
+  /* [2026-09-20 リョー「フォントとか全然ちゃうやん」] 語は背景画像 (手書き SVG) を
+     やめ、サブセットの実フォントで出す。語はボタンの本文なので要素数は増えない */
   .pochi-caption { position: absolute; left: var(--anchor-x); top: var(--anchor-y);
     width: 190px; height: 90px; margin-left: 12px; padding: 0; transform: translateY(-50%);
-    border: 0; border-bottom: 1px solid #d9b453; background-color: #102b25f5;
-    background-size: 164px auto; background-repeat: no-repeat; background-position: center 23px;
+    border: 0; border-bottom: 2px solid #d9b453; background-color: #102b25f5;
+    display: grid; place-items: center;
+    font-family: 'FX Kana', 'Noto Sans JP', sans-serif; font-weight: 900;
+    font-size: 32px; line-height: 1; letter-spacing: 0.04em;
     cursor: pointer; color: #d9b453; animation: captionIn .24s ease-out; }
   .pochi-caption::before { content: attr(data-owner); position: absolute; top: 4px; left: 12px;
     font-size: 10px; letter-spacing: .12em; }
