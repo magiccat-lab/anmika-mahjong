@@ -6,17 +6,8 @@
 
   const dispatch = createEventDispatcher<{ skip: { ts: number } }>();
 
-  // [2026-09-20 リョー選択 E+F] 全幅の黒帯 + 巨大文字 (現行) をやめ、
-  // 宣言した席の側に寄せた小さい帯 (案 F) と、その席から広がる光の輪 (案 E) にした。
-  // 文字は読める最小限。卓の中央は覆わない (原則 2)。
-  const LABELS: Record<CutinPayload['id'], string> = {
-    reach: 'リーチ',
-    ron: 'ロン',
-    tsumo: 'ツモ',
-    fever: 'フィーバー',
-    kan: 'カン',
-    pon: 'ポン',
-  };
+  import { FX_ARTWORK, FX_LABELS } from './fxArtwork';
+  export let artwork = FX_ARTWORK;
 
   /** 演出の起点。P1 が上家 (左端)、P2 が下家 (右端)、それ以外は自分 (下)。 */
   function seatClass(seat?: 0 | 1 | 2): string {
@@ -50,111 +41,38 @@
       aria-hidden="true"
       on:click={onSkip}
     >
-      <div class="fx-ring ring-a"></div>
-      <div class="fx-ring ring-b"></div>
-      <div class="fx-band"><span class="fx-text">{LABELS[cutin.id]}</span></div>
+      <div class="fx-ring"></div>
+      <img class="fx-word" src={artwork[cutin.id]} alt={FX_LABELS[cutin.id]} draggable="false" />
     </div>
   {/key}
 {/if}
 
 <style>
-  /* 2026-09-20 演出ゼロベース再検討 (リョー選択 E+F)。
-     原則: 事実が先・卓を隠さない・軽中重の3段・色は金1つ・transform と opacity だけ。
-     mix-blend / filter / blur は使わない (スマホで一番重い描画だった) */
-  .fx {
-    position: fixed;
-    inset: 0;
-    z-index: 800;
-    pointer-events: none;
-    overflow: hidden;
-    /* 起点。席ごとに上書きする */
-    --fx-x: 50%;
-    --fx-y: 76%;
-    --accent: #d9b453;
-  }
+  /* Three elements including root. App alone owns finish/pump and watchdog. */
+  .fx { position: fixed; inset: 0; z-index: 800; pointer-events: none;
+    --fx-x: 28%; --fx-y: 73%; --word-shift: -50%; --entry: 0px; }
   .fx-skippable { pointer-events: auto; cursor: pointer; }
-
-  /* 色は金 1 つ (原則 4)。カン/ポンの青緑は廃止した */
-  .fx-fever { --accent: #e0a53e; }
-
-  .from-left { --fx-x: 6%; --fx-y: 50%; --band-x: -16px; }
-  .from-right { --fx-x: 94%; --fx-y: 50%; --band-x: 16px; }
-  .from-bottom { --fx-x: 28%; --fx-y: 78%; --band-x: 0; }
-
-  /* --- E 光の輪: 席から広がる。transform と opacity だけ --- */
-  .fx-ring {
-    position: absolute;
-    left: var(--fx-x);
-    top: var(--fx-y);
-    width: 26vmin;
-    height: 26vmin;
-    margin: -13vmin 0 0 -13vmin;
-    border: 1px solid var(--accent);
-    border-radius: 50%;
-    opacity: 0;
-    transform: scale(0.25);
-    animation: fxRing var(--fx-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  .from-left { --fx-x: 5%; --fx-y: 45%; --word-shift: 0%; --entry: -12px; }
+  .from-right { --fx-x: 95%; --fx-y: 45%; --word-shift: -100%; --entry: 12px; }
+  .fx-word { position: absolute; left: var(--fx-x); top: var(--fx-y);
+    width: clamp(86px, 13vw, 142px); height: 68px; object-fit: contain;
+    padding: 5px 9px; box-sizing: border-box; background: #102b25ed;
+    border-bottom: 1px solid #d9b453; opacity: 0;
+    transform: translate(var(--word-shift), -50%);
+    animation: wordIn calc(var(--fx-dur) - 100ms) cubic-bezier(.22,1,.36,1) 100ms forwards; }
+  .fx-reach .fx-word { width: clamp(120px, 18vw, 180px); }
+  .fx-heavy .fx-word { width: clamp(180px, 27vw, 250px); height: 76px; }
+  .fx-ring { position: absolute; left: var(--fx-x); top: var(--fx-y);
+    width: 92px; height: 92px; margin: -46px;
+    border: 1px solid #d9b453; border-radius: 50%; opacity: 0;
+    animation: ringOut calc(var(--fx-dur) - 100ms) ease-out 100ms forwards; }
+  /* First 100ms let the accepted board change precede its caption. */
+  @keyframes wordIn {
+    0% { opacity: 0; transform: translate(calc(var(--word-shift) + var(--entry)), -40%) scale(.94); }
+    28%, 78% { opacity: 1; transform: translate(var(--word-shift), -50%) scale(1); }
+    100% { opacity: 0; transform: translate(var(--word-shift), -55%) scale(1); }
   }
-  .ring-b { animation-delay: 120ms; }
-
-  /* --- F 現行の圧縮版: 帯を 1/3 にして宣言席の側へ寄せる --- */
-  .fx-band {
-    position: absolute;
-    left: var(--fx-x);
-    top: var(--fx-y);
-    transform: translate(-50%, -50%);
-    padding: 0.28em 1.1em;
-    border-left: 2px solid var(--accent);
-    background: rgba(6, 8, 12, 0.82);
-    opacity: 0;
-    animation: fxBand var(--fx-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  }
-  .from-left .fx-band { transform: translate(-10%, -50%); }
-  .from-right .fx-band { transform: translate(-90%, -50%); border-left: none; border-right: 2px solid var(--accent); }
-
-  .fx-text {
-    color: #f4f2ec;
-    font-weight: 700;
-    /* 現行は 46〜110px。読める最小限まで落として卓を隠さない */
-    font-size: clamp(18px, 3.4vw, 30px);
-    letter-spacing: 0.16em;
-    padding-left: 0.16em;
-    white-space: nowrap;
-  }
-  /* 重 (フィーバー) だけ一段大きい */
-  .fx-heavy .fx-text { font-size: clamp(26px, 5vw, 46px); }
-  .fx-heavy .fx-ring { width: 40vmin; height: 40vmin; margin: -20vmin 0 0 -20vmin; }
-
-  @keyframes fxRing {
-    0% { opacity: 0; transform: scale(0.25); }
-    18% { opacity: 0.85; }
-    100% { opacity: 0; transform: scale(1.9); }
-  }
-
-  @keyframes fxBand {
-    0% { opacity: 0; transform: translate(calc(-50% + var(--band-x, 0px)), -50%); }
-    14% { opacity: 1; transform: translate(-50%, -50%); }
-    78% { opacity: 1; transform: translate(-50%, -50%); }
-    100% { opacity: 0; transform: translate(-50%, -50%); }
-  }
-  /* 左右寄せは基準位置が違うので、帯の keyframe を席ごとに上書きする */
-  .from-left .fx-band { animation-name: fxBandLeft; }
-  .from-right .fx-band { animation-name: fxBandRight; }
-
-  @keyframes fxBandLeft {
-    0% { opacity: 0; transform: translate(calc(-10% - 16px), -50%); }
-    14% { opacity: 1; transform: translate(-10%, -50%); }
-    78% { opacity: 1; transform: translate(-10%, -50%); }
-    100% { opacity: 0; transform: translate(-10%, -50%); }
-  }
-  @keyframes fxBandRight {
-    0% { opacity: 0; transform: translate(calc(-90% + 16px), -50%); }
-    14% { opacity: 1; transform: translate(-90%, -50%); }
-    78% { opacity: 1; transform: translate(-90%, -50%); }
-    100% { opacity: 0; transform: translate(-90%, -50%); }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .fx-ring { animation: none; opacity: 0; }
-  }
+  @keyframes ringOut { 0% { opacity: 0; transform: scale(.35); } 28% { opacity: .65; } 100% { opacity: 0; transform: scale(1.5); } }
+  @media (prefers-reduced-motion: reduce) { .fx-ring { animation: none; } .fx-word { animation-name: quietWord; } }
+  @keyframes quietWord { 0%, 100% { opacity: 0; } 28%, 78% { opacity: 1; } }
 </style>

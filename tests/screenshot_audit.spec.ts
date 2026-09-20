@@ -127,5 +127,6 @@ test('screenshot audit: menu / table / cutin / round end', async ({ page }) => {
       await page.evaluate(() => (window as any).__gameStore?.cpuStep?.());
     }
   }
+  expect(gotCutin, '実画面でカットインを一度以上観測する').toBe(true);
   console.log('[shots]', JSON.stringify({ gotCutin, gotHule, gotPingju }));
 });

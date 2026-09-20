@@ -1,13 +1,9 @@
-﻿
+
 <script lang="ts">
-  // 白ぽっち [z5] ツモ時 カットイン modal [ダンガンロンパ風]
-  // リョー指示 2026-05-13:
-  //   - 白待ちロンはそのまま [zimo 時のみ発動]
-  //   - 青/緑 = ファンファーレ [正]、 赤/黄 = 残念 SE [逆]
-  //   - AI/CPU 番でも同じ演出 [800ms 後 自動開封]
-  //   - カットイン背景 ダンガンロンパ風 + cutin SE 同時再生 + デカく出す
+  // FX-02 P1: compact tile and original vector caption. Close safeguards stay independent.
   import { onMount, onDestroy } from 'svelte';
-  import Tile from './Tile.svelte';
+  import { POCHI_ARTWORK } from './fxArtwork';
+  export let artwork = POCHI_ARTWORK;
   import { playSound } from './prefs';
   export let player: number;
   export let color: 'blue' | 'red' | 'green' | 'yellow';
@@ -20,9 +16,6 @@
   // [2026-07-21] 誰の引き牌か。リョーが P1 の演出を自分のツモと誤認した
   $: seatLabel = `player ${player}`;
 
-  function colorPaiKey(c: string): string {
-    return { blue: 'z5b', red: 'z5r', green: 'z5g', yellow: 'z5y' }[c] ?? 'z5';
-  }
   function colorLabel(c: string): string {
     return { blue: '青', red: '赤', green: '緑', yellow: '黄' }[c] ?? c;
   }
@@ -32,10 +25,6 @@
   function colorHex(c: string): string {
     return { blue: '#3a78ff', red: '#ff4444', green: '#33dd88', yellow: '#ffd633' }[c] ?? '#fff';
   }
-  // 開封前は 白 [リョー指示: 「?」 デカ表示で 未確定感]、 開封後 実色 accent
-  const NEUTRAL_ACCENT = '#ffffff';
-  $: currentAccent = revealed ? colorHex(color) : NEUTRAL_ACCENT;
-
   // [2026-09-14] ミュート設定を見る。prefs.muted なら鳴らさない。
   function playSE(src: string, volume = 0.6): void {
     playSound(src, volume);
@@ -93,141 +82,47 @@
   });
 </script>
 
-<div class="overlay" on:click={reveal} on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') reveal(); }} role="dialog" tabindex="-1">
-  <!-- 2026-09-20 リョー指摘「ポッチツモ演出ダセー」で作り直し。
-       演出ゼロベース再検討の原則に合わせた [重 の枠だが、派手さは全部落とす]:
-       ・斜めスラム・ネオン光彩・絵文字・点滅をやめ、transform と opacity だけにする
-       ・主役は牌。文字は牌の説明に落とす [事実が先、演出は後]
-       ・色は金 1 つ。開いた後のぽっちの色だけ情報として出す -->
-  <div class="pochi-panel" class:revealed>
-    <div class="who">{seatLabel} の引き</div>
-    <div class="tile-bay">
-      <div class="tile-mega" class:revealed>
-        {#if revealed}
-          <Tile pai={colorPaiKey(color)} size="lg" />
-        {:else}
-          <div class="unknown-card"><span class="qmark">?</span></div>
-        {/if}
-      </div>
-    </div>
-    {#if revealed}
-      <div class="call" style="--pochi: {colorHex(color)}">{colorLabel(color)}ぽっち</div>
-      <div class="verdict" class:neg={!isPositive(color)}>{isPositive(color) ? '正' : '逆'}</div>
-    {:else}
-      <div class="call">白ぽっち</div>
-      <div class="hint">{isCpu ? 'めくり中' : 'タップでめくる'}</div>
-    {/if}
-  </div>
+<!-- Three elements. No dimming; opaque paint is limited to the tile and caption. -->
+<div class="overlay" class:revealed role="dialog" aria-label={revealed ? `${seatLabel} ${colorLabel(color)}ぽっち ${isPositive(color) ? '正' : '逆'}` : `${seatLabel} 白ぽっち 未開封`}
+  tabindex="-1" on:click={reveal} on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); reveal(); } }}>
+  <button class="pochi-tile" data-seal={revealed ? (isPositive(color) ? '正' : '逆') : ''} class:revealed style:--pochi={revealed ? colorHex(color) : 'transparent'}
+    aria-label={revealed ? `${colorLabel(color)}ぽっち・閉じる` : '白ぽっちをめくる'}></button>
+  <button class="pochi-caption" style:background-image={`url("${artwork}")`}
+    data-owner={`${seatLabel} の引き`}
+    data-result={revealed ? `${colorLabel(color)}ぽっち   ${isPositive(color) ? '正' : '逆'}   / 閉じる` : (isCpu ? '白ぽっち / めくり中' : '白ぽっち / タップでめくる')}
+    aria-label={revealed ? '開示を閉じる' : '白ぽっちをめくる'}></button>
 </div>
 
 <style>
-  /* 2026-09-20 作り直し。ダンガンロンパ風 [斜めスラム + ネオン + 絵文字] をやめ、
-     卓と同じ静かな面に揃える。動かすのは transform と opacity だけ */
-  .overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.62);
-    z-index: 9999;
-    overflow: hidden;
-    cursor: pointer;
-    animation: fadein 0.16s ease-out;
-    outline: none;
-  }
-  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
-
-  .pochi-panel {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: rgba(10, 13, 18, 0.94);
-    border: 1px solid #d9b453;
-    border-radius: 6px;
-    padding: clamp(14px, 4dvh, 26px) clamp(20px, 7dvw, 48px);
-    text-align: center;
-    min-width: min(300px, 74dvw);
-    max-height: 92dvh;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: clamp(6px, 2.2dvh, 16px);
-    animation: panelIn 0.24s cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  @keyframes panelIn {
-    0% { opacity: 0; transform: translate(-50%, -46%); }
-    100% { opacity: 1; transform: translate(-50%, -50%); }
-  }
-
-  .who {
-    font-size: clamp(11px, 3dvh, 14px);
-    color: #9aa2ad;
-    letter-spacing: 0.14em;
-  }
-
-  .tile-bay {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: min(190px, 34dvh);
-    height: min(190px, 34dvh);
-  }
-  .tile-mega {
-    display: inline-block;
-    transform-origin: center;
-    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
-    --tile-lg-w: calc(min(190px, 34dvh) * 0.48);
-    --tile-lg-h: calc(min(190px, 34dvh) * 0.66);
-  }
-  /* 開いた瞬間だけ少し起き上がる。回転はしない */
-  .tile-mega.revealed { transform: scale(1.12); }
-  .tile-mega :global(.tile.size-lg) {
-    width: var(--tile-lg-w);
-    height: var(--tile-lg-h);
-  }
-
-  .unknown-card {
-    width: calc(min(190px, 34dvh) * 0.48);
-    height: calc(min(190px, 34dvh) * 0.66);
-    background: linear-gradient(135deg, #f8f5e8, #ded6c0);
-    border: 1px solid #9a927f;
-    border-radius: 5px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .qmark {
-    font-size: calc(min(190px, 34dvh) * 0.3);
-    font-weight: 800;
-    color: #6b6558;
-    line-height: 1;
-  }
-
-  .call {
-    font-size: clamp(18px, 5dvh, 30px);
-    font-weight: 700;
-    color: #f4f2ec;
-    letter-spacing: 0.16em;
-    padding-left: 0.16em;
-  }
-  /* 開いた後だけ、ぽっちの色を文字の下線に出す [情報としての色] */
-  .revealed .call {
-    border-bottom: 2px solid var(--pochi, #d9b453);
-    padding-bottom: 0.14em;
-  }
-
-  .verdict {
-    font-size: clamp(13px, 3.4dvh, 18px);
-    font-weight: 700;
-    letter-spacing: 0.3em;
-    padding-left: 0.3em;
-    color: #d9b453;
-  }
-  .verdict.neg { color: #9aa2ad; }
-
-  .hint {
-    font-size: clamp(12px, 3dvh, 15px);
-    color: #9aa2ad;
-    letter-spacing: 0.18em;
-  }
+  .overlay { position: fixed; inset: 0; z-index: 9999; cursor: pointer;
+    /* [2026-09-20 検収] 28% だと横に伸びる札が中央の点数パネルに重なった。
+       札の右端 (anchor + 12 + 190px) がパネルの左端より手前で止まる位置へ寄せる */
+    --anchor-x: 18%; --anchor-y: 68%; outline: none; }
+  .pochi-tile { position: absolute; left: var(--anchor-x); top: var(--anchor-y);
+    width: 60px; height: 82px; padding: 0; border: 1px solid #d9b453;
+    border-bottom: 5px solid #c4bda9; border-radius: 6px; background: #f5f0df;
+    transform: translate(-100%, -50%); cursor: pointer; animation: tileIn .24s ease-out; }
+  .pochi-tile::after { content: '?'; position: absolute; inset: 0; display: grid; place-items: center;
+    font: inherit; font-size: 32px; color: #776b49; }
+  .pochi-tile.revealed { animation: tileReveal .24s ease-out; }
+  .pochi-tile.revealed::before { content: attr(data-seal); position: absolute;
+    right: -9px; top: -12px; width: 25px; height: 25px; border: 1px solid #d9b453;
+    border-radius: 50%; background: #102b25; color: #d9b453;
+    font: inherit; font-size: 17px; line-height: 25px; }
+  .pochi-tile.revealed::after { content: ''; inset: 31px 20px; border-radius: 50%; background: var(--pochi); }
+  .pochi-caption { position: absolute; left: var(--anchor-x); top: var(--anchor-y);
+    width: 190px; height: 90px; margin-left: 12px; padding: 0; transform: translateY(-50%);
+    border: 0; border-bottom: 1px solid #d9b453; background-color: #102b25f5;
+    background-size: 164px auto; background-repeat: no-repeat; background-position: center 23px;
+    cursor: pointer; color: #d9b453; animation: captionIn .24s ease-out; }
+  .pochi-caption::before { content: attr(data-owner); position: absolute; top: 4px; left: 12px;
+    font-size: 10px; letter-spacing: .12em; }
+  .pochi-caption::after { content: attr(data-result); position: absolute; bottom: 7px; left: 12px;
+    font-size: 11px; letter-spacing: .06em; }
+  button:focus-visible { outline: 2px solid #d9b453; outline-offset: 4px; }
+  @keyframes tileIn { from { opacity: 0; transform: translate(-100%, -40%); } to { opacity: 1; transform: translate(-100%, -50%); } }
+  @keyframes tileReveal { from { transform: translate(-100%, -50%) scale(.92); } to { transform: translate(-100%, -50%) scale(1); } }
+  @keyframes captionIn { from { opacity: 0; transform: translate(6px, -50%); } to { opacity: 1; transform: translate(0, -50%); } }
+  @media (max-width: 480px) { .overlay { --anchor-x: 17%; --anchor-y: 72%; } .pochi-caption { width: 170px; background-size: 150px auto; } }
+  @media (prefers-reduced-motion: reduce) { .pochi-tile, .pochi-tile.revealed, .pochi-caption { animation: none; } }
 </style>
