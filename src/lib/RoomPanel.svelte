@@ -181,11 +181,12 @@
   }
   h2 { color: #d4af37; }
   .code-block { text-align: center; margin: 8px 0 4px; }
-  .code-label { font-size: 12px; opacity: 0.7; }
+  .code-label { font-size: 12px; opacity: 0.7; margin-bottom: 6px; }
   .code {
     display: inline-block;
     font-family: 'Menlo', 'Consolas', monospace;
     font-size: 44px;
+    line-height: 1.15; /* 大きい字が見出しに重ならない様に */
     font-weight: 900;
     letter-spacing: 0.3em;
     padding-left: 0.3em; /* letter-spacing の右端ぶんを左にも足して中央に見せる */

@@ -3437,7 +3437,7 @@
     <div class="leave-confirm" role="dialog" aria-modal="true" aria-labelledby="leave-confirm-title">
       <div class="leave-confirm-box">
         <p id="leave-confirm-title">本当に抜ける？</p>
-        <p class="leave-confirm-sub">席は残る。ロビーの「戻る」から同じ部屋に戻れる</p>
+        <p class="leave-confirm-sub">席は残る。抜けてる間は CPU が代わりに打つ。ロビーの「戻る」で同じ部屋に戻れる</p>
         <div class="leave-confirm-actions">
           <button type="button" class="leave-confirm-yes" on:click={confirmLeaveGame}>抜ける</button>
           <button type="button" class="leave-confirm-no" on:click={() => { leaveConfirmOpen = false; }}>戻る</button>
