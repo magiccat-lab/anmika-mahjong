@@ -6,6 +6,8 @@
 // 新裁定: ツモ前の待ち [getTingpaiListBeforeZimo] にその p1/p2 が本物の待ちとして含まれる
 // [本待ち] なら通常ツモ和了。ぽっち扱いの副作用 [色 / 倍率 / 金北自動 / swap / 役 / サイコロ]
 // を一切付けず、支払いも通常 [正] のまま。待ちに含まれない時は旧挙動 [p2=黄 逆払い / p1=緑] 不変。
+// [2026-10-09 リョー裁定 2] 本待ちでも一発ツモのサイコロ [でかぽっち base35] は出す。
+// 白待ちの白ぽっち即ツモと同じ形で、避けるのは 2p の逆払いだけ = 本待ち 2p のサイコロは +35。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { buildShoupai, type Game3 } from '../game3';
@@ -95,7 +97,26 @@ const hupaiNames = (result: any): string[] => (result?.hupai ?? []).map((h: any)
 const dekaChances = (chances: any[] | null | undefined): any[] =>
   (chances ?? []).filter((c: any) => c.awardKey === 'でかぽっち');
 
-/** 本待ち = 通常ツモ: ぽっち副作用ゼロ + 正の支払い */
+/** 本待ちの でかぽっちサイコロを全部当たりで振り切り、勝者の祝儀の増減を返す */
+function rollDekaSaiAllHit(store: Store, game: Game3, player: PlayerId): number {
+  let s = read(store);
+  const idx = s.pendingSaiKoro.chances.findIndex((c: any) => c.awardKey === 'でかぽっち');
+  expect(idx).toBeGreaterThanOrEqual(0);
+  for (let i = 0; i < idx; i++) {
+    store.selectSaiKoroCombo(1, 2);
+    for (let r = 0; r < 4; r++) store.rollSaiKoroDice([3, 4]);
+    store.advanceSaiKoro();
+  }
+  s = read(store);
+  expect(s.pendingSaiKoro.chances[s.pendingSaiKoro.currentIdx].awardKey).toBe('でかぽっち');
+  const before = game.chipLedger[player];
+  store.selectSaiKoroCombo(1, 2);
+  for (let r = 0; r < 4; r++) store.rollSaiKoroDice([1, 2]);
+  expect(read(store).pendingSaiKoro.finalized).toBe(true);
+  return game.chipLedger[player] - before;
+}
+
+/** 本待ち = 通常ツモ: ぽっち副作用ゼロ + 正の支払い + 一発ツモのサイコロ [+35] */
 function expectNormalTsumo(ctx: ReturnType<typeof riichiYifaDraw>, pai: 'p1' | 'p2') {
   const { store, game, player, others, multBefore, defenBefore, kinpeiAuto } = ctx;
   expect(game.getTingpaiListBeforeZimo(player)).toContain(pai);
@@ -117,7 +138,7 @@ function expectNormalTsumo(ctx: ReturnType<typeof riichiYifaDraw>, pai: 'p1' | '
   expect(dry._dekapochiFrom).toBeUndefined();
   expect(hupaiNames(dry).some((n) => n.includes('一発'))).toBe(true);
 
-  // store.tsumo(): 通常 [正] の支払い、でかぽっちサイコロ無し
+  // store.tsumo(): 通常 [正] の支払い + でかぽっちサイコロ [10-09 裁定、倍率は中立のまま]
   const s = tsumoThroughStore(store, player);
   const result = s.lastHuleResult;
   expect(hupaiNames(result).some((n) => n.includes('でかぽっち'))).toBe(false);
@@ -126,11 +147,17 @@ function expectNormalTsumo(ctx: ReturnType<typeof riichiYifaDraw>, pai: 'p1' | '
   expect(result.defen).toBeGreaterThan(0);
   expect(game.state.defen[player]).toBeGreaterThan(defenBefore[player]);
   for (const o of others) expect(game.state.defen[o]).toBeLessThan(defenBefore[o]);
-  expect(dekaChances(result.saiKoroChances)).toHaveLength(0);
-  expect(dekaChances(s.pendingSaiKoro?.chances)).toHaveLength(0);
+  expect(dekaChances(result.saiKoroChances)).toEqual([
+    expect.objectContaining({ awardKey: 'でかぽっち', baseChip: 35, plusMinus: '+', mode: 'tsumo' }),
+  ]);
+  expect(dekaChances(s.pendingSaiKoro?.chances)).toHaveLength(1);
   expect(game.pochiMultiplier[player]).toEqual(NEUTRAL);
   expect(game.pochiPaymentMode[player]).toBe(false);
   expect(game.shan.lastZimoPochi ?? null).toBeNull();
+
+  // 4 投全部当たり = 35 × 4 オール。p2 でも逆払いにならず勝者の祝儀が増える
+  const gained = rollDekaSaiAllHit(store, game, player);
+  expect(gained).toBeGreaterThan(0);
 }
 
 // M0IT journal の形: m77 p33 p5 s44 s55 s66 s88 の七対子 p5 単騎。p1/p2 は待ちに無く、
@@ -141,7 +168,7 @@ const P2_KANCHAN = ['p1', 'p3', 's1', 's2', 's3', 's5', 's6', 's7', 's9', 's9', 
 // p2p3 両面 [待ち p1 / p4] + s123 s567 s999 z11
 const P1_RYANMEN = ['p2', 'p3', 's1', 's2', 's3', 's5', 's6', 's7', 's9', 's9', 's9', 'z1', 'z1'];
 
-describe('でかぽっち 本待ち裁定 [2026-09-02]: 待ちに本物の p1/p2 が含まれれば通常ツモ', () => {
+describe('でかぽっち 本待ち裁定 [2026-09-02 / 10-09]: 待ちに本物の p1/p2 が含まれれば通常ツモ + サイコロ', () => {
   let warn: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -151,7 +178,7 @@ describe('でかぽっち 本待ち裁定 [2026-09-02]: 待ちに本物の p1/p2
     vi.restoreAllMocks();
   });
 
-  it('本待ち p2 [p1p3 嵌張] を一発ツモ → 黄ぽっち扱いにならず通常の正払いツモ和了', () => {
+  it('本待ち p2 [p1p3 嵌張] を一発ツモ → 黄ぽっち扱いにならず通常の正払いツモ和了 + サイコロ +35', () => {
     const ctx = riichiYifaDraw(P2_KANCHAN, 'p2');
     expect(ctx.tingBefore).toEqual(['p2']);
     expectNormalTsumo(ctx, 'p2');
@@ -189,9 +216,11 @@ describe('でかぽっち 本待ち裁定 [2026-09-02]: 待ちに本物の p1/p2
     ]);
     expect(s.pendingSaiKoro).not.toBeNull();
     expect(dekaChances(s.pendingSaiKoro.chances)).toHaveLength(1);
+    // 黄倍率で符号が反転し、当たるほど勝者が払う [本待ち +35 の対照]
+    expect(rollDekaSaiAllHit(store, game, player)).toBeLessThan(0);
   });
 
-  it('本待ち p1 [p2p3 両面] を一発ツモ → 緑ぽっち扱いにならず通常ツモ和了', () => {
+  it('本待ち p1 [p2p3 両面] を一発ツモ → 緑ぽっち扱いにならず通常ツモ和了 + サイコロ +35', () => {
     const ctx = riichiYifaDraw(P1_RYANMEN, 'p1');
     expect(ctx.tingBefore).toEqual(expect.arrayContaining(['p1', 'p4']));
     expectNormalTsumo(ctx, 'p1');

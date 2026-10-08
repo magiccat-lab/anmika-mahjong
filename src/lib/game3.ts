@@ -4234,14 +4234,17 @@ export class Game3 {
       result.saiKoroChances.push({ awardKey: '白ぽっち即ツモ', name: '白ぽっち即ツモ', baseChip: 70, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
     }
     // でかぽっち即ツモ → サイコロ base 35 [70×0.5]。2p [黄扱い] の -35 は
-    // ツモ時に applyPochiColorMultiplier(yellow) 済みの倍率が自動で符号反転する
+    // ツモ時に applyPochiColorMultiplier(yellow) 済みの倍率が自動で符号反転する。
+    // [2026-10-09 リョー裁定] 本待ちの p1/p2 一発ツモもサイコロは出す [白待ちの白ぽっち即ツモと同型]。
+    // 本待ちは zimo() が黄倍率を掛けないので 2p でも +35 [避けるのは逆払いだけ]
     const zimoCoreDeka = sp_w?._zimo ? toCorePai(sp_w._zimo) : null;
     const isDekapochiTsumo =
       loser === null
       && this.yifaActive[winner]
       && this.lizhi.has(winner)
       && (zimoCoreDeka === 'p1' || zimoCoreDeka === 'p2')
-      && (result.hupai ?? []).some((h: any) => h.name?.includes('でかぽっち'));
+      && ((result.hupai ?? []).some((h: any) => h.name?.includes('でかぽっち'))
+        || this.getTingpaiListBeforeZimo(winner).includes(zimoCoreDeka));
     if (isDekapochiTsumo) {
       result.saiKoroChances = result.saiKoroChances ?? [];
       result.saiKoroChances.push({ awardKey: 'でかぽっち', name: 'でかぽっち', baseChip: 35, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
