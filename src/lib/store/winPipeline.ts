@@ -30,13 +30,28 @@ export type PendingKinpei = {
   /** 和了計算で新たに表示された華を、snapshot 復元後も選択肢として保持する。 */
   availableHuapai?: string[];
   /** [2026-07-22 リョー要望] 選択前に現段階の和了内容を見せる [強化前の暫定計算] */
-  preview?: { hupai: Array<{ name: string; fanshu: unknown }>; fanshu?: number; fu?: number } | null;
+  preview?: KinpeiPreview | null;
   otherWinners?: number[];
   humanOthers?: number[];
   cutinQueued?: boolean;
   /** この和了で冬の使用可否を既に選択済みなら、金北再計算後に再表示しない。 */
   fuyuDecisionMade?: boolean;
 };
+
+/** 金北の強化前の暫定和了。2026-10-08 から打点 [defen / defen3] も持ち、選択中に和了パネルとして出す */
+export type KinpeiPreview = { hupai: Array<{ name: string; fanshu: unknown }>; fanshu?: number; fu?: number; damanguan?: number; defen?: number; defen3?: number };
+
+export function kinpeiPreview(result: any): KinpeiPreview | null {
+  if (!result) return null;
+  return {
+    hupai: (result.hupai ?? []).map((h: any) => ({ ...h })),
+    fanshu: result.fanshu,
+    fu: result.fu,
+    damanguan: result.damanguan,
+    defen: result.defen,
+    defen3: result.defen3,
+  };
+}
 
 export type PendingFuyu = {
   winner: number;

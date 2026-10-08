@@ -3160,10 +3160,11 @@
        [秋ドラ表示を上がりまで隠すため]。この panel が唯一の金北UIなので、
        pendingKinpei 単独でも開くようにしないと single で操作手段が消えて詰む -->
   {#if ($game.lastHuleResult || state.finished || $game.pendingPingju || $game.pendingKinpei) && viewMode === 'single'}
-    <!-- 2026-10-08 fix [リョー報告「今がめんが写ってない」]: 金北選択の間は lastHuleResult が
-         まだ無いので左の和了欄が空になり、白い板が盤面を覆っていた。この間は選択の帯だけにして盤面を見せる -->
+    <!-- 2026-10-08 fix [リョー報告「今がめんが写ってない」→「強化先の選択は上がりとか一式の情報見て選ぶから先に出して」]:
+         金北選択の間は lastHuleResult がまだ無いので左の和了欄が空の白い板だった。強化前の暫定和了
+         [pendingKinpei.preview] を和了パネルで出す。preview が無い時だけ、選択の帯に畳んで盤面を見せる -->
     <div class="agari-unified-panel" class:appear-after-cutin={!!$game.lastHuleResult && !state.finished}
-      class:kinpei-only={!!$game.pendingKinpei && !$game.lastHuleResult && !state.finished && !$game.pendingPingju}>
+      class:kinpei-only={!!$game.pendingKinpei && !$game.pendingKinpei.preview && !$game.lastHuleResult && !state.finished && !$game.pendingPingju}>
       <div class="agari-left" class:pingju-only={$game.pendingPingju && !$game.lastHuleResult && !state.finished}>
         {#if state.finished}
           <GameEndPanel names={seatDisplayNames} ranking={$game.game.getRanking()} zifengZ={(p) => $game.game.zifengZ(p as any)} chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)} finalScore={$game.game.getFinalScore()} />
@@ -3229,6 +3230,27 @@
               </div>
             </RoundEndPanel>
           {/each}
+        {/if}
+        {#if $game.pendingKinpei?.preview && !$game.lastHuleResult && !state.finished}
+          {@const kw = $game.pendingKinpei.winner as PlayerId}
+          <div class="kinpei-provisional-note">強化前の暫定です。強化先を選ぶと確定します</div>
+          <RoundEndPanel
+            names={seatDisplayNames}
+            lastWinner={kw}
+            huleResult={$game.pendingKinpei.preview}
+            baopai={[...$game.game.shan.displayBaopai]}
+            fubaopai={$game.game.shan.displayFubaopai ? [...$game.game.shan.displayFubaopai] : null}
+            winnerLizhi={$game.game.lizhi.has(kw)}
+            winnerShoupai={handTiles($game.game.shoupai.get(kw), kw)}
+            winnerFulou={fulouMianzi($game.game.shoupai.get(kw), kw)}
+            winnerHuapai={$game.game.huapai[kw] ?? []}
+            winnerNuki={$game.game.nukidora[kw] ?? 0}
+            winnerNukiGold={$game.game.nukidoraGold[kw] ?? 0}
+            hideFuyuResult={true}
+            agariType={$game.pendingKinpei.isRon ? 'ron' : 'tsumo'}
+            agariPai={$game.pendingKinpei.isRon ? ($game.lastDapai?.pai ?? null) : ($game.game.shoupai.get(kw)?._zimo ?? null)}
+            agariFrom={$game.pendingKinpei.isRon ? $game.pendingKinpei.ronfrom : null}
+          />
         {/if}
       </div>
       <!-- 2026-05-14 codex review #3 fix: inline Kinpei は winner 限定 -->
@@ -4596,7 +4618,12 @@
   main.mode-single .agari-unified-panel.appear-after-cutin {
     animation-delay: 1.35s;
   }
-  /* 金北選択だけの間は白い板を出さず、盤面の下側に選択の帯だけ置く [2026-10-08 リョー報告] */
+  main.mode-single .agari-unified-panel .kinpei-provisional-note {
+    font-size: 14px;
+    font-weight: 700;
+    color: #806000;
+  }
+  /* 金北選択で暫定和了 [preview] も無い時は白い板を出さず、盤面の下側に選択の帯だけ置く [2026-10-08 リョー報告] */
   main.mode-single .agari-unified-panel.kinpei-only {
     top: auto;
     grid-template-rows: auto;

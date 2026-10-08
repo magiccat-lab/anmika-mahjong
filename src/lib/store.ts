@@ -36,6 +36,7 @@ import {
   settleRonResultsInKamichaOrder,
   settleAfterWin,
   sortRonResultsByKamicha,
+  kinpeiPreview,
   type PendingFeverContinue,
   type PendingFuyu,
   type PendingKamiPochi,
@@ -1716,6 +1717,8 @@ export function createGameStore() {
             isRon,
             ronfrom,
             availableHuapai: resolvedHuapai,
+            // [2026-10-08 リョー「強化先の選択は上がりとか一式の情報見て選ぶから先に出して」] 冬経路も暫定和了を見せる
+            preview: kinpeiPreview(result),
             otherWinners,
             humanOthers: fuyuHumanOthers,
             cutinQueued: fuyuCutinQueued,
@@ -2756,11 +2759,7 @@ export function createGameStore() {
             ronfrom: null,
             availableHuapai: resolvedHuapai,
             // [2026-07-22 リョー要望] 強化前の暫定和了を選択画面に見せる
-            preview: result ? {
-              hupai: (result.hupai ?? []).map((h: any) => ({ ...h })),
-              fanshu: result.fanshu,
-              fu: result.fu,
-            } : null,
+            preview: kinpeiPreview(result),
           });
           s.message = `🎁 金北 強化対象を選択してください [保留も可]`;
           return { ...s };
