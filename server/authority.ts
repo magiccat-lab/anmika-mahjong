@@ -108,6 +108,10 @@ export class RoomAuthority {
   /** commandId 導入前のWSA-A7暫定冪等窓。次局開始後、最初の非nextRound操作まで有効。 */
   /** Cumulative ledger at the beginning of the current match. */
   private matchStartChipLedger: Record<PlayerId, number> = { 0: 0, 1: 0, 2: 0 };
+  /** [2026-10-09 遊真 A5] 直前の validateAndApply の reject で canonical store が動いた可能性があるか。
+   *  検証段の reject は mirror を戻すので canonical は無傷。ws は true の時だけ全 command を
+   *  読み直して作り直す [旧実装は reject のたびに頭から replay し、長く遊ぶほど重くなった] */
+  canonicalMayBeDirty = false;
 
   constructor(init: RoomAuthorityInit) {
     this.game = new Game3({
@@ -123,6 +127,31 @@ export class RoomAuthority {
     });
     this.canonicalStore.setOnlineReplayMode(true);
     this.matchStartChipLedger = { ...this.canonicalState().game.chipLedger };
+  }
+
+  /** [2026-10-09 遊真 A5] 試合の区切りからの復元用。nextMatch 直後の状態は「新しい山の配牌 +
+   *  持ち越したチップ」だけなので、新しい authority にその試合開始時のチップを入れれば
+   *  前の試合の command を replay せずに同じ状態になる [store.nextMatch → reset と同じ持ち越し]。
+   *  cpuSeats も nextMatch の適用時と同じく復元直後から効かせる */
+  seedMatchStart(chipLedger: Record<PlayerId, number>, members: Iterable<AuthorityMember> = []): void {
+    const canonicalGame = this.canonicalState().game;
+    for (const player of PLAYERS) {
+      const value = Number(chipLedger[player] ?? 0);
+      canonicalGame.chipLedger[player] = value;
+      this.game.chipLedger[player] = value;
+    }
+    this.matchStartChipLedger = { ...canonicalGame.chipLedger };
+    // 頭から読んだ時と同じ状態にそろえる: store.nextMatch → reset() は state を丸ごと set し直すので、
+    // 2 試合目以降の canonical store には _onlineMode が無い [= autoLizhiInline が効く]。
+    // ここで消さないと復元した authority だけ挙動が変わり、続きの command が食い違う
+    delete (this.canonicalState() as { _onlineMode?: boolean })._onlineMode;
+    this.cpuSeats = new Set(
+      Array.from(members)
+        .filter((member) => member.is_cpu)
+        .map((member) => asPlayerId(member.seat))
+        .filter((seat): seat is PlayerId => seat !== null),
+    );
+    this.canonicalStore.setCpuSeats([...this.cpuSeats]);
   }
 
   resetMatch(init: RoomAuthorityInit): void {
@@ -220,6 +249,7 @@ export class RoomAuthority {
   }
 
   validateAndApply(actorSeat: number, action: any, _members: Iterable<AuthorityMember> = []): string | null {
+    this.canonicalMayBeDirty = false;
     this.cpuSeats = new Set(
       Array.from(_members)
         .filter((member) => member.is_cpu)
@@ -297,6 +327,9 @@ export class RoomAuthority {
       const canonical = this.canonicalState();
       if (this.canonicalMutationToken(canonical) === beforeCanonical) {
         this.restoreValidationMirror(validationSnapshot);
+        // 検証は通ったのに reducer が動かなかった食い違い [まれ]。token に載らない所が
+        // 動いていないとは言い切れないので、従来どおり作り直しに倒す
+        this.canonicalMayBeDirty = true;
         return `${action.type}: canonical reducer rejected or made no state change`;
       }
       // WSA: canonical store の reducer は副作用を伴う (continueFever→draw→discard 等)。
@@ -310,6 +343,8 @@ export class RoomAuthority {
       return null;
     } catch (e: any) {
       this.restoreValidationMirror(validationSnapshot);
+      // reducer が途中まで書いて投げた可能性がある。ここだけは ws に作り直させる
+      this.canonicalMayBeDirty = true;
       return e?.message ? `canonical reducer exception: ${e.message}` : 'canonical reducer exception';
     }
   }

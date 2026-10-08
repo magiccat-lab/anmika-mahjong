@@ -354,6 +354,8 @@ export function sanitizeIncomingAction(actionInput: Record<string, unknown>): Re
   delete action._blindState;
   delete action._draw;
   delete action._state;
+  // [2026-10-09 遊真 A5] 復元の起点になるので client からは受けない
+  delete action._startChipLedger;
   return action;
 }
 
@@ -376,6 +378,21 @@ export function upgradeLegacySnapshotRoomLedger(
   };
 }
 
+/** [2026-10-09 遊真 A5] 復元を始められる最後の nextMatch の位置。server が焼いた
+ *  _startChipLedger [3 席の数値] と山がそろっている物だけ。無ければ null [頭から読む] */
+export function lastReplayableMatchBoundary(commands: readonly AcceptedRoomCommand[]): number | null {
+  for (let index = commands.length - 1; index >= 0; index -= 1) {
+    const action = commands[index].action as Record<string, any>;
+    if (action.type !== 'nextMatch') continue;
+    const ledger = action._startChipLedger;
+    const ok = Array.isArray(action.preShuffledPool) && action.preShuffledPool.length > 0
+      && ledger && typeof ledger === 'object'
+      && [0, 1, 2].every((seat) => typeof ledger[seat] === 'number' && Number.isFinite(ledger[seat]));
+    return ok ? index : null;
+  }
+  return null;
+}
+
 export function restoreAuthority(
   snapshot: CanonicalRoomSnapshot,
   commands?: AcceptedRoomCommand[],
@@ -388,7 +405,32 @@ export function restoreAuthority(
     changshu: snapshot.start.changshu,
   });
   const members = snapshot.start.members.map((member) => ({ seat: member.seat, is_cpu: member.is_cpu }));
-  const cmds = commands ?? snapshot.commands;
+  let cmds = commands ?? snapshot.commands;
+  // [2026-10-09 遊真 A5] 試合の区切りから読み直す。nextMatch の command には server が
+  // 新しい試合の山 [preShuffledPool] と開始時のチップ [_startChipLedger] を焼いてあるので、
+  // 最後の区切りから新しい authority を作れば前の試合を replay しなくていい。
+  // 1 晩遊ぶと command が数千になり、復元 [Node 再起動 ・ 全員が抜けた後の再入室] が秒単位で止まっていた。
+  // _startChipLedger の無い古い区切り [この版より前の command] は従来どおり頭から読む
+  const boundary = lastReplayableMatchBoundary(cmds);
+  if (boundary !== null) {
+    const nextMatch = cmds[boundary].action as Record<string, any>;
+    const jumped = createRoomAuthority({
+      preShuffledPool: nextMatch.preShuffledPool,
+      qijia: nextMatch.qijia,
+      changshu: snapshot.start.changshu,
+    });
+    jumped.seedMatchStart(nextMatch._startChipLedger, members);
+    cmds = cmds.slice(boundary + 1);
+    for (const command of cmds) {
+      if (command.action.type === 'stamp') continue;
+      const reason = jumped.validateAndApply(command.actorSeat, command.action, members);
+      if (reason) {
+        throw new Error(`cannot restore room ${snapshot.roomId} at revision ${command.revision}: ${reason}`);
+      }
+    }
+    jumped.takeCanonicalChipEffects();
+    return jumped;
+  }
   for (const command of cmds) {
     if (command.action.type === 'stamp') continue;
     const reason = authority.validateAndApply(command.actorSeat, command.action, members);
@@ -1126,7 +1168,10 @@ function sendSync(
     ? null
     : roomToGameSeat(mapping, recipientRoomSeat);
   const projectionSeat = recipientGameSeat ?? SPECTATOR_SEAT;
-  const payload = fullCommands ? { ...snapshot, commands: fullCommands } : snapshot;
+  // [2026-10-09 遊真 A5] つなぎ直しには今の盤面 [state = 席ごとの投影] だけを送る。
+  // client は command 列を使っておらず、1 晩分を毎回 sanitize して送るのは重いだけだった
+  void fullCommands;
+  const payload = { ...snapshot, commands: [] as AcceptedRoomCommand[] };
   let sanitizedStart = payload.start;
   if (sanitizedStart && sanitizedStart.preShuffledPool?.length > 0) {
     const blindData = blindStartFor(sanitizedStart);
@@ -1509,12 +1554,21 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         : membersForAuthority(room);
       const reason = room.authority.validateAndApply(actorSeat, action, applyMembers);
       if (reason) {
-        room.authority = restoreAuthority(previous, persistence.loadCommands(room.roomId));
+        // [2026-10-09 遊真 A5] 検証で弾いた分は authority が自分で元に戻している。全 command の
+        // 読み直しは canonical が動いたかもしれない時だけ [弾かれるたびに頭から読むと重い]
+        if (room.authority.canonicalMayBeDirty) {
+          room.authority = restoreAuthority(previous, persistence.loadCommands(room.roomId));
+        }
         return { reason };
       }
       const drawData = captureActionEffects(room.authority, beforeEffects);
       if (action.type === 'nextRound' || action.type === 'nextMatch') {
         action._blindState = captureBlindStart(room.authority!);
+        // [2026-10-09 遊真 A5] 試合の区切りから復元できる様に、新しい試合の開始時のチップを焼く
+        if (action.type === 'nextMatch') {
+          const ledger = room.authority.canonicalState().game.chipLedger;
+          action._startChipLedger = { 0: ledger[0], 1: ledger[1], 2: ledger[2] };
+        }
       } else if (drawData) {
         action._draw = drawData;
       }

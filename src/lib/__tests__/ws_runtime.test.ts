@@ -202,7 +202,9 @@ describe('authoritative websocket runtime', () => {
     cleanups.push(async () => replacement.ws.close());
     const sync = await waitUntil(() => replacement.messages.find((message) => message.type === 'sync'));
     expect(sync.snapshot).toMatchObject({ revision: 1, started: true });
-    expect(sync.snapshot.commands).toHaveLength(1);
+    // [2026-10-09 遊真 A5] つなぎ直しは今の盤面 [state] だけ。command 列は送らない
+    expect(sync.snapshot.commands).toHaveLength(0);
+    expect(sync.snapshot.state).toBeTruthy();
     expect(sync.snapshot.start.preShuffledPool).toEqual([]);
     expect(sync.snapshot.start.hands[0]).toHaveLength(13);
     expect(sync.snapshot.start.hands[1]).toEqual([]);
