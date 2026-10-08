@@ -3,7 +3,11 @@
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
   import Tile from './lib/Tile.svelte';
-  import { activeCpuGameSeats, hostGameSeat, memberAtGameSeat } from './lib/onlineSeats';
+  import { activeCpuGameSeats, canHostToggleCpuProxy, clientGameToRoomSeat, hostGameSeat, isMemberCpuProxy, memberAtGameSeat, type OnlineMemberLike } from './lib/onlineSeats';
+  import OnlineSeatStatus from './lib/OnlineSeatStatus.svelte';
+  import DeadlineBar from './lib/DeadlineBar.svelte';
+  import { applyDeadlineMessage, planDeadlineWarn, type OnlineDeadline } from './lib/onlineDeadline';
+  import { withRoomParam } from './lib/roomLink';
   import TileChecker from './lib/TileChecker.svelte';
   import ChipBreakdown from './lib/ChipBreakdown.svelte';
   import WallPanel from './lib/WallPanel.svelte';
@@ -21,7 +25,7 @@
   import ReplayPanel from './lib/ReplayPanel.svelte';
   import RulesPanel from './lib/RulesPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
-  import { prefs, ANMIKA_RULE_VERSION } from './lib/prefs';
+  import { prefs } from './lib/prefs';
   import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
@@ -1210,6 +1214,41 @@
   let onlineRoomChipLedger: Record<string, number> | null = null;
   $: onlineInactive = onlineGameStarted && !onlineSpectator && onlineSeatInfoReceived
     && onlineActiveMapping !== null && onlineGameSeat === null;
+  // [2026-10-09 遊真 A2] 自分の席を CPU が代打ちしている間は帯を出して「自分で打つ」を押せるようにする
+  $: myMember = onlineMembers.find((m) => m.user_id === onlineMe?.user_id);
+  $: myCpuProxy = onlineGameStarted && !onlineSpectator && isMemberCpuProxy(myMember);
+  // [2026-10-09 遊真 C2] 対局中に socket が OPEN でない間は、盤面を触れなくして「つなぎ直し中」を出す
+  // [store 側は切断中の操作を黙って捨てるので、押したのに反応しない状態を作らない]。
+  // 終端 close [onlineTerminalClose] は再接続しないので帯は出さず、既存の通知に任せる
+  $: onlineWsDown = onlineGameStarted && !onlineSocketOpen;
+  // [2026-10-09 遊真 C3] 対局中の「× 退出」は確認してから抜ける [window.confirm でなくページ内]
+  let leaveConfirmOpen = false;
+  function confirmLeaveGame(): void {
+    leaveConfirmOpen = false;
+    // 席は残す [/leave は呼ばない]。ロビーの「戻る」から同じ部屋に戻れる
+    disconnectOnline();
+    currentRoomId = null;
+    viewMode = 'online';
+  }
+  // [2026-10-09 遊真 B2] 部屋の中にいる間は ?room= を URL に残す [再読み込みで同じ部屋に戻る]。
+  // 観戦は残さない [開き直すと join 扱いで、席が空いていれば座ってしまう]。
+  // 外すのは自分が書いた物だけ [起動直後の ?room= を onMount が読む前に消さない]
+  let roomUrlWritten: string | null = null;
+  $: syncRoomUrl(onlineSpectator ? null : currentRoomId);
+  function syncRoomUrl(roomId: string | null): void {
+    if (typeof window === 'undefined') return;
+    if (roomId === roomUrlWritten) return;
+    if (roomId === null && roomUrlWritten === null) return;
+    roomUrlWritten = roomId;
+    try {
+      const next = withRoomParam(window.location, roomId);
+      if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+        window.history.replaceState(window.history.state, '', next);
+      }
+    } catch { /* URL を書き換えられない環境では何もしない */ }
+  }
+  // [2026-10-09 遊真 B2] 招待リンクで入れなかった理由を、ロビーの上に出す
+  let lobbyNotice: string | null = null;
 
   /** server message から seat/mapping/room ledger の contract field を取り込む */
   function absorbSeatContract(msg: any): void {
@@ -1222,7 +1261,16 @@
     if ('roomChipLedger' in msg && msg.roomChipLedger) onlineRoomChipLedger = msg.roomChipLedger;
   }
   let onlineWs: WebSocket | null = null;
-  let onlineMembers: Array<{ seat: number; user_id: string; username: string; is_cpu: boolean }> = [];
+  // [2026-10-09 遊真 C1/A2] member は connected [つながっているか] と cpu_proxy [CPU が代打ちか] も運ぶ
+  let onlineMembers: OnlineMemberLike[] = [];
+  // [2026-10-09 遊真 C2] socket が OPEN か。readyState はリアクティブでないので onopen/onclose で持つ
+  let onlineSocketOpen = false;
+  // [2026-10-09 遊真 C1] 誰待ちか ・ 残り何秒か [server の deadline message]。席の札に棒で出す
+  let onlineDeadline: OnlineDeadline | null = null;
+  let deadlineWarnedKey: string | null = null;
+  let deadlineWarnTimer: ReturnType<typeof setTimeout> | null = null;
+  let deadlineToast: string | null = null;
+  let deadlineToastTimer: ReturnType<typeof setTimeout> | null = null;
   let onlineSocketGeneration = 0;
   let onlineReconnectAttempt = 0;
   let onlineReconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1268,6 +1316,45 @@
     markOnlineSyncHealthy();
   }
 
+  // [2026-10-09 遊真 C1] server の deadline message [誰を何秒待っているか] を取り込む。
+  // 自席が turn / reaction で待たれていて残り 10 秒を切ったら、1 つの待ちにつき 1 回だけ知らせる
+  function clearDeadlineWarnTimer(): void {
+    if (deadlineWarnTimer) { clearTimeout(deadlineWarnTimer); deadlineWarnTimer = null; }
+  }
+  function clearOnlineDeadline(): void {
+    clearDeadlineWarnTimer();
+    onlineDeadline = null;
+  }
+  function showDeadlineToast(text: string): void {
+    deadlineToast = text;
+    if (deadlineToastTimer) clearTimeout(deadlineToastTimer);
+    deadlineToastTimer = setTimeout(() => { deadlineToast = null; deadlineToastTimer = null; }, 2500);
+  }
+  function fireDeadlineWarn(key: string): void {
+    deadlineWarnTimer = null;
+    if (deadlineWarnedKey === key) return;
+    deadlineWarnedKey = key;
+    showDeadlineToast('残り 10 秒');
+    try { navigator.vibrate?.(200); } catch { /* 振動に対応しない端末 */ }
+  }
+  function onOnlineDeadline(msg: unknown): void {
+    const next = applyDeadlineMessage(onlineDeadline, msg, performance.now());
+    if (next === onlineDeadline) return; // 古い revision / 壊れた message は無視
+    onlineDeadline = next;
+    clearDeadlineWarnTimer();
+    const plan = planDeadlineWarn(next, onlineRoomMeta?.mySeat, performance.now());
+    if (!plan || plan.key === deadlineWarnedKey) return;
+    if (plan.delayMs === 0) fireDeadlineWarn(plan.key);
+    else deadlineWarnTimer = setTimeout(() => fireDeadlineWarn(plan.key), plan.delayMs);
+  }
+  // [2026-10-09 遊真 A2] 席を CPU に替える / 戻す。host は他の人間席を、本人は自席の on:false だけ
+  // 送れる [許可の判定は server]。socket が切れている間は何もしない [つなぎ直し中の帯が出ている]
+  function sendSetCpuProxy(roomSeat: number, on: boolean): void {
+    const ws = onlineWs;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify({ type: 'setCpuProxy', seat: roomSeat, on })); } catch { /* 切れていれば押し直し */ }
+  }
+
   function seatName(seat: number): string {
     // [2026-07-23 4人回し Phase3, Sol P1-2] 引数は game seat、onlineMembers は room seat 契約。
     // mapping を必ず通して photo 直引きの別人表示を防ぐ [3人部屋は恒等]
@@ -1295,6 +1382,8 @@
         ? (onlineGameSeat ?? undefined)
         : onlineRoomMeta?.mySeat) as 0|1|2|undefined,
       isHost: !!onlineRoomMeta?.isHost,
+      // [2026-10-09 遊真 A3] 次の試合へは観戦以外の全員が押せる。観戦かどうかを store に渡す
+      spectator: onlineSpectator,
       hostSeat,
       ...protocol,
     };
@@ -1449,6 +1538,8 @@
     const roomAtConnect = currentRoomId;
     const generation = ++onlineSocketGeneration;
     if (onlineResyncTimer) { clearTimeout(onlineResyncTimer); onlineResyncTimer = null; } // 旧 socket 宛の予約は捨てる
+    onlineSocketOpen = false;
+    clearOnlineDeadline(); // 旧 socket の待ち時間は捨てる [接続し直した直後の sync 後に deadline が来る]
     onlineTerminalClose = null;
     let token = '';
     let wsBase = '';
@@ -1476,6 +1567,7 @@
     onlineWs = ws;
     ws.onopen = () => {
       if (generation !== onlineSocketGeneration) { ws.close(); return; }
+      onlineSocketOpen = true;
       // [2026-09-02 yuma] attempt のリセットは open ではなく sync/start が正常に入った時
       // [markOnlineSyncHealthy]。server は open 後に 4403 等で切るので、ここで戻すと
       // backoff が常に 500ms に潰れて「open→close」を毎秒2回、何日でも回していた
@@ -1496,9 +1588,17 @@
       } else if (msg.type === 'sync') {
         absorbSeatContract(msg); // [Phase3] sync top-level に recipient seat 契約
         absorbSeatContract(msg.snapshot); // activeMapping / roomChipLedger は snapshot 側
+        // [2026-10-09 遊真 C1] 巻き戻し [rewind] で revision が戻った時は、持っている待ち時間を捨てる
+        // [古い revision として無視され続けて、巻き戻し前の表示が残らないように]
+        if (onlineDeadline && typeof msg.snapshot?.revision === 'number' && msg.snapshot.revision < onlineDeadline.revision) {
+          clearOnlineDeadline();
+        }
         applyCanonicalSync(ws, msg.snapshot);
       } else if (msg.type === 'lobby') {
         onlineMembers = msg.members ?? [];
+      } else if (msg.type === 'deadline') {
+        // [2026-10-09 遊真 C1] 誰待ちか ・ 残り何秒か
+        onOnlineDeadline(msg);
       } else if (msg.type === 'action') {
         // [Phase3 Sol P1-1] seat 契約の吸収は applyRevisionedAction 内の revision 検証後
         applyRevisionedAction(ws, msg);
@@ -1543,6 +1643,8 @@
     ws.onclose = (event) => {
       if (generation !== onlineSocketGeneration) return;
       onlineWs = null;
+      onlineSocketOpen = false;
+      clearOnlineDeadline();
       // [2026-09-02 yuma] server が意図して切った終端 code は再接続しない。
       // 4001 新タブに置換 / 4002 部屋差し替え / 4401 token 不正 / 4403 席・部屋不一致 / 4404 部屋消滅 / 4410 追放。
       // 再接続で状況は変わらず、部屋消滅 [TF1F] では reconnect 毎に server が卓を復元し直して
@@ -1565,6 +1667,9 @@
     if (onlineReconnectTimer) clearTimeout(onlineReconnectTimer);
     onlineReconnectTimer = null;
     if (onlineWs) { try { onlineWs.close(); } catch (e) {} onlineWs = null; }
+    onlineSocketOpen = false;
+    clearOnlineDeadline();
+    deadlineWarnedKey = null;
     game.disconnectOnline();
     onlineGameStarted = false;
     onlineRoomMeta = null;
@@ -1574,6 +1679,30 @@
     onlineSeatInfoReceived = false;
     onlineActiveMapping = null;
     onlineRoomChipLedger = null;
+  }
+  // [2026-10-09 遊真 C1] タブ / アプリに戻った時の即復帰。スマホは裏に回すと socket が死ぬが close の
+  // 通知も遅れ、backoff [最大 10 秒] も待たされる。閉じていれば今つなぎ直し [attempt は 0 に戻す]、
+  // 生きていれば resync で盤面を取り直す。終端 close [4001 等] と、接続し直し中は触らない
+  function onOnlineVisibilityChange(): void {
+    if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+    if (!onlineShouldReconnect || onlineTerminalClose || !currentRoomId || !onlineRoomMeta || !onlineMe) return;
+    const ws = onlineWs;
+    if (ws && ws.readyState === WebSocket.CONNECTING) return;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: 'resync' })); } catch { /* close 経由の再接続に任せる */ }
+      return;
+    }
+    onlineReconnectAttempt = 0;
+    if (onlineReconnectTimer) { clearTimeout(onlineReconnectTimer); onlineReconnectTimer = null; }
+    void connectOnlineWs(true);
+  }
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onOnlineVisibilityChange);
+    onDestroy(() => {
+      document.removeEventListener('visibilitychange', onOnlineVisibilityChange);
+      clearDeadlineWarnTimer();
+      if (deadlineToastTimer) clearTimeout(deadlineToastTimer);
+    });
   }
   // [2026-07-22 リョー要望] 次局へは全員が押したら進む。自動 ready 送信を廃止し、
   // 「次局へ」押下 = readyNextRound 送信。server が全員分揃った時に nextRound を発行する
@@ -1632,6 +1761,9 @@
       if ($game.cpu[0]) game.toggleCpu(0);
     }
     // ?room= 指定時 オンライン部屋に直入り [test / share link 用]
+    // [2026-10-09 遊真 B2] 部屋の中にいる間は ?room= が URL に残る [syncRoomUrl]ので、再読み込みも同じ道を通る:
+    //   join は既存 member なら対局中でも冪等に成功 → RoomPanel が status=playing を見て onStart →
+    //   connectOnlineWs → server の sync で盤面を復元
     try {
       const params = new URLSearchParams(window.location.search);
       const rid = params.get('room');
@@ -1647,7 +1779,20 @@
             currentRoomId = rid;
             appMode = 'started';
             viewMode = 'online';
+          } else {
+            // 入れなかった [満席 ・ 開始済みで席が無い ・ 部屋が消えた]。黙ってメニューに落とさず、
+            // ロビーで理由を出す。?room= も外す [再読み込みで同じ失敗を繰り返さない]
+            lobbyNotice = joined.status === 404
+              ? `部屋 ${rid} は見つからなかった [もう消えたかも]`
+              : `部屋 ${rid} には入れなかった [満席か、もう始まっている]`;
+            try { window.history.replaceState(window.history.state, '', withRoomParam(window.location, null)); } catch { /* URL はそのまま */ }
+            appMode = 'started';
+            viewMode = 'online';
           }
+        } else {
+          // 未ログインの招待リンク: ロビーのログイン画面へ。ログインから戻る先に ?room= を持ち越す
+          appMode = 'started';
+          viewMode = 'online';
         }
       }
     } catch (e) {}
@@ -1974,15 +2119,10 @@
   onDestroy(() => { if (cutinWatchdogTimer) clearTimeout(cutinWatchdogTimer); });
   // 次の試合へ時 chip リセット option [リョー指示、 default 持越し]
   let resetChipOnNextMatch = false;
-  let __matchPostInflight = false;
   // R16 P0 #3 fix: 試合開始時 chipLedger snapshot、 chip_delta = total - this[seat] で計算
   let matchStartChipLedger: Record<number, number> = { 0: 0, 1: 0, 2: 0 };
-  // R17 #2 fix: POST 成功済 match_no を 記録、 再押下時 重複 POST せず nextMatch のみ実行
-  let __lastPostedMatch: { roomId: string; matchNo: number } | null = null;
   async function handleNextMatch() {
-    // R15 P0 #5 fix: 順序を 「1. resetChip 確認 → 2. POST [host のみ、 finalize 後最終 chip 反映]
-    //   → 3. nextMatch 実行」 に。 旧 code は POST が finalize 前 + await ナシで連打可能、
-    //   ダブルクリックで二重 INSERT、 resetChip キャンセル後も POST 済 になってた
+    // 順序は 「1. resetChip 確認 → 2. nextMatch 実行」。resetChip キャンセル後に進まないようにする
     if (resetChipOnNextMatch) {
       // [2026-07-23 リョー指示] online のリセット発動は server 側の全員同意判定。
       // host の確認ダイアログは状況を正しく伝える
@@ -1993,121 +2133,8 @@
         `チップリセットは全員同意 [今 ${chipResetVoteSeats.length}/${chipResetVoteTotal}] が揃うまで発動しない。リセットなしで次の試合へ進む？`,
       )) return;
     }
-    // R17 #2 + R18 #3 fix: 直前 試合 [room_id + match_no] の POST が済んでれば 二重 POST 回避。
-    // events.length 依存は偶然一致 / リロードで baseline 失う問題があったので、
-    // server レスポンスの match_no を baseline + sessionStorage で persist
-    // 「同 room の 「次の match_no が 既存最大+1 と一致」 の前提」 で 重複判定
-    // R19 #2 fix: 重複判定は 「server 409 catch で idempotency 扱い」 に統一、
-    // client side baseline は撤回 [リロードで失う + events.length 偶然一致 不安定]
-    // server 側 room+match_no UNIQUE で 二重 INSERT は防がれる、 409 は ack 扱い
-    const sessionPostKey = `anmikaPostedMatch:${currentRoomId}`;
-    const alreadyPosted = false;  // 常に POST 試行、 二重は server 409 で catch して ack に
-    // R14 P1 #4 + R15 P0 #5 + P1 [CPU 全 member 必須] fix
-    if (
-      !__matchPostInflight
-      && !alreadyPosted
-      && onlineGameStarted && onlineRoomMeta?.isHost
-      && currentRoomId && $game.game.state.finished
-      // [2026-07-23 リョー指示 全員同意制に伴う変更] 旧「chip reset 時は match 永続化
-      // スキップ」を廃止。reset の発動は server の全員同意判定になり host checkbox と
-      // 一致しない上、スキップすると戦績DBからその試合が消える。試合記録は常に残し、
-      // reset は次試合の ledger だけを 0 にする
-      // [2026-07-23 総点検 P2] サイコロ等の未消化 pending があると getFinalScore が
-      // dice 分を含まない時点で確定してしまう。全消化後に送る
-      && !$game.pendingSaiKoro && !$game.pendingKinpei && !$game.pendingFuyu
-      && !$game.pendingKamiPochi && !$game.pendingPochiSwap && !$game.pendingFeverContinue
-    ) {
-      __matchPostInflight = true;
-      try {
-        // finalScore [chipBase + uma + topN + tontonbu] を計算 → 全 user_id 分の delta
-        let finalScores: Array<{ player: number; total: number }> = [];
-        try {
-          finalScores = ($game.game as any).getFinalScore() ?? [];
-        } catch {}
-        const chipDelta: Record<string, number> = {};
-        for (const m of onlineMembers) {
-          if (!m.user_id) continue;
-          const seat = m.seat;
-          if (seat !== 0 && seat !== 1 && seat !== 2) {
-            chipDelta[m.user_id] = 0;
-            continue;
-          }
-          const fs = finalScores.find((s) => s.player === seat);
-          // R15 P1 fix: server は CPU 含む全 member chip_delta key 必須、
-          // CPU は user_id "CPU_..." で 0 を必ず送る
-          // R16 P0 #3 fix: total は累積値、 「今試合差分」 = total - matchStartChipLedger[seat]
-          // を送って server で users.chip_total に正しく加算する [二重加算防止]
-          const total = fs?.total ?? 0;
-          chipDelta[m.user_id] = total - (matchStartChipLedger[seat] ?? 0);
-        }
-        const paifu = ($game.game.events ?? []).slice(0, 5000);
-        // R20 #1 fix: deterministic match_uuid を client/server で 共有、 リトライ重複保存 防止。
-        // sessionStorage に persist [リロード後も 同 uuid で再 POST]、
-        // server で room_id+match_uuid UNIQUE で 二重保存 reject [409]
-        const uuidKey = `anmikaMatchUuid:${currentRoomId}`;
-        let matchUuid: string;
-        try {
-          const stored: string | null = sessionStorage.getItem(uuidKey);
-          let v: string;
-          if (stored) {
-            v = stored;
-          } else {
-            v = ((crypto as any).randomUUID?.() as string | undefined) ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-            sessionStorage.setItem(uuidKey, v);
-          }
-          matchUuid = v;
-        } catch {
-          matchUuid = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        }
-        const r = await fetch('/api/matches', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          // [2026-09-14] どのルール版で打たれた牌譜かを残す [公開リンクを配るため]
-          body: JSON.stringify({ room_id: currentRoomId, paifu, chip_delta: chipDelta, match_uuid: matchUuid, rule_version: ANMIKA_RULE_VERSION }),
-        });
-        if (!r.ok) {
-          const detail = await r.text().catch(() => '');
-          // R19 #2 fix: 409 は idempotency ヒット [既に同 match_no 保存済] = ack 扱い、
-          // game.nextMatch 進める。 リロード後の再 POST もこれで安全
-          if (r.status === 409) {
-            // R23 #4 fix: server 409 typed response [reason: 'idempotency_hit'] を 利用、
-            // detail JSON parse して reason 別 toast、 match_no race vs uuid 重複を区別
-            let typed: any = null;
-            try { typed = JSON.parse(detail); } catch {}
-            const reason = typed?.detail?.reason ?? typed?.reason ?? 'unknown';
-            const mno = typed?.detail?.match_no ?? typed?.match_no;
-            console.info('[matches POST] 409 typed', { reason, match_no: mno });
-            if (reason !== 'idempotency_hit' && reason !== 'unknown') {
-              console.warn('[matches POST] 409 unexpected reason', reason, detail);
-            }
-          } else {
-            // R16 P0 #4 fix: POST 失敗時 nextMatch 進行を ブロック、 user に通知 + 再試行可能
-            console.warn('[matches POST] failed', r.status, detail);
-            window.alert(`試合結果の保存に失敗 [HTTP ${r.status}]、 「次の試合へ」 を 再度押してリトライ。 ${detail.slice(0, 200)}`);
-            __matchPostInflight = false;
-            return;  // game.nextMatch せず 中断
-          }
-        }
-        // R20 #1 fix: POST 成功 [or 409 ack] → 現 match_uuid は使用済 → 削除、
-        // 次試合 nextMatch で 新 uuid 自動生成 [server 採番と整合]
-        try {
-          const respJson = await r.json().catch(() => ({}));
-          const mno = Number(respJson?.match_no ?? 0);
-          __lastPostedMatch = { roomId: currentRoomId, matchNo: mno };
-          try { sessionStorage.setItem(sessionPostKey, String(mno)); } catch {}
-          try { sessionStorage.removeItem(uuidKey); } catch {}
-        } catch {}
-      } catch (e) {
-        // R16 P0 #4 fix: ネットワーク error も同様 ブロック
-        console.warn('[matches POST] err', e);
-        window.alert(`試合結果の保存中ネットワークエラー、 「次の試合へ」 再押下でリトライ ${String(e).slice(0, 200)}`);
-        __matchPostInflight = false;
-        return;
-      } finally {
-        __matchPostInflight = false;
-      }
-    }
+    // [2026-10-09 遊真 A3] 試合結果の保存は server が自分で行う [旧: host の client が POST /api/matches]。
+    // 誰が押しても同じなので、ここでは保存せず nextMatch を送るだけ
     if (resetChipOnNextMatch) {
       // chip reset case: broadcast & finalize=false [skip getFinalScore writeback]
       game.nextMatch({ finalize: false, resetChip: true });
@@ -2336,7 +2363,8 @@
     />
   {:else}
     <LobbyPanel
-      onJoinRoom={(rid, user) => { currentRoomId = rid; onlineMe = user; }}
+      notice={lobbyNotice}
+      onJoinRoom={(rid, user) => { lobbyNotice = null; currentRoomId = rid; onlineMe = user; }}
       onSpectateRoom={(rid, user) => {
         currentRoomId = rid;
         onlineMe = user;
@@ -2350,7 +2378,22 @@
     <button class="mode-toggle" on:click={() => { viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>← オフラインに戻る</button>
   </div>
 {:else}
-<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class="ui-board-v2" class:spectating={onlineSpectator} on:contextmenu={onContextMenuTsumokiri}>
+<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class:ws-down={onlineWsDown} class="ui-board-v2" class:spectating={onlineSpectator} on:contextmenu={onContextMenuTsumokiri}>
+  <!-- [2026-10-09 遊真 C2/A2] 対局中の帯: socket が切れている間の「つなぎ直し中」と、
+       自分の席を CPU が代打ちしている間の「自分で打つ」。切れている間は盤面を暗くして触れなくする -->
+  {#if onlineGameStarted && ((onlineWsDown && !onlineTerminalClose) || myCpuProxy)}
+    <div class="online-notices" class:below-inactive={onlineInactive} role="status">
+      {#if onlineWsDown && !onlineTerminalClose}
+        <div class="online-notice notice-reconnect">つなぎ直し中…</div>
+      {/if}
+      {#if myCpuProxy}
+        <div class="online-notice notice-proxy">
+          <span>CPU が代わりに打ってる</span>
+          <button type="button" disabled={onlineWsDown} on:click={() => { const seat = myMember?.seat ?? onlineRoomMeta?.mySeat; if (typeof seat === 'number' && seat >= 0) sendSetCpuProxy(seat, false); }}>自分で打つ</button>
+        </div>
+      {/if}
+    </div>
+  {/if}
   <!-- [2026-07-23 リョー要望 観戦モード] 閲覧専用の明示バナー -->
   {#if onlineSpectator && onlineGameStarted}
     <div class="spectator-banner">
@@ -2659,7 +2702,9 @@
               チップリセット同意 [{chipResetVoteSeats.length}/{chipResetVoteTotal}]
             </label>
           {/if}
-          {#if !onlineGameStarted || onlineRoomMeta?.isHost}
+          <!-- [2026-10-09 遊真 A3] online も席に座っている全員が「次の試合へ」を押せる [旧: host のみ]。
+               観戦だけ押せない -->
+          {#if !onlineGameStarted || !onlineSpectator}
             <button class="next-btn" on:click={handleNextMatch}>▶ 次の試合へ</button>
             {#if !onlineGameStarted}
               <label style="display:inline-flex; align-items:center; gap:4px; font-size:13px;">
@@ -2667,7 +2712,7 @@
               </label>
             {/if}
           {:else}
-            <button class="next-btn" disabled>ホストの「次の試合へ」待ち</button>
+            <span class="muted-hint">👁 観戦中 [対局者が「次の試合へ」を押すと次が始まる]</span>
           {/if}
         {:else if !onlineGameStarted}
           <button class="next-btn" on:click={() => game.nextRound()}>次局へ</button>
@@ -2772,7 +2817,10 @@
           <label title="ポン/カン機会を自動で見送る"><input type="checkbox" bind:checked={onlineNoCall}>鳴きなし</label>
           <label title="自分の手番を自動でツモ切り"><input type="checkbox" bind:checked={autoTsumoKiri}>ツモ切り</label>
           <label title="ツモ/ロンできる時に自動で和了"><input type="checkbox" bind:checked={onlineAutoWin}>自動アガリ</label>
-          <button class="table-setting-btn leave" on:click={() => { disconnectOnline(); viewMode = 'online'; }} title="対局から退出" aria-label="対局から退出">× <span class="settings-label">退出</span></button>
+          <!-- [2026-10-09 遊真 C5] オンライン中もバグ通報を押せる [🔧 局頭に戻すは出さない] -->
+          <button class="table-setting-btn save" on:click={reportBug} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報">🐛 <span class="settings-label">バグ通報</span></button>
+          <!-- [2026-10-09 遊真 C3] 抜ける前に 1 回だけページ内で確認する -->
+          <button class="table-setting-btn leave" on:click={() => { leaveConfirmOpen = true; }} title="対局から退出" aria-label="対局から退出">× <span class="settings-label">退出</span></button>
         {/if}
       </div>
     </div>
@@ -2842,6 +2890,7 @@
           <div class="ssub">
             {#if revealAll || selfPlayer === srv1}シャンテン {xt1} / {/if}チップ {$game.game.chipLedger[srv1] ?? 0}<br>{$game.game.shuvariUsed[srv1] ? 'シュバ済' : 'シュバ未'}
           </div>
+          {#if onlineGameStarted}<DeadlineBar deadline={onlineDeadline} roomSeat={clientGameToRoomSeat(onlineActiveMapping, srv1)} />{/if}
         </div>
         <div class="score-center">
           <div class="benbang">{state.benbang} 本場</div>
@@ -2853,11 +2902,13 @@
           <div class="ssub">
             {#if revealAll || selfPlayer === srv2}シャンテン {xt2} / {/if}チップ {$game.game.chipLedger[srv2] ?? 0}<br>{$game.game.shuvariUsed[srv2] ? 'シュバ済' : 'シュバ未'}
           </div>
+          {#if onlineGameStarted}<DeadlineBar deadline={onlineDeadline} roomSeat={clientGameToRoomSeat(onlineActiveMapping, srv2)} />{/if}
         </div>
         <div class="score-side score-bottom lizhi-{$game.game.lizhi.has(srv0)} {$game.game.shuvariActive[srv0] ? 'shuvari' : ''} {$game.game.feverActive[srv0] ? 'fever' : ''} {oyaPlayer === srv0 ? 'is-oya' : ''}">
           <div class="sname">{onlineGameStarted ? seatName(srv0) : 'P0'} [自]{$game.game.lizhi.has(srv0) ? ' リーチ' : ''}{$game.game.shuvariActive[srv0] ? ' [シュバ]' : ''}{$game.game.feverActive[srv0] ? ' [フィバ]' : ''}</div>
           {#key $game.game.state.defen[srv0]}<div class="sval">{$game.game.state.defen[srv0].toLocaleString()}</div>{/key}
           <div class="ssub">シャンテン {xt0} / チップ {$game.game.chipLedger[srv0] ?? 0} / {$game.game.shuvariUsed[srv0] ? 'シュバ済' : 'シュバ未'}</div>
+          {#if onlineGameStarted}<DeadlineBar deadline={onlineDeadline} roomSeat={clientGameToRoomSeat(onlineActiveMapping, srv0)} />{/if}
         </div>
       </div>
       <!-- 4 方向 河ゾーン [雀魂風、 6 牌/行で wrap]、 各 player の向きに合わせて回転 -->
@@ -3006,6 +3057,10 @@
           <span class="vfeng">{['東','南','西'][$game.game.zifengZ(srv1) - 1] ?? ''}</span>
           <span class="vname">{onlineGameStarted ? seatName(srv1) + ' 上家' : 'P1 上家'}</span>
           {#if $game.game.shuvariActive[srv1]}<span class="vshuvari-badge">シュバ</span>{/if}
+          {#if onlineGameStarted}
+            {@const seatMember = memberAtGameSeat(onlineMembers, onlineActiveMapping, srv1)}
+            <OnlineSeatStatus member={seatMember} canToggle={canHostToggleCpuProxy(seatMember, !!onlineRoomMeta?.isHost, onlineMe?.user_id)} onSetCpuProxy={sendSetCpuProxy} />
+          {/if}
         </div>
         <div class="vhand vleft-hand">
           {#each sideTiles1 as t}
@@ -3053,6 +3108,10 @@
           <span class="vfeng">{['東','南','西'][$game.game.zifengZ(srv2) - 1] ?? ''}</span>
           <span class="vname">{onlineGameStarted ? seatName(srv2) + ' 下家' : 'P2 下家'}</span>
           {#if $game.game.shuvariActive[srv2]}<span class="vshuvari-badge">シュバ</span>{/if}
+          {#if onlineGameStarted}
+            {@const seatMember = memberAtGameSeat(onlineMembers, onlineActiveMapping, srv2)}
+            <OnlineSeatStatus member={seatMember} canToggle={canHostToggleCpuProxy(seatMember, !!onlineRoomMeta?.isHost, onlineMe?.user_id)} onSetCpuProxy={sendSetCpuProxy} />
+          {/if}
         </div>
         <div class="vhand vright-hand">
           {#each sideTiles2 as t}
@@ -3322,11 +3381,12 @@
                 <input type="checkbox" bind:checked={resetChipOnNextMatch}>チップリセット
               </label>
             {/if}
-            <!-- R15 P0 #4 fix: online は host のみ「次の試合へ」 表示。 ゲストが先押しで desync -->
-            {#if !onlineGameStarted || onlineRoomMeta?.isHost}
+            <!-- [2026-10-09 遊真 A3] online も席に座っている全員が押せる [旧: host のみ。server が受理する]。
+                 観戦だけ押せない -->
+            {#if !onlineGameStarted || !onlineSpectator}
               <button on:click={handleNextMatch}>▶ 次の試合へ</button>
             {:else}
-              <span class="muted-hint">ホストの「次の試合へ」を待ってる</span>
+              <span class="muted-hint">👁 観戦中 [対局者が「次の試合へ」を押すと次が始まる]</span>
             {/if}
           {:else}
             <!-- R21 P0 fix: nextRound は host or winner or 親 許容 [server gate]、
@@ -3366,6 +3426,23 @@
         {/if}
       </span>
       <button on:click={() => location.reload()}>再読み込み</button>
+    </div>
+  {/if}
+  <!-- [2026-10-09 遊真 C1] 残り 10 秒の短い知らせ -->
+  {#if deadlineToast}
+    <div class="deadline-toast" role="status">{deadlineToast}</div>
+  {/if}
+  <!-- [2026-10-09 遊真 C3] 対局中の「× 退出」の確認 [ページ内。window.confirm は使わない] -->
+  {#if leaveConfirmOpen}
+    <div class="leave-confirm" role="dialog" aria-modal="true" aria-labelledby="leave-confirm-title">
+      <div class="leave-confirm-box">
+        <p id="leave-confirm-title">本当に抜ける？</p>
+        <p class="leave-confirm-sub">席は残る。ロビーの「戻る」から同じ部屋に戻れる</p>
+        <div class="leave-confirm-actions">
+          <button type="button" class="leave-confirm-yes" on:click={confirmLeaveGame}>抜ける</button>
+          <button type="button" class="leave-confirm-no" on:click={() => { leaveConfirmOpen = false; }}>戻る</button>
+        </div>
+      </div>
     </div>
   {/if}
   {#if newVersionAvailable && !newVersionToastDismissed}
@@ -5557,4 +5634,119 @@
   }
   .rotation-chip-bar .rc-title { opacity: 0.75; }
   .rotation-chip-bar .rc-entry.rc-inactive { opacity: 0.65; font-style: italic; }
+
+  /* [2026-10-09 遊真 C1] 席の札の下端に残り時間の棒を重ねる足場 */
+  main.online-game .score-box .score-side { position: relative; }
+
+  /* [2026-10-09 遊真 C2/A2] 対局中の帯 [つなぎ直し中 / CPU が代わりに打ってる]。
+     どの modal よりも上に出す [切れている間は modal の上からも状況が見える] */
+  .online-notices {
+    position: fixed;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    max-width: 92vw;
+  }
+  .online-notices.below-inactive { top: 76px; }
+  .online-notice {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-radius: 999px;
+    padding: 4px 14px;
+    font-size: 13px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+  }
+  .notice-reconnect {
+    background: rgba(120, 60, 20, 0.96);
+    border: 1px solid rgba(255, 190, 120, 0.7);
+    color: #ffe2c2;
+    font-weight: 700;
+  }
+  .notice-proxy {
+    background: rgba(20, 40, 70, 0.96);
+    border: 1px solid rgba(140, 190, 255, 0.6);
+    color: #d6e8ff;
+  }
+  .notice-proxy button {
+    border: 0;
+    border-radius: 999px;
+    background: #ffd060;
+    color: #1a1820;
+    padding: 3px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .notice-proxy button:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* socket が OPEN でない間は盤面を暗くして触れなくする [store は切断中の操作を黙って捨てるので、
+     押したのに反応しない状態を作らない]。退出 [dora-row] ・ 観戦帯 ・ 通知 ・ 確認は触れたままにする */
+  main.ws-down::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 10000;
+    pointer-events: none;
+  }
+  main.ws-down > :global(*:not(.online-notices):not(.dora-row):not(.spectator-banner):not(.new-version-toast):not(.leave-confirm):not(.deadline-toast)) {
+    pointer-events: none;
+  }
+  /* [2026-10-09 遊真 C1] 残り 10 秒の短い知らせ */
+  .deadline-toast {
+    position: fixed;
+    top: 44px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30500;
+    background: #8a2b1d;
+    color: #fff;
+    border: 2px solid #ffd060;
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-size: 16px;
+    font-weight: 700;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+  }
+  /* [2026-10-09 遊真 C3] 対局中の退出確認 */
+  .leave-confirm {
+    position: fixed;
+    inset: 0;
+    z-index: 31000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+  }
+  .leave-confirm-box {
+    min-width: 240px;
+    max-width: 88vw;
+    padding: 16px 20px;
+    border-radius: 10px;
+    background: #1f2a3a;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #f4f4f4;
+    text-align: center;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  }
+  .leave-confirm-box p { margin: 0 0 6px; font-size: 16px; font-weight: 700; }
+  .leave-confirm-box p.leave-confirm-sub { margin-bottom: 12px; font-size: 12px; font-weight: 400; opacity: 0.75; }
+  .leave-confirm-actions { display: flex; gap: 12px; justify-content: center; }
+  .leave-confirm-actions button {
+    min-width: 84px;
+    min-height: 40px;
+    border: 0;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .leave-confirm-yes { background: #aa4040; color: #fff; }
+  .leave-confirm-no { background: #ffd060; color: #1a1820; }
 </style>

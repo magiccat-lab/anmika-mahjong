@@ -13,6 +13,10 @@ export type OnlineMemberLike = {
   user_id: string;
   username: string;
   is_cpu: boolean;
+  // [2026-10-09 遊真 C1/A2] lobby / sync の member が運ぶ接続状態と CPU 代打ち。
+  // 古い server 応答では無いので省略可 [省略 = つながっていて、自分で打っている]
+  connected?: boolean;
+  cpu_proxy?: boolean;
 };
 
 export function clientGameToRoomSeat(mapping: ClientSeatMapping, gameSeat: number): number {
@@ -60,4 +64,26 @@ export function hostGameSeat(
   const host = members.find((member) => member.user_id === hostUserId);
   if (!host) return null;
   return clientRoomToGameSeat(mapping, host.seat);
+}
+
+/** [2026-10-09 遊真 C1] 人間の member が切断中か [CPU 席は対象外] */
+export function isMemberDisconnected(member: OnlineMemberLike | undefined): boolean {
+  return !!member && !member.is_cpu && member.connected === false;
+}
+
+/** [2026-10-09 遊真 A2] CPU が代わりに打っている人間の member か */
+export function isMemberCpuProxy(member: OnlineMemberLike | undefined): boolean {
+  return !!member && !member.is_cpu && member.cpu_proxy === true;
+}
+
+/**
+ * [2026-10-09 遊真 A2] host に「CPU に替える / 戻す」を出す席か。
+ * 自分以外の人間 member だけ [CPU 席 ・ 空席 ・ 自分には出さない]
+ */
+export function canHostToggleCpuProxy(
+  member: OnlineMemberLike | undefined,
+  isHost: boolean,
+  myUserId: string | undefined,
+): boolean {
+  return isHost && !!member && !member.is_cpu && member.user_id !== myUserId;
 }

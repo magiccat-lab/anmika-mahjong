@@ -3,6 +3,7 @@
   // 部屋画面: ホストが member list + 開始 button、 ゲストは 「待機中」 表示
   // 3 人揃ったら host が start、 status=playing → 親へ通知して game 開始
   import { onMount, onDestroy } from 'svelte';
+  import { roomInviteUrl } from './roomLink';
 
   const API_BASE = (import.meta as any).env?.VITE_ANMIKA_SERVER ?? '';
 
@@ -44,7 +45,7 @@
         onStart();
       }
     } catch (e) {
-      error = String(e);
+      error = '部屋の情報を取れなかった';
     }
   }
 
@@ -77,7 +78,7 @@
           return;
         }
         const j = await r.json().catch(() => ({}));
-        error = j.detail || 'start failed';
+        error = j.detail || '開始できなかった';
         if (r.status < 500) return;
       } catch (e) {
         error = String(e);
@@ -87,10 +88,28 @@
   }
 
   function shareLink(): string {
-    return `${location.origin}/?room=${roomId}`;
+    return roomInviteUrl(location.origin, roomId);
   }
-  function copyLink() {
-    navigator.clipboard?.writeText(shareLink());
+  // [2026-10-09 遊真 B3] コピーできたかを見せる。clipboard が無い [http ・ 古い端末] 時は理由を出す
+  let copied = false;
+  let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+  async function copyLink() {
+    try {
+      if (!navigator.clipboard) throw new Error('no clipboard');
+      await navigator.clipboard.writeText(shareLink());
+      copied = true;
+      if (copiedTimer) clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => { copied = false; copiedTimer = null; }, 1800);
+    } catch (e) {
+      error = 'コピーできなかった。上のリンクを長押ししてコピーしてほしい';
+    }
+  }
+  // [2026-10-09 遊真 B3] 端末の共有シート [LINE ・ Discord など] が使える時だけ「共有」を出す
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+  async function shareRoom() {
+    try {
+      await navigator.share({ title: 'アンミカ麻雀', text: `アンミカ麻雀の部屋 ${roomId}`, url: shareLink() });
+    } catch (e) { /* 共有シートを閉じた */ }
   }
 
   onMount(() => {
@@ -99,22 +118,32 @@
   });
   onDestroy(() => {
     if (polling) clearInterval(polling);
+    if (copiedTimer) clearTimeout(copiedTimer);
   });
 </script>
 
 <div class="room">
-  <h2>🀄 部屋 {roomId}{room?.match_mode === 'hanchan' ? ' [半荘戦]' : ' [東風戦]'}{room?.rotation_enabled ? ' [4人回し]' : ''}</h2>
-  <p class="hint">招待リンク: <code>{shareLink()}</code> <button class="copy" on:click={copyLink}>📋 copy</button></p>
+  <h2>🀄 部屋{room?.match_mode === 'hanchan' ? ' [半荘戦]' : ' [東風戦]'}{room?.rotation_enabled ? ' [4人回し]' : ''}</h2>
+  <!-- [2026-10-09 遊真 B3] 部屋コードを大きく出す [口頭 ・ 画面越しでも読める] -->
+  <div class="code-block">
+    <div class="code-label">部屋コード</div>
+    <div class="code" aria-label={`部屋コード ${roomId}`}>{roomId}</div>
+  </div>
+  <p class="hint">招待リンク: <code>{shareLink()}</code></p>
+  <div class="invite-actions">
+    <button class="copy" on:click={copyLink}>{copied ? '✓ コピーした' : '📋 コピー'}</button>
+    {#if canShare}<button class="copy share" on:click={shareRoom}>📤 共有</button>{/if}
+  </div>
 
   <div class="members">
     {#each Array.from({ length: capacity }, (_, i) => i) as seat (seat)}
       {@const m = members.find((x) => x.seat === seat)}
       <div class="seat">
-        <div class="seat-label">P{seat}</div>
+        <div class="seat-label">席{seat + 1}</div>
         {#if m}
           {#if m.avatar_url}<img class="avatar" src={m.avatar_url} alt={m.username} />{/if}
           <span class="name">{m.username}</span>
-          {#if m.user_id === room?.host_user_id}<span class="host-tag">host</span>{/if}
+          {#if m.user_id === room?.host_user_id}<span class="host-tag">ホスト</span>{/if}
           {#if m.user_id.startsWith('CPU_')}<span class="cpu-tag">CPU</span>{/if}
         {:else}
           <span class="empty">待機中…</span>
@@ -151,7 +180,20 @@
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   }
   h2 { color: #d4af37; }
-  .hint { font-size: 12px; opacity: 0.8; }
+  .code-block { text-align: center; margin: 8px 0 4px; }
+  .code-label { font-size: 12px; opacity: 0.7; }
+  .code {
+    display: inline-block;
+    font-family: 'Menlo', 'Consolas', monospace;
+    font-size: 44px;
+    font-weight: 900;
+    letter-spacing: 0.3em;
+    padding-left: 0.3em; /* letter-spacing の右端ぶんを左にも足して中央に見せる */
+    color: #ffe9ad;
+    user-select: all;
+  }
+  .hint { font-size: 12px; opacity: 0.8; word-break: break-all; }
+  .invite-actions { display: flex; gap: 8px; justify-content: center; }
   .hint code {
     background: rgba(255,255,255,0.1);
     padding: 2px 6px;
@@ -162,11 +204,10 @@
     background: #4060a0;
     color: #fff;
     border: 0;
-    padding: 2px 8px;
+    padding: 6px 14px;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 11px;
-    margin-left: 4px;
+    font-size: 13px;
   }
   .members {
     display: flex;
@@ -216,7 +257,13 @@
     font-size: 14px;
     cursor: pointer;
   }
-  .start:disabled { opacity: 0.4; cursor: not-allowed; }
+  /* [2026-10-09 遊真 B3] 揃っていない間は緑の押せそうな見た目をやめ、灰色の押せない見た目にする */
+  .start:disabled {
+    background: #3a3f47;
+    color: #8c929c;
+    border: 1px solid #555;
+    cursor: not-allowed;
+  }
   .waiting { color: #aaa; font-size: 13px; line-height: 38px; }
   .leave {
     background: transparent;
