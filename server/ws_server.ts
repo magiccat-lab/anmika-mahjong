@@ -1189,6 +1189,12 @@ export function computeRewindPlan(
   return { keepThrough, matchId, roundId };
 }
 
+/** [2026-10-09 遊真 A1] port を取れない類の失敗。これだけは process を落とす */
+function isListenError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === 'EADDRINUSE' || code === 'EACCES' || code === 'EADDRNOTAVAIL';
+}
+
 function sendJson(ws: WebSocket | null, payload: unknown): void {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   try { ws.send(JSON.stringify(payload)); } catch { /* socket closed between check and send */ }
@@ -1233,8 +1239,7 @@ function sendSync(
   snapshot: CanonicalRoomSnapshot,
   recipientRoomSeat: number,
   authority: RoomAuthority | null,
-  fullCommands?: AcceptedRoomCommand[],
-  currentMembers?: Array<{ seat: number; user_id: string; username: string; is_cpu: boolean; connected?: boolean }> | null,
+  currentMembers?: Array<{ seat: number; user_id: string; username: string; is_cpu: boolean; connected?: boolean; cpu_proxy?: boolean }> | null,
 ): void {
   // [2026-07-23 4人回し Phase3] 受信者 room seat → game seat 変換 [抜け番は観戦投影]
   const mapping = snapshot.activeMapping ?? null;
@@ -1243,8 +1248,7 @@ function sendSync(
     : roomToGameSeat(mapping, recipientRoomSeat);
   const projectionSeat = recipientGameSeat ?? SPECTATOR_SEAT;
   // [2026-10-09 遊真 A5] つなぎ直しには今の盤面 [state = 席ごとの投影] だけを送る。
-  // client は command 列を使っておらず、1 晩分を毎回 sanitize して送るのは重いだけだった
-  void fullCommands;
+  // client は command 列を使っておらず、1 晩分を毎回 DB から読んで sanitize して送るのは重いだけだった
   const payload = { ...snapshot, commands: [] as AcceptedRoomCommand[] };
   let sanitizedStart = payload.start;
   if (sanitizedStart && sanitizedStart.preShuffledPool?.length > 0) {
@@ -2395,7 +2399,12 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
 
   // [2026-10-09 遊真 A1] listen / accept 層の error で process を落とさない [記録だけ残す]。
   // 起動失敗 [EADDRINUSE 等] も見落とさないよう log 無効時も console.error に出す
-  wss.on('error', (error) => { console.error('[anmika-ws] wss error', error); });
+  wss.on('error', (error) => {
+    // [2026-10-09 遊真 A1] listen の失敗 [port 使用中等] は落として systemd に再起動させる。
+    // 生き残ると「接続を受けない半端な process」が残る
+    if (isListenError(error)) throw error;
+    console.error('[anmika-ws] wss error', error);
+  });
 
   wss.on('connection', async (ws, request) => {
     // [2026-10-09 遊真 A1] 最初の文として付ける [await より前]。壊れた frame [RSV1 立ち等] で
@@ -2447,10 +2456,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       });
       const membersForSync = () => currentMembersPayload(room);
       const specSync = () => {
-        sendSync(
-          ws, room.snapshot, SPECTATOR_SEAT, room.authority,
-          persistence.loadCommands(room.roomId), membersForSync(),
-        );
+        sendSync(ws, room.snapshot, SPECTATOR_SEAT, room.authority, membersForSync());
         sendDeadlineStateTo(ws, room);
       };
       const handleSpectatorMessage = (data: RawData) => {
@@ -2538,7 +2544,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     let pendingResyncTimer: ReturnType<typeof setTimeout> | null = null;
     const sendMemberSync = () => {
       lastSyncSentAt = performance.now();
-      sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), currentMembersPayload(room));
+      sendSync(ws, room.snapshot, payload.seat, room.authority, currentMembersPayload(room));
       sendNextRoundReadyStateTo(ws, room);
       sendChipResetVoteStateTo(ws, room);
       sendDeadlineStateTo(ws, room);
@@ -2718,7 +2724,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
 
     broadcast(room, lobbyPayload(room));
     if (room.snapshot.started) {
-      sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), currentMembersPayload(room));
+      sendSync(ws, room.snapshot, payload.seat, room.authority, currentMembersPayload(room));
       sendNextRoundReadyStateTo(ws, room);
       sendChipResetVoteStateTo(ws, room);
       sendDeadlineStateTo(ws, room);
@@ -2797,13 +2803,12 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           if (room.deadlineTimer) { clearTimeout(room.deadlineTimer); room.deadlineTimer = null; }
           if (room.nextRoundTimer) { clearTimeout(room.nextRoundTimer); room.nextRoundTimer = null; }
           room.deadlineInfo = null;
-          const commands = persistence.loadCommands(room.roomId);
           const currentMembers = currentMembersPayload(room);
           for (const member of room.members.values()) {
-            sendSync(member.ws, room.snapshot, member.seat, room.authority, commands, currentMembers);
+            sendSync(member.ws, room.snapshot, member.seat, room.authority, currentMembers);
           }
           for (const spectator of room.spectators.values()) {
-            sendSync(spectator.ws, room.snapshot, SPECTATOR_SEAT, room.authority, commands, currentMembers);
+            sendSync(spectator.ws, room.snapshot, SPECTATOR_SEAT, room.authority, currentMembers);
           }
         }).catch((error) => warn('[anmika-ws] force-finish failed', error)));
         log(`[anmika-ws] TEST force-finish-match room=${room_id}`);
@@ -2963,11 +2968,11 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           if (room.nextRoundTimer) { clearTimeout(room.nextRoundTimer); room.nextRoundTimer = null; }
           if (room.deadlineTimer) { clearTimeout(room.deadlineTimer); room.deadlineTimer = null; }
           for (const member of room.members.values()) {
-            sendSync(member.ws, rewound, member.seat, authority, kept);
+            sendSync(member.ws, rewound, member.seat, authority, currentMembersPayload(room));
           }
           // [2026-07-23 観戦モード] 巻き戻しは観戦者にも配る
           for (const spectator of room.spectators.values()) {
-            sendSync(spectator.ws, rewound, SPECTATOR_SEAT, authority, kept);
+            sendSync(spectator.ws, rewound, SPECTATOR_SEAT, authority, currentMembersPayload(room));
           }
           scheduleRoomDeadline(room);
         }
@@ -3002,7 +3007,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     res.writeHead(404); res.end('not found');
   });
   // [2026-10-09 遊真 A1] 内部 API の listen 失敗 / 壊れた request で process を落とさない
-  internalHttp.on('error', (error) => { console.error('[anmika-ws] internal http error', error); });
+  internalHttp.on('error', (error) => {
+    if (isListenError(error)) throw error;
+    console.error('[anmika-ws] internal http error', error);
+  });
   internalHttp.on('clientError', (error, socket) => {
     warn('[anmika-ws] internal http clientError', error);
     try {
@@ -3042,6 +3050,8 @@ if (import.meta.url === invokedPath) {
   // CLI 起動だけに付ける [createWsRuntime 内に置くと test の uncaught 検知を殺す]
   process.on('uncaughtException', (error) => {
     console.error('[anmika-ws] uncaughtException', error?.stack ?? error);
+    // listen できないなら生き残っても意味がない。exit して systemd [Restart=always] に任せる
+    if (isListenError(error)) process.exit(1);
   });
   process.on('unhandledRejection', (reason) => {
     console.error('[anmika-ws] unhandledRejection', (reason as Error | undefined)?.stack ?? reason);
