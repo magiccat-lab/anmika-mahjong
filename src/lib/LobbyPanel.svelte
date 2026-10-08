@@ -2,13 +2,15 @@
 <script lang="ts">
   // ロビー画面: Discord login + 部屋一覧 + 部屋作成 [リョー指示 2026-05-13 オンライン対戦 Phase 1]
   import { onMount, onDestroy } from 'svelte';
+  import { discordLoginUrl } from './roomLink';
 
   // dev mode は同 origin、 production は同 domain で server が proxied
   // env で override 可能
   const API_BASE = (import.meta as any).env?.VITE_ANMIKA_SERVER ?? '';
 
   type User = { user_id: string; username: string; avatar_url: string | null; chip_total: number; games_played: number };
-  type Room = { room_id: string; host_user_id: string; host_name: string; member_count: number; status: string; match_mode?: string; rotation_enabled?: number | boolean };
+  // [2026-10-09 遊真 B3] my_seat = その部屋での自分の席 [部屋の席番号。座っていなければ null]
+  type Room = { room_id: string; host_user_id: string; host_name: string; member_count: number; status: string; match_mode?: string; rotation_enabled?: number | boolean; my_seat?: number | null };
 
   let me: User | null = null;
   let rooms: Room[] = [];
@@ -22,6 +24,18 @@
   export let onJoinRoom: (roomId: string, user: User) => void = () => {};
   // [2026-07-23 リョー要望 観戦モード] 部屋を閲覧専用で見る
   export let onSpectateRoom: (roomId: string, user: User) => void = () => {};
+  // [2026-10-09 遊真 B2] 招待リンクから入れなかった理由など、ロビーの上に出す知らせ
+  export let notice: string | null = null;
+
+  // [2026-10-09 遊真 B1] ログイン後に今のページ [招待リンクの ?room= ごと] へ戻す
+  function loginHref(): string {
+    return typeof window === 'undefined'
+      ? `${API_BASE}/auth/discord/login`
+      : discordLoginUrl(API_BASE, window.location);
+  }
+  function goLogin(): void {
+    window.location.href = loginHref();
+  }
 
   async function refreshMe() {
     try {
@@ -39,7 +53,7 @@
     }
   }
   async function createRoom() {
-    if (!me) { window.location.href = `${API_BASE}/auth/discord/login`; return; }
+    if (!me) { goLogin(); return; }
     try {
       const r = await fetch(`${API_BASE}/api/rooms`, {
         method: 'POST',
@@ -51,17 +65,17 @@
       const { room_id } = await r.json();
       if (me) onJoinRoom(room_id, me);
     } catch (e) {
-      error = String(e);
+      error = '部屋を作れなかった。もう一度試してほしい';
     }
   }
   async function joinRoom(roomId: string) {
-    if (!me) { window.location.href = `${API_BASE}/auth/discord/login`; return; }
+    if (!me) { goLogin(); return; }
     try {
       const r = await fetch(`${API_BASE}/api/rooms/${roomId}/join`, { method: 'POST', credentials: 'include' });
       if (!r.ok) throw new Error('join failed');
       onJoinRoom(roomId, me);
     } catch (e) {
-      error = String(e);
+      error = `部屋 ${roomId} に入れなかった [満席か、もう始まっている]`;
     }
   }
   async function logout() {
@@ -79,10 +93,10 @@
       if (!r.ok) throw new Error(`delete failed: ${r.status}`);
       await refreshRooms();
     } catch (e) {
-      error = String(e);
+      error = `部屋 ${roomId} を削除できなかった`;
     }
   }
-  // R11 user 報告: 24h 以上古い open 部屋 一括 cleanup
+  // R11 user 報告: 24h 以上古い空き部屋の一括片付け [遊んでいる部屋は消さない]
   async function cleanupOld() {
     try {
       const r = await fetch(`${API_BASE}/api/rooms/cleanup`, {
@@ -92,9 +106,9 @@
       if (!r.ok) throw new Error(`cleanup failed: ${r.status}`);
       const result = await r.json();
       await refreshRooms();
-      error = `${result.deleted_count} 件の古い部屋を削除`;
+      error = `${result.deleted_count} 件の古い部屋を片付けた`;
     } catch (e) {
-      error = String(e);
+      error = '古い部屋を片付けられなかった';
     }
   }
 
@@ -112,20 +126,22 @@
 </script>
 
 <div class="lobby">
-  <h2>🀄 anmika online</h2>
+  <h2>🀄 アンミカ麻雀 オンライン</h2>
   {#if loading}
     <p>読み込み中…</p>
   {:else if !me}
+    {#if notice}<p class="notice">{notice}</p>{/if}
     <p>オンライン対戦には Discord ログインが必要</p>
-    <a class="login-btn" href="{API_BASE}/auth/discord/login">Discord でログイン</a>
+    <a class="login-btn" href={loginHref()}>Discord でログイン</a>
   {:else}
+    {#if notice}<p class="notice">{notice}</p>{/if}
     <div class="user-info">
       {#if me.avatar_url}<img class="avatar" src={me.avatar_url} alt={me.username} />{/if}
       <div>
         <div class="name">{me.username}</div>
-        <div class="stats">累計 chip: <strong>{me.chip_total}</strong> / 試合: {me.games_played}</div>
+        <div class="stats">累計チップ: <strong>{me.chip_total}</strong> / 試合: {me.games_played}</div>
       </div>
-      <button class="logout" on:click={logout}>logout</button>
+      <button class="logout" on:click={logout}>ログアウト</button>
     </div>
     <div class="actions">
       <label class="cpu-select">
@@ -149,23 +165,28 @@
       </label>
       <button class="create" on:click={createRoom}>＋ 新しい部屋を作る</button>
     </div>
-    <h3>公開中の部屋 <button class="cleanup-btn" on:click={cleanupOld} title="24h 以上古い open 部屋を一括削除">🧹 古い部屋 cleanup</button></h3>
+    <h3>公開中の部屋 <button class="cleanup-btn" on:click={cleanupOld} title="24 時間たった空き部屋を片付ける">🧹 古い部屋を片付け</button></h3>
     {#if rooms.length === 0}
-      <p class="empty">部屋がない、 上の button で作って招待しよう</p>
+      <p class="empty">部屋がない、 上の「新しい部屋を作る」で作って招待しよう</p>
     {:else}
       <ul class="room-list">
         {#each rooms as r}
           <li class="room">
             <div>
               <strong>{r.room_id}</strong> [{r.member_count}/{r.rotation_enabled ? 4 : 3} 人]{r.match_mode === 'hanchan' ? ' 半荘' : ' 東風'}{r.rotation_enabled ? ' 4人回し' : ''}{r.status === 'playing' ? ' ▶対局中' : ''}
-              <span class="host"> host: {r.host_name}</span>
+              <span class="host"> ホスト: {r.host_name}</span>
+              {#if r.my_seat !== null && r.my_seat !== undefined}<span class="mine"> あなたは席{r.my_seat + 1}</span>{/if}
             </div>
             <div style="display:flex; gap:6px;">
-              {#if r.status === 'open'}
+              <!-- [2026-10-09 遊真 B2] 自分が座っている部屋は「戻る」。招待リンクと同じ道 [join は既存 member なら
+                   対局中でも冪等に成功 → 部屋画面 → 対局中なら盤面を復元] で入り直す -->
+              {#if r.my_seat !== null && r.my_seat !== undefined}
+                <button class="rejoin-btn" on:click={() => joinRoom(r.room_id)}>戻る</button>
+              {:else if r.status === 'open'}
                 <button on:click={() => joinRoom(r.room_id)} disabled={r.member_count >= (r.rotation_enabled ? 4 : 3)}>入る</button>
               {/if}
               <!-- [2026-07-23 観戦モード] 対局中の部屋は閲覧専用で覗ける -->
-              <button on:click={() => { if (!me) { window.location.href = `${API_BASE}/auth/discord/login`; return; } onSpectateRoom(r.room_id, me); }} title="閲覧専用で見る">👁 観戦</button>
+              <button on:click={() => { if (!me) { goLogin(); return; } onSpectateRoom(r.room_id, me); }} title="閲覧専用で見る">👁 観戦</button>
               {#if me && r.host_user_id === me.user_id}
                 <button on:click={() => deleteRoom(r.room_id)} class="del-btn" title="自分の部屋を削除">🗑️</button>
               {/if}
@@ -248,6 +269,8 @@
     margin: 6px 0;
   }
   .host { font-size: 11px; opacity: 0.6; margin-left: 8px; }
+  .mine { font-size: 11px; color: #ffd060; margin-left: 8px; }
+  .room button.rejoin-btn { background: #d4af37; color: #1a1820; font-weight: 700; }
   .room button {
     background: #4060a0;
     color: #fff;
@@ -259,4 +282,5 @@
   .room button[disabled] { opacity: 0.4; cursor: not-allowed; }
   .empty { opacity: 0.6; font-style: italic; }
   .error { color: #f88; font-size: 12px; }
+  .notice { color: #ffd060; font-size: 13px; }
 </style>
