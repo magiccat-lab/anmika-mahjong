@@ -87,4 +87,4 @@ export function playSound(src: string, volume = 1): HTMLAudioElement | null {
  * - anmika-1.0.0 … 2026-09-14 時点。7萬の符を么九扱いにした / 超過ハン祝儀を数え役満にも /
  *   嵌八萬を超過ハンの母数で 8 翻 / 神ぽっちのドラを表裏で分ける、までを含む
  */
-export const ANMIKA_RULE_VERSION = 'anmika-1.0.0';
+export { ANMIKA_RULE_VERSION } from './ruleVersion';
