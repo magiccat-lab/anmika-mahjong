@@ -316,3 +316,33 @@ export function fanshuLevel(fanshu: number, fu: number): number {
   return 0;
 }
 export const LEVEL_TO_FANSHU = [0, 1, 2, 3, 4, 6, 8, 11, 13, 18, 24];
+
+/** 夏で上げた後の基本点 [2000 = 満貫 ・ 3000 = 跳満 …]。夏が無ければ null。
+ *  _basePointOverride が無い時 [オンラインの投影で _ 付きの鍵が落ちた時など] は
+ *  hupai の「夏 [打点ランクアップ X→Y基本点]」「夏 [本役満ランクアップ X→Y基本点]」から Y を取る。 */
+export function natsuBasePoint(result: any): number | null {
+  const o = Number(result?._basePointOverride);
+  if (o > 0) return o;
+  for (const h of result?.hupai ?? []) {
+    const m = typeof h?.name === 'string' ? h.name.match(/ランクアップ \d+→(\d+)基本点/) : null;
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+
+/** 基本点 → 打点段階の名前 [夏の梯子どおり] */
+export const BASE_POINT_TIER: Record<number, { level: number; label: string }> = {
+  2000: { level: 4, label: '満貫' }, 3000: { level: 5, label: '跳満' }, 4000: { level: 6, label: '倍満' },
+  6000: { level: 7, label: '三倍満' }, 8000: { level: 8, label: '役満' }, 10000: { level: 9, label: '五倍満' },
+  12000: { level: 10, label: '六倍満' },
+};
+
+/** 夏の段上げを入れた打点段階 [Lv]。
+ *  [2026-10-09 リョー報告「表示満貫になってたしマンさん筋肉発動してたよ」] 夏は満貫以上だと翻を増やさず
+ *  基本点だけ上げるので、fanshuLevel(fanshu) だけ見ると跳満に上がった手を満貫と取り違える。
+ *  面前満貫 3→29 の判定と和了パネルの段の表示はこれで見る。夏が無い手は fanshuLevel と同じ。 */
+export function effectiveLevel(result: any): number {
+  const base = natsuBasePoint(result);
+  if (base !== null && BASE_POINT_TIER[base]) return BASE_POINT_TIER[base].level;
+  return typeof result?.fanshu === 'number' ? fanshuLevel(result.fanshu, result.fu ?? 30) : 0;
+}

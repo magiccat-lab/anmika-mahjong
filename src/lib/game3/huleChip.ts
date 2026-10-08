@@ -8,7 +8,7 @@
 //
 // 関数自体は this 依存ナシの pure 形、 class 側は wrap method で互換維持。
 
-import { dlog, fanshuLevel, isNijiPai, toCorePai } from '../helpers';
+import { dlog, effectiveLevel, isNijiPai, toCorePai } from '../helpers';
 import { tulipNeighbors } from './tulip';
 import type { PlayerId } from './chip';
 import { hasGoldKita as hasGoldKitaTile, type GoldHand } from './gold';
@@ -669,9 +669,11 @@ export function applyChipsOnHule(
   // 4 翻は符にかかわらずアンミカの満貫段階。切り上げ満貫も同じ対象にする。
   // [2026-07-17 リョー指摘] 対象は「満貫段階 [Lv4] ちょうど」のみ。
   // ハネ満以上・役満は 29 枚ルールの対象外 [従来 >=4 で倍満でも発動していた]
+  // [2026-10-09 リョー報告「マンさん筋肉発動してたよ」] 夏で跳満以上に上がった手は満貫ではない。
+  // 夏の段上げを入れた段階で見る [夏で満貫に届いた手は対象]。
   const isMangan = typeof result.fanshu === 'number'
     && !((result.damanguan ?? 0) > 0)
-    && fanshuLevel(result.fanshu, result.fu ?? 30) === 4;
+    && effectiveLevel(result) === 4;
   const boostedPayers: PlayerId[] = [];
   if (isMenzen3 && isMangan) {
     for (const payer of [0, 1, 2] as PlayerId[]) {

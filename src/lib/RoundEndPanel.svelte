@@ -1,6 +1,7 @@
 ﻿
 <script lang="ts">
   import Tile from './Tile.svelte';
+  import { BASE_POINT_TIER, natsuBasePoint } from './helpers';
   import type { FulouMianzi } from './fulouDisplay';
   export let lastWinner: number | null;
   export let huleResult: any;
@@ -45,7 +46,9 @@
     if (fanshu >= 5) return '満貫';
     return null;
   }
-  $: tier = tierLabel(Number(huleResult.fanshu) || 0);
+  // [2026-10-09 リョー報告「表示満貫になってたし」] 夏で上げた段は翻に出ないので、基本点から段の名前を取る
+  $: natsuBase = natsuBasePoint(huleResult);
+  $: tier = (natsuBase !== null && BASE_POINT_TIER[natsuBase]?.label) || tierLabel(Number(huleResult.fanshu) || 0);
 </script>
 
 <section class="hule-panel">
@@ -57,7 +60,7 @@
     {/if}
     <span class="winner">{lastWinner !== null ? (names[lastWinner] ?? `P${lastWinner}`) : ''} 和了</span>
     <span class="score">{huleResult.fu ?? 0}符 {huleResult.fanshu ?? 0}翻</span>
-    {#if tier}<span class="tier-chip tier-{tier === '役満' ? 'yakuman' : 'big'}">{tier}</span>{/if}
+    {#if tier}<span class="tier-chip tier-{['役満', '五倍満', '六倍満'].includes(tier) ? 'yakuman' : 'big'}">{tier}</span>{/if}
     <span class="defen">{Math.round($defenTween).toLocaleString()}<span class="defen-unit">点</span></span>
   </div>
 
