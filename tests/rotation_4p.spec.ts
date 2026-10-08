@@ -4,7 +4,7 @@
 //       抜け番表示 [試合1は4人目=CPU3] + 部屋チップバー → 満室 join 拒否 → 盤面同期
 import { test, expect, BrowserContext, Page } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 async function fakeLogin(ctx: BrowserContext, user_id: string, username: string): Promise<void> {
   const r = await ctx.request.post(`${BASE}/auth/test/login`, {

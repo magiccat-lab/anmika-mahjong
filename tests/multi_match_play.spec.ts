@@ -1,7 +1,7 @@
 // 連続複数試合 + ダブロン + 副露 候補 維持 検証 [R13 codex fix 後]
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 test('連続 3 試合 play-through: 各試合 finished 到達、 chip 持越し、 state 整合', async ({ page }) => {
   test.setTimeout(300000);

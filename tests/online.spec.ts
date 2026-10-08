@@ -1,14 +1,16 @@
 // オンライン対戦 自動テスト [拡張版]
 // 前提: server を ANMIKA_TEST_AUTH=1 で起動 [POST /auth/test/login が有効]
 // 使い方: npx playwright test tests/online.spec.ts
-//   ANMIKA_BASE_URL=http://127.0.0.1:8080 npx playwright test tests/online.spec.ts --headed
+//   ANMIKA_BASE_URL=http://127.0.0.1:18990 npx playwright test tests/online.spec.ts --headed
+// [2026-10-09 遊真 D1] 既定の接続先は tools/run_online_e2e.mjs の隔離スタック [18990]。
+//   本番 [8790 / 8080 / anmika.magiccatlab.com] は既定にしない [部屋を作る test が本番 DB に書く]。通常は `node tools/run_online_e2e.mjs`
 //
 // test 1: 2 client + CPU 1 [配牌同期 + 1 打牌反映]
 // test 2: 2 client + CPU 1 [多巡 desync 検出 = 両 view の game.state を直接 diff]
 // test 3: 3 human client [cpu_count=0、 実 gameplay 同等の構成]
 import { test, expect, BrowserContext, Page } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 async function fakeLogin(ctx: BrowserContext, user_id: string, username: string): Promise<void> {
   const r = await ctx.request.post(`${BASE}/auth/test/login`, {

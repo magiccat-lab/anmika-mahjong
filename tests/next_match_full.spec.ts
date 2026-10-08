@@ -1,7 +1,7 @@
 // end-to-end 自走テスト: 「次の試合へ」 button click → UI 上で chip 反映 確認
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 test('次の試合へ button click で finalScore が chip 表示に反映', async ({ page }) => {
   test.setTimeout(120000);

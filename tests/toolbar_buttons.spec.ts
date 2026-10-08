@@ -2,7 +2,7 @@
 //   リョー指示 2026-05-14: 「リーチ棒 / ポン button 等 基礎的な所で error あって困った」
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'http://localhost:8080';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 test.describe('toolbar 基礎 button gate [single mode]', () => {
   test('single mode entry → table 表示まで', async ({ page }) => {

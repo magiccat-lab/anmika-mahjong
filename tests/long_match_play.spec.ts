@@ -1,7 +1,7 @@
 // 連続 10 試合 play-through [長時間 e2e、 chip drift / nextMatch transition / state corruption 洗い出し]
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 const N_MATCHES = Number(process.env.ANMIKA_N_MATCHES ?? 5);
 
 test(`連続 ${N_MATCHES} 試合 play-through: 各試合 finished 到達 / chip 持越し / state 整合 / drift なし`, async ({ page }) => {

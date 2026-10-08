@@ -1,7 +1,7 @@
 // 「次の試合へ」 chip 持越し + 自家手牌 face=up regression [2026-05-14 リョー報告 fix]
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 test('single mode: 自家手牌は face=up', async ({ page }) => {
   await page.goto(BASE);

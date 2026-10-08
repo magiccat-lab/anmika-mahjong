@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 test('menu shows two buttons + single mode starts', async ({ page }) => {
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });

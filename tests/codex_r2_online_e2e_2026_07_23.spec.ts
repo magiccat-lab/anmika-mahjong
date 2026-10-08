@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
-const BASE = process.env.ANMIKA_BASE_URL ?? "http://127.0.0.1:8790";
+const BASE = process.env.ANMIKA_BASE_URL ?? "http://127.0.0.1:18990";
 
 type Client = {
   ctx: BrowserContext;
