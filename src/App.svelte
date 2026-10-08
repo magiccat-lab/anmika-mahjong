@@ -3160,7 +3160,10 @@
        [秋ドラ表示を上がりまで隠すため]。この panel が唯一の金北UIなので、
        pendingKinpei 単独でも開くようにしないと single で操作手段が消えて詰む -->
   {#if ($game.lastHuleResult || state.finished || $game.pendingPingju || $game.pendingKinpei) && viewMode === 'single'}
-    <div class="agari-unified-panel" class:appear-after-cutin={!!$game.lastHuleResult && !state.finished}>
+    <!-- 2026-10-08 fix [リョー報告「今がめんが写ってない」]: 金北選択の間は lastHuleResult が
+         まだ無いので左の和了欄が空になり、白い板が盤面を覆っていた。この間は選択の帯だけにして盤面を見せる -->
+    <div class="agari-unified-panel" class:appear-after-cutin={!!$game.lastHuleResult && !state.finished}
+      class:kinpei-only={!!$game.pendingKinpei && !$game.lastHuleResult && !state.finished && !$game.pendingPingju}>
       <div class="agari-left" class:pingju-only={$game.pendingPingju && !$game.lastHuleResult && !state.finished}>
         {#if state.finished}
           <GameEndPanel names={seatDisplayNames} ranking={$game.game.getRanking()} zifengZ={(p) => $game.game.zifengZ(p as any)} chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)} finalScore={$game.game.getFinalScore()} />
@@ -4592,6 +4595,25 @@
   /* 和了時はロン/ツモ cutin [1.85s] を先に見せ、被って濁らないよう遅らせて登場 */
   main.mode-single .agari-unified-panel.appear-after-cutin {
     animation-delay: 1.35s;
+  }
+  /* 金北選択だけの間は白い板を出さず、盤面の下側に選択の帯だけ置く [2026-10-08 リョー報告] */
+  main.mode-single .agari-unified-panel.kinpei-only {
+    top: auto;
+    grid-template-rows: auto;
+    overflow: visible;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+  main.mode-single .agari-unified-panel.kinpei-only .agari-left {
+    display: none;
+  }
+  main.mode-single .agari-unified-panel.kinpei-only .kinpei-inline {
+    grid-row: 1;
+    background: linear-gradient(160deg, rgba(255, 253, 246, 0.97), rgba(243, 235, 213, 0.97));
+    border: 2px solid #c0a040;
+    box-shadow: 0 0 0 4px rgba(212, 175, 55, 0.22), 0 12px 32px rgba(0, 0, 0, 0.45);
   }
   @keyframes agariPanelIn {
     0% { opacity: 0; transform: translateY(26px) scale(0.97); }
