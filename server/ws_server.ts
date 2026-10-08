@@ -1494,6 +1494,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       // WSA: 復元した started room に deadline を再設定 [Node再起動後の自動進行停止を防ぐ]
       if (room.authority && room.snapshot.started) {
         scheduleRoomDeadline(room);
+        // [2026-10-09 遊真 A2] 再起動直後は全員未接続。戻ってこない人の席も猶予後に CPU 代行へ回す
+        for (const member of room.members.values()) {
+          if (!member.is_cpu && !member.connected) armCpuProxyTimer(room, member);
+        }
         // [2026-10-09 遊真 A3] 再起動をまたいで未保存だった終了済み試合を保存する
         // [match_uuid が一意なので、保存済みなら API 側で重複扱いになるだけ]
         maybeRecordMatch(room);
