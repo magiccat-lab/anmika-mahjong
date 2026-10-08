@@ -70,8 +70,18 @@ describe('抜け番 host の nextMatch 代行 [Phase4 room control]', () => {
     expect(resolved.actorRoomSeat).toBe(0); // 監査痕跡は host の room seat
   });
 
-  it('host 以外の抜け番の nextMatch は拒否のまま', () => {
+  // [2026-10-09 遊真 A3] host が落ちても次の試合へ進めるよう、CPU でない room member なら誰の nextMatch でも通す
+  it('host 以外の抜け番の nextMatch も active game seat 0 の代行で通る', () => {
     const resolved = resolveActorSeat(room('host-uid'), 'other-uid', 0, { type: 'nextMatch' });
+    expect(resolved.reason).toBeNull();
+    expect(resolved.actorSeat).toBe(0);
+    expect(resolved.actorRoomSeat).toBe(0);
+  });
+
+  it('CPU 席の uid からの nextMatch は抜け番では拒否される', () => {
+    const cpuRoom = room('host-uid');
+    cpuRoom.members.set('CPU_X', { user_id: 'CPU_X', seat: 0, is_cpu: true });
+    const resolved = resolveActorSeat(cpuRoom, 'CPU_X', 0, { type: 'nextMatch' });
     expect(resolved.reason).toMatch(/inactive/);
   });
 

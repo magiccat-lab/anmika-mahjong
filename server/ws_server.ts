@@ -27,11 +27,18 @@ import {
   type RoomStartSnapshot,
 } from './protocol';
 import { activeTrioForStart, computeRoomChipDelta, foldRoomState, gameToRoomSeat, initialRoomChipLedger, mappingFor, nextMappingForMatch, roomToGameSeat } from './rotation';
+import { ANMIKA_RULE_VERSION } from '../src/lib/ruleVersion';
 
 const DEFAULT_PORT = 8791;
 const DEFAULT_REACTION_TIMEOUT_MS = 15_000;
 const DEFAULT_TURN_TIMEOUT_MS = 60_000;
 const DEFAULT_DISCONNECT_GRACE_MS = 30_000;
+// [2026-10-09 遊真 A2] 切断から 15 秒で CPU が代わりに打つ。戻ったら席を返す
+const DEFAULT_CPU_PROXY_GRACE_MS = 15_000;
+// CPU 代行席の 1 手 / 反応窓の待ち [CPU 席と同じ 750ms]
+const CPU_PROXY_STEP_MS = 750;
+// [2026-10-09 遊真 A3] 終わった試合の保存 POST の再試行間隔 [1 回目は即時]
+const DEFAULT_MATCH_RECORD_RETRY_DELAYS_MS = [0, 2_000, 5_000];
 // [2026-07-22 リョー要望: 全員ready制] 30s 自動進行は廃止。timeout は AFK/切断時の最終保険のみ
 const DEFAULT_NEXT_ROUND_TIMEOUT_MS = 180_000;
 const SERVER_NEXT_ROUND_UID = '__server_next_round__';
@@ -70,6 +77,18 @@ type Member = RoomMemberSnapshot & {
   ws: WebSocket | null;
   generation: number;
   connected: boolean;
+  // [2026-10-09 遊真 A2] true の間、この席は CPU が代わりに打つ [切断 15 秒後 / host の「CPU に切替」]。
+  // 本人が戻る [再接続・コマンド送信・自分で打つ] と false に戻る
+  cpuProxy: boolean;
+};
+
+// [2026-10-09 遊真 C1] 「誰を・あと何 ms 待っているか」。seats は room seat 契約。
+// endsAt は performance.now() 基準 [壁時計は WSL2 で飛ぶ]
+type DeadlineInfo = {
+  kind: 'turn' | 'reaction' | 'postWin';
+  seats: number[];
+  endsAt: number;
+  revision: number;
 };
 
 type Room = {
@@ -97,6 +116,12 @@ type Room = {
   nextRoundReadySeats: Set<number>;
   // [2026-07-23 リョー指示] チップリセット同意 vote [human 席]。全員揃った時だけ nextMatch で発動
   chipResetVotes: Set<number>;
+  // [2026-10-09 遊真 A2] user_id → 切断から CPU 代行までの猶予 timer
+  cpuProxyTimers: Map<string, ReturnType<typeof setTimeout>>;
+  // [2026-10-09 遊真 C1] 直近に張った人間待ちの期限 [無ければ null]
+  deadlineInfo: DeadlineInfo | null;
+  // [2026-10-09 遊真 A3] サーバーが保存 POST を出した試合の `${roomInstanceId}:${matchId}`
+  recordedMatchKeys: Set<string>;
 };
 
 export type WsRuntimeOptions = {
@@ -109,7 +134,11 @@ export type WsRuntimeOptions = {
   reactionTimeoutMs?: number;
   turnTimeoutMs?: number;
   disconnectGraceMs?: number;
+  /** [2026-10-09 遊真 A2] 切断から CPU 代行に切り替わるまで [env ANMIKA_CPU_PROXY_GRACE_MS、既定 15000] */
+  cpuProxyGraceMs?: number;
   nextRoundTimeoutMs?: number;
+  /** [2026-10-09 遊真 A3] 試合保存 POST の再試行までの待ち [既定 0 / 2s / 5s の 3 回] */
+  matchRecordRetryDelaysMs?: number[];
   /** [2026-07-24 Sol設計] test 専用 control seam。env では有効化できず、
    *  test harness entry [server/ws_server_test_harness.ts] だけが true を渡す。
    *  production CLI entry [createWsRuntime()] では常に無効 = endpoint は 404 */
@@ -201,6 +230,51 @@ export function currentMatchRoomDelta(
     if (member) byUser[member.user_id] = value;
   }
   return { bySeat, byUser };
+}
+
+/** [2026-10-09 遊真 A3] /internal/match-result の応答本体を純関数に切り出した物。
+ *  endpoint と、サーバー自身による試合保存 [maybeRecordMatch] が同じ形を使う。
+ *  await を挟まず同期で組む [単一時点 snapshot]。snapshot.start が無ければ null */
+export function buildMatchResult(
+  snapshot: CanonicalRoomSnapshot,
+  authority: RoomAuthority,
+  commands: readonly AcceptedRoomCommand[],
+) {
+  if (!snapshot.start) return null;
+  const state = authority.canonicalState();
+  const finished = state.game.state.finished === true;
+  const matchLedger = finished ? authority.matchResultLedger() : state.game.chipLedger;
+  // [2026-07-23 4人回し Phase5] start.members 直引きをやめ mapping 写像で user を引く。
+  // rotation 部屋向けに、抜け番の dice 分を含む現試合の room ledger delta も同梱する
+  const ledger = ledgerByUserId(snapshot, matchLedger ?? null);
+  const roomDelta = currentMatchRoomDelta(snapshot, commands);
+  // [Sol最終レビュー P1-2] 現試合の active trio [user_id + game seat]。
+  // live の room_members DB でなく start snapshot 由来 [対局中 leave/evict 後の
+  // POST でも試合開始時点の参加者を保存できる]。python 側 members_json の SSoT
+  const rosterForActive = snapshot.start.roomMembers ?? snapshot.start.members;
+  const mappingForActive = snapshot.activeMapping ?? null;
+  const activeMembers = mappingForActive
+    ? mappingForActive.gameToRoom
+      .map((roomSeat, gameSeat) => {
+        const member = rosterForActive.find((m) => m.seat === roomSeat);
+        return member ? { user_id: member.user_id, seat: gameSeat } : null;
+      })
+      .filter((m): m is { user_id: string; seat: number } => m !== null)
+    : snapshot.start.members.map((m) => ({ user_id: m.user_id, seat: m.seat }));
+  return {
+    ok: true,
+    finished,
+    ledger,
+    matchId: snapshot.matchId ?? null,
+    roomInstanceId: snapshot.roomInstanceId ?? null,
+    rotationEnabled: snapshot.start.rotationEnabled === true,
+    activeMapping: snapshot.activeMapping ?? null,
+    activeMembers,
+    roomLedgerDelta: roomDelta.byUser,
+    roomLedgerDeltaBySeat: roomDelta.bySeat,
+    roomChipLedger: snapshot.roomChipLedger ?? null,
+    events: (state.game.events ?? []).slice(0, 20000),
+  };
 }
 
 /** A Shuvari player cannot waive a legal ron, even when their decision is
@@ -1162,12 +1236,32 @@ function sendSync(
 function lobbyPayload(room: Room) {
   return {
     type: 'lobby',
-    members: Array.from(room.members.values())
-      .sort((a, b) => a.seat - b.seat)
-      .map(({ seat, user_id, username, is_cpu, connected }) => ({
-        seat, user_id, username, is_cpu, connected,
-      })),
+    members: currentMembersPayload(room),
   };
+}
+
+/** [2026-10-09 遊真 A2] lobby と sync.currentMembers の共通形。cpu_proxy = CPU が代わりに打っている席 */
+function currentMembersPayload(room: Room) {
+  return Array.from(room.members.values())
+    .sort((a, b) => a.seat - b.seat)
+    .map(({ seat, user_id, username, is_cpu, connected, cpuProxy }) => ({
+      seat, user_id, username, is_cpu, connected, cpu_proxy: cpuProxy === true,
+    }));
+}
+
+/** [2026-10-09 遊真 A2] 人間が 1 人でも接続していて、かつ CPU 代行に回っていない = 卓を見ている者がいる */
+function hasPilot(room: Room): boolean {
+  for (const member of room.members.values()) {
+    if (!member.is_cpu && member.connected && !member.cpuProxy) return true;
+  }
+  return false;
+}
+
+/** [2026-10-09 遊真 A2] この席の手を CPU ロジックが打つか。代行席は「見ている人間」がいる間だけ。
+ *  全員いなくなった卓を CPU が最後まで自動で打ち切らない [既存の全員切断 cleanup に任せる] */
+function cpuDriven(room: Room, member: Member | undefined | null): boolean {
+  if (!member) return false;
+  return member.is_cpu || (member.cpuProxy === true && hasPilot(room));
 }
 
 export function resolveActorSeat(room: Room, uid: string, seat: number, action: Record<string, unknown>) {
@@ -1177,10 +1271,11 @@ export function resolveActorSeat(room: Room, uid: string, seat: number, action: 
   // Phase4 の server control command 化で別経路になる]
   const gameSeat = roomToGameSeat(room.snapshot?.activeMapping ?? null, seat);
   if (gameSeat === null) {
-    // [2026-07-23 4人回し Phase4] host の nextMatch は room control。抜け番 host でも
-    // 出せるよう active game seat 0 を代行させる [nextMatch は席非依存の遷移で、
-    // fromUserId=host uid が監査痕跡に残る。envelope の commandId 冪等性も維持]
-    if (action.type === 'nextMatch' && uid === room.hostUserId) {
+    // [2026-07-23 4人回し Phase4] nextMatch は room control。抜け番でも出せるよう
+    // active game seat 0 を代行させる [nextMatch は席非依存の遷移で、
+    // fromUserId=押した人の uid が監査痕跡に残る。envelope の commandId 冪等性も維持]
+    // [2026-10-09 遊真 A3] host 限定をやめ、CPU でない room member なら誰でも [host が落ちても次の試合へ進める]
+    if (action.type === 'nextMatch' && !room.members?.get(uid)?.is_cpu) {
       return { actorSeat: 0, actorRoomSeat: seat, reason: null };
     }
     return { actorSeat: seat, actorRoomSeat: seat, reason: 'inactive seat cannot send game actions' };
@@ -1206,8 +1301,13 @@ function validateAction(room: Room, uid: string, seat: number, action: Record<st
       return { actorSeat: actor.actorSeat, actorRoomSeat: actor.actorRoomSeat, reason: `${action.type}: player ${String(target)} != actor ${actor.actorSeat}` };
     }
   }
-  if (action.type === 'nextMatch' && uid !== room.hostUserId) {
-    return { actorSeat: actor.actorSeat, actorRoomSeat: actor.actorRoomSeat, reason: 'nextMatch requires host' };
+  // [2026-10-09 遊真 A3] nextMatch は host 限定をやめ、CPU でない room member なら誰でも押せる
+  // [観戦者は room.members に居ないのでここへ来ない / 来ても member 照合で拒否]
+  if (action.type === 'nextMatch') {
+    const actorMember = room.members.get(uid);
+    if (!actorMember || actorMember.is_cpu) {
+      return { actorSeat: actor.actorSeat, actorRoomSeat: actor.actorRoomSeat, reason: 'nextMatch requires a room member' };
+    }
   }
   // [2026-07-22 リョー要望: 全員が次局へを押したら進む] client 直送の nextRound は廃止。
   // readyNextRound が全員分揃った時 [または timeout] に server だけが発行する [uid は偽装不可]
@@ -1232,6 +1332,12 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
   const turnTimeoutMs = options.turnTimeoutMs ?? Number(process.env.ANMIKA_TURN_TIMEOUT_MS || DEFAULT_TURN_TIMEOUT_MS);
   const disconnectGraceMs = options.disconnectGraceMs ?? Number(process.env.ANMIKA_DISCONNECT_GRACE_MS || DEFAULT_DISCONNECT_GRACE_MS);
   const nextRoundTimeoutMs = options.nextRoundTimeoutMs ?? Number(process.env.ANMIKA_NEXT_ROUND_TIMEOUT_MS || DEFAULT_NEXT_ROUND_TIMEOUT_MS);
+  // [2026-10-09 遊真 A2] 切断から CPU が代わりに打ち始めるまで
+  const cpuProxyGraceMs = options.cpuProxyGraceMs ?? Number(process.env.ANMIKA_CPU_PROXY_GRACE_MS || DEFAULT_CPU_PROXY_GRACE_MS);
+  const matchRecordRetryDelaysMs = options.matchRecordRetryDelaysMs ?? DEFAULT_MATCH_RECORD_RETRY_DELAYS_MS;
+  // [2026-10-09 遊真 A3] 保存 POST の再試行待ち timer。runtime.close() で止める
+  const matchRecordTimers = new Set<ReturnType<typeof setTimeout>>();
+  let closing = false;
   // [2026-09-02 codex監査 P0] active 3席に人間がいない部屋 [4人回しで host が抜け番 + CPU 3席 等] は
   // ready を押せる者が存在せず局終了で永久停止する。その時だけ server がこの待ち時間で次局へ進める
   const noActiveHumanNextRoundMs = Number(process.env.ANMIKA_NO_HUMAN_NEXT_ROUND_MS || 2000);
@@ -1323,6 +1429,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       if (cached.deadlineTimer) clearTimeout(cached.deadlineTimer);
       if (cached.cleanupTimer) clearTimeout(cached.cleanupTimer);
       if (cached.nextRoundTimer) clearTimeout(cached.nextRoundTimer);
+      clearCpuProxyTimers(cached);
       for (const member of cached.members.values()) member.ws?.close(4002, 'room session replaced');
       rooms.delete(roomId);
     }
@@ -1357,9 +1464,12 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       nextRoundReadyRevision: null,
       nextRoundReadySeats: new Set<number>(),
       chipResetVotes: new Set<number>(),
+      cpuProxyTimers: new Map(),
+      deadlineInfo: null,
+      recordedMatchKeys: new Set<string>(),
     };
     for (const member of snapshot.start?.members ?? []) {
-      room.members.set(member.user_id, { ...member, ws: null, generation: 0, connected: false });
+      room.members.set(member.user_id, { ...member, ws: null, generation: 0, connected: false, cpuProxy: false });
     }
     // Publish before the HTTP member lookup so simultaneous sockets share one
     // room object and therefore one command queue.
@@ -1378,11 +1488,15 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           ws: previous?.ws ?? null,
           generation: previous?.generation ?? 0,
           connected: previous?.connected ?? false,
+          cpuProxy: previous?.cpuProxy ?? false,
         });
       }
       // WSA: 復元した started room に deadline を再設定 [Node再起動後の自動進行停止を防ぐ]
       if (room.authority && room.snapshot.started) {
         scheduleRoomDeadline(room);
+        // [2026-10-09 遊真 A3] 再起動をまたいで未保存だった終了済み試合を保存する
+        // [match_uuid が一意なので、保存済みなら API 側で重複扱いになるだけ]
+        maybeRecordMatch(room);
       }
     })();
     try {
@@ -1392,6 +1506,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       if (room.deadlineTimer) clearTimeout(room.deadlineTimer);
       if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
       if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
+      clearCpuProxyTimers(room);
       throw error;
     }
     return room;
@@ -1406,6 +1521,134 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       matchId: room.snapshot.matchId,
       roundId: room.snapshot.roundId,
     });
+  };
+
+  const clearCpuProxyTimer = (room: Room, userId: string): void => {
+    const timer = room.cpuProxyTimers.get(userId);
+    if (timer) clearTimeout(timer);
+    room.cpuProxyTimers.delete(userId);
+  };
+
+  const clearCpuProxyTimers = (room: Room): void => {
+    for (const timer of room.cpuProxyTimers.values()) clearTimeout(timer);
+    room.cpuProxyTimers.clear();
+  };
+
+  // [2026-10-09 遊真 A2] 切断した人間席に猶予 timer を張る。猶予が過ぎても同じ接続世代のまま
+  // 未接続なら CPU 代行 [cpuProxy] に回す。再接続 [= 新しい世代] か部屋の片付けで止まる。
+  // 状態変更は queue の中で行い、受理済みコマンドと順序を揃える
+  const armCpuProxyTimer = (room: Room, member: Member): void => {
+    if (member.is_cpu || !room.snapshot.started) return;
+    const uid = member.user_id;
+    const generation = member.generation;
+    clearCpuProxyTimer(room, uid);
+    const timer = setTimeout(() => {
+      room.cpuProxyTimers.delete(uid);
+      room.queue = room.queue.then(async () => {
+        if (rooms.get(room.roomId) !== room) return;
+        const live = room.members.get(uid);
+        if (!live || live.is_cpu || live.connected || live.generation !== generation || live.cpuProxy) return;
+        live.cpuProxy = true;
+        afterCpuProxyChange(room);
+        scheduleRoomDeadline(room);
+      }).catch((error) => warn(`[anmika-ws] cpu proxy arm failed room=${room.roomId}`, error));
+    }, cpuProxyGraceMs);
+    room.cpuProxyTimers.set(uid, timer);
+  };
+
+  // [2026-10-09 遊真 A2] cpuProxy が変わった時の共通後始末 [lobby 通知 + ready gate の再評価]。
+  // 代行席は ready を押せないので required / total から外れる。期限の張り直しは呼び側が行う
+  const afterCpuProxyChange = (room: Room): void => {
+    broadcast(room, lobbyPayload(room));
+    if (room.nextRoundReadyRevision === room.snapshot.revision && room.nextRoundReadySeats.size > 0) {
+      broadcast(room, nextRoundReadyPayload(room));
+      maybeAdvanceAllReady(room, room.nextRoundReadyRevision);
+    }
+  };
+
+  // [2026-10-09 遊真 C1] 「誰を何 ms 待っているか」を配る。seats は room seat 契約
+  const deadlinePayload = (info: DeadlineInfo) => ({
+    type: 'deadline',
+    kind: info.kind,
+    seats: info.seats,
+    remainingMs: Math.max(0, Math.round(info.endsAt - performance.now())),
+    revision: info.revision,
+  });
+
+  const sendDeadlineStateTo = (ws: WebSocket | null, room: Room): void => {
+    if (room.deadlineInfo) sendJson(ws, deadlinePayload(room.deadlineInfo));
+  };
+
+  // [2026-10-09 遊真 A3] 終わった試合をサーバー自身が API に保存する [host が落ちていても残る]。
+  // payload は同期で組み切ってから fire-and-forget で POST する [room queue は止めない]。
+  // 5xx / ネットワーク失敗は再試行 [既定 0 / 2s / 5s]、4xx は記録して打ち切り
+  const postMatchRecord = (room: Room, key: string, body: Record<string, unknown>): void => {
+    const delays = matchRecordRetryDelaysMs.length > 0 ? matchRecordRetryDelaysMs : [0];
+    let attempt = 0;
+    const run = async (): Promise<void> => {
+      if (closing) return;
+      try {
+        const response = await fetch(`${apiBase}/api/internal/matches/record`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Anmika-Internal-Secret': internalApiSecret },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(15_000),
+        });
+        await response.text().catch(() => '');
+        if (response.ok) {
+          log(`[anmika-ws] match recorded room=${room.roomId} match=${String(body.match_uuid)} attempt=${attempt + 1}`);
+          return;
+        }
+        if (response.status >= 400 && response.status < 500) {
+          warn(`[anmika-ws] match record rejected room=${room.roomId} status=${response.status}`);
+          return;
+        }
+        warn(`[anmika-ws] match record failed room=${room.roomId} status=${response.status} attempt=${attempt + 1}`);
+      } catch (error) {
+        warn(`[anmika-ws] match record error room=${room.roomId} attempt=${attempt + 1}`, error);
+      }
+      attempt += 1;
+      if (attempt >= delays.length || closing) {
+        // 全回失敗: 次に終了済み局面で action が通った時 [nextMatch 等] にもう一度試せるよう鍵を戻す
+        room.recordedMatchKeys.delete(key);
+        return;
+      }
+      schedule(delays[attempt]);
+    };
+    const schedule = (delayMs: number): void => {
+      const timer = setTimeout(() => { matchRecordTimers.delete(timer); void run(); }, Math.max(0, delayMs));
+      timer.unref?.();
+      matchRecordTimers.add(timer);
+    };
+    schedule(delays[0]);
+  };
+
+  const maybeRecordMatch = (room: Room): void => {
+    if (!internalApiSecret) return;
+    const authority = room.authority;
+    if (!authority || !room.snapshot.started || !room.snapshot.start) return;
+    try {
+      if (authority.canonicalState().game.state.finished !== true) return;
+      if (!authority.isPostWinResolved()) return;
+      const key = `${room.snapshot.roomInstanceId}:${room.snapshot.matchId}`;
+      if (room.recordedMatchKeys.has(key)) return;
+      const result = buildMatchResult(room.snapshot, authority, persistence.loadCommands(room.roomId));
+      if (!result) return;
+      room.recordedMatchKeys.add(key);
+      postMatchRecord(room, key, {
+        room_id: room.roomId,
+        match_uuid: `srv:${key}`,
+        rule_version: ANMIKA_RULE_VERSION,
+        finished: true,
+        ledger: result.ledger,
+        rotationEnabled: result.rotationEnabled,
+        roomLedgerDelta: result.roomLedgerDelta,
+        activeMembers: result.activeMembers,
+        events: result.events,
+      });
+    } catch (error) {
+      warn(`[anmika-ws] match record build failed room=${room.roomId}`, error);
+    }
   };
 
   const acceptAction = (
@@ -1468,6 +1711,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         }
         // 自動消化で revision が進んでいるため、この nextMatch 自体の baseline を取り直す
         previous = room.snapshot;
+        // [2026-10-09 遊真 A3] 終わった試合を、新しい試合に置き換わる前に保存する
+        maybeRecordMatch(room);
       }
       if (action.type === 'nextMatch') {
         // [2026-07-23 リョー指示] チップリセットは全員の同意がないとできない。
@@ -1561,6 +1806,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       warn(`[anmika-ws] persistence rollback room=${room.roomId}`, error);
       return { reason: 'persistence failure' };
     }
+    // [2026-10-09 遊真 A3] この action で試合が終わり切った [post-win 解決済み] ならサーバーが保存する
+    maybeRecordMatch(room);
     return { reason: null, command: appended.command, ack };
   };
 
@@ -1574,7 +1821,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     type: 'nextRoundReady',
     revision: room.nextRoundReadyRevision,
     seats: [...room.nextRoundReadySeats].sort((a, b) => a - b),
-    total: Math.max(1, activeHumanMembers(room).length),
+    // [2026-10-09 遊真 A2] CPU 代行席は押せないので分母から外す
+    total: Math.max(1, activeHumanMembers(room).filter((m) => !m.cpuProxy).length),
   });
 
   const sendNextRoundReadyStateTo = (ws: WebSocket, room: Room) => {
@@ -1619,8 +1867,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     if (room.nextRoundReadyRevision !== revision || room.snapshot.revision !== revision) return;
     // 切断中の人間は押せないので gate から除外 [復帰しないケースは timeout fallback が拾う]
     // [Phase3] 抜け番も gate から除外 [active human の全押しで進む]
+    // [2026-10-09 遊真 A2] CPU 代行席も除外 [押せない]
     const required = activeHumanMembers(room)
-      .filter((m) => m.connected)
+      .filter((m) => m.connected && !m.cpuProxy)
       .map((m) => m.seat);
     if (required.length === 0) return;
     if (!required.every((seat) => room.nextRoundReadySeats.has(seat))) return;
@@ -1724,8 +1973,28 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
   const scheduleRoomDeadline = (room: Room): void => {
     if (room.deadlineTimer) clearTimeout(room.deadlineTimer);
     room.deadlineTimer = null;
+    room.deadlineInfo = null;
     const authority = room.authority;
     if (!authority) return;
+
+    // [2026-10-09 遊真 C1] 人間を待つ期限を張った時だけ info を残して配る。人間待ちが無い
+    // [CPU / CPU 代行の手番、局終了 等] 時は kind:'none' を配って client の表示を消させる。
+    // seats は game seat で受け、room seat [4人回しの写像込み] に直して配る
+    const announceDeadline = (kind: DeadlineInfo['kind'] | 'none', gameSeats: number[], delayMs: number): void => {
+      const revision = room.snapshot.revision;
+      if (kind === 'none' || gameSeats.length === 0) {
+        broadcast(room, { type: 'deadline', kind: 'none', seats: [], remainingMs: 0, revision });
+        return;
+      }
+      const mapping = room.snapshot.activeMapping ?? null;
+      room.deadlineInfo = {
+        kind,
+        seats: gameSeats.map((seat) => gameToRoomSeat(mapping, seat)),
+        endsAt: performance.now() + Math.max(0, delayMs),
+        revision,
+      };
+      broadcast(room, deadlinePayload(room.deadlineInfo));
+    };
 
     const canonical = authority.canonicalState();
     let postWinOwner: number | null = null;
@@ -1781,11 +2050,19 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         : postWinAction.type === 'advanceSaiKoro' ? 2000
         : 1500;
       const humanPostWinTimeoutMs = Number(process.env.ANMIKA_POST_WIN_TIMEOUT_MS || 180_000);
-      const delay = owner?.is_cpu ? cpuStepDelay : humanPostWinTimeoutMs;
+      // [2026-10-09 遊真 A2] CPU 代行中の人間 owner も CPU の刻みで進める [180 秒待たない]
+      const armedCpu = cpuDriven(room, owner);
+      const delay = armedCpu ? cpuStepDelay : humanPostWinTimeoutMs;
+      announceDeadline(armedCpu ? 'none' : 'postWin', [postWinOwner], delay);
       room.deadlineTimer = setTimeout(() => {
         room.queue = room.queue.then(async () => {
           const live = room.authority;
           if (!live) return;
+          // 待っている間に代行が解けた / 付いた [戻った・host が切替・見る人が居なくなった] なら張り直す
+          if (cpuDriven(room, memberByGameSeat(room, postWinOwner!)) !== armedCpu) {
+            scheduleRoomDeadline(room);
+            return;
+          }
           const result = acceptAction(
             room,
             postWinOwner!,
@@ -1811,7 +2088,16 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       // [2026-09-02 codex監査 P0] 例外: active 3席に人間が一人もいない [4人回しで host が抜け番 +
       // CPU 3席、全 active 人間の追放 等] と ready gate の required が空で誰も進められない。
       // 試合が続く限り server が短い timer で nextRound を代行する [host の抜け番中でも卓が回る]
-      if (!canonical.game.state.finished && activeHumanMembers(room).length === 0 && authority.isPostWinResolved()) {
+      //
+      // [2026-10-09 遊真 A2] CPU 代行 [cpuProxy] 導入後の判定: 「ready を押せる active 人間」=
+      // active 席で接続中かつ代行でない人間。これが 0 でも、卓を見ている人間 [hasPilot = 接続中で
+      // 代行でない人間。この時点では抜け番しか居ない] がいれば進める
+      // → (1) active 席の人間が全員切断・代行で、残りの pilot が抜け番だけの部屋も進む。
+      // 逆に (2) 人間が全員切断 [= pilot 0] の部屋は進めない [全員いない卓を CPU が最後まで
+      // 自動で回し続けない。既存の全員切断 cleanup に任せる]
+      announceDeadline('none', [], 0);
+      const canPressReady = activeHumanMembers(room).some((m) => m.connected && !m.cpuProxy);
+      if (!canonical.game.state.finished && !canPressReady && hasPilot(room) && authority.isPostWinResolved()) {
         const revision = room.snapshot.revision;
         const actorRoomSeat = room.snapshot.activeMapping?.gameToRoom?.[0] ?? 0;
         room.deadlineTimer = setTimeout(() => {
@@ -1826,52 +2112,89 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     for (const candidate of authority.ponCandidates) reactionSeats.add(candidate.player);
     for (const candidate of authority.kanCandidates) reactionSeats.add(candidate.player);
     if (reactionSeats.size > 0) {
+      // [2026-10-09 遊真 A2] 反応する人間席が全員 CPU 代行なら 750ms で済ませる
+      // [人間席が 1 つでも本人操作なら従来の reactionTimeoutMs]。待たれているのは代行でない席だけ
+      const humanReactionSeats = [...reactionSeats].filter((seat) => !memberByGameSeat(room, seat)?.is_cpu);
+      const waitedSeats = humanReactionSeats.filter((seat) => !cpuDriven(room, memberByGameSeat(room, seat)));
+      const armedShort = humanReactionSeats.length > 0 && waitedSeats.length === 0;
+      const reactionDelay = armedShort ? CPU_PROXY_STEP_MS : reactionTimeoutMs;
+      announceDeadline('reaction', waitedSeats, reactionDelay);
       room.deadlineTimer = setTimeout(() => {
         room.queue = room.queue.then(async () => {
+          // 750ms で張った後に誰かが戻った等で代行でない席が出たら、その人を待つ形に張り直す
+          if (armedShort && humanReactionSeats.some((seat) => !cpuDriven(room, memberByGameSeat(room, seat)))) {
+            scheduleRoomDeadline(room);
+            return;
+          }
           for (const seat of reactionSeats) {
             const member = memberByGameSeat(room, seat); // [Phase3] reaction 候補は game seat
             if (member?.is_cpu) continue;
-            const result = acceptAction(
+            const liveAuthority = room.authority!;
+            const uid = member?.user_id ?? `deadline-seat-${seat}`;
+            // CPU 代行席は、合法なロンがあれば必ず取る [CPU と同じ]。それ以外は従来の timeout 動作 [pass / 強制ロン]
+            const proxyRon = cpuDriven(room, member) && (liveAuthority.ronCandidates as number[]).includes(seat);
+            let result = acceptAction(
               room,
               seat,
-              member?.user_id ?? `deadline-seat-${seat}`,
-              reactionTimeoutAction(room.authority!, seat),
+              uid,
+              proxyRon ? { type: 'ron', player: seat } : reactionTimeoutAction(liveAuthority, seat),
               `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
             );
+            if (!result.command && proxyRon) {
+              // ロンが通らなかった場合は pass で窓を閉じる [同じ期限を無音で張り直し続けない]
+              result = acceptAction(
+                room,
+                seat,
+                uid,
+                reactionTimeoutAction(room.authority!, seat),
+                `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
+              );
+            }
             if (result.command) broadcastAction(room, result.command);
           }
           scheduleRoomDeadline(room);
         }).catch((error) => warn('[anmika-ws] reaction deadline failed', error));
-      }, reactionTimeoutMs);
+      }, reactionDelay);
       return;
     }
 
     const current = authority.currentPlayer();
     const member = memberByGameSeat(room, current); // [Phase3] currentPlayer は game seat
+    // [2026-10-09 遊真 A2] CPU 席に加え、CPU 代行中の人間席も 750ms / CPU ロジックで打つ
+    const armedCpu = cpuDriven(room, member);
     // [2026-07-21 監査 D-15 fix] この timer を張った時点の接続世代を控える。
     // 発火までに切断→再接続で generation が上がっていたら、この timer は旧世代の
     // 期限なので無効化し、再接続時に張り直した新 timer に任せる
+    // [A2: 代行席の世代は再接続まで変わらないので、代行中の切断席の timer が永久に捨てられる事は無い]
     const scheduledGeneration = member?.generation ?? 0;
-    let delay = member?.is_cpu ? 750 : member?.connected ? turnTimeoutMs : disconnectGraceMs;
+    let delay = armedCpu ? CPU_PROXY_STEP_MS : member?.connected ? turnTimeoutMs : disconnectGraceMs;
     // [2026-07-21 監査 L-04 fix] 他家 FEVER 中の非 FEVER 者は強制ツモ切りしか選択肢が
     // 無いのに、online だけ通常手番 deadline [60s] まで手動待ちだった。single の
     // 800ms 自動進行と揃えて、強制ツモ切り確定時は権威が短い専用 deadline で発行する
     // [client は表示追従のみ]。tsumo/カン/北抜き/リーチが可能なら turnTimeoutAction が
     // tsumokiri 以外を返すので、この短縮は選択肢ゼロの局面だけに効く
-    if (member && !member.is_cpu && member.connected) {
+    if (member && !armedCpu && member.connected) {
       const someoneFever = ([0, 1, 2] as const).some((p) => authority.game.feverActive[p]);
       if (someoneFever && !authority.game.feverActive[current] && authority.lastZimo
         && turnTimeoutAction(authority, false)?.type === 'tsumokiri') {
         delay = 800;
       }
     }
+    announceDeadline(armedCpu ? 'none' : 'turn', [current], delay);
     room.deadlineTimer = setTimeout(() => {
       room.queue = room.queue.then(async () => {
         const live = room.authority;
         if (!live || live.roundEnded || live.currentPlayer() !== current) return;
         const liveMember = memberByGameSeat(room, current); // [Phase3] game seat 照合
         if (liveMember && !liveMember.is_cpu && liveMember.generation !== scheduledGeneration) return;
-        const action = turnTimeoutAction(live, member?.is_cpu === true);
+        // [A2] 待っている間に代行が解けた / 付いた [戻った・host が切替・見る人が居なくなった] なら、
+        // 古い期限のまま打たず現状に合わせて張り直す
+        const liveCpu = cpuDriven(room, liveMember);
+        if (liveCpu !== armedCpu) {
+          scheduleRoomDeadline(room);
+          return;
+        }
+        const action = turnTimeoutAction(live, liveCpu);
         if (!action) {
           scheduleRoomDeadline(room);
           return;
@@ -1979,6 +2302,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           .map(({ seat, user_id, username, is_cpu }) => ({ seat, user_id, username, is_cpu })),
       });
     }
+    // [2026-10-09 遊真 A2] 開始時点で未接続の人間席も、猶予後に CPU 代行へ回す
+    for (const member of room.members.values()) {
+      if (!member.is_cpu && !member.connected) armCpuProxyTimer(room, member);
+    }
     // [2026-07-23 観戦モード] 観戦者にも全 private マスクで start を配る
     for (const spectator of room.spectators.values()) {
       sendJson(spectator.ws, {
@@ -2008,7 +2335,18 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
   const wss = new WebSocketServer({ port });
   log(`[anmika-ws] authoritative endpoint listening on :${port}`);
 
+  // [2026-10-09 遊真 A1] listen / accept 層の error で process を落とさない [記録だけ残す]。
+  // 起動失敗 [EADDRINUSE 等] も見落とさないよう log 無効時も console.error に出す
+  wss.on('error', (error) => { console.error('[anmika-ws] wss error', error); });
+
   wss.on('connection', async (ws, request) => {
+    // [2026-10-09 遊真 A1] 最初の文として付ける [await より前]。壊れた frame [RSV1 立ち等] で
+    // ws が 'error' を emit した時、listener が無いと uncaught になり process ごと落ちていた
+    // [token 無し接続から 1 frame 送るだけで全部屋が落ちる]。terminate して close handler に任せる
+    ws.on('error', (error) => {
+      warn('[anmika-ws] socket error', error);
+      try { ws.terminate(); } catch { /* already closed */ }
+    });
     const url = new URL(request.url ?? '/', 'http://localhost');
     const path = url.pathname.match(/^\/ws\/room\/([A-Z0-9]+)$/);
     if (!path) { ws.close(4404, 'invalid path'); return; }
@@ -2049,13 +2387,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         ws,
         generation,
       });
-      const membersForSync = () => Array.from(room.members.values())
-        .sort((a, b) => a.seat - b.seat)
-        .map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected }));
-      const specSync = () => sendSync(
-        ws, room.snapshot, SPECTATOR_SEAT, room.authority,
-        persistence.loadCommands(room.roomId), membersForSync(),
-      );
+      const membersForSync = () => currentMembersPayload(room);
+      const specSync = () => {
+        sendSync(
+          ws, room.snapshot, SPECTATOR_SEAT, room.authority,
+          persistence.loadCommands(room.roomId), membersForSync(),
+        );
+        sendDeadlineStateTo(ws, room);
+      };
       const handleSpectatorMessage = (data: RawData) => {
         room.queue = room.queue.then(async () => {
           let msg: unknown;
@@ -2108,6 +2447,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           ws: cachedMember?.ws ?? null,
           generation: cachedMember?.generation ?? 0,
           connected: cachedMember?.connected ?? false,
+          cpuProxy: cachedMember?.cpuProxy ?? false,
         });
       }
     }
@@ -2124,9 +2464,12 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       ws,
       generation,
       connected: true,
+      // [2026-10-09 遊真 A2] 戻ってきたら席を返す [この後の lobby broadcast / deadline 張り直しで反映]
+      cpuProxy: false,
     };
     if (previous?.ws && previous.ws !== ws) previous.ws.close(4001, 'replaced by newer connection');
     room.members.set(payload.uid, member);
+    clearCpuProxyTimer(room, payload.uid);
 
     // [2026-09-02 yuma] client の hydrate 失敗 → resync → sync → 失敗 … が無間隔で往復すると
     // sync 毎の投影計算で server が焼ける [8/9 の 6U1V で 3 日間、毎秒数十回]。同一接続の
@@ -2137,9 +2480,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     let pendingResyncTimer: ReturnType<typeof setTimeout> | null = null;
     const sendMemberSync = () => {
       lastSyncSentAt = performance.now();
-      sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
+      sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), currentMembersPayload(room));
       sendNextRoundReadyStateTo(ws, room);
       sendChipResetVoteStateTo(ws, room);
+      sendDeadlineStateTo(ws, room);
     };
     const handleMessage = (data: RawData) => {
       room.queue = room.queue.then(async () => {
@@ -2189,6 +2533,22 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           if (value.value === true) room.chipResetVotes.add(payload.seat);
           else room.chipResetVotes.delete(payload.seat);
           broadcast(room, chipResetVotePayload(room));
+          return;
+        }
+        if ((msg as Record<string, unknown>)?.type === 'setCpuProxy') {
+          // [2026-10-09 遊真 A2] host は自分以外の人間席を CPU 代行に切り替え / 戻せる。
+          // 本人は自分の席を「自分で打つ」[on:false] にだけできる。それ以外は無視
+          const value = msg as Record<string, unknown>;
+          if (typeof value.seat !== 'number' || typeof value.on !== 'boolean') return;
+          const target = Array.from(room.members.values()).find((m) => m.seat === value.seat);
+          if (!target || target.is_cpu) return;
+          const allowed = target.user_id === payload.uid
+            ? value.on === false
+            : payload.uid === room.hostUserId;
+          if (!allowed || target.cpuProxy === value.on) return;
+          target.cpuProxy = value.on;
+          afterCpuProxyChange(room);
+          scheduleRoomDeadline(room);
           return;
         }
         if ((msg as Record<string, unknown>)?.type === 'stamp') {
@@ -2251,6 +2611,12 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           return;
         }
         broadcastAction(room, accepted.command);
+        // [2026-10-09 遊真 A2] 代行中の席の本人が指した = 戻ってきた。席を返す
+        const sender = room.members.get(payload.uid);
+        if (sender?.cpuProxy && sender.connected && sender.ws === ws) {
+          sender.cpuProxy = false;
+          afterCpuProxyChange(room);
+        }
         scheduleRoomDeadline(room);
       }).catch((error) => warn(`[anmika-ws] command queue room=${room.roomId}`, error));
     };
@@ -2262,11 +2628,16 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       if (pendingResyncTimer) { clearTimeout(pendingResyncTimer); pendingResyncTimer = null; }
       const current = room.members.get(payload.uid);
       if (!current || current.generation !== generation || current.ws !== ws) return;
+      const pilotBefore = hasPilot(room);
       current.ws = null;
       current.connected = false;
       // [2026-07-23 Sol 4周目 P1] 切断者のチップリセット同意は失効 [不同意側に倒す]
       if (room.chipResetVotes.delete(current.seat)) broadcast(room, chipResetVotePayload(room));
       broadcast(room, lobbyPayload(room));
+      // [2026-10-09 遊真 A2] 切断から cpuProxyGraceMs 後に CPU が代わりに打つ [戻れば解除]
+      armCpuProxyTimer(room, current);
+      // 卓を見ている人間が 0 になった: 代行席の自動打ちを止める [cpuDriven が false になる] ので期限を張り直す
+      if (pilotBefore && !hasPilot(room) && room.snapshot.started) scheduleRoomDeadline(room);
       // [2026-07-22 全員ready] 切断で gate 対象が減るため、待ち状態を再評価
       if (room.nextRoundReadyRevision === room.snapshot.revision && room.nextRoundReadySeats.size > 0) {
         maybeAdvanceAllReady(room, room.nextRoundReadyRevision);
@@ -2280,6 +2651,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           if (latest === room && (latestHumans.length === 0 || latestHumans.every((item) => !item.connected))) {
             if (room.deadlineTimer) clearTimeout(room.deadlineTimer);
             if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
+            clearCpuProxyTimers(room);
             rooms.delete(room.roomId);
           }
         }, disconnectGraceMs);
@@ -2288,9 +2660,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
 
     broadcast(room, lobbyPayload(room));
     if (room.snapshot.started) {
-      sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), Array.from(room.members.values()).sort((a, b) => a.seat - b.seat).map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected })));
+      sendSync(ws, room.snapshot, payload.seat, room.authority, persistence.loadCommands(room.roomId), currentMembersPayload(room));
       sendNextRoundReadyStateTo(ws, room);
       sendChipResetVoteStateTo(ws, room);
+      sendDeadlineStateTo(ws, room);
       // [2026-07-21 監査 D-15 fix] 再接続時は手番 deadline を現在時刻から張り直す。
       // scheduleRoomDeadline は冒頭で旧 timer を clearTimeout するので、切断前の
       // 残り期限で復帰直後に auto-discard される事故を防ぐ [新世代で rebase]
@@ -2324,6 +2697,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
             try { member.ws.close(4410, 'evicted'); } catch (_) { /* noop */ }
           }
           room.members.delete(user_id);
+          clearCpuProxyTimer(room, user_id);
           // [2026-07-23 Sol 7周目 P2] close handler は member 削除済みで early return する
           // ため、ここで ready gate / 同意票を直接整理する。旧実装は残り全員 ready 済みでも
           // 180s timeout まで待たされた
@@ -2364,10 +2738,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           room.authority!.forceFinishMatchForTest();
           if (room.deadlineTimer) { clearTimeout(room.deadlineTimer); room.deadlineTimer = null; }
           if (room.nextRoundTimer) { clearTimeout(room.nextRoundTimer); room.nextRoundTimer = null; }
+          room.deadlineInfo = null;
           const commands = persistence.loadCommands(room.roomId);
-          const currentMembers = Array.from(room.members.values())
-            .sort((a, b) => a.seat - b.seat)
-            .map(({ seat, user_id, username, is_cpu, connected }) => ({ seat, user_id, username, is_cpu, connected }));
+          const currentMembers = currentMembersPayload(room);
           for (const member of room.members.values()) {
             sendSync(member.ws, room.snapshot, member.seat, room.authority, commands, currentMembers);
           }
@@ -2428,41 +2801,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           return;
         }
         // ここから応答構築まで await を挟まない [event loop 1 tick 内 = 単一時点]
-        const state = authority.canonicalState();
-        const finished = state.game.state.finished === true;
-        const matchLedger = finished ? authority.matchResultLedger() : state.game.chipLedger;
-        // [2026-07-23 4人回し Phase5] start.members 直引きをやめ mapping 写像で user を引く。
-        // rotation 部屋向けに、抜け番の dice 分を含む現試合の room ledger delta も同梱する
-        const ledger = ledgerByUserId(snapshot, matchLedger ?? null);
-        const roomDelta = currentMatchRoomDelta(snapshot, persistence.loadCommands(room_id));
-        // [Sol最終レビュー P1-2] 現試合の active trio [user_id + game seat]。
-        // live の room_members DB でなく start snapshot 由来 [対局中 leave/evict 後の
-        // POST でも試合開始時点の参加者を保存できる]。python 側 members_json の SSoT
-        const rosterForActive = snapshot.start.roomMembers ?? snapshot.start.members;
-        const mappingForActive = snapshot.activeMapping ?? null;
-        const activeMembers = mappingForActive
-          ? mappingForActive.gameToRoom
-            .map((roomSeat, gameSeat) => {
-              const member = rosterForActive.find((m) => m.seat === roomSeat);
-              return member ? { user_id: member.user_id, seat: gameSeat } : null;
-            })
-            .filter((m): m is { user_id: string; seat: number } => m !== null)
-          : snapshot.start.members.map((m) => ({ user_id: m.user_id, seat: m.seat }));
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          ok: true,
-          finished,
-          ledger,
-          matchId: snapshot.matchId ?? null,
-          roomInstanceId: snapshot.roomInstanceId ?? null,
-          rotationEnabled: snapshot.start.rotationEnabled === true,
-          activeMapping: snapshot.activeMapping ?? null,
-          activeMembers,
-          roomLedgerDelta: roomDelta.byUser,
-          roomLedgerDeltaBySeat: roomDelta.bySeat,
-          roomChipLedger: snapshot.roomChipLedger ?? null,
-          events: (state.game.events ?? []).slice(0, 20000),
-        }));
+        res.end(JSON.stringify(buildMatchResult(snapshot, authority, persistence.loadCommands(room_id))));
       } catch (_) { res.writeHead(400); res.end('bad request'); }
       return;
     }
@@ -2594,6 +2934,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           if (room.deadlineTimer) clearTimeout(room.deadlineTimer);
           if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
           if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
+          clearCpuProxyTimers(room);
           rooms.delete(room_id);
         }
         res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}');
@@ -2601,6 +2942,15 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       return;
     }
     res.writeHead(404); res.end('not found');
+  });
+  // [2026-10-09 遊真 A1] 内部 API の listen 失敗 / 壊れた request で process を落とさない
+  internalHttp.on('error', (error) => { console.error('[anmika-ws] internal http error', error); });
+  internalHttp.on('clientError', (error, socket) => {
+    warn('[anmika-ws] internal http clientError', error);
+    try {
+      if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+      else socket.destroy();
+    } catch { /* socket already gone */ }
   });
   internalHttp.listen(internalPort, '127.0.0.1', () => {
     log(`[anmika-ws] internal API listening on 127.0.0.1:${internalPort}`);
@@ -2612,10 +2962,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     persistence,
     internalHttp,
     close: async () => {
+      closing = true;
+      for (const timer of matchRecordTimers) clearTimeout(timer);
+      matchRecordTimers.clear();
       for (const room of rooms.values()) {
         if (room.deadlineTimer) clearTimeout(room.deadlineTimer);
         if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
         if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
+        clearCpuProxyTimers(room);
       }
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve) => internalHttp.close(() => resolve()));
@@ -2625,4 +2979,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : '';
-if (import.meta.url === invokedPath) createWsRuntime();
+if (import.meta.url === invokedPath) {
+  // [2026-10-09 遊真 A1] 想定外の例外 / 未処理 rejection で本番 process を落とさない [スタックを残して続行]。
+  // CLI 起動だけに付ける [createWsRuntime 内に置くと test の uncaught 検知を殺す]
+  process.on('uncaughtException', (error) => {
+    console.error('[anmika-ws] uncaughtException', error?.stack ?? error);
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('[anmika-ws] unhandledRejection', (reason as Error | undefined)?.stack ?? reason);
+  });
+  createWsRuntime();
+}
