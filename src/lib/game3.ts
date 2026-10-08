@@ -457,7 +457,7 @@ export class Game3 {
 
   /** まだロン受付が閉じていない直前の打牌。次の dapai / zimo が来た時点で
    *  「その牌をロンできたのに見逃した」player にフリテンを付けて閉じる。 */
-  pendingRonWindow: { player: PlayerId; pai: string } | null = null;
+  pendingRonWindow: { player: PlayerId; pai: string; declaration?: boolean } | null = null;
 
   /** 旧牌譜・テスト互換。新規ロジックは firstTurnState と席別 predicate を使う。 */
   get diyizimo(): boolean { return hasAnyFirstTurnEligibility(this.firstTurnState); }
@@ -1547,7 +1547,11 @@ export class Game3 {
     this.discardLog[player].push({ pai: paiForHand, gold: isGold, pochi: pochiColor, tsumogiri: isTsumogiri });
     this.events.push({ type: 'dapai', player, pai: paiForHand });
     // この打牌のロン受付を開く [見逃しフリテン判定用]。次の dapai / zimo で閉じる
-    this.pendingRonWindow = { player, pai: paiForHand };
+    // declaration: リーチ宣言牌の打牌。dapai は lizhiDeclareDapai を下のこの場で戻すので、
+    // 宣言牌への放銃 [シュバ返金] は窓の側で覚えておく [2026-10-09 通報 20261009_1]
+    this.pendingRonWindow = isDeclarationDiscard
+      ? { player, pai: paiForHand, declaration: true }
+      : { player, pai: paiForHand };
     // 注: justNukidBei は ここで clear しない。 dapai 開始時点で clear すると
     //     直後の getPonCandidates [store 側] が flag false で 抜き直後 dapai を
     //     ポン可と誤判定する [ルール 2-4 「抜き直後の他家ポン不可」 違反]。
@@ -4063,10 +4067,17 @@ export class Game3 {
     this.shan.commitDoraReveal();
     // シュバリー宣言牌への放銃はリーチ不成立と同じ扱いで、シュバ権を消費しない
     // [リョー指摘 2026-07-17: 宣言牌放銃でシュバ棒が消える]。
-    // lizhiDeclareDapai は宣言者の次の自打牌まで true のため、コレが立ったまま
-    // 放銃 = 宣言牌そのものへのロンと判定できる。lateシュバは宣言牌通過後にしか
-    // 宣言できないので誤返金はない
-    if (loser !== null && this.lizhiDeclareDapai[loser] && this.shuvariActive[loser]) {
+    // 宣言牌そのものへのロンは、開いているロン窓が loser の宣言牌の打牌かで見る。
+    // [2026-10-09 通報 20261009_1「前からだが、シュバ宣言牌をロンされるとシュバ消える」]
+    // 旧実装は lizhiDeclareDapai[loser] だけを見ていたが、dapai が宣言牌を打った瞬間に
+    // false へ戻すので実際の流れでは一度も効いていなかった [07-21 のテストは手で立てていた]。
+    // 窓は次のツモ / 打牌で閉じるので、北抜き牌や次巡の打牌への放銃を誤って返金しない。
+    // lateシュバは宣言牌通過後にしか宣言できないので誤返金はない
+    const declarationRon = loser !== null && (
+      this.lizhiDeclareDapai[loser]
+      || (this.pendingRonWindow?.player === loser && this.pendingRonWindow.declaration === true)
+    );
+    if (loser !== null && declarationRon && this.shuvariActive[loser]) {
       // シュバリ宣言牌への放銃はシュバ不成立。シュバ権に加えて、宣言で供託した
       // リーチ棒 [通常 1000 / オープン 2000] も宣言者へ戻す。
       // [リョー報告 2026-07-21 再発: シュバ宣言牌ロンでシュバ棒が消える]
