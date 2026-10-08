@@ -1,7 +1,7 @@
 // リョー報告系 bug が再発しないか 整合性 ブラウザテスト [2026-05-14 自走]
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 test.describe('integrity_check: live-play 系 bug 回帰', () => {
   test('2 試合 連続: chip ledger 持越し + 全試合 face=up 維持', async ({ page }) => {

@@ -1,7 +1,7 @@
 // リョー報告 fix の実機エビデンス: face=up + 次の試合 chip 持越し
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 test('リョー報告 fix evidence: face=up + 次の試合 chip 持越し', async ({ page }) => {
   test.setTimeout(120000);

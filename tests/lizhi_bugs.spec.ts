@@ -3,7 +3,7 @@
 //   bug 2: 河で `_` 付き tile が 1 件のみ [複数 `_` でも UI 上 1 件しか rotate されない]
 import { test, expect, BrowserContext, Page } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 const HAS_SERVER_AUTH = process.env.ANMIKA_E2E_SERVER_AUTH === '1';
 const serverAuthTest = HAS_SERVER_AUTH ? test : test.skip;
 

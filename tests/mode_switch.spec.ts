@@ -2,7 +2,7 @@
 // menu → solo → メニューに戻る → online → メニューに戻る → solo を 1 page 内で繰返し state 漏れ check
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 test('オフライン↔オンライン 切替: state 漏れ無し', async ({ page }) => {
   test.setTimeout(60000);

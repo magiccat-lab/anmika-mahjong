@@ -1,7 +1,7 @@
 // 強制経路 e2e: 流局 / 山枯渇 周辺の state 整合 [R13 P2 #9 rollback regression 検出狙い]
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 test('流局強制: shan を空近くまで進めて pingju 到達 → nextRound で復帰', async ({ page }) => {
   test.setTimeout(180_000);

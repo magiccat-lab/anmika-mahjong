@@ -9,7 +9,7 @@
 //  5. window.__game.game.lastWinner / pendingPingju 等の終局シグナル いずれか有り
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.ANMIKA_BASE_URL ?? 'https://anmika.magiccatlab.com';
+const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 
 test('single mode フルフロー: hule or 流局まで進行', async ({ page }) => {
   test.setTimeout(120000);
