@@ -21,6 +21,7 @@ import os
 import secrets as _secrets
 import sqlite3
 import time as _time
+from urllib.parse import urlsplit
 
 import jwt as _jwt
 from contextlib import asynccontextmanager
@@ -303,12 +304,34 @@ def current_user(request: Request) -> dict[str, Any] | None:
 # ---- routes: auth ----
 
 
+def _safe_next_path(raw: Any) -> str | None:
+    """[2026-10-09 遊真 B1] ログイン後の戻り先。同一サイトの相対パスだけ通す [open redirect 対策]。
+    `/` 始まり・`//` 不可・バックスラッシュ不可・スキーム/ホスト付き不可・制御文字不可・200 字以内"""
+    if not isinstance(raw, str) or not raw or len(raw) > 200:
+        return None
+    if not raw.startswith("/") or raw.startswith("//") or "\\" in raw:
+        return None
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in raw):
+        return None
+    parts = urlsplit(raw)
+    if parts.scheme or parts.netloc:
+        return None
+    return raw
+
+
 @app.get("/auth/discord/login")
-async def discord_login(request: Request):
+async def discord_login(request: Request, next: str | None = None):
     if not DISCORD_CLIENT_ID:
         raise HTTPException(status_code=503, detail="OAuth not configured")
     state = _secrets.token_urlsafe(16)
     request.session["oauth_state"] = state
+    # [2026-10-09 遊真 B1] 招待リンク [/?room=ABCD] から来た未ログインの人を callback 後に元の URL へ戻す。
+    # 不正な next は無視し、前回の login_next が残らないように消す
+    safe_next = _safe_next_path(next)
+    if safe_next:
+        request.session["login_next"] = safe_next
+    else:
+        request.session.pop("login_next", None)
     url = (
         "https://discord.com/api/oauth2/authorize"
         f"?client_id={DISCORD_CLIENT_ID}"
@@ -358,7 +381,8 @@ async def discord_callback(request: Request, code: str | None = None, state: str
     )
     upsert_user(user_id, username, avatar_url)
     request.session["user_id"] = user_id
-    return RedirectResponse("/")
+    # [2026-10-09 遊真 B1] login で預かった戻り先へ [無ければ従来どおり /]
+    return RedirectResponse(_safe_next_path(request.session.pop("login_next", None)) or "/")
 
 
 @app.post("/auth/logout")
@@ -479,14 +503,19 @@ async def list_rooms(request: Request):
     if not u:
         raise HTTPException(status_code=401, detail="login required")
     with db_conn() as c:
+        # [2026-10-09 遊真 B2] my_seat = 自分の席 [room_members の PK が room_id+user_id なので 1 行以下]。
+        # 非メンバーは null。ロビーの「自分の部屋へ戻る」用。JOIN 1 本で N+1 にしない
         rows = c.execute(
             """SELECT r.room_id, r.host_user_id, r.status, r.created_at, r.match_mode, r.rotation_enabled,
                       u.username AS host_name,
-                      (SELECT COUNT(*) FROM room_members WHERE room_id=r.room_id) AS member_count
+                      (SELECT COUNT(*) FROM room_members WHERE room_id=r.room_id) AS member_count,
+                      rm.seat AS my_seat
                FROM rooms r
                LEFT JOIN users u ON u.user_id = r.host_user_id
+               LEFT JOIN room_members rm ON rm.room_id = r.room_id AND rm.user_id = ?
                WHERE r.status IN ('open', 'playing')
                ORDER BY r.created_at DESC LIMIT 50""",
+            (u["user_id"],),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -861,7 +890,10 @@ async def save_bug_report(request: Request):
 async def cleanup_old_rooms(request: Request):
     """R11 user 報告: 古い部屋 一括削除
     - open: 24h 以上前
-    - playing: 2h 以上前 [テスト残骸 / 中断試合]
+
+    [2026-10-09 遊真 A4] 遊んでいる部屋 [playing] は消さない。旧実装は playing も 2h 超で消し、
+    長い夜の対局中にホストが押すと部屋ごと消えた。放置された playing は sweep_stale_rooms [24h] が拾う。
+    レスポンスの deleted_playing は client 互換のため残し、常に 0
 
     R18 #8 fix: 旧 code は ログイン済 任意 user で 全 room cleanup 可能、
     対戦中の第三者 [全くの他人] が落とせるリスク。 自分が host の room のみ cleanup する制約
@@ -875,11 +907,7 @@ async def cleanup_old_rooms(request: Request):
             "SELECT room_id FROM rooms WHERE status='open' AND host_user_id=? AND created_at < datetime('now', '-24 hours')",
             (me_uid,),
         ).fetchall()
-        old_playing = c.execute(
-            "SELECT room_id FROM rooms WHERE status='playing' AND host_user_id=? AND created_at < datetime('now', '-2 hours')",
-            (me_uid,),
-        ).fetchall()
-        ids = [r["room_id"] for r in old_open] + [r["room_id"] for r in old_playing]
+        ids = [r["room_id"] for r in old_open]
         for rid in ids:
             _archive_or_delete_room(c, rid)
         c.commit()
@@ -893,7 +921,7 @@ async def cleanup_old_rooms(request: Request):
         "ok": True,
         "deleted_count": len(ids),
         "deleted_open": len(old_open),
-        "deleted_playing": len(old_playing),
+        "deleted_playing": 0,
     }
 
 
@@ -1520,6 +1548,100 @@ async def room_ws(ws: WebSocket, room_id: str):
 # ---- routes: match result ----
 
 
+def _insert_match_record(
+    c: sqlite3.Connection,
+    room_id: str,
+    match_uuid: str,
+    members_snap_list: list[dict],
+    paifu: Any,
+    chip_delta: dict[str, int],
+    duration: Any,
+    paifu_source: str,
+    rule_version: str,
+) -> int:
+    """matches INSERT + users.chip_total/games_played 更新 + 戦績 stats [SAVEPOINT] の共通本体。
+    [2026-10-09 遊真 A3] 旧 finish_match [POST /api/matches] の末尾をそのまま切り出した。
+    ws server からの POST /api/internal/matches/record と共用する。
+    検証 [host / member / ledger 照合 / uuid 冪等] は呼び出し側の責務。commit も呼び出し側。
+    戻り値は採番した match_no。room_id+match_no / room_id+match_uuid の UNIQUE 違反は 409 match_no_race"""
+    # 次 match_no = 既存最大 + 1 [room_id+match_no UNIQUE]。INSERT 直前に採番して race 窓を狭める
+    max_no = c.execute(
+        "SELECT COALESCE(MAX(match_no), 0) AS m FROM matches WHERE room_id=?", (room_id,)
+    ).fetchone()
+    next_match_no = int(max_no["m"]) + 1
+    try:
+        c.execute(
+            "INSERT INTO matches(room_id, match_no, match_uuid, members_json, paifu_json, chip_delta_json, duration_sec, paifu_source, rule_version) VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                room_id,
+                next_match_no,
+                match_uuid,
+                json.dumps(members_snap_list),
+                json.dumps(paifu),
+                json.dumps(chip_delta),
+                duration,
+                paifu_source,
+                rule_version,
+            ),
+        )
+    except sqlite3.IntegrityError as e:
+        # R22 低 #3 fix: 409 typed response
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "reason": "match_no_race",
+                "match_no": next_match_no,
+                "msg": f"match {next_match_no} already recorded for this room [concurrent insert]",
+            },
+        ) from e
+    # [2026-07-24 4人回し Phase5] chip_total は chip_delta 全員 [抜け番の dice 分込み]、
+    # games_played は実際に打った active trio だけ増やす
+    played_uids = {m.get("user_id") for m in members_snap_list if isinstance(m, dict)}
+    if not played_uids:
+        played_uids = set(chip_delta.keys())  # legacy fallback [members 不明なら従来どおり全員 +1]
+    for uid, delta in chip_delta.items():
+        c.execute(
+            """UPDATE users SET chip_total = chip_total + ?,
+                                   games_played = games_played + ?,
+                                   updated_at = datetime('now') WHERE user_id = ?""",
+            (int(delta), 1 if uid in played_uids else 0, uid),
+        )
+    # [2026-07-23 リョー要望] 戦績集計: paifu から per-user 統計を導出して同 transaction で保存。
+    # 導出失敗は試合記録を壊さない [log のみ、recompute_stats.py で後追い可能]。
+    # [2026-07-23 Sol指摘 P1] 途中席で例外だと部分行が catch 後の commit で確定するため
+    # SAVEPOINT で stats 書き込みだけ原子化 [全席 or 0 行]
+    try:
+        c.execute("SAVEPOINT match_stats")
+        try:
+            mrow = c.execute(
+                "SELECT match_id FROM matches WHERE room_id=? AND match_no=?",
+                (room_id, next_match_no),
+            ).fetchone()
+            if mrow is None:
+                raise RuntimeError("match row not found after INSERT")
+            seat_fb_rows = c.execute(
+                "SELECT user_id, seat FROM room_members WHERE room_id=?", (room_id,)
+            ).fetchall()
+            seat_fb = {r["user_id"]: r["seat"] for r in seat_fb_rows}
+            seat_by_user = match_stats.seat_map_from_members(members_snap_list, seat_fb)
+            for srow in match_stats.build_stat_rows(paifu, seat_by_user, chip_delta):
+                match_stats.upsert_stat_row(c, mrow["match_id"], srow)
+            c.execute("RELEASE SAVEPOINT match_stats")
+        except Exception:
+            c.execute("ROLLBACK TO SAVEPOINT match_stats")
+            c.execute("RELEASE SAVEPOINT match_stats")
+            raise
+    except Exception:
+        log.exception(
+            "match stats derivation failed [room=%s match_no=%s]", room_id, next_match_no
+        )
+    # R14 P1 #5 fix: room.status は 'playing' のまま [次 試合 INSERT 通すため]、
+    # 完全終了は 別 endpoint or 退室時に切替。
+    # R16 P0 #1 fix: start_payloads は pop しない [次 nextMatch broadcast で
+    # 新 start baseline に置換される]、 旧 pop は 2 試合目以降の再接続復元を破壊してた
+    return next_match_no
+
+
 @app.post("/api/matches")
 async def finish_match(request: Request):
     u = current_user(request)
@@ -1554,11 +1676,6 @@ async def finish_match(request: Request):
             raise HTTPException(
                 status_code=409, detail=f"room not yet started [status={room['status']}]"
             )
-        # 次 match_no = 既存最大 + 1 [room_id+match_no UNIQUE]
-        max_no = c.execute(
-            "SELECT COALESCE(MAX(match_no), 0) AS m FROM matches WHERE room_id=?", (room_id,)
-        ).fetchone()
-        next_match_no = int(max_no["m"]) + 1
         # R22 P1 #4 fix: chip_delta 検証は **試合開始時 member snapshot** を 基準に。
         # 旧 code は 現 room_members 依存で leave / archive 後に member 行 消えると 保存失敗、
         # snapshot 経路: 1) hub.start_payloads['members']、 2) 直前 match.members_json、
@@ -1627,6 +1744,7 @@ async def finish_match(request: Request):
         # /internal/match-result の単一時点 snapshot で同時に取る
         # [別 HTTP だと間に nextMatch が滑り込み、旧 match の chip_delta で
         #  新 match の events を保存し得た]
+        client_match_uuid = match_uuid  # [A3] 置き換え前。未送信は従来どおり 400
         authority_events = None
         rotation_room = False
         active_mapping = None
@@ -1684,6 +1802,14 @@ async def finish_match(request: Request):
                                         status_code=400,
                                         detail=f"chip_delta mismatch for {uid}: client={delta} authority={auth_val}",
                                     )
+                        # [2026-10-09 遊真 A3] server 自身の記録 [POST /api/internal/matches/record] と
+                        # 同じ試合が同じ uuid で衝突するよう、client の match_uuid を server 側 id に置き換える。
+                        # 旧 client のキャッシュが残る間の二重保存ガード [後から来た方は 409 idempotency_hit =
+                        # 旧 client は成功扱い]
+                        srv_instance = ledger_data.get("roomInstanceId")
+                        srv_match_id = ledger_data.get("matchId")
+                        if isinstance(srv_instance, str) and srv_instance and srv_match_id is not None:
+                            match_uuid = f"srv:{srv_instance}:{srv_match_id}"
                         # ledger 検証を通った snapshot と同一時点の events だけを牌譜に採用
                         ev = ledger_data.get("events")
                         if isinstance(ev, list) and ev:
@@ -1715,7 +1841,7 @@ async def finish_match(request: Request):
             paifu_source = "authority"
         # R20 #1 fix: match_uuid 必須 [client が deterministic 生成]、 既存 row check して
         # 同 uuid なら chip_total 二重加算せず 409 ack [冪等]
-        if not match_uuid:
+        if not client_match_uuid:
             raise HTTPException(
                 status_code=400, detail="match_uuid required [R20 #1 client must send]"
             )
@@ -1758,79 +1884,135 @@ async def finish_match(request: Request):
                 {"user_id": uid, **({"seat": seat_of[uid]} if uid in seat_of else {})}
                 for uid in sorted(snapshot_members)
             ]
-        try:
-            c.execute(
-                "INSERT INTO matches(room_id, match_no, match_uuid, members_json, paifu_json, chip_delta_json, duration_sec, paifu_source, rule_version) VALUES(?,?,?,?,?,?,?,?,?)",
-                (
-                    room_id,
-                    next_match_no,
-                    match_uuid,
-                    json.dumps(members_snap_list),
-                    json.dumps(paifu),
-                    json.dumps(chip_delta),
-                    duration,
-                    paifu_source,
-                    rule_version,
-                ),
-            )
-        except sqlite3.IntegrityError as e:
-            # R22 低 #3 fix: 409 typed response
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "reason": "match_no_race",
-                    "match_no": next_match_no,
-                    "msg": f"match {next_match_no} already recorded for this room [concurrent insert]",
-                },
-            ) from e
-        # [2026-07-24 4人回し Phase5] chip_total は chip_delta 全員 [抜け番の dice 分込み]、
-        # games_played は実際に打った active trio だけ増やす
-        played_uids = {m.get("user_id") for m in members_snap_list if isinstance(m, dict)}
-        if not played_uids:
-            played_uids = set(chip_delta.keys())  # legacy fallback [members 不明なら従来どおり全員 +1]
-        for uid, delta in chip_delta.items():
-            c.execute(
-                """UPDATE users SET chip_total = chip_total + ?,
-                                       games_played = games_played + ?,
-                                       updated_at = datetime('now') WHERE user_id = ?""",
-                (int(delta), 1 if uid in played_uids else 0, uid),
-            )
-        # [2026-07-23 リョー要望] 戦績集計: paifu から per-user 統計を導出して同 transaction で保存。
-        # 導出失敗は試合記録を壊さない [log のみ、recompute_stats.py で後追い可能]。
-        # [2026-07-23 Sol指摘 P1] 途中席で例外だと部分行が catch 後の commit で確定するため
-        # SAVEPOINT で stats 書き込みだけ原子化 [全席 or 0 行]
-        try:
-            c.execute("SAVEPOINT match_stats")
-            try:
-                mrow = c.execute(
-                    "SELECT match_id FROM matches WHERE room_id=? AND match_no=?",
-                    (room_id, next_match_no),
-                ).fetchone()
-                if mrow is None:
-                    raise RuntimeError("match row not found after INSERT")
-                seat_fb_rows = c.execute(
-                    "SELECT user_id, seat FROM room_members WHERE room_id=?", (room_id,)
-                ).fetchall()
-                seat_fb = {r["user_id"]: r["seat"] for r in seat_fb_rows}
-                seat_by_user = match_stats.seat_map_from_members(members_snap_list, seat_fb)
-                for srow in match_stats.build_stat_rows(paifu, seat_by_user, chip_delta):
-                    match_stats.upsert_stat_row(c, mrow["match_id"], srow)
-                c.execute("RELEASE SAVEPOINT match_stats")
-            except Exception:
-                c.execute("ROLLBACK TO SAVEPOINT match_stats")
-                c.execute("RELEASE SAVEPOINT match_stats")
-                raise
-        except Exception:
-            log.exception(
-                "match stats derivation failed [room=%s match_no=%s]", room_id, next_match_no
-            )
-        # R14 P1 #5 fix: room.status は 'playing' のまま [次 試合 INSERT 通すため]、
-        # 完全終了は 別 endpoint or 退室時に切替。
-        # R16 P0 #1 fix: start_payloads は pop しない [次 nextMatch broadcast で
-        # 新 start baseline に置換される]、 旧 pop は 2 試合目以降の再接続復元を破壊してた
+        next_match_no = _insert_match_record(
+            c,
+            room_id,
+            match_uuid,
+            members_snap_list,
+            paifu,
+            chip_delta,
+            duration,
+            paifu_source,
+            rule_version,
+        )
         c.commit()
     return {"ok": True, "match_no": next_match_no}
-    return {"ok": True}
+
+
+def _validated_chip_delta(raw: Any, label: str) -> dict[str, int]:
+    """内部 API 用の chip delta 検証: 非空 dict・key は str・値は int [bool 不可]・|d| <= 999_999・合計 0"""
+    if not isinstance(raw, dict) or not raw:
+        raise HTTPException(status_code=400, detail=f"{label} must be non-empty dict")
+    out: dict[str, int] = {}
+    total = 0
+    for uid, d in raw.items():
+        if not isinstance(uid, str) or not uid:
+            raise HTTPException(status_code=400, detail=f"{label} has invalid user id")
+        if isinstance(d, bool) or not isinstance(d, int):
+            raise HTTPException(status_code=400, detail=f"{label} {uid} not int")
+        if abs(d) > 999_999:
+            raise HTTPException(status_code=400, detail=f"{label} {uid} out of range")
+        out[uid] = d
+        total += d
+    if total != 0:
+        raise HTTPException(status_code=400, detail=f"{label} sum != 0 (got {total})")
+    return out
+
+
+@app.post("/api/internal/matches/record")
+async def record_match_internal(request: Request):
+    """[2026-10-09 遊真 A3] ws server が試合終了時に自分で戦績を記録する内部 API。
+    client の POST /api/matches [host のブラウザが閉じると保存されない] に依存しないための経路。
+    認証は X-Anmika-Internal-Secret [_require_internal_secret]。ledger / events は ws authority の値そのもの
+    なので finish_match のような authority への再照会はしない。
+
+    body: {room_id, match_uuid, rule_version, finished, ledger, rotationEnabled,
+           roomLedgerDelta, activeMembers: [{user_id, seat}], events}
+    - 404 部屋なし / 409 まだ open / 400 finished が true でない・値が不正
+    - 同じ room_id+match_uuid が既にあれば 200 {ok, duplicate: true, match_no} [chip を二重に足さない]
+    - chip_delta = rotationEnabled なら roomLedgerDelta、でなければ ledger [int・|d|<=999999・合計 0]
+    - 保存は finish_match と同じ _insert_match_record [paifu = events, paifu_source='authority']"""
+    _require_internal_secret(request)
+    try:
+        body = await request.json()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid json") from e
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be object")
+    room_id = body.get("room_id")
+    match_uuid = body.get("match_uuid")
+    if not isinstance(room_id, str) or not room_id:
+        raise HTTPException(status_code=400, detail="room_id required")
+    if not isinstance(match_uuid, str) or not match_uuid.strip() or len(match_uuid) > 200:
+        raise HTTPException(status_code=400, detail="match_uuid required")
+    match_uuid = match_uuid.strip()
+    rule_version = str(body.get("rule_version") or "").strip()[:40]
+    with db_conn() as c:
+        room = c.execute("SELECT status FROM rooms WHERE room_id=?", (room_id,)).fetchone()
+        if not room:
+            raise HTTPException(status_code=404, detail="room not found")
+        if room["status"] == "open":
+            raise HTTPException(
+                status_code=409, detail=f"room not yet started [status={room['status']}]"
+            )
+        if body.get("finished") is not True:
+            raise HTTPException(status_code=400, detail="match is not finished")
+
+        def _duplicate_match_no() -> int | None:
+            row = c.execute(
+                "SELECT match_no FROM matches WHERE room_id=? AND match_uuid=? LIMIT 1",
+                (room_id, match_uuid),
+            ).fetchone()
+            return int(row["match_no"]) if row is not None else None
+
+        dup = _duplicate_match_no()
+        if dup is not None:
+            return {"ok": True, "duplicate": True, "match_no": dup}
+        # rotation 部屋は抜け番の dice 分込みの roomLedgerDelta [全員 0 埋め] が SSoT、
+        # 通常部屋は match-local ledger
+        if body.get("rotationEnabled") is True:
+            chip_delta = _validated_chip_delta(body.get("roomLedgerDelta"), "roomLedgerDelta")
+        else:
+            chip_delta = _validated_chip_delta(body.get("ledger"), "ledger")
+        raw_members = body.get("activeMembers")
+        members_snap_list = [
+            {"user_id": m["user_id"], "seat": m["seat"]}
+            for m in (raw_members if isinstance(raw_members, list) else [])
+            if isinstance(m, dict)
+            and isinstance(m.get("user_id"), str)
+            and isinstance(m.get("seat"), int)
+            and not isinstance(m.get("seat"), bool)
+        ]
+        if not members_snap_list:
+            raise HTTPException(status_code=400, detail="activeMembers required")
+        missing = {m["user_id"] for m in members_snap_list} - set(chip_delta)
+        if missing:
+            raise HTTPException(
+                status_code=400, detail=f"chip delta missing active members: {sorted(missing)}"
+            )
+        events = body.get("events")
+        if not isinstance(events, list) or not events:
+            raise HTTPException(status_code=400, detail="events required")
+        try:
+            match_no = _insert_match_record(
+                c,
+                room_id,
+                match_uuid,
+                members_snap_list,
+                events,
+                chip_delta,
+                None,
+                "authority",
+                rule_version,
+            )
+        except HTTPException:
+            # 同じ uuid の並行 POST [ws の再送と client 経路など] は UNIQUE 違反 → 重複扱いに倒す
+            dup = _duplicate_match_no()
+            if dup is not None:
+                return {"ok": True, "duplicate": True, "match_no": dup}
+            raise
+        c.commit()
+    return {"ok": True, "duplicate": False, "match_no": match_no}
 
 
 # ---- routes: stats [2026-07-23 リョー要望 戦績集計] ----
