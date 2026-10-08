@@ -539,6 +539,8 @@ export function createGameStore() {
   // [2026-07-23 観戦モード] -1 = 席なし閲覧専用 [全 action gate が自動で塞がる]
   let myOnlineSeat: 0 | 1 | 2 | -1 | null = null;
   let iAmHost = false;
+  // [2026-10-09 遊真 A3] 観戦接続 [席なし]。nextMatch の送信可否に使う
+  let onlineSpectator = false;
   // 2026-05-14 R3 P0 #1: applyOnlineRemoteAction で cpuRelay 検証用、 host seat を保持
   let hostSeat: 0 | 1 | 2 | null = null;
   let onlineRevision = 0;
@@ -840,6 +842,7 @@ export function createGameStore() {
     /** オンライン対戦 接続 & game init */
     initOnlineGame(opts: {
       ws: WebSocket; qijia: 0|1|2; cpuSeats?: number[]; mySeat?: 0|1|2|-1; isHost?: boolean; hostSeat?: 0|1|2; revision?: number; matchId?: number; roundId?: number;
+      spectator?: boolean;
       changshu?: number;
       preShuffledPool?: string[];
       blindStart?: { hands: Record<0|1|2, string[]>; firstZimo: string; paishu: number; baopai: string[]; fubaopai: string[] | null; canDrawRinshan?: boolean; huapai?: Record<0|1|2, string[]>; goldHand?: Record<0|1|2, {p:number;s:number;z:number}>; pochiHand?: Record<0|1|2, Record<string, number>> };
@@ -848,6 +851,7 @@ export function createGameStore() {
       onlineMode = true;
       myOnlineSeat = opts.mySeat ?? null;
       iAmHost = opts.isHost ?? false;
+      onlineSpectator = opts.spectator ?? false;
       hostSeat = opts.hostSeat ?? null;
       onlineRevision = opts.revision ?? 0;
       onlineMatchId = opts.matchId ?? 1;
@@ -1201,6 +1205,7 @@ export function createGameStore() {
       isApplyingRemote = false;
       myOnlineSeat = null;
       iAmHost = false;
+      onlineSpectator = false;
       hostSeat = null;
       onlineRevision = 0;
       onlineMatchId = 1;
@@ -3193,8 +3198,10 @@ export function createGameStore() {
         }
       }
       if (onlineMode && !isApplyingRemote) {
-        if (!iAmHost) {
-          dlog('[nextMatch] reject: online 中は host のみ');
+        // [2026-10-09 遊真 A3] 次の試合へは席に座っている人なら誰でも押せる [旧: host のみ]。
+        // 観戦 [席なし] だけ止める。server 側も観戦者の nextMatch は受けない
+        if (onlineSpectator) {
+          dlog('[nextMatch] reject: online 中の観戦は押せない');
           return;
         }
         const curState = get(store) as StoreState;
