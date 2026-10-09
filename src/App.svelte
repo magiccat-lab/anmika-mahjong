@@ -2433,9 +2433,9 @@
     {:else}
       <div class="hp-groups">
         {#each groups as g (g.key)}
-          <div class="hp-group" class:hp-nuki={g.key === 'nuki'}>
+          <!-- [2026-10-09 リョー 2 版目「華のテキストはいらん」] 効果の字は出さず、読み上げとマウスを乗せた時だけ -->
+          <div class="hp-group" class:hp-nuki={g.key === 'nuki'} title={g.label} aria-label={g.label}>
             <div class="hp-tiles">{#each g.tiles as t}<Tile pai={t} size="md" />{/each}</div>
-            <span class="hp-label">{g.label}</span>
           </div>
         {/each}
       </div>
@@ -6214,13 +6214,10 @@
     width: calc(var(--hp-h) * 0.75 * 0.727);
     height: calc(var(--hp-h) * 0.75);
   }
-  .hp-label { font-size: 12px; line-height: 1.2; color: var(--jz-ink); white-space: nowrap; }
-  .hp-nuki .hp-label { color: var(--jz-sub); }
   /* 4 種類以上 [四華 ・ 八華級] は牌を一回り詰めて、帯の高さが跳ねにくくする */
   .hua-panel.hp-dense { --hp-h: calc(var(--hua-op-h) * 0.9); }
   .hua-panel.hp-me.hp-dense { --hp-h: calc(var(--hua-me-h) * 0.8); }
   .hp-dense .hp-groups { column-gap: 8px; }
-  .hp-dense .hp-label { font-size: 11px; }
 
   /* ---- 手牌のすぐ上の帯: 自分の札 ・ ツモ切り ・ 操作 ---- */
   .me-strip {
@@ -6365,7 +6362,7 @@
     .hp-left .hp-title, .hp-right .hp-title { display: none; }
     .hua-panel.hp-left, .hua-panel.hp-right { grid-template-columns: minmax(0, 1fr); }
     .hp-me .hp-title { font-size: 12px; }
-    .hp-none, .hp-label { font-size: 11px; }
+    .hp-none { font-size: 11px; }
     .hp-groups { gap: 2px 8px; }
     .hp-group { gap: 1px; }
   }
@@ -6458,7 +6455,7 @@
     main.mode-single.ui-board-v2 .seat-left .seat-card,
     main.mode-single.ui-board-v2 .seat-right .seat-card { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
     .hua-panel { padding: 4px 8px 6px; gap: 3px; }
-    .hp-none, .hp-label { font-size: 11px; }
+    .hp-none { font-size: 11px; }
     .hp-me .hp-title { font-size: 12px; }
     .hp-groups { gap: 3px 8px; }
     main.mode-single.ui-board-v2 .agari-unified-panel { top: 8px; bottom: 8px; left: 8px; right: 8px; }
