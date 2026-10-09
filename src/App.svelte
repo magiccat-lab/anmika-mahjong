@@ -3,6 +3,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
   import Tile from './lib/Tile.svelte';
+  import { preloadTiles } from './lib/tilePreload';
   import { activeCpuGameSeats, canHostToggleCpuProxy, clientGameToRoomSeat, clientRoomToGameSeat, hostGameSeat, isMemberCpuProxy, memberAtGameSeat, type OnlineMemberLike } from './lib/onlineSeats';
   import OnlineSeatStatus from './lib/OnlineSeatStatus.svelte';
   import DeadlineBar from './lib/DeadlineBar.svelte';
@@ -1813,6 +1814,9 @@
       }))
     : [];
   onMount(async () => {
+    // 牌の絵は入口にいる間に読んでおく [卓が開いた時に絵が遅れて出ないように]
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
+    if (ric) ric(preloadTiles, { timeout: 800 }); else setTimeout(preloadTiles, 200);
     // 起動時 single モードの初期化 [P1/P2 CPU on、 revealAll off、 self=0]
     if (viewMode === 'single') {
       revealAll = false;
