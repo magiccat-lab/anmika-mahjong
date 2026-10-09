@@ -45,9 +45,8 @@ describe('Game3 applyHuapaiEffect', () => {
     expect(result.hupai.some((h: any) => h.name.startsWith('冬'))).toBe(true);
   });
 
-  // [2026-09-14 リョー裁定「夏は向こうにあわせる」] 夏 1 枚に金北を当てても段は増えない。
-  // 金北が夏に効くのは 夏 2 枚以上の時の ×4 だけ [旧: 夏金北単体 = 夏夏相当 2 段]
-  it('夏金北 [natsu=1 + kinpeiTarget=natsu] は 夏 1 枚と同じ 1 段だけ', () => {
+  // [2026-10-09 リョー「夏で1段、夏金北は夏夏と同じ2段ね」] 9/14 に外した 夏金北 = 夏夏相当 を戻した
+  it('夏金北 [natsu=1 + kinpeiTarget=natsu] は 夏夏と同じ 2 段', () => {
     const g = new Game3();
     g.qipai();
     const player = 0 as PlayerId;
@@ -56,9 +55,9 @@ describe('Game3 applyHuapaiEffect', () => {
     g.goldHand[player] = { p: 0, s: 0, z: 1 };
     const result = { fanshu: 1, fu: 30, hupai: [] } as any;
     g.applyHuapaiEffect(result, player);
-    // 1 翻 30 符 = 480 点 [満貫未満] なので 1 翻上がって 2 翻
-    expect(result.fanshu).toBe(2);
-    expect(result.hupai.some((h: any) => h.name.startsWith('夏'))).toBe(true);
+    // 1 翻 30 符 = 480 点 [満貫未満] なので 1 翻ずつ 2 段で 3 翻
+    expect(result.fanshu).toBe(3);
+    expect(result.hupai.some((h: any) => h.name.startsWith('夏金北'))).toBe(true);
   });
 
   it('夏夏金北 [natsu>=2 + kinpeiTarget=natsu] では打点 ランクアップ skip [base ×4 は別 path]', () => {

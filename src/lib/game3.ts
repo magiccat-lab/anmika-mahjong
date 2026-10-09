@@ -2806,7 +2806,7 @@ export class Game3 {
       const diceCount = (dryResult.saiKoroChances ?? [])
         .reduce((sum: number, chance: any) => sum + Math.max(1, Number(chance?.count) || 1), 0);
       if (diceCount > 0) expected += diceCount * 2;
-      if (kind === 'deka') expected += 1; // 35枚サイコロは全候補共通なので tie-break 値だけ加える。
+      if (kind === 'deka') expected += 1; // でかぽっちのサイコロは全候補共通なので tie-break 値だけ加える。
       return expected;
     };
     if (this.lizhi.has(player) && isPochiAgariPai && ronSwapAllowed) {
@@ -3254,9 +3254,9 @@ export class Game3 {
     const isNatsuKinpei = this.kinpeiTarget[player] === 'natsu';
     const natsuKinpeiActive = natsu >= 2 && isNatsuKinpei;  // 夏夏金北 [×4]
     if (natsuKinpeiActive) (result as any)._pointPaymentMultiplier = 4;
-    // [2026-09-14 リョー裁定「夏は向こうにあわせる」] 夏 1 枚に金北を当てても段は増えない。
-    // 金北が夏に効くのは 夏 2 枚以上の時の ×4 だけ [旧実装は 夏金北単体を 夏夏相当にしていた]
-    const natsuEffect = natsu;
+    // [2026-10-09 リョー「夏で1段、夏金北は夏夏と同じ2段ね」] 9/14 に外した 夏金北 = 夏夏相当 を戻す [ルール表 2-5 のとおり]。
+    // 梯子 [満貫未満は 1 翻ずつ、満貫から上は 1 段ずつ] は 9/14 のまま
+    const natsuEffect = natsu + (isNatsuKinpei && natsu === 1 ? 1 : 0);
     // 夏: 打点ランクアップ N 段 [マンガン未満なら直接マンガン、 マンガン以降は段階アップ]
     if (natsuEffect > 0 && !natsuKinpeiActive && (result.damanguan ?? 0) > 0) {
       const beforeBase = Number((result as any)._basePointOverride) > 0
@@ -3289,7 +3289,9 @@ export class Game3 {
         const idx = NATSU_LADDER.indexOf(cur);
         overrideBase = idx >= 0 && idx + 1 < NATSU_LADDER.length ? NATSU_LADDER[idx + 1] : cur;
       }
-      const labelN = natsuEffect === 1 ? '夏' : natsuEffect === 2 ? '夏夏' : `夏×${natsuEffect}`;
+      const labelN = isNatsuKinpei && natsu === 1
+        ? '夏金北'
+        : natsuEffect === 1 ? '夏' : natsuEffect === 2 ? '夏夏' : `夏×${natsuEffect}`;
       const afterBase = overrideBase ?? natsuBaseOf(fan, fu);
       result.hupai.push({
         name: `${labelN} [打点ランクアップ ${natsuBaseOf(beforeFan, fu)}→${afterBase}基本点]`,
@@ -3586,16 +3588,20 @@ export class Game3 {
     const addSai = (
       awardKey: string,
       name: string,
-      baseChip: 70 | 140 | 35 | 100 | 300,
+      baseChip: 70 | 140 | 100 | 300,
       shuvariApplicable: boolean,
       count: number = 1,
       plusMinus: '+' | '-' = '+',
       alwaysShuvari: boolean = false,
+      rollCount?: number,
     ) => {
       if (registeredSaiAwardKeys.has(awardKey)) return;
       registeredSaiAwardKeys.add(awardKey);
-      result.saiKoroChances.push({ awardKey, name, baseChip, shuvariApplicable, alwaysShuvari, count, plusMinus, mode: saiMode });
+      result.saiKoroChances.push({ awardKey, name, baseChip, shuvariApplicable, alwaysShuvari, count, plusMinus, mode: saiMode, ...(rollCount ? { rollCount } : {}) });
     };
+    // [2026-10-09 リョー「今ベース35サイになってる奴は全部ベース70の振る回数を2回にしてほしい」]
+    // 旧 35 枚 × 4 回 [鳴き四華 ・ 鳴き四華四北の 1 回目 ・ でかぽっち] は 70 枚 × 2 回
+    const HALF_SAI_ROLLS = 2;
     const YAKUMAN_SAI_BASE = {
       カラス: 140,
       八連荘: 140,
@@ -3937,7 +3943,7 @@ export class Game3 {
 
     // 8 華: 春夏秋冬 8 枚抜き [全て] アガリ → 100 オール
     // [リョー指示 2026-05-11: 自分抜き分のみ、 ドラ表示由来は対象外]
-    // 副露時 chip 半減 [鳴き四華 35 / 鳴き八華 70]。八華四北の300枚は副露でも固定。
+    // 副露時は鳴き四華が 70 × 2 回振り [10-09、旧 35 × 4 回]。鳴き八華は 70。八華四北の300枚は副露でも固定。
     const huaCount = (this as any)._huapaiOwnLengthAtHule?.[player] ?? this.huapai[player].length;
     const nukiTotal = (this.nukidora[player] ?? 0) + (this.nukidoraGold[player] ?? 0);
     const hasFulou = (sp._fulou?.length ?? 0) > 0;
@@ -3963,11 +3969,11 @@ export class Game3 {
     } else if (hasAll4Hua && nukiTotal >= 4) {
       (result._directChipAwards ??= []).push({ n: 100, opts: { bypassShuvari: true, label: '四華四北 100枚オール' } });
       result.hupai.push({ name: '四華四北 [+100オール]', fanshu: 0 });
-      // 鳴き四華四北は35枚と70枚を各1回。面前なら70枚を独立2回。
-      addSai('四華四北:1', '四華四北 1/2', hasFulou ? 35 : 70, false, 1);
+      // 鳴き四華四北は 70 枚 2 回振りと 70 枚 [4 回振り] を各 1 回。面前なら70枚を独立2回。
+      addSai('四華四北:1', '四華四北 1/2', 70, false, 1, '+', false, hasFulou ? HALF_SAI_ROLLS : undefined);
       addSai('四華四北:2', '四華四北 2/2', 70, false, 1);
     } else if (hasAll4Hua) {
-      addSai('四華', '四華', hasFulou ? 35 : 70, true);
+      addSai('四華', '四華', 70, true, 1, '+', false, hasFulou ? HALF_SAI_ROLLS : undefined);
     } else if (nukiTotal >= 4) {
       addSai('四北', '四北', 70, true);
     }
@@ -4233,10 +4239,10 @@ export class Game3 {
       result.saiKoroChances = result.saiKoroChances ?? [];
       result.saiKoroChances.push({ awardKey: '白ぽっち即ツモ', name: '白ぽっち即ツモ', baseChip: 70, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
     }
-    // でかぽっち即ツモ → サイコロ base 35 [70×0.5]。2p [黄扱い] の -35 は
+    // でかぽっち即ツモ → サイコロ base 70 を 2 回振り [10-09 リョー、旧 35 × 4 回]。2p [黄扱い] の負号は
     // ツモ時に applyPochiColorMultiplier(yellow) 済みの倍率が自動で符号反転する。
     // [2026-10-09 リョー裁定] 本待ちの p1/p2 一発ツモもサイコロは出す [白待ちの白ぽっち即ツモと同型]。
-    // 本待ちは zimo() が黄倍率を掛けないので 2p でも +35 [避けるのは逆払いだけ]
+    // 本待ちは zimo() が黄倍率を掛けないので 2p でも + [避けるのは逆払いだけ]
     const zimoCoreDeka = sp_w?._zimo ? toCorePai(sp_w._zimo) : null;
     const isDekapochiTsumo =
       loser === null
@@ -4247,7 +4253,7 @@ export class Game3 {
         || this.getTingpaiListBeforeZimo(winner).includes(zimoCoreDeka));
     if (isDekapochiTsumo) {
       result.saiKoroChances = result.saiKoroChances ?? [];
-      result.saiKoroChances.push({ awardKey: 'でかぽっち', name: 'でかぽっち', baseChip: 35, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
+      result.saiKoroChances.push({ awardKey: 'でかぽっち', name: 'でかぽっち', baseChip: 70, rollCount: 2, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
     }
     // 3 麻実点を defen / defen3 両方に書き戻し [古い majiang-core の 4 麻 defen を上書き]
     // winnerGain は 逆ぽっち反転時に既に -値 になってる

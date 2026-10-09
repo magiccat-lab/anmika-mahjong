@@ -53,9 +53,16 @@ describe('夏の梯子 [ルールブック 2-2]', () => {
     expect(apply(24, 30, ['f2', 'f2'])._basePointOverride).toBe(12000);
   });
 
-  it('夏 1 枚に金北を当てても段は増えない [向こうに合わせる]', () => {
+  // [2026-10-09 リョー「夏で1段、夏金北は夏夏と同じ2段ね」] 9/14 の「向こうに合わせて段を増やさない」から戻した
+  it('夏 1 枚に金北を当てると夏夏と同じ 2 段', () => {
     const withKinpei = apply(5, 30, ['f2'], true);
-    const plain = apply(5, 30, ['f2']);
-    expect(withKinpei._basePointOverride).toBe(plain._basePointOverride);
+    const natsuNatsu = apply(5, 30, ['f2', 'f2']);
+    expect(withKinpei._basePointOverride).toBe(4000);
+    expect(withKinpei._basePointOverride).toBe(natsuNatsu._basePointOverride);
+  });
+
+  it('40 符 10 翻の倍満に夏金北で役満 [10-09 のスクショ]', () => {
+    expect(apply(10, 40, ['f2'])._basePointOverride).toBe(6000);
+    expect(apply(10, 40, ['f2'], true)._basePointOverride).toBe(8000);
   });
 });

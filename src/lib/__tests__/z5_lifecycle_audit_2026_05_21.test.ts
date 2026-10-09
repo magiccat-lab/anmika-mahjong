@@ -7,7 +7,7 @@ import type { PlayerId } from '../types';
 // base はどちらも 70 固定。色の増減 [青=+140 / 赤=-140 / 緑=+70 / 黄=-70] は
 // pochiMultiplier [chip 倍率、符号込み] が applyChipOall で自動適用する。
 // award 側に 140 や '-' を焼き込むと二重掛けになる [280 事故] ので、
-// このテストは「award は常に base70/35 + '+'」と「倍率経由の実効値」の両方を縛る。
+// このテストは「award は常に base70 + '+'」と「倍率経由の実効値」の両方を縛る。
 
 function rigPochiTsumo(pai: string, color: 'blue' | 'red' | 'green' | 'yellow' | null, opts: { yifa?: boolean; lizhi?: boolean } = {}) {
   const winner = 0 as PlayerId;
@@ -71,7 +71,7 @@ describe('z5 lifecycle audit 2026-05-21 (2026-07-17 裁定反映)', () => {
     expect(sokuTsumo).toBeUndefined();
   });
 
-  it('でかぽっち: 即 1p/2p ツモとも award は base35 [2p の -35 は倍率が担う]', () => {
+  it('でかぽっち: 即 1p/2p ツモとも award は base70 × 2 回 [2p の負号は倍率が担う、10-09 に 35 × 4 回から]', () => {
     for (const pai of ['p1', 'p2'] as const) {
       const { g, winner } = rigPochiTsumo(pai, null, { lizhi: true });
       const result: any = { fanshu: 1, fu: 30, hupai: [{ name: 'でかぽっち', fanshu: 0 }] };
@@ -79,7 +79,8 @@ describe('z5 lifecycle audit 2026-05-21 (2026-07-17 裁定反映)', () => {
 
       const deka = (result.saiKoroChances ?? []).find((c: any) => c.awardKey === 'でかぽっち');
       expect(deka, `${pai} のでかぽっちサイコロ`).toBeTruthy();
-      expect(deka.baseChip).toBe(35);
+      expect(deka.baseChip).toBe(70);
+      expect(deka.rollCount).toBe(2);
       expect(deka.plusMinus).toBe('+');
     }
   });

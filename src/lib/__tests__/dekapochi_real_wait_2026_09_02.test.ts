@@ -2,12 +2,12 @@
 //
 // でかぽっち = リーチ一発中に p1/p2 をツモると緑 [p1] / 黄 [p2] ぽっち扱い
 // [zimo() が shan.lastZimoPochi + 黄倍率 [逆払い] + 金北自動確定、hule() が swap 上書き +
-// 「でかぽっち オールマイティ」役、applyHule が でかぽっち サイコロ base35]。
+// 「でかぽっち オールマイティ」役、applyHule が でかぽっち サイコロ base70 × 2 回]。
 // 新裁定: ツモ前の待ち [getTingpaiListBeforeZimo] にその p1/p2 が本物の待ちとして含まれる
 // [本待ち] なら通常ツモ和了。ぽっち扱いの副作用 [色 / 倍率 / 金北自動 / swap / 役 / サイコロ]
 // を一切付けず、支払いも通常 [正] のまま。待ちに含まれない時は旧挙動 [p2=黄 逆払い / p1=緑] 不変。
-// [2026-10-09 リョー裁定 2] 本待ちでも一発ツモのサイコロ [でかぽっち base35] は出す。
-// 白待ちの白ぽっち即ツモと同じ形で、避けるのは 2p の逆払いだけ = 本待ち 2p のサイコロは +35。
+// [2026-10-09 リョー裁定 2] 本待ちでも一発ツモのサイコロ [でかぽっち] は出す。同日「ベース35は全部ベース70の2回に」で base70 × 2 回。
+// 白待ちの白ぽっち即ツモと同じ形で、避けるのは 2p の逆払いだけ = 本待ち 2p のサイコロは +。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { buildShoupai, type Game3 } from '../game3';
@@ -111,12 +111,13 @@ function rollDekaSaiAllHit(store: Store, game: Game3, player: PlayerId): number 
   expect(s.pendingSaiKoro.chances[s.pendingSaiKoro.currentIdx].awardKey).toBe('でかぽっち');
   const before = game.chipLedger[player];
   store.selectSaiKoroCombo(1, 2);
-  for (let r = 0; r < 4; r++) store.rollSaiKoroDice([1, 2]);
+  // [10-09] でかぽっちは 70 × 2 回振り。2 投で終わる
+  for (let r = 0; r < 2; r++) store.rollSaiKoroDice([1, 2]);
   expect(read(store).pendingSaiKoro.finalized).toBe(true);
   return game.chipLedger[player] - before;
 }
 
-/** 本待ち = 通常ツモ: ぽっち副作用ゼロ + 正の支払い + 一発ツモのサイコロ [+35] */
+/** 本待ち = 通常ツモ: ぽっち副作用ゼロ + 正の支払い + 一発ツモのサイコロ [+] */
 function expectNormalTsumo(ctx: ReturnType<typeof riichiYifaDraw>, pai: 'p1' | 'p2') {
   const { store, game, player, others, multBefore, defenBefore, kinpeiAuto } = ctx;
   expect(game.getTingpaiListBeforeZimo(player)).toContain(pai);
@@ -148,14 +149,14 @@ function expectNormalTsumo(ctx: ReturnType<typeof riichiYifaDraw>, pai: 'p1' | '
   expect(game.state.defen[player]).toBeGreaterThan(defenBefore[player]);
   for (const o of others) expect(game.state.defen[o]).toBeLessThan(defenBefore[o]);
   expect(dekaChances(result.saiKoroChances)).toEqual([
-    expect.objectContaining({ awardKey: 'でかぽっち', baseChip: 35, plusMinus: '+', mode: 'tsumo' }),
+    expect.objectContaining({ awardKey: 'でかぽっち', baseChip: 70, rollCount: 2, plusMinus: '+', mode: 'tsumo' }),
   ]);
   expect(dekaChances(s.pendingSaiKoro?.chances)).toHaveLength(1);
   expect(game.pochiMultiplier[player]).toEqual(NEUTRAL);
   expect(game.pochiPaymentMode[player]).toBe(false);
   expect(game.shan.lastZimoPochi ?? null).toBeNull();
 
-  // 4 投全部当たり = 35 × 4 オール。p2 でも逆払いにならず勝者の祝儀が増える
+  // 2 投全部当たり = 70 × 2 オール。p2 でも逆払いにならず勝者の祝儀が増える
   const gained = rollDekaSaiAllHit(store, game, player);
   expect(gained).toBeGreaterThan(0);
 }
@@ -178,7 +179,7 @@ describe('でかぽっち 本待ち裁定 [2026-09-02 / 10-09]: 待ちに本物�
     vi.restoreAllMocks();
   });
 
-  it('本待ち p2 [p1p3 嵌張] を一発ツモ → 黄ぽっち扱いにならず通常の正払いツモ和了 + サイコロ +35', () => {
+  it('本待ち p2 [p1p3 嵌張] を一発ツモ → 黄ぽっち扱いにならず通常の正払いツモ和了 + サイコロ +', () => {
     const ctx = riichiYifaDraw(P2_KANCHAN, 'p2');
     expect(ctx.tingBefore).toEqual(['p2']);
     expectNormalTsumo(ctx, 'p2');
@@ -206,21 +207,21 @@ describe('でかぽっち 本待ち裁定 [2026-09-02 / 10-09]: 待ちに本物�
     expect(result._dekapochiSwap).toBe('p5');
     expect(result._dekapochiFrom).toBe('p2');
 
-    // applyHule(): 逆払い [和了者の点が減り他家が増える] + でかぽっちサイコロ base35
+    // applyHule(): 逆払い [和了者の点が減り他家が増える] + でかぽっちサイコロ base70 × 2 回
     expect(result._pochiPaymentApplied).toBe(true);
     expect(result.defen).toBeLessThan(0);
     expect(game.state.defen[player]).toBeLessThan(defenBefore[player]);
     for (const o of others) expect(game.state.defen[o]).toBeGreaterThan(defenBefore[o]);
     expect(dekaChances(result.saiKoroChances)).toEqual([
-      expect.objectContaining({ awardKey: 'でかぽっち', baseChip: 35, plusMinus: '+', mode: 'tsumo' }),
+      expect.objectContaining({ awardKey: 'でかぽっち', baseChip: 70, rollCount: 2, plusMinus: '+', mode: 'tsumo' }),
     ]);
     expect(s.pendingSaiKoro).not.toBeNull();
     expect(dekaChances(s.pendingSaiKoro.chances)).toHaveLength(1);
-    // 黄倍率で符号が反転し、当たるほど勝者が払う [本待ち +35 の対照]
+    // 黄倍率で符号が反転し、当たるほど勝者が払う [本待ち + の対照]
     expect(rollDekaSaiAllHit(store, game, player)).toBeLessThan(0);
   });
 
-  it('本待ち p1 [p2p3 両面] を一発ツモ → 緑ぽっち扱いにならず通常ツモ和了 + サイコロ +35', () => {
+  it('本待ち p1 [p2p3 両面] を一発ツモ → 緑ぽっち扱いにならず通常ツモ和了 + サイコロ +', () => {
     const ctx = riichiYifaDraw(P1_RYANMEN, 'p1');
     expect(ctx.tingBefore).toEqual(expect.arrayContaining(['p1', 'p4']));
     expectNormalTsumo(ctx, 'p1');
