@@ -9,7 +9,8 @@
 
   export let roomId: string;
   export let me: { user_id: string; username: string };
-  export let onLeave: () => void = () => {};
+  /** reason: ロビーの上に出す知らせ [部屋が解散された時など] */
+  export let onLeave: (reason?: string) => void = () => {};
   export let onStart: () => void = () => {};
 
   type Member = { seat: number; user_id: string; username: string; avatar_url: string | null };
@@ -30,8 +31,13 @@
       const r = await fetch(`${API_BASE}/api/rooms/${roomId}`, { credentials: 'include' });
       if (!r.ok) {
         if (r.status === 404) {
+          // [2026-10-09 shun2 R4] 待っている間に解散された時は、ロビーの上に誰が解散したかを残す
+          // [旧: 「部屋が削除された」を出した直後にロビーへ移り、何が起きたか分からなかった]
+          const hostName = members.find((m) => m.user_id === room?.host_user_id)?.username;
           error = '部屋が削除された';
-          onLeave();
+          onLeave(hostName && room?.host_user_id !== me.user_id
+            ? `${hostName} が部屋 ${roomId} を解散しました`
+            : `部屋 ${roomId} はなくなりました`);
           return;
         }
         throw new Error('fetch room failed');
@@ -169,110 +175,114 @@
 </div>
 
 <style>
+  /* [2026-10-09 shun2 見た目 b / V3 V8] ロビーと同じ札 ・ 字 ・ ボタン。開始は主ボタン [金]、退出 ・ 解散は副 */
   .room {
-    padding: 24px;
-    max-width: 720px;
+    box-sizing: border-box;
+    width: min(720px, 100%);
     margin: 24px auto;
-    color: #fff;
-    font-family: 'Noto Sans JP', sans-serif;
-    background: linear-gradient(135deg, #1a2230, #2a2235);
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    padding: 20px;
+    color: var(--jz-ink);
+    font-family: var(--sans);
+    background: var(--jz-panel);
+    border: 1px solid var(--jz-panel-bd);
+    border-radius: var(--jz-rad);
+    box-shadow: var(--jz-shadow);
   }
-  h2 { color: #d4af37; }
+  h2 { margin: 0 0 8px; font-size: 20px; font-weight: 700; color: var(--jz-ink); }
   .code-block { text-align: center; margin: 8px 0 4px; }
-  .code-label { font-size: 12px; opacity: 0.7; margin-bottom: 6px; }
+  .code-label { font-size: 12px; color: var(--jz-sub); margin-bottom: 6px; }
   .code {
     display: inline-block;
-    font-family: 'Menlo', 'Consolas', monospace;
+    font-family: var(--sans);
+    font-variant-numeric: tabular-nums;
     font-size: 44px;
     line-height: 1.15; /* 大きい字が見出しに重ならない様に */
-    font-weight: 900;
+    font-weight: 700;
     letter-spacing: 0.3em;
     padding-left: 0.3em; /* letter-spacing の右端ぶんを左にも足して中央に見せる */
-    color: #ffe9ad;
+    color: var(--jz-gold);
     user-select: all;
   }
-  .hint { font-size: 12px; opacity: 0.8; word-break: break-all; }
+  .hint { font-size: 12px; color: var(--jz-sub); word-break: break-all; }
   .invite-actions { display: flex; gap: 8px; justify-content: center; }
   .hint code {
-    background: rgba(255,255,255,0.1);
+    background: var(--jz-sec);
     padding: 2px 6px;
-    border-radius: 4px;
-    font-family: monospace;
+    border-radius: var(--jz-rad);
+    font-family: var(--mono);
+    color: var(--jz-ink);
   }
-  .copy {
-    background: #4060a0;
-    color: #fff;
-    border: 0;
-    padding: 6px 14px;
-    border-radius: 4px;
+  button {
+    box-sizing: border-box;
+    min-height: 44px;
+    padding: 0 18px;
+    border-radius: var(--jz-rad);
+    font-size: 15px;
+    font-weight: 700;
+    white-space: nowrap;
     cursor: pointer;
-    font-size: 13px;
+    border: 1px solid var(--jz-sec-bd);
+    background: var(--jz-sec);
+    color: var(--jz-ink);
   }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
   .members {
     display: flex;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 10px;
     margin: 18px 0;
-    justify-content: space-around;
   }
   .seat {
-    flex: 1;
+    flex: 1 1 140px;
     text-align: center;
-    padding: 16px 8px;
-    background: rgba(255,255,255,0.05);
-    border-radius: 8px;
+    padding: 14px 8px;
+    background: var(--jz-sec);
+    border: 1px solid var(--jz-sec-bd);
+    border-radius: var(--jz-rad);
     min-height: 80px;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 4px;
   }
-  .seat-label { font-size: 11px; opacity: 0.6; }
+  .seat-label { font-size: 12px; color: var(--jz-sub); }
   .avatar { width: 40px; height: 40px; border-radius: 50%; }
   .name { font-weight: 700; }
-  .host-tag {
-    background: #d4af37;
-    color: #1a1820;
-    font-size: 10px;
+  .host-tag,
+  .cpu-tag {
+    font-size: 11px;
     padding: 2px 6px;
-    border-radius: 4px;
+    border-radius: var(--jz-rad);
     font-weight: 700;
   }
-  .cpu-tag {
-    background: #555;
-    color: #fff;
-    font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
-  .empty { color: #888; font-style: italic; }
-  .actions { display: flex; gap: 12px; justify-content: center; margin-top: 24px; }
+  .host-tag { background: var(--jz-accent); color: var(--jz-on-accent); }
+  .cpu-tag { background: transparent; color: var(--jz-ink); box-shadow: inset 0 0 0 1px var(--jz-sub); }
+  .empty { color: var(--jz-sub); }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; align-items: center; margin-top: 24px; }
   .start {
-    background: #44ee77;
-    color: #1a1820;
-    border: 0;
-    padding: 10px 24px;
-    border-radius: 6px;
-    font-weight: 900;
-    font-size: 14px;
-    cursor: pointer;
+    min-height: 48px;
+    padding: 0 28px;
+    font-size: 16px;
+    background: var(--jz-accent);
+    color: var(--jz-on-accent);
+    border-color: transparent;
+    box-shadow: var(--jz-shadow);
   }
-  /* [2026-10-09 遊真 B3] 揃っていない間は緑の押せそうな見た目をやめ、灰色の押せない見た目にする */
+  /* [2026-10-09 遊真 B3] 揃っていない間は押せない見た目 */
   .start:disabled {
-    background: #3a3f47;
-    color: #8c929c;
-    border: 1px solid #555;
+    background: var(--jz-sec);
+    color: var(--jz-sub);
+    border: 1px solid var(--jz-sec-bd);
+    box-shadow: none;
     cursor: not-allowed;
+    opacity: 1;
   }
-  .waiting { color: #aaa; font-size: 13px; line-height: 38px; }
-  .leave {
-    background: transparent;
-    color: #aaa;
-    border: 1px solid #555;
-    padding: 8px 16px;
-    border-radius: 4px;
-    cursor: pointer;
+  .waiting { color: var(--jz-sub); font-size: 14px; }
+  .leave { background: transparent; }
+  .error { color: #ffb4a0; font-size: 13px; }
+  @media (max-width: 560px) {
+    .room { margin: 0; padding: 16px; border-radius: 0; border-width: 0; min-height: 100dvh; }
+    .code { font-size: 36px; }
+    .actions { flex-direction: column; align-items: stretch; }
   }
-  .error { color: #f88; font-size: 12px; }
 </style>

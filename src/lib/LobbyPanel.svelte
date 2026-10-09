@@ -165,25 +165,25 @@
       </label>
       <button class="create" on:click={createRoom}>＋ 新しい部屋を作る</button>
     </div>
-    <h3>公開中の部屋 <button class="cleanup-btn" on:click={cleanupOld} title="24 時間たった空き部屋を片付ける">🧹 古い部屋を片付け</button></h3>
+    <h3>公開中の部屋 <button class="cleanup-btn" on:click={cleanupOld} title="24 時間たった空き部屋を片付ける">古い空き部屋を片付ける</button></h3>
     {#if rooms.length === 0}
       <p class="empty">部屋がない、 上の「新しい部屋を作る」で作って招待しよう</p>
     {:else}
       <ul class="room-list">
         {#each rooms as r}
           <li class="room">
-            <div>
+            <div class="room-info">
               <strong>{r.room_id}</strong> [{r.member_count}/{r.rotation_enabled ? 4 : 3} 人]{r.match_mode === 'hanchan' ? ' 半荘' : ' 東風'}{r.rotation_enabled ? ' 4人回し' : ''}{r.status === 'playing' ? ' ▶対局中' : ''}
               <span class="host"> ホスト: {r.host_name}</span>
               {#if r.my_seat !== null && r.my_seat !== undefined}<span class="mine"> あなたは席{r.my_seat + 1}</span>{/if}
             </div>
-            <div style="display:flex; gap:6px;">
+            <div class="room-btns">
               <!-- [2026-10-09 遊真 B2] 自分が座っている部屋は「戻る」。招待リンクと同じ道 [join は既存 member なら
                    対局中でも冪等に成功 → 部屋画面 → 対局中なら盤面を復元] で入り直す -->
               {#if r.my_seat !== null && r.my_seat !== undefined}
                 <button class="rejoin-btn" on:click={() => joinRoom(r.room_id)}>戻る</button>
               {:else if r.status === 'open'}
-                <button on:click={() => joinRoom(r.room_id)} disabled={r.member_count >= (r.rotation_enabled ? 4 : 3)}>入る</button>
+                <button class="join-btn" on:click={() => joinRoom(r.room_id)} disabled={r.member_count >= (r.rotation_enabled ? 4 : 3)}>入る</button>
               {/if}
               <!-- [2026-07-23 観戦モード] 対局中の部屋は閲覧専用で覗ける -->
               <button on:click={() => { if (!me) { goLogin(); return; } onSpectateRoom(r.room_id, me); }} title="閲覧専用で見る">👁 観戦</button>
@@ -200,87 +200,122 @@
 </div>
 
 <style>
+  /* [2026-10-09 shun2 見た目 b / V3 V8] 卓と同じ札 ・ 字 ・ ボタン。スマホ縦は設定を縦に積み、
+     作るボタンは横いっぱいの 1 行 [旧: 「新しい部屋を作る」「入る」が 1 字ずつ縦に崩れていた] */
   .lobby {
-    padding: 24px;
-    max-width: 720px;
+    box-sizing: border-box;
+    width: min(720px, 100%);
     margin: 24px auto;
-    color: #fff;
-    font-family: 'Noto Sans JP', sans-serif;
-    background: linear-gradient(135deg, #1a2230, #2a2235);
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    padding: 20px;
+    color: var(--jz-ink);
+    font-family: var(--sans);
+    text-align: left;
+    background: var(--jz-panel);
+    border: 1px solid var(--jz-panel-bd);
+    border-radius: var(--jz-rad);
+    box-shadow: var(--jz-shadow);
   }
-  h2 { color: #d4af37; }
-  .login-btn {
-    display: inline-block;
-    background: #5865f2;
-    color: #fff;
-    padding: 10px 18px;
-    border-radius: 6px;
-    text-decoration: none;
+  h2 { margin: 0 0 12px; font-size: 22px; font-weight: 700; color: var(--jz-ink); }
+  h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 20px 0 8px; font-size: 16px; font-weight: 700; color: var(--jz-ink); }
+  button, .login-btn {
+    box-sizing: border-box;
+    min-height: 44px;
+    padding: 0 16px;
+    border-radius: var(--jz-rad);
+    font-size: 15px;
     font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+    border: 1px solid var(--jz-sec-bd);
+    background: var(--jz-sec);
+    color: var(--jz-ink);
+  }
+  .login-btn {
+    display: inline-flex;
+    align-items: center;
+    background: #5865f2;
+    border-color: transparent;
+    color: #fff;
+    text-decoration: none;
   }
   .login-btn:hover { background: #4752c4; }
+  button:hover:not([disabled]) { filter: brightness(1.08); }
   .user-info {
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 12px;
-    background: rgba(255,255,255,0.06);
-    border-radius: 8px;
+    background: var(--jz-sec);
+    border-radius: var(--jz-rad);
     margin: 12px 0;
   }
-  .avatar { width: 48px; height: 48px; border-radius: 50%; }
-  .name { font-weight: 700; }
-  .stats { font-size: 12px; opacity: 0.7; }
-  .logout {
-    margin-left: auto;
-    background: transparent;
-    color: #aaa;
-    border: 1px solid #555;
-    padding: 4px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 11px;
+  .avatar { width: 44px; height: 44px; border-radius: 50%; }
+  .name { font-weight: 700; font-size: 16px; }
+  .stats { font-size: 12px; color: var(--jz-sub); font-variant-numeric: tabular-nums; }
+  .logout { margin-left: auto; min-height: 36px; font-size: 13px; background: transparent; }
+  .actions { margin: 16px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+  .cpu-select { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--jz-sub); white-space: nowrap; min-height: 44px; }
+  .cpu-select select {
+    min-height: 40px;
+    padding: 0 8px;
+    font-size: 14px;
+    background: var(--jz-panel-solid);
+    color: var(--jz-ink);
+    border: 1px solid var(--jz-sec-bd);
+    border-radius: var(--jz-rad);
   }
-  .actions { margin: 16px 0; display: flex; align-items: center; gap: 12px; }
-  .cpu-select { font-size: 13px; color: #ddd; }
-  .cpu-select select { margin-left: 6px; padding: 4px; background: #2a3340; color: #fff; border: 1px solid #555; border-radius: 4px; }
+  .cpu-select input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--jz-accent-flat); }
   .create {
-    background: #d4af37;
-    color: #1a1820;
-    border: 0;
-    padding: 10px 20px;
-    border-radius: 6px;
-    font-weight: 700;
-    cursor: pointer;
+    background: var(--jz-accent);
+    color: var(--jz-on-accent);
+    border-color: transparent;
+    box-shadow: var(--jz-shadow);
+    min-height: 48px;
+    padding: 0 22px;
+    font-size: 16px;
   }
-  .room-list {
-    list-style: none;
-    padding: 0;
-  }
+  .cleanup-btn { min-height: 36px; font-size: 13px; font-weight: 500; color: var(--jz-sub); background: transparent; }
+  .room-list { list-style: none; padding: 0; margin: 0; }
   .room {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
-    padding: 10px 14px;
-    background: rgba(255,255,255,0.04);
-    border-radius: 6px;
-    margin: 6px 0;
+    gap: 8px 12px;
+    padding: 10px 12px;
+    background: var(--jz-sec);
+    border: 1px solid var(--jz-sec-bd);
+    border-radius: var(--jz-rad);
+    margin: 8px 0;
+    font-size: 14px;
   }
-  .host { font-size: 11px; opacity: 0.6; margin-left: 8px; }
-  .mine { font-size: 11px; color: #ffd060; margin-left: 8px; }
-  .room button.rejoin-btn { background: #d4af37; color: #1a1820; font-weight: 700; }
-  .room button {
-    background: #4060a0;
-    color: #fff;
-    border: 0;
-    padding: 6px 14px;
-    border-radius: 4px;
-    cursor: pointer;
-  }
+  .room-info { min-width: 0; flex: 1 1 220px; }
+  .room-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .host { font-size: 12px; color: var(--jz-sub); margin-left: 8px; }
+  .mine { font-size: 12px; color: var(--jz-gold); margin-left: 8px; }
+  .room button.rejoin-btn,
+  .room button.join-btn { background: var(--jz-accent); color: var(--jz-on-accent); border-color: transparent; }
+  .room button.del-btn { background: transparent; }
   .room button[disabled] { opacity: 0.4; cursor: not-allowed; }
-  .empty { opacity: 0.6; font-style: italic; }
-  .error { color: #f88; font-size: 12px; }
-  .notice { color: #ffd060; font-size: 13px; }
+  .empty { color: var(--jz-sub); font-size: 14px; }
+  .error { color: #ffb4a0; font-size: 13px; }
+  .notice {
+    margin: 0 0 12px;
+    padding: 8px 12px;
+    border-radius: var(--jz-rad);
+    background: #f4e3b0;
+    color: #2a1a04;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  @media (max-width: 560px) {
+    .lobby { margin: 0; padding: 16px; border-radius: 0; border-width: 0; min-height: 100dvh; }
+    .actions { flex-direction: column; align-items: stretch; }
+    .cpu-select { justify-content: space-between; }
+    .cpu-select:has(input[type='checkbox']) { justify-content: flex-start; gap: 10px; }
+    .cpu-select select { flex: 1 1 auto; max-width: 62%; }
+    .create { width: 100%; }
+    .room-btns { width: 100%; }
+    .room-btns button { flex: 1 1 0; }
+  }
 </style>

@@ -24,3 +24,14 @@
 | Yuji Syuku | 9.0KB | 毛筆。細くて小さい字に向かない |
 | Yusei Magic | 3.5KB | 手書きマーカー |
 | (前) Noto Sans JP 900 | 7.6KB | 読めるが普通 |
+
+# zkgn/ — Zen Kaku Gothic New 500 / 700 (画面の字)
+
+2026-10-09 shun2、見た目 b 雀荘 (リョー ○)。端末の字体まかせをやめ、卓 ・ ロビー ・ 部屋 ・ 入口の字をこれにそろえた。
+
+- 元: **Zen Kaku Gothic New** (SIL Open Font License 1.1、self-host 可)
+- Google Fonts の `css2?family=Zen+Kaku+Gothic+New:wght@500;700` が返す分割 (unicode-range ごとの woff2、
+  2 太さ x 121 個) をそのまま保存し、URL だけ `/fonts/zkgn/` に書き換えて `zkgn.css` にした。
+  ブラウザは画面に出た字の分割だけを読む (全部で 3.5MB あるが、1 画面で読むのは 10 個前後)
+- 読み込み: `index.html` の `<link rel="stylesheet" href="/fonts/zkgn/zkgn.css">`、使う所は `src/app.css` の `--sans`
+- 取り直す時は同じ URL を Chrome の UA で取り、上と同じ名前 (`zkgn-<太さ>-<連番>.woff2`) で保存する

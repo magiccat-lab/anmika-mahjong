@@ -52,11 +52,10 @@
     padding: 32px 16px;
     box-sizing: border-box;
     border-radius: 0;
-    background:
-      radial-gradient(ellipse at 50% -10%, rgba(255, 224, 128, 0.14), transparent 55%),
-      radial-gradient(ellipse at 50% 115%, rgba(0, 0, 0, 0.45), transparent 60%),
-      linear-gradient(165deg, #17452c 0%, #123524 55%, #0d2a1c 100%);
-    box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.25);
+    /* [2026-10-09 shun2 見た目 b] 入口も卓と同じフェルトと木の縁 */
+    background: var(--jz-felt-bg);
+    box-shadow: inset 0 0 0 10px var(--jz-wood), inset 0 0 0 11px rgba(208, 170, 82, 0.5);
+    color: var(--jz-ink);
   }
   .entry-brand {
     display: flex;
@@ -68,10 +67,12 @@
   .entry-menu h1 {
     margin: 0;
     font-size: 2.5rem;
-    color: #ffe9ad;
+    font-weight: 700;
+    color: var(--jz-ink);
     letter-spacing: 0.06em;
-    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
   }
+  /* [2026-10-09 shun2 V8] ボタンは 主 [金] と 副 [淡い札] の 2 種、角 4px、高さ 52px。
+     旧: 6 色 [緑 ・ 青 ・ 茶 ・ 紫 ・ 紺 ・ 灰] で色と意味が結び付いていなかった */
   .entry-btn {
     display: flex;
     flex-direction: column;
@@ -79,27 +80,22 @@
     gap: 2px;
     width: min(320px, calc(100vw - 32px));
     min-width: 0;
-    min-height: 58px;
+    min-height: 52px;
     box-sizing: border-box;
-    font-size: 1.15rem;
-    padding: 0.8rem 1.25rem;
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    border-radius: 12px;
+    padding: 0.7rem 1.25rem;
+    border: 1px solid var(--jz-sec-bd);
+    border-radius: var(--jz-rad);
+    background: var(--jz-sec);
+    color: var(--jz-ink);
     cursor: pointer;
     touch-action: manipulation;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-    transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+    transition: filter 0.12s ease;
   }
-  .entry-btn .btn-main { font-size: 1.15rem; font-weight: 700; line-height: 1.25; }
-  .entry-btn.solo { background: #2a7; color: white; }
-  .entry-btn.online { background: #27a; color: white; }
-  .entry-btn.stats { background: #7a5a1e; color: white; }
-  .entry-btn.replay { background: #5a3a6e; color: white; }
-  .entry-btn.rules { background: #35617a; color: white; }
-  .entry-btn.settings { background: #4a4a52; color: white; }
-  .entry-btn:hover { transform: translateY(-2px); box-shadow: 0 7px 18px rgba(0, 0, 0, 0.4); filter: brightness(1.07); }
-  .entry-btn:active { transform: translateY(0); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35); }
-  .entry-btn:focus-visible { outline: 3px solid #ffd060; outline-offset: 3px; }
+  .entry-btn .btn-main { font-size: 1.1rem; font-weight: 700; line-height: 1.25; }
+  .entry-btn.solo,
+  .entry-btn.online { background: var(--jz-accent); color: var(--jz-on-accent); border-color: transparent; box-shadow: var(--jz-shadow); }
+  .entry-btn:hover { filter: brightness(1.08); }
+  .entry-btn:focus-visible { outline: 3px solid var(--jz-gold); outline-offset: 3px; }
 
   @media (max-width: 420px) {
     .entry-menu { gap: 1rem; padding: 16px; box-sizing: border-box; }

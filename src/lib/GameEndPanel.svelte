@@ -50,7 +50,7 @@
   }
   h2 { font-size: 14px; margin: 0 0 8px; color: #2080d0; }
   .rule-note { font-size: 12px; color: #555; margin: 8px 0; line-height: 1.5; }
-  .ranking { width: 100%; border-collapse: collapse; font-family: 'Menlo', Consolas, monospace; font-size: 18px; }
+  .ranking { width: 100%; border-collapse: collapse; font-family: var(--sans); font-variant-numeric: tabular-nums; font-size: 18px; }
   .ranking th, .ranking td { padding: 10px 14px; text-align: right; border-bottom: 1px solid rgba(0,0,0,0.1); }
   .ranking th { background: rgba(0,0,0,0.05); font-weight: 700; font-size: 17px; }
   .ranking td.who { text-align: left; }

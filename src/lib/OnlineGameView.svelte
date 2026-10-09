@@ -203,7 +203,7 @@
 <style>
   .online-game {
     color: #fff;
-    font-family: 'Noto Sans JP', sans-serif;
+    font-family: var(--sans);
     padding: 16px;
     max-width: 960px;
     margin: 0 auto;

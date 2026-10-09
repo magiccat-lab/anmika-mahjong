@@ -1,7 +1,8 @@
 // SP横持ち UI 再設計 [docs/sp-ui-redesign.md] 手順A: スクショ基線 + bbox assert。
 // 3つの SP 横 viewport で「壊れてない」の機械判定を常時走らせる:
 //   1. 自家手牌の牌ボタンが 13 枚以上、全て viewport 内に完全に見える
-//   2. score-box と 抜き box の bbox が交差しない [2026-07-22 リョー報告の再発防止]
+//   2. 中央の札と席の札 [抜き牌もここ] の bbox が交差しない [2026-07-22 リョー報告の再発防止。
+//      2026-10-09 shun2: 抜き box は席の札の中へ移った]
 //   3. 手牌行が横にはみ出さない
 // SHOT_DIR 指定時は各 viewport のスクショと bbox JSON も基線として残す。
 import { test, expect } from '@playwright/test';
@@ -51,8 +52,8 @@ for (const vp of VIEWPORTS) {
       return {
         hand: bb(hand),
         tiles,
-        score: bb(root?.querySelector('.score-box') ?? null),
-        nuki: [...(root?.querySelectorAll('.nuki') ?? [])].map(bb),
+        score: bb(root?.querySelector('.score-box .cb-panel') ?? null),
+        nuki: [...(root?.querySelectorAll('.seat-card') ?? [])].map(bb),
       };
     });
 
@@ -64,11 +65,11 @@ for (const vp of VIEWPORTS) {
       expect(t!.left).toBeGreaterThanOrEqual(-0.5);
       expect(t!.right).toBeLessThanOrEqual(vp.width + 0.5);
     }
-    // 2. score-box × 抜き box 非交差
+    // 2. 中央の札 × 席の札 [3 人分] 非交差
     expect(m.score).not.toBeNull();
     expect(m.nuki.length).toBe(3);
     for (const n of m.nuki) {
-      expect(intersects(m.score, n), `score-box が抜き box と交差 [${vp.name}]`).toBe(false);
+      expect(intersects(m.score, n), `中央の札が席の札と交差 [${vp.name}]`).toBe(false);
     }
     // 3. 手牌行がはみ出さない
     expect(m.hand!.right).toBeLessThanOrEqual(vp.width + 0.5);

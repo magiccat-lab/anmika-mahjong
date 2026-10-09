@@ -58,7 +58,7 @@
     display: block;
     box-sizing: border-box;
     border: var(--sheet-border, 2px solid #c0a040);
-    font-family: 'Noto Sans JP', sans-serif;
+    font-family: var(--sans);
     /* safe-area 込みで画面外へ出さない */
     max-width: min(94dvw, calc(100dvw - env(safe-area-inset-left) - env(safe-area-inset-right) - 12px));
     overflow: auto;

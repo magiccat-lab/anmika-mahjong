@@ -30,21 +30,25 @@ test('solo table stays readable at representative viewport sizes', async ({ page
     expect(metrics.document.scrollHeight).toBe(metrics.document.clientHeight);
 
     if (viewport.name === 'mobile-landscape') {
-      const dora = await page.locator('.dora-main').boundingBox();
-      const settings = await page.locator('.settings-group').boundingBox();
-      const scoreBox = await page.locator('.score-box').boundingBox();
-      const selfScore = await page.locator('.score-side.score-bottom .sval').boundingBox();
-      expect(dora).not.toBeNull();
-      expect(settings).not.toBeNull();
-      expect(scoreBox).not.toBeNull();
+      // [2026-10-09 shun2] 点は席の札へ、設定は ⋯ へ移った。今だれの番かの札が ⋯ と重ならず、
+      // 自分の点が自分の札の中に収まる
+      const status = await page.locator('.turn-status').boundingBox();
+      const menu = await page.locator('.table-menu-btn').boundingBox();
+      const myCard = await page.locator('.seat-card.sc-me').boundingBox();
+      const selfScore = await page.locator('.seat-card.sc-me .sval').boundingBox();
+      expect(status).not.toBeNull();
+      expect(menu).not.toBeNull();
+      expect(myCard).not.toBeNull();
       expect(selfScore).not.toBeNull();
-      expect(dora!.x + dora!.width).toBeLessThanOrEqual(settings!.x);
-      expect(selfScore!.y + selfScore!.height).toBeLessThanOrEqual(scoreBox!.y + scoreBox!.height);
+      expect(status!.x + status!.width).toBeLessThanOrEqual(menu!.x);
+      expect(selfScore!.y + selfScore!.height).toBeLessThanOrEqual(myCard!.y + myCard!.height);
     }
 
     if (viewport.name === 'mobile-portrait') {
-      await expect(page.locator('.orientation-notice')).toBeVisible();
-      await expect(page.locator('.orientation-notice')).toContainText('横向き');
+      // [2026-10-09 shun2] 縦持ちの卓を作ったので「横向きにして」は出さず、手牌 14 枚が 2 段に収まる
+      await expect(page.locator('.orientation-notice')).toBeHidden();
+      const tops = await page.locator('.seat-bottom .tile-btn').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+      expect(new Set(tops).size).toBeLessThanOrEqual(2);
     }
 
   }

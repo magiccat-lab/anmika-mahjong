@@ -25,8 +25,9 @@
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
-  --sans: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo', 'Noto Sans JP', system-ui, sans-serif;
-  --heading: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo', 'Noto Sans JP', system-ui, sans-serif;
+  /* [2026-10-09 shun2 見た目 b 雀荘] 端末の字体まかせをやめ、Zen Kaku Gothic New を配る [index.html の zkgn.css] */
+  --sans: 'Zen Kaku Gothic New', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo', 'Noto Sans JP', system-ui, sans-serif;
+  --heading: 'Zen Kaku Gothic New', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo', 'Noto Sans JP', system-ui, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
   font: 18px/145% var(--sans);
@@ -72,6 +73,41 @@ button,
 input,
 label {
   touch-action: manipulation;
+}
+
+/* [2026-10-09 shun2 V8] ボタンと入力欄だけブラウザ既定の字になっていた。本文の字を継ぐ */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* [2026-10-09 shun2 見た目 b 雀荘] 色と面の決まり。卓 ・ ロビー ・ 部屋 ・ 入口で同じ物を使う。
+   深い緑のフェルトに細い木の縁、生成りの字、金は点数と押す物だけ。角は 4px */
+:root {
+  --jz-page: #14100c;
+  --jz-felt: #1f5a45;
+  --jz-felt2: #174a39;
+  --jz-wood: #3a2617;
+  --jz-ink: #f2eee3;
+  --jz-sub: #cfc8b4;
+  --jz-panel: rgba(12, 30, 23, 0.82);
+  --jz-panel-solid: #10261d;
+  --jz-panel-bd: rgba(208, 170, 82, 0.35);
+  --jz-gold: #e5c26a;
+  --jz-accent: linear-gradient(180deg, #e9cd7e, #c79a3a);
+  --jz-accent-flat: #d8b25a;
+  --jz-on-accent: #2a1a04;
+  --jz-sec: rgba(242, 238, 227, 0.1);
+  --jz-sec-bd: rgba(242, 238, 227, 0.28);
+  --jz-sel: rgba(233, 205, 126, 0.22);
+  --jz-danger: #9c3b2a;
+  --jz-back: #8d7042;
+  --jz-back-edge: #efe6cf;
+  --jz-rad: 4px;
+  --jz-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --jz-felt-bg: radial-gradient(ellipse at 50% 45%, var(--jz-felt) 0%, var(--jz-felt2) 90%);
 }
 
 button:focus-visible,

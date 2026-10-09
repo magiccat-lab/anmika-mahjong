@@ -3,7 +3,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
   import Tile from './lib/Tile.svelte';
-  import { activeCpuGameSeats, canHostToggleCpuProxy, clientGameToRoomSeat, hostGameSeat, isMemberCpuProxy, memberAtGameSeat, type OnlineMemberLike } from './lib/onlineSeats';
+  import { activeCpuGameSeats, canHostToggleCpuProxy, clientGameToRoomSeat, clientRoomToGameSeat, hostGameSeat, isMemberCpuProxy, memberAtGameSeat, type OnlineMemberLike } from './lib/onlineSeats';
   import OnlineSeatStatus from './lib/OnlineSeatStatus.svelte';
   import DeadlineBar from './lib/DeadlineBar.svelte';
   import { applyDeadlineMessage, planDeadlineWarn, type OnlineDeadline } from './lib/onlineDeadline';
@@ -1223,6 +1223,18 @@
   $: onlineWsDown = onlineGameStarted && !onlineSocketOpen;
   // [2026-10-09 遊真 C3] 対局中の「× 退出」は確認してから抜ける [window.confirm でなくページ内]
   let leaveConfirmOpen = false;
+  // [2026-10-09 shun2 V2] store のお知らせは席番号 [player 2 / p1 / P0] で書かれている。オンラインでは名前に直す
+  function prettyOnlineMessage(m: string, names: readonly string[]): string {
+    return m.replace(/\b(?:player\s*|[pP])([0-2])\b/g, (all, d) => names[Number(d)] ?? all);
+  }
+  // [2026-10-09 shun2 V9] 卓の右上の ⋯ [設定 ・ バグ通報 ・ 退出]。外を押したら閉じる
+  let tableMenuOpen = false;
+  function closeTableMenuOnOutside(e: MouseEvent) {
+    if (!tableMenuOpen) return;
+    const t = e.target as Element | null;
+    if (t && typeof t.closest === 'function' && t.closest('.table-menu-wrap')) return;
+    tableMenuOpen = false;
+  }
   function confirmLeaveGame(): void {
     leaveConfirmOpen = false;
     // 席は残す [/leave は呼ばない]。ロビーの「戻る」から同じ部屋に戻れる
@@ -1624,6 +1636,14 @@
             nextRoundPressedLocal = false;
           }
         }
+      } else if (msg.type === 'stamp') {
+        // [2026-10-09 shun2 R2] 他の人のスタンプ。server は room seat で送ってくる。
+        // 受け口が無く、他の人の画面に出ていなかった。盤面の game seat に直して出す [自分の分は押した時に出している]
+        const roomSeat = typeof msg.seat === 'number' ? msg.seat : -1;
+        if (roomSeat !== (onlineRoomMeta?.mySeat ?? -2)) {
+          const gameSeat = clientRoomToGameSeat(onlineActiveMapping, roomSeat);
+          if (gameSeat !== null) game.applyOnlineRemoteAction(gameSeat, { type: 'stamp', stampId: msg.stampId });
+        }
       } else if (msg.type === 'chipResetVote') {
         // [2026-07-23 リョー指示] チップリセット同意の進捗 [server broadcast]
         chipResetVoteSeats = Array.isArray(msg.seats) ? msg.seats : [];
@@ -1751,6 +1771,16 @@
   $: selfNextRoundReady = nextRoundPressedLocal
     || nextRoundReadySeats.includes((onlineRoomMeta?.mySeat ?? -1) as number);
   $: nextRoundReadyShownCount = Math.max(nextRoundReadySeats.length, nextRoundPressedLocal ? 1 : 0);
+  // [2026-10-09 shun2 R6] 次局待ちは人数だけでなく、誰が押したか ・ 誰がまだかを出す [席に座っている人間だけ]
+  $: nextRoundWaitList = onlineGameStarted
+    ? onlineMembers
+      .filter((m) => !m.is_cpu && !(onlineActiveMapping && m.seat === onlineActiveMapping.inactiveRoomSeat))
+      .map((m) => ({
+        seat: m.seat,
+        name: m.username,
+        ready: nextRoundReadySeats.includes(m.seat) || (nextRoundPressedLocal && m.seat === onlineRoomMeta?.mySeat),
+      }))
+    : [];
   onMount(async () => {
     // 起動時 single モードの初期化 [P1/P2 CPU on、 revealAll off、 self=0]
     if (viewMode === 'single') {
@@ -1846,6 +1876,8 @@
   // body class + #app に inline style 直接当てる [bulletproof、 CSS 効かない環境保険]
   $: if (typeof document !== 'undefined') {
     document.body.classList.toggle('solo-mode', viewMode === 'single');
+    // [2026-10-09 shun2 V3] 入口 ・ ロビー ・ 部屋もフェルトの地に [旧: ロビーと部屋だけ白い地で別のアプリに見えた]
+    document.body.classList.toggle('felt-page', appMode === 'menu' || (viewMode === 'online' && !onlineGameStarted));
     const appEl = document.getElementById('app');
     if (appEl) {
       if (viewMode === 'single') {
@@ -2310,6 +2342,71 @@
   }
 </script>
 
+<svelte:window on:click={closeTableMenuOnOutside} />
+
+<!-- [2026-10-09 shun2 見た目 b / V1 V7 V10] 席の札。上家 ・ 下家は左右の列、自分は手牌のすぐ上の帯。
+     風 ・ 名前 ・ リーチ等の印 ・ 点 ・ チップとシュバ ・ 抜いた華と北 ・ 切断と CPU 代打ち ・ 残り時間を、
+     札の中の決まった場所に置く [旧: 点は真ん中の板、抜きは卓の上の帯、代打ちは細い列に押し込み] -->
+{#snippet seatCard(p: PlayerId, pos: 'left' | 'right' | 'me')}
+  {@const seatMember = onlineGameStarted ? memberAtGameSeat(onlineMembers, onlineActiveMapping, p) : undefined}
+  {@const hua = $game.game.huapai[p] ?? []}
+  {@const nukiN = ($game.game.nukidora[p] ?? 0) + ($game.game.nukidoraGold[p] ?? 0)}
+  {@const wind = ['東', '南', '西'][$game.game.zifengZ(p) - 1] ?? ''}
+  <div class="seat-card sc-{pos}" class:turn={currentPlayer === p && !$game.roundEnded} class:oya={wind === '東'}>
+    <div class="sc-head">
+      <span class="sc-wind" title={wind === '東' ? '親' : ''}>{wind}</span>
+      <span class="sc-name">{onlineGameStarted ? seatName(p) : (pos === 'me' ? 'あなた' : `P${p}`)}</span>
+      {#if $game.game.lizhi.has(p)}<span class="sc-tag">リーチ</span>{/if}
+      {#if $game.game.shuvariActive[p]}<span class="sc-tag hot">シュバ</span>{/if}
+      {#if $game.game.feverActive[p]}<span class="sc-tag hot">フィーバー</span>{/if}
+    </div>
+    <div class="sc-pt">{#key $game.game.state.defen[p]}<span class="sval">{$game.game.state.defen[p].toLocaleString()}</span>{/key}</div>
+    <div class="sc-sub">
+      <span>チップ {$game.game.chipLedger[p] ?? 0}</span>
+      <span>{$game.game.shuvariUsed[p] ? 'シュバ済' : 'シュバ未'}</span>
+      {#if selfPlayer === p || (!onlineGameStarted && revealAll)}<span>シャンテン {$game.game.xiangting(p)}</span>{/if}
+    </div>
+    {#if hua.length + nukiN > 0}
+      <div class="sc-nuki" title="抜いた華と北">
+        {#each hua as h}<Tile pai={h} size="sm" />{/each}
+        {#each Array($game.game.nukidora[p] ?? 0) as _}<Tile pai="z4" size="sm" />{/each}
+        {#each Array($game.game.nukidoraGold[p] ?? 0) as _}<Tile pai="gN" size="sm" />{/each}
+        <span class="sc-nuki-n">{hua.length > 0 ? `華 ${hua.length}` : ''}{hua.length > 0 && nukiN > 0 ? ' ・ ' : ''}{nukiN > 0 ? `北 ${nukiN}` : ''}</span>
+      </div>
+    {/if}
+    {#if onlineGameStarted}
+      {#if pos !== 'me'}
+        <OnlineSeatStatus member={seatMember} canToggle={canHostToggleCpuProxy(seatMember, !!onlineRoomMeta?.isHost, onlineMe?.user_id)} onSetCpuProxy={sendSetCpuProxy} />
+      {/if}
+      <DeadlineBar deadline={onlineDeadline} roomSeat={clientGameToRoomSeat(onlineActiveMapping, p)} />
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet sideHand(tiles: string[], fulou: any[], rot: 'l' | 'r')}
+  <!-- [2026-10-09 shun2 V6] 相手の伏せ牌は札の下に小さく [旧: 1 枚 54px の青い背が画面の高さいっぱい]。
+       背の色は局ごとに 2 色を交互 [2026-05-12 リョー指示] のまま、卓に沈む茶と紺にした -->
+  <div class="vhand" class:vhand-open={tiles.some((t) => t !== 'back')}>
+    {#each tiles as t}
+      {#if t === 'back'}
+        <span class="vback back-{state.jushu % 2 === 0 ? 'a' : 'b'}"></span>
+      {:else}
+        <span class="vface"><Tile pai={t} size="sm" /></span>
+      {/if}
+    {/each}
+  </div>
+  {#if fulou.length > 0}
+    <div class="vfulou">
+      {#each fulou as m}
+        <span class="vfulou-group">
+          {#each m.tiles as t, ti}<span class="vft" class:vclaimed={ti === m.rotateIdx}><Tile pai={t} size="sm" /></span>{/each}
+          {#if m.kakanTile}<span class="vft vclaimed"><Tile pai={m.kakanTile} size="sm" /></span>{/if}
+        </span>
+      {/each}
+    </div>
+  {/if}
+{/snippet}
+
 {#if appMode === 'menu'}
   <EntryMenu
     onSelectSolo={() => { appMode = 'started'; viewMode = 'single'; }}
@@ -2343,7 +2440,7 @@
     <RoomPanel
       roomId={currentRoomId}
       me={onlineMe}
-      onLeave={() => { disconnectOnline(); currentRoomId = null; }}
+      onLeave={(reason) => { disconnectOnline(); currentRoomId = null; if (reason) lobbyNotice = reason; }}
       onStart={async () => {
         try {
           const r = await fetch(`/api/rooms/${currentRoomId}`, { credentials: 'include' });
@@ -2495,6 +2592,11 @@
         />
       {/each}
     </div>
+    <!-- [2026-10-09 shun2 V2] オンラインのお知らせは 1 本の帯に。薄い金の地に濃い字 [旧: 薄い黄色に白い字でコントラスト 1.2]。
+         席番号 [player 2 / p1] は名前に直す。下の操作の行は卓の操作 [中央 ・ 手牌の上] と二重なので卓では出さない -->
+    {#if onlineGameStarted && $game.message && !($game.lastHuleResult || state.finished || $game.pendingPingju)}
+      <div class="msg-band" role="status">{prettyOnlineMessage($game.message, seatDisplayNames)}</div>
+    {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: 進行 row は debug 寄り、 オンライン中は
          ツモ切り / 自動 / CPU button が 他人手番でも代理 action になるので非表示。
          CPU toggle は local 状態 [single mode 用]、 単独表示にする -->
@@ -2690,7 +2792,8 @@
     {#if $game.roundEnded && !$game.pendingSaiKoro}
       <!-- R21 P0 fix: nextRound は host or winner [人間] or 親 [agariyame] 許容 [server で gate]、
            次局へ は 流局 = host、 和了 = winner 自身 が押す自然な UX に -->
-      <div class="action-row">
+      <!-- [2026-10-09 shun2 V5] 卓では和了 ・ 流局の板の「次局へ」1 か所にする。板が出ていない時だけこの行を残す -->
+      <div class="action-row" class:round-fallback={!($game.lastHuleResult || state.finished || $game.pendingPingju || $game.pendingKinpei)}>
         <span class="row-label">局終了:</span>
         {#if state.finished}
           <!-- [2026-07-22 リョー報告: 終局時の表示と処理がされてない] online の半荘終了は
@@ -2773,7 +2876,8 @@
   </header>
 
   {#if viewMode === 'single'}
-    <!-- 上部 row: フィーバー待ち [左、 ドラ表と同列 inline] + ドラ表示牌 + 設定 -->
+    <!-- 上部 row [2026-10-09 shun2 見た目 b / V9]: 今だれの番かの札と ⋯ だけ。ドラは真ん中の札へ、
+         ツモ切りは手牌の上の札へ、他の設定と退出は ⋯ の中へ移した。フィーバー待ちは出ている時だけ真ん中に -->
     <div class="dora-row">
       <span class="turn-status status-{actionStatus.tone}" aria-live="polite">
         <span class="status-dot" aria-hidden="true"></span>
@@ -2783,7 +2887,7 @@
         {#if feverWaits.length > 0}
           <span class="fever-inline-label">🔥 フィーバー</span>
           {#each feverWaits as fw}
-            <span class="fever-inline-player">p{fw.player}:</span>
+            <span class="fever-inline-player">{seatDisplayNames[fw.player as 0|1|2] ?? `p${fw.player}`}:</span>
             {#each fw.waits as w}
               <span class="fever-inline-wait">
                 <Tile pai={w.tile} size="md" />
@@ -2791,36 +2895,29 @@
               </span>
             {/each}
           {/each}
-          <span class="dora-divider">|</span>
         {/if}
-        <span class="dora-label">ドラ表</span>
-        {#each baopai.filter((t) => typeof t === 'string') as t}
-          <Tile pai={t} size="md" />
-        {/each}
       </div>
-      <div class="settings-group">
-        {#if !onlineGameStarted}
-          <label title="自分の手番を自動でツモ切り"><input type="checkbox" bind:checked={autoTsumoKiri}>ツモ切り</label>
-        {/if}
-        {#if !onlineGameStarted}
-          <label title="他家の手牌を表示"><input type="checkbox" checked={revealAll} on:change={toggleRevealAll}>他家手牌</label>
-          <label title="CPU の操作を2.5秒遅らせる"><input type="checkbox" bind:checked={cpuSlowMode}>CPU ラグ</label>
-          <!-- 2026-07-22 リョー指示: 局中の オンライン対戦 button は撤去 [入口は menu のみ]。
-               牌譜保存も局中は状態ダンプと重複扱いで撤去 [終局画面の保存は残す] -->
-          <button class="table-setting-btn save" on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ">🩺 <span class="settings-label">状態ダンプ</span></button>
-          <button class="table-setting-btn save" on:click={reportBug} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報">🐛 <span class="settings-label">バグ通報</span></button>
-          <!-- 打牌アドバイス [2026-07-21 リョー要望]: CPU戦のみ。初版は header 内 action-row に
-               置いて single モードの display:none で丸ごと消えていた -->
-          <button class="table-setting-btn advice" class:advice-on={adviceOpen} on:click={() => adviceOpen = !adviceOpen} title="CPUと同じ評価で候補打牌を表示" aria-label="打牌の助言">💡 <span class="settings-label">助言</span></button>
-        {:else}
-          <!-- [2026-07-22 リョー要望] オンラインにも 鳴きなし/ツモ切り/自動アガリ -->
-          <label title="ポン/カン機会を自動で見送る"><input type="checkbox" bind:checked={onlineNoCall}>鳴きなし</label>
-          <label title="自分の手番を自動でツモ切り"><input type="checkbox" bind:checked={autoTsumoKiri}>ツモ切り</label>
-          <label title="ツモ/ロンできる時に自動で和了"><input type="checkbox" bind:checked={onlineAutoWin}>自動アガリ</label>
-          <!-- [2026-10-09 遊真 C5] オンライン中もバグ通報を押せる [🔧 局頭に戻すは出さない] -->
-          <button class="table-setting-btn save" on:click={reportBug} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報">🐛 <span class="settings-label">バグ通報</span></button>
-          <!-- [2026-10-09 遊真 C3] 抜ける前に 1 回だけページ内で確認する -->
-          <button class="table-setting-btn leave" on:click={() => { leaveConfirmOpen = true; }} title="対局から退出" aria-label="対局から退出">× <span class="settings-label">退出</span></button>
+      <div class="table-menu-wrap">
+        <button type="button" class="table-menu-btn" class:open={tableMenuOpen} aria-label="設定と退出" aria-expanded={tableMenuOpen} title="設定と退出" on:click={() => { tableMenuOpen = !tableMenuOpen; }}>⋯</button>
+        {#if tableMenuOpen}
+          <div class="table-menu" role="menu">
+            {#if !onlineGameStarted}
+              <label class="tm-toggle" title="他家の手牌を表示"><input type="checkbox" checked={revealAll} on:change={toggleRevealAll}><span>他家の手牌を見る</span></label>
+              <label class="tm-toggle" title="CPU の操作を2.5秒遅らせる"><input type="checkbox" bind:checked={cpuSlowMode}><span>CPU を 2.5 秒待たせる</span></label>
+              <!-- 打牌アドバイス [2026-07-21 リョー要望]: CPU戦のみ -->
+              <button type="button" class="table-setting-btn advice" class:advice-on={adviceOpen} on:click={() => { adviceOpen = !adviceOpen; tableMenuOpen = false; }} title="CPUと同じ評価で候補打牌を表示" aria-label="打牌の助言">💡 <span class="settings-label">助言</span></button>
+              <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; exportDiagnostics(); }} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ">🩺 <span class="settings-label">状態ダンプ</span></button>
+              <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; reportBug(); }} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報">🐛 <span class="settings-label">バグ通報</span></button>
+            {:else}
+              <!-- [2026-07-22 リョー要望] オンラインにも 鳴きなし/自動アガリ [ツモ切りは手牌の上] -->
+              <label class="tm-toggle" title="ポン/カン機会を自動で見送る"><input type="checkbox" bind:checked={onlineNoCall}><span>鳴きなし</span></label>
+              <label class="tm-toggle" title="ツモ/ロンできる時に自動で和了"><input type="checkbox" bind:checked={onlineAutoWin}><span>自動アガリ</span></label>
+              <!-- [2026-10-09 遊真 C5] オンライン中もバグ通報を押せる [🔧 局頭に戻すは出さない] -->
+              <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; reportBug(); }} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報">🐛 <span class="settings-label">バグ通報</span></button>
+              <!-- [2026-10-09 遊真 C3] 抜ける前に 1 回だけページ内で確認する -->
+              <button type="button" class="table-setting-btn leave" on:click={() => { tableMenuOpen = false; leaveConfirmOpen = true; }} title="対局から退出" aria-label="対局から退出"><span class="settings-label">退出</span></button>
+            {/if}
+          </div>
         {/if}
       </div>
     </div>
@@ -2876,39 +2973,24 @@
           {/if}
         </div>
       {/if}
-      <!-- 中央の score-box [仕組み図 中央四角]、 oya 方向に外枠 [リョー指示] -->
-      <!-- 2026-05-14 codex review #3 fix: oyaPlayer は real player id、 視覚座 srv0/srv1/srv2 への
-           mapping で direction 決める。 online で selfPlayer != 0 の時に親枠方向 ズレを防ぐ -->
-      <div class="score-box oya-{oyaPlayer === srv0 ? 'bottom' : (oyaPlayer === srv1 ? 'left' : (oyaPlayer === srv2 ? 'right' : 'bottom'))}">
-        <!-- [2026-07-20 リョー指摘: 「いつの間にか回り親になってる？」]
-             返り東は changbang / jushu を 0 に巻き戻すので、画面上は東 1 局に戻り
-             何周目か分からなくなる。返り東中である事を明示する -->
-        <div class="score-side score-top">場 {['東','南','西','北'][state.changbang] ?? '東'}{state.jushu + 1}局{state.tongaeshi ? ' [返り東]' : ''}</div>
-        <div class="score-side score-left lizhi-{$game.game.lizhi.has(srv1)} {$game.game.shuvariActive[srv1] ? 'shuvari' : ''} {$game.game.feverActive[srv1] ? 'fever' : ''} {oyaPlayer === srv1 ? 'is-oya' : ''}">
-          <div class="sname">{onlineGameStarted ? seatName(srv1) : 'P1'}{$game.game.lizhi.has(srv1) ? ' リーチ' : ''}{$game.game.shuvariActive[srv1] ? ' [シュバ]' : ''}{$game.game.feverActive[srv1] ? ' [フィバ]' : ''}</div>
-          {#key $game.game.state.defen[srv1]}<div class="sval">{$game.game.state.defen[srv1].toLocaleString()}</div>{/key}
-          <div class="ssub">
-            {#if revealAll || selfPlayer === srv1}シャンテン {xt1} / {/if}チップ {$game.game.chipLedger[srv1] ?? 0}<br>{$game.game.shuvariUsed[srv1] ? 'シュバ済' : 'シュバ未'}
+      <!-- 中央の札 [2026-10-09 shun2 見た目 b / V1]: 局 ・ ドラ ・ 本場と供託 ・ 残りだけ。
+           名前と点は席の札へ移した [スマホ横で名前と点が重なって誰の点か読めなかった]。
+           箱の寸法は河の配置の基準なので残し、見える札は真ん中に小さく置く -->
+      <div class="score-box">
+        <div class="cb-panel">
+          <!-- [2026-07-20 リョー指摘: 「いつの間にか回り親になってる？」] 返り東は東 1 局に戻るので明示する -->
+          <div class="score-side score-top">{['東','南','西','北'][state.changbang] ?? '東'} {state.jushu + 1} 局{state.tongaeshi ? ' [返り東]' : ''}</div>
+          <div class="cb-dora">
+            <span class="cb-label">ドラ表示</span>
+            {#each baopai.filter((t) => typeof t === 'string') as t}
+              <Tile pai={t} size="sm" />
+            {/each}
           </div>
-          {#if onlineGameStarted}<DeadlineBar deadline={onlineDeadline} roomSeat={clientGameToRoomSeat(onlineActiveMapping, srv1)} />{/if}
-        </div>
-        <div class="score-center">
-          <div class="benbang">{state.benbang} 本場</div>
-          <div class="paishu">山 {paishu}</div>
-        </div>
-        <div class="score-side score-right lizhi-{$game.game.lizhi.has(srv2)} {$game.game.shuvariActive[srv2] ? 'shuvari' : ''} {$game.game.feverActive[srv2] ? 'fever' : ''} {oyaPlayer === srv2 ? 'is-oya' : ''}">
-          <div class="sname">{onlineGameStarted ? seatName(srv2) : 'P2'}{$game.game.lizhi.has(srv2) ? ' リーチ' : ''}{$game.game.shuvariActive[srv2] ? ' [シュバ]' : ''}{$game.game.feverActive[srv2] ? ' [フィバ]' : ''}</div>
-          {#key $game.game.state.defen[srv2]}<div class="sval">{$game.game.state.defen[srv2].toLocaleString()}</div>{/key}
-          <div class="ssub">
-            {#if revealAll || selfPlayer === srv2}シャンテン {xt2} / {/if}チップ {$game.game.chipLedger[srv2] ?? 0}<br>{$game.game.shuvariUsed[srv2] ? 'シュバ済' : 'シュバ未'}
+          <div class="score-center">
+            <span class="benbang">{state.benbang} 本場</span>
+            <span class="kyotaku">供託 {state.lizhibang}</span>
+            <span class="paishu">残り {paishu}</span>
           </div>
-          {#if onlineGameStarted}<DeadlineBar deadline={onlineDeadline} roomSeat={clientGameToRoomSeat(onlineActiveMapping, srv2)} />{/if}
-        </div>
-        <div class="score-side score-bottom lizhi-{$game.game.lizhi.has(srv0)} {$game.game.shuvariActive[srv0] ? 'shuvari' : ''} {$game.game.feverActive[srv0] ? 'fever' : ''} {oyaPlayer === srv0 ? 'is-oya' : ''}">
-          <div class="sname">{onlineGameStarted ? seatName(srv0) : 'P0'} [自]{$game.game.lizhi.has(srv0) ? ' リーチ' : ''}{$game.game.shuvariActive[srv0] ? ' [シュバ]' : ''}{$game.game.feverActive[srv0] ? ' [フィバ]' : ''}</div>
-          {#key $game.game.state.defen[srv0]}<div class="sval">{$game.game.state.defen[srv0].toLocaleString()}</div>{/key}
-          <div class="ssub">シャンテン {xt0} / チップ {$game.game.chipLedger[srv0] ?? 0} / {$game.game.shuvariUsed[srv0] ? 'シュバ済' : 'シュバ未'}</div>
-          {#if onlineGameStarted}<DeadlineBar deadline={onlineDeadline} roomSeat={clientGameToRoomSeat(onlineActiveMapping, srv0)} />{/if}
         </div>
       </div>
       <!-- 4 方向 河ゾーン [雀魂風、 6 牌/行で wrap]、 各 player の向きに合わせて回転 -->
@@ -2937,96 +3019,89 @@
         {/each}
       </div>
     </div>
-    <!-- 抜き牌 3 box 上部に並べる [srv1 / srv0 / srv2 順、 視覚座 = 左 / 自 / 右]、 center-board の外
-         2026-05-14 ゆーま 自走 bug fix: hardcoded nukidora[0/1/2] だと online で
-         selfPlayer != 0 の時 自分の box に他人の抜き牌が表示される、 srv* 参照に変更 -->
-    <div class="nuki-row">
-      <div class="nuki">
-        <div class="nuki-label">{onlineGameStarted ? seatName(srv1) : 'P1'} 抜</div>
-        {#each Array($game.game.nukidora[srv1] ?? 0) as _, i}<Tile pai="z4" size="md" />{/each}
-        {#each Array($game.game.nukidoraGold[srv1] ?? 0) as _, i}<Tile pai="gN" size="md" />{/each}
-        {#each $game.game.huapai[srv1] ?? [] as h}<Tile pai={h} size="md" />{/each}
-      </div>
-      <div class="nuki">
-        <div class="nuki-label">{onlineGameStarted ? seatName(srv0) : 'P0'} 抜 [自]</div>
-        {#each Array($game.game.nukidora[srv0] ?? 0) as _, i}<Tile pai="z4" size="md" />{/each}
-        {#each Array($game.game.nukidoraGold[srv0] ?? 0) as _, i}<Tile pai="gN" size="md" />{/each}
-        {#each $game.game.huapai[srv0] ?? [] as h}<Tile pai={h} size="md" />{/each}
-      </div>
-      <div class="nuki">
-        <div class="nuki-label">{onlineGameStarted ? seatName(srv2) : 'P2'} 抜</div>
-        {#each Array($game.game.nukidora[srv2] ?? 0) as _, i}<Tile pai="z4" size="md" />{/each}
-        {#each Array($game.game.nukidoraGold[srv2] ?? 0) as _, i}<Tile pai="gN" size="md" />{/each}
-        {#each $game.game.huapai[srv2] ?? [] as h}<Tile pai={h} size="md" />{/each}
-      </div>
-    </div>
+    <!-- [2026-10-09 shun2 V7] 抜いた華と北は席の札の中に出す [旧: 卓の上の 3 枠の帯] -->
   {/if}
 
-  <!-- スタンプ slot bar [画面下、 手牌の上、 左から P1 / P0 / P2] -->
+  <!-- スタンプ slot bar [画面下、 手牌の上、 左から 上家 / 自分 / 下家]
+       [2026-10-09 shun2 R2] 卓の他の部分と同じく自分を下に回した並び [srv*]。旧: 席番号 1/0/2 固定で、
+       自分が席 1 以外だと別の人の所に出ていた -->
   <div class="stamp-slot-bar">
-    <div class="stamp-slot stamp-slot-p1"><StampPopup stamp={$game.stamps[1]} /></div>
-    <div class="stamp-slot stamp-slot-p0"><StampPopup stamp={$game.stamps[0]} /></div>
-    <div class="stamp-slot stamp-slot-p2"><StampPopup stamp={$game.stamps[2]} /></div>
+    <div class="stamp-slot stamp-slot-p1"><StampPopup stamp={$game.stamps[srv1]} /></div>
+    <div class="stamp-slot stamp-slot-p0"><StampPopup stamp={$game.stamps[srv0]} /></div>
+    <div class="stamp-slot stamp-slot-p2"><StampPopup stamp={$game.stamps[srv2]} /></div>
   </div>
   <CutinOverlay cutin={$game.cutin} on:skip={onCutinSkip} />
 
   <div class="seat seat-bottom" style="position:relative">
     {#if viewMode === 'single'}
-      <div class="toolbar toolbar-red">
-        <!-- 現在 player [手番] が P0 [user] の時だけ アクション button 表示 [リョー指示 2026-05-12: CPU 手番中 北抜きボタンが出る bug fix] -->
-        <!-- ツモ button は center overlay に移動。暗槓は下の実候補一覧から宣言する。 -->
-        {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && baseLizhiCandidates.length > 0}
-          <div class="tb-row">
-            <LizhiControls
-              pending={$game.lizhiPending === currentPlayer}
-              flags={pendingLizhiFlags}
-              normalCandidates={normalLizhiPhysicalCandidates}
-              feverCandidates={feverLizhiPhysicalCandidates}
-              feverCandidateViews={feverCandidateViews}
-              {feverAvailable}
-              shuvariUsed={$game.game.shuvariUsed[currentPlayer]}
-              onSelect={(opts) => game.lizhi(opts)}
-              onCancel={() => game.cancelLizhi()}
-            />
-          </div>
+      <!-- [2026-10-09 shun2 見た目 b] 自分の札と、続けて効く設定 [ツモ切り] は手牌のすぐ上の 1 本に -->
+      <div class="me-strip">
+        {@render seatCard(srv0, 'me')}
+        {#if !onlineSpectator}
+          <label class="tm-toggle tsumokiri-toggle" title="自分の手番を自動でツモ切り"><input type="checkbox" bind:checked={autoTsumoKiri}><span>ツモ切り</span></label>
+          <!-- スタンプ button [自家のみ表示、 cosmetic、 game state 副作用なし]。帯の右端に固定 -->
+          <button class="stamp-open-btn" on:click={openStampPallet} title="スタンプ" aria-label="スタンプ">💬</button>
         {/if}
-        {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou}
-          {#each $game.game.getKanCandidates(currentPlayer) as km}
-            <div class="tb-row"><button class="kan-btn" on:click={() => game.declareKan(km)}>{km === whiteKanCandidate ? '白暗カン' : 'カン'}</button></div>
-          {/each}
-        {/if}
-        <!-- ロン+スキップ は ron-choice-panel に移動 [center overlay 白 bg]、 toolbar 側は出さない -->
+        <!-- 操作 [リーチ ・ カン ・ ポン ・ 北抜き ・ 次へ]: 帯の右端に下を揃えて置き、選択肢が増えたら上へ伸びる [手牌は動かない] -->
+        <div class="toolbar toolbar-red">
+          <!-- 現在 player [手番] が P0 [user] の時だけ アクション button 表示 [リョー指示 2026-05-12: CPU 手番中 北抜きボタンが出る bug fix] -->
+          <!-- ツモ button は center overlay に移動。暗槓は下の実候補一覧から宣言する。 -->
+          {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && baseLizhiCandidates.length > 0}
+            <div class="tb-row">
+              <LizhiControls
+                pending={$game.lizhiPending === currentPlayer}
+                flags={pendingLizhiFlags}
+                normalCandidates={normalLizhiPhysicalCandidates}
+                feverCandidates={feverLizhiPhysicalCandidates}
+                feverCandidateViews={feverCandidateViews}
+                {feverAvailable}
+                shuvariUsed={$game.game.shuvariUsed[currentPlayer]}
+                onSelect={(opts) => game.lizhi(opts)}
+                onCancel={() => game.cancelLizhi()}
+              />
+            </div>
+          {/if}
+          <!-- [2026-10-09 shun2] 北抜きも操作の帯に [旧: 上の帯にだけあった。牌を押しても抜ける] -->
+          {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && $game.game.canNukiBei(currentPlayer)}
+            <div class="tb-row"><button class="nuki-btn" on:click={() => game.nukiBei()}>北抜き</button></div>
+          {/if}
+          {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou}
+            {#each $game.game.getKanCandidates(currentPlayer) as km}
+              <div class="tb-row"><button class="kan-btn" on:click={() => game.declareKan(km)}>{km === whiteKanCandidate ? '白暗カン' : 'カン'}</button></div>
+            {/each}
+          {/if}
+          <!-- ロン+スキップ は ron-choice-panel に移動 [center overlay 白 bg]、 toolbar 側は出さない -->
 
-        <!-- 自家 [selfPlayer] が候補のときだけ ポン/カン/スキップ を表示 [mianzi 非空チェック]
-             2026-05-14 ゆーま 自走 bug fix: 旧 hardcoded 0 だと online で selfPlayer != 0
-             の時 ポンボタンが出ない、 selfPlayer 参照に修正 -->
-        {#if $game.awaitingFulou && ([...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])].some(c => c.player === actorSeat && (c.mianzi?.length ?? 0) > 0))}
-          {#each ($game.ponCandidates ?? []).filter(c => c.player === actorSeat) as cand}
-            {#each cand.mianzi as m}
-              <div class="tb-row hot"><button class="pon-btn" on:click={() => game.pon(cand.player, m)}>ポン</button></div>
+          <!-- 自家 [selfPlayer] が候補のときだけ ポン/カン/スキップ を表示 [mianzi 非空チェック]
+               2026-05-14 ゆーま 自走 bug fix: 旧 hardcoded 0 だと online で selfPlayer != 0
+               の時 ポンボタンが出ない、 selfPlayer 参照に修正 -->
+          {#if $game.awaitingFulou && ([...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])].some(c => c.player === actorSeat && (c.mianzi?.length ?? 0) > 0))}
+            {#each ($game.ponCandidates ?? []).filter(c => c.player === actorSeat) as cand}
+              {#each cand.mianzi as m}
+                <div class="tb-row hot"><button class="pon-btn" on:click={() => game.pon(cand.player, m)}>ポン</button></div>
+              {/each}
             {/each}
-          {/each}
-          {#each ($game.kanCandidates ?? []).filter(c => c.player === actorSeat) as cand}
-            {#each cand.mianzi as m}
-              <div class="tb-row hot"><button class="kan-btn" on:click={() => game.damingang(cand.player, m)}>カン</button></div>
+            {#each ($game.kanCandidates ?? []).filter(c => c.player === actorSeat) as cand}
+              {#each cand.mianzi as m}
+                <div class="tb-row hot"><button class="kan-btn" on:click={() => game.damingang(cand.player, m)}>カン</button></div>
+              {/each}
             {/each}
-          {/each}
-          <div class="tb-row"><button on:click={() => game.pass()}>見送る</button></div>
-        {/if}
-        <!-- 2026-05-14 codex review #3 fix: 続行 / drawNext も winner / currentPlayer===selfPlayer gate -->
-        {#if $game.pendingFeverContinue && !$game.pendingSaiKoro && (!onlineGameStarted || $game.pendingFeverContinue.winner === actorSeat)}
-          <div class="tb-row hot"><button class="next-btn" on:click={() => game.continueFever()}>続行</button></div>
-        {/if}
-        {#if needsZimo && (!onlineGameStarted || currentPlayer === actorSeat)}
-          <div class="tb-row hot">
-            <button class="next-btn" on:click={() => game.drawNext()}>▶ ツモ [p{currentPlayer}]</button>
+            <div class="tb-row"><button on:click={() => game.pass()}>見送る</button></div>
+          {/if}
+          <!-- 2026-05-14 codex review #3 fix: 続行 / drawNext も winner / currentPlayer===selfPlayer gate -->
+          {#if $game.pendingFeverContinue && !$game.pendingSaiKoro && (!onlineGameStarted || $game.pendingFeverContinue.winner === actorSeat)}
+            <div class="tb-row hot"><button class="next-btn" on:click={() => game.continueFever()}>続行</button></div>
+          {/if}
+          {#if needsZimo && (!onlineGameStarted || currentPlayer === actorSeat)}
+            <div class="tb-row hot">
+              <button class="next-btn" on:click={() => game.drawNext()}>▶ ツモ [p{currentPlayer}]</button>
+            </div>
+          {/if}
+          {#if $game.message && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.lastHuleResult}
+            <div class="tb-row"><span class="alert">{$game.message}</span></div>
+          {/if}
+          <!-- スタンプ button [自家のみ表示、 cosmetic、 game state 副作用なし] -->
           </div>
-        {/if}
-        {#if $game.message && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.lastHuleResult}
-          <div class="tb-row"><span class="alert">{$game.message}</span></div>
-        {/if}
-        <!-- スタンプ button [自家のみ表示、 cosmetic、 game state 副作用なし] -->
-        {#if !onlineSpectator}<div class="tb-row"><button class="stamp-open-btn" on:click={openStampPallet} title="スタンプ">💬</button></div>{/if}
       </div>
     {/if}
     <PlayerHandPanel
@@ -3053,32 +3128,8 @@
   <div class="seat seat-left" style="position:relative">
     {#if viewMode === 'single'}
       <div class="vplayer left {currentPlayer === srv1 ? 'current' : ''}">
-        <div class="vinfo">
-          <span class="vfeng">{['東','南','西'][$game.game.zifengZ(srv1) - 1] ?? ''}</span>
-          <span class="vname">{onlineGameStarted ? seatName(srv1) + ' 上家' : 'P1 上家'}</span>
-          {#if $game.game.shuvariActive[srv1]}<span class="vshuvari-badge">シュバ</span>{/if}
-          {#if onlineGameStarted}
-            {@const seatMember = memberAtGameSeat(onlineMembers, onlineActiveMapping, srv1)}
-            <OnlineSeatStatus member={seatMember} canToggle={canHostToggleCpuProxy(seatMember, !!onlineRoomMeta?.isHost, onlineMe?.user_id)} onSetCpuProxy={sendSetCpuProxy} />
-          {/if}
-        </div>
-        <div class="vhand vleft-hand">
-          {#each sideTiles1 as t}
-            <span class="vtile rot-l back-{state.jushu % 2 === 0 ? 'blue' : 'orange'}">
-              {#if t === 'back'}
-                <Tile pai="m1" face="down" size="md" />
-              {:else}
-                <Tile pai={t} size="md" />
-              {/if}
-            </span>
-          {/each}
-          {#each fulou1 as m}
-            <span class="vfulou-group">
-              {#each m.tiles as t, ti}<span class="vtile rot-l" class:vclaimed={ti === m.rotateIdx}><Tile pai={t} size="md" /></span>{/each}
-              {#if m.kakanTile}<span class="vtile rot-l vclaimed"><Tile pai={m.kakanTile} size="md" /></span>{/if}
-            </span>
-          {/each}
-        </div>
+        {@render seatCard(srv1, 'left')}
+        {@render sideHand(sideTiles1, fulou1, 'l')}
       </div>
     {:else}
       <PlayerHandPanel
@@ -3104,32 +3155,8 @@
   <div class="seat seat-right" style="position:relative">
     {#if viewMode === 'single'}
       <div class="vplayer right {currentPlayer === srv2 ? 'current' : ''}">
-        <div class="vinfo">
-          <span class="vfeng">{['東','南','西'][$game.game.zifengZ(srv2) - 1] ?? ''}</span>
-          <span class="vname">{onlineGameStarted ? seatName(srv2) + ' 下家' : 'P2 下家'}</span>
-          {#if $game.game.shuvariActive[srv2]}<span class="vshuvari-badge">シュバ</span>{/if}
-          {#if onlineGameStarted}
-            {@const seatMember = memberAtGameSeat(onlineMembers, onlineActiveMapping, srv2)}
-            <OnlineSeatStatus member={seatMember} canToggle={canHostToggleCpuProxy(seatMember, !!onlineRoomMeta?.isHost, onlineMe?.user_id)} onSetCpuProxy={sendSetCpuProxy} />
-          {/if}
-        </div>
-        <div class="vhand vright-hand">
-          {#each sideTiles2 as t}
-            <span class="vtile rot-r back-{state.jushu % 2 === 0 ? 'blue' : 'orange'}">
-              {#if t === 'back'}
-                <Tile pai="m1" face="down" size="md" />
-              {:else}
-                <Tile pai={t} size="md" />
-              {/if}
-            </span>
-          {/each}
-          {#each fulou2 as m}
-            <span class="vfulou-group">
-              {#each m.tiles as t, ti}<span class="vtile rot-r" class:vclaimed={ti === m.rotateIdx}><Tile pai={t} size="md" /></span>{/each}
-              {#if m.kakanTile}<span class="vtile rot-r vclaimed"><Tile pai={m.kakanTile} size="md" /></span>{/if}
-            </span>
-          {/each}
-        </div>
+        {@render seatCard(srv2, 'right')}
+        {@render sideHand(sideTiles2, fulou2, 'r')}
       </div>
     {:else}
       <PlayerHandPanel
@@ -3223,6 +3250,7 @@
          金北選択の間は lastHuleResult がまだ無いので左の和了欄が空の白い板だった。強化前の暫定和了
          [pendingKinpei.preview] を和了パネルで出す。preview が無い時だけ、選択の帯に畳んで盤面を見せる -->
     <div class="agari-unified-panel" class:appear-after-cutin={!!$game.lastHuleResult && !state.finished}
+      class:pingju-small={$game.pendingPingju && !$game.lastHuleResult && !state.finished && !$game.pendingKinpei}
       class:kinpei-only={!!$game.pendingKinpei && !$game.pendingKinpei.preview && !$game.lastHuleResult && !state.finished && !$game.pendingPingju}>
       <div class="agari-left" class:pingju-only={$game.pendingPingju && !$game.lastHuleResult && !state.finished}>
         {#if state.finished}
@@ -3235,17 +3263,14 @@
           </div>
           {#if $game.game.preHuleSnapshot}
             {@const pdelta = [0,1,2].map(p => state.defen[p as PlayerId] - (($game.game.preHuleSnapshot as any).defen[p] ?? 0))}
-            <div class="payment-row" style="display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap;">
-              <span style="font-weight:700; font-size:16px;">点数移動:</span>
+            <!-- [2026-10-09 shun2 V5] 点の動きは 3 人を名前で縦に並べる [旧: P0/P1/P2 の札を横に] -->
+            <div class="payment-row pingju-moves">
               {#each pdelta as v, p}
-                <span style="display:inline-flex; align-items:baseline; gap:6px; padding:6px 14px; border-radius:6px; font-weight:700; font-variant-numeric:tabular-nums;
-                  border: 1px solid {v > 0 ? 'rgba(60,150,80,0.4)' : v < 0 ? 'rgba(190,70,70,0.4)' : 'rgba(0,0,0,0.12)'};
-                  background: {v > 0 ? 'rgba(80,180,100,0.16)' : v < 0 ? 'rgba(220,80,80,0.14)' : 'rgba(0,0,0,0.06)'};
-                  color: {v > 0 ? '#1e7a38' : v < 0 ? '#b23030' : '#888'};">
-                  <span style="font-size:12px; color:#666; font-weight:800;">P{p}</span>
-                  <span style="font-size:18px;">{v > 0 ? '+' : (v === 0 ? '±' : '')}{v.toLocaleString()}</span>
-                  <span style="font-size:13px; color:#555;">→ {state.defen[p as PlayerId].toLocaleString()}</span>
-                </span>
+                <div class="pm-row" class:up={v > 0} class:down={v < 0}>
+                  <span class="pm-name">{seatDisplayNames[p] ?? `P${p}`}</span>
+                  <span class="pm-delta">{v > 0 ? '+' : (v === 0 ? '±' : '')}{v.toLocaleString()}</span>
+                  <span class="pm-after">{state.defen[p as PlayerId].toLocaleString()}</span>
+                </div>
               {/each}
             </div>
           {/if}
@@ -3402,6 +3427,13 @@
               <button disabled={selfNextRoundReady || !nextRoundReadySafe} on:click={sendNextRoundReady}>
                 {selfNextRoundReady ? `全員待ち [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]` : `▶ 次局へ [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]`}
               </button>
+              {#if nextRoundWaitList.length > 0}
+                <span class="ready-list" aria-label="次局へを押した人">
+                  {#each nextRoundWaitList as w (w.seat)}
+                    <span class="ready-chip" class:ready={w.ready}>{w.ready ? '✓' : 'まだ'} {w.name}</span>
+                  {/each}
+                </span>
+              {/if}
               {:else}
               <span class="muted-hint">👁 観戦中 [{nextRoundReadyShownCount}/{nextRoundReadyTotal} 次局待ち]</span>
               {/if}
@@ -3542,7 +3574,7 @@
     max-width: 900px;
     margin: 16px auto;
     padding: 16px;
-    font-family: 'Noto Sans JP', sans-serif;
+    font-family: var(--sans);
   }
   header {
     border-bottom: 1px solid #ccc;
@@ -3833,6 +3865,8 @@
     max-width: none !important;
     border-inline: 0 !important;
   }
+  :global(body.felt-page) { background: var(--jz-felt2); color: var(--jz-ink); }
+  :global(body.felt-page #app) { border-inline: 0; }
   :global(body.solo-mode) {
     margin: 0;
     overflow: hidden;
@@ -4272,18 +4306,6 @@
     font-size: 13px;
     font-weight: 500;
   }
-  main.mode-single .dora-row .settings-group label {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  main.mode-single .dora-row .settings-group input[type="checkbox"] {
-    width: 14px;
-    height: 14px;
-    accent-color: #d4af37;
-  }
   main.mode-single .table-setting-btn {
     min-height: 32px;
     padding: 5px 10px;
@@ -4368,17 +4390,6 @@
   }
   main.mode-single .toolbar-red .tb-row button:hover {
     background: #ffe080 !important;
-  }
-  /* 2026-07-22 リョー指摘: スタンプ button がデカい。floating 大ボタン様式から外して小ピルに */
-  main.mode-single .toolbar-red .tb-row button.stamp-open-btn {
-    font-size: 13px !important;
-    padding: 3px 8px !important;
-    background: #fff8e1 !important;
-    border: 1px solid #ff9800 !important;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  }
-  main.mode-single .toolbar-red .tb-row button.stamp-open-btn:hover {
-    background: #ffe082 !important;
   }
   main.mode-single .toolbar .tb-row {
     display: flex;
@@ -5104,7 +5115,8 @@
      宣言だけは v2 セクション末尾の「手順F 移植分」へ引き継いである。 */
 
   /* スマホ縦向きでは卓が欠けるため、誤操作できる半端な盤面を見せず案内する。 */
-  @media (max-width: 700px) and (orientation: portrait) {
+  /* [2026-10-09 shun2] 縦持ちの卓を作ったので「横向きにして」は出さない [下の縦持ちの節]。旧の規則は使わない */
+  @media (max-width: 1px) and (orientation: portrait) {
     main.mode-single .orientation-notice {
       position: fixed;
       inset: 0;
@@ -5454,11 +5466,6 @@
       gap: 6px;
       font-size: 11px;
     }
-    main.mode-single.ui-board-v2 .dora-row .settings-group label { gap: 2px; }
-    main.mode-single.ui-board-v2 .dora-row .settings-group input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
-    }
     main.mode-single.ui-board-v2 .table-setting-btn {
       min-width: 34px;
       min-height: 32px;
@@ -5749,4 +5756,562 @@
   }
   .leave-confirm-yes { background: #aa4040; color: #fff; }
   .leave-confirm-no { background: #ffd060; color: #1a1820; }
+
+  /* ============================================================
+     [2026-10-09 shun2] 見た目 b 雀荘 [リョー ○、見直し 2 版目]。一人回しとオンラインの卓で共通。
+     深い緑のフェルトに細い木の縁、生成りの字、金は点数と押す物だけ。色は app.css の --jz-*。
+     字は 11px 未満を作らない [V4: 11 / 12 / 14 / 16 / 22px の段]
+     ============================================================ */
+  main.mode-single.ui-board-v2 {
+    --side-col: clamp(150px, 15vw, 228px);
+    --frame: 10px;
+    background: var(--jz-felt-bg);
+    box-shadow: inset 0 0 0 var(--frame) var(--jz-wood), inset 0 0 0 calc(var(--frame) + 1px) rgba(208, 170, 82, 0.5);
+    color: var(--jz-ink);
+    padding:
+      calc(var(--frame) + 6px + env(safe-area-inset-top))
+      calc(var(--frame) + 6px + env(safe-area-inset-right))
+      calc(var(--frame) + 4px + env(safe-area-inset-bottom))
+      calc(var(--frame) + 6px + env(safe-area-inset-left));
+    grid-template-columns: var(--side-col) minmax(0, 1fr) var(--side-col);
+    column-gap: 10px;
+    row-gap: 6px;
+  }
+  /* 牌に薄い厚み [卓に置いている感じ]。強調の枠は牌の外の button 側なので干渉しない */
+  /* [V6] 河の牌を一回り大きく [旧: 上限 36px の高さ = 幅 26px]。河の 1 辺 [6 枚] と真ん中の箱の 1 辺がそろう比のまま上限を上げる */
+  main.mode-single.ui-board-v2 {
+    --score-side: min(56cqh, 34cqw, 280px);
+    --river-tile-h: clamp(15px, calc(var(--score-side) * 0.22), 62px);
+  }
+  main.mode-single.ui-board-v2 :global(.tile:not(.down)) {
+    box-shadow: 0 2px 0 #cdbf9f, 0 3px 3px rgba(0, 0, 0, 0.3);
+  }
+
+  /* ---- 上の行: 今だれの番か ・ フィーバー待ち ・ ⋯ ---- */
+  main.mode-single.ui-board-v2 .dora-row {
+    background: transparent;
+    padding: 0;
+    gap: 8px;
+    min-height: 40px;
+    font-size: 14px;
+    color: var(--jz-ink);
+  }
+  main.mode-single.ui-board-v2 .turn-status {
+    max-width: none;
+    padding: 6px 12px;
+    font-size: 14px;
+    font-weight: 700;
+    border-radius: var(--jz-rad);
+    border: 1px solid var(--jz-panel-bd);
+    background: var(--jz-panel);
+    color: var(--jz-ink);
+  }
+  main.mode-single.ui-board-v2 .turn-status .status-dot { background: var(--jz-sub); }
+  /* 自分が何かする番は金の札 + 濃い字。他の人の番は暗い札 */
+  main.mode-single.ui-board-v2 .turn-status.status-action {
+    background: var(--jz-accent);
+    color: var(--jz-on-accent);
+    border-color: transparent;
+    box-shadow: none;
+  }
+  main.mode-single.ui-board-v2 .turn-status.status-action .status-dot { background: #8a2b1d; }
+  main.mode-single.ui-board-v2 .dora-row .fever-inline-remain { font-size: 11px; }
+  .table-menu-wrap { position: relative; justify-self: end; }
+  .table-menu-btn {
+    width: 44px;
+    height: 40px;
+    border: 1px solid var(--jz-panel-bd);
+    border-radius: var(--jz-rad);
+    background: var(--jz-panel);
+    color: var(--jz-ink);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .table-menu-btn.open { background: var(--jz-sel); }
+  .table-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 900;
+    min-width: 220px;
+    display: grid;
+    gap: 6px;
+    padding: 10px;
+    border-radius: var(--jz-rad);
+    border: 1px solid var(--jz-panel-bd);
+    background: var(--jz-panel-solid);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    color: var(--jz-ink);
+  }
+  main.mode-single.ui-board-v2 .table-menu .table-setting-btn {
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: var(--jz-rad);
+    font-size: 14px;
+    font-weight: 700;
+    text-align: left;
+    background: var(--jz-sec);
+    border: 1px solid var(--jz-sec-bd);
+    color: var(--jz-ink);
+  }
+  main.mode-single.ui-board-v2 .table-menu .table-setting-btn.leave { background: var(--jz-danger); border-color: transparent; color: #fff; }
+  main.mode-single.ui-board-v2 .table-menu .table-setting-btn.advice-on { background: var(--jz-sel); }
+  main.mode-single.ui-board-v2 .table-menu .settings-label { display: inline; }
+
+  /* ON/OFF の札 [V9: ブラウザ素の 14px の四角をやめ、押せる所を札ぜんぶに] */
+  .tm-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: var(--jz-rad);
+    background: var(--jz-sec);
+    border: 1px solid var(--jz-sec-bd);
+    color: var(--jz-ink);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .tm-toggle input {
+    order: 2;
+    appearance: none;
+    -webkit-appearance: none;
+    flex: none;
+    width: 36px;
+    height: 20px;
+    margin: 0;
+    border-radius: 10px;
+    background: rgba(242, 238, 227, 0.25);
+    position: relative;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .tm-toggle input::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s;
+  }
+  .tm-toggle input:checked { background: var(--jz-accent-flat); }
+  .tm-toggle input:checked::after { transform: translateX(16px); }
+  .tm-toggle:has(input:checked) { border-color: var(--jz-gold); }
+
+  /* ---- 中央の札 [局 ・ ドラ ・ 本場 ・ 供託 ・ 残り] ---- */
+  main.mode-single.ui-board-v2 .score-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+  .cb-panel {
+    display: grid;
+    justify-items: center;
+    gap: 4px;
+    max-width: 100%;
+    padding: 8px 12px;
+    border-radius: var(--jz-rad);
+    border: 1px solid var(--jz-panel-bd);
+    background: var(--jz-panel);
+    box-shadow: var(--jz-shadow);
+    text-align: center;
+    color: var(--jz-ink);
+  }
+  main.mode-single.ui-board-v2 .cb-panel .score-top {
+    grid-area: auto;
+    padding: 0;
+    font-size: clamp(14px, calc(var(--score-side) * 0.08), 20px);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--jz-ink);
+    white-space: nowrap;
+  }
+  /* 箱が小さい時 [スマホ] は札を箱に収める: 字を一段下げ、本場 ・ 供託 ・ 残りは折り返す */
+  @container board-cell (max-width: 520px) {
+    .cb-panel { padding: 4px 6px; gap: 2px; }
+    main.mode-single.ui-board-v2 .cb-panel .score-top { font-size: 13px; }
+    .cb-dora .cb-label { display: none; }
+    main.mode-single.ui-board-v2 .cb-panel .score-center { flex-wrap: wrap; justify-content: center; gap: 0 6px; white-space: normal; }
+    main.mode-single.ui-board-v2 .cb-panel .benbang,
+    main.mode-single.ui-board-v2 .cb-panel .kyotaku,
+    main.mode-single.ui-board-v2 .cb-panel .paishu { font-size: 11px; }
+  }
+  .cb-dora { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--jz-sub); white-space: nowrap; }
+  main.mode-single.ui-board-v2 .cb-dora :global(.tile.size-sm) {
+    width: clamp(18px, calc(var(--river-tile-w) * 0.85), 28px);
+    height: clamp(25px, calc(var(--river-tile-h) * 0.85), 38px);
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+  }
+  main.mode-single.ui-board-v2 .cb-panel .score-center {
+    grid-area: auto;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--jz-sub);
+    white-space: nowrap;
+  }
+  main.mode-single.ui-board-v2 .cb-panel .benbang,
+  main.mode-single.ui-board-v2 .cb-panel .kyotaku { font-size: 12px; color: var(--jz-sub); font-weight: 500; }
+  main.mode-single.ui-board-v2 .cb-panel .paishu { font-size: 12px; color: var(--jz-ink); font-weight: 700; letter-spacing: 0; }
+
+  /* ---- 左右の列: 席の札 + 小さな伏せ牌 + 鳴いた牌 ---- */
+  main.mode-single.ui-board-v2 .seat-left,
+  main.mode-single.ui-board-v2 .seat-right {
+    background: transparent;
+    padding: 0;
+    overflow: visible;
+    justify-content: center;
+  }
+  main.mode-single.ui-board-v2 .vplayer,
+  main.mode-single.ui-board-v2 .vplayer.current {
+    height: auto;
+    justify-content: center;
+    gap: 8px;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .seat-card {
+    position: relative;
+    text-align: left;
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 8px 10px 10px;
+    border-radius: var(--jz-rad);
+    border: 1px solid var(--jz-panel-bd);
+    background: var(--jz-panel);
+    box-shadow: var(--jz-shadow);
+    color: var(--jz-ink);
+  }
+  .seat-card.turn { box-shadow: inset 0 0 0 2px var(--jz-gold), var(--jz-shadow); }
+  .sc-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  .sc-wind {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--jz-rad);
+    background: var(--jz-sec);
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .seat-card.oya .sc-wind { background: var(--jz-accent); color: var(--jz-on-accent); }
+  .sc-name { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sc-tag { flex: none; padding: 1px 6px; border-radius: var(--jz-rad); background: var(--jz-accent); color: var(--jz-on-accent); font-size: 11px; font-weight: 700; }
+  .sc-tag.hot { background: #b4442c; color: #fff; }
+  .sc-pt .sval { display: inline-block; font-size: 22px; font-weight: 700; line-height: 1.1; color: var(--jz-gold); font-variant-numeric: tabular-nums; }
+  .sc-sub { display: flex; flex-wrap: wrap; gap: 0 8px; font-size: 12px; color: var(--jz-sub); }
+  .sc-nuki { display: flex; flex-wrap: wrap; align-items: center; gap: 1px; }
+  main.mode-single.ui-board-v2 .sc-nuki :global(.tile.size-sm) { width: 18px; height: 25px; min-width: 0; min-height: 0; margin: 0; }
+  .sc-nuki-n { margin-left: 6px; font-size: 12px; color: var(--jz-sub); white-space: nowrap; }
+  /* [V10] 切断 ・ 代打ちの印と「CPU に替える」は札の中の 1 行 */
+  .seat-card :global(.oss) { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; margin: 0; }
+  .seat-card :global(.oss-badge) { font-size: 11px; padding: 2px 6px; border-radius: var(--jz-rad); }
+  .seat-card :global(.oss-proxy) { background: transparent; color: var(--jz-ink); box-shadow: inset 0 0 0 1px var(--jz-sub); }
+  .seat-card :global(.oss-toggle) {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: var(--jz-rad);
+    border: 1px solid var(--jz-sec-bd);
+    background: var(--jz-sec);
+    color: var(--jz-ink);
+  }
+  /* 残り時間の棒は札の下端 */
+  .seat-card :global(.dl-bar) { left: 6px; right: 6px; bottom: 3px; height: 4px; }
+  .seat-card :global(.dl-bar i) { background: var(--jz-gold); }
+
+  main.mode-single.ui-board-v2 .vhand {
+    flex: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 2px;
+    padding: 0 4px;
+    overflow: visible;
+  }
+  .vback {
+    display: inline-block;
+    width: 12px;
+    height: 17px;
+    border-radius: 2px;
+    background: var(--jz-back);
+    box-shadow: inset 0 -3px 0 var(--jz-back-edge);
+  }
+  .vback.back-b { background: #3e4f6b; }
+  main.mode-single.ui-board-v2 .vface :global(.tile.size-sm) { width: 20px; height: 28px; min-width: 0; min-height: 0; margin: 0; }
+  .vfulou { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+  main.mode-single.ui-board-v2 .vfulou-group { flex-direction: row; align-items: flex-end; gap: 1px; margin: 0; padding: 0; border: 0; }
+  main.mode-single.ui-board-v2 .vft :global(.tile.size-sm) { width: 20px; height: 28px; min-width: 0; min-height: 0; margin: 0; }
+  .vft.vclaimed { display: inline-block; transform: rotate(90deg); margin: 0 4px; }
+
+  /* ---- 手牌のすぐ上の帯: 自分の札 ・ ツモ切り ・ 操作 ---- */
+  .me-strip {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+  }
+  .seat-card.sc-me {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 12px;
+    padding: 4px 12px;
+    min-height: 44px;
+  }
+  .seat-card.sc-me .sc-head { flex-wrap: nowrap; }
+  .seat-card.sc-me .sc-pt .sval { font-size: 20px; }
+  .seat-card.sc-me .sc-nuki { flex-wrap: nowrap; }
+  .tsumokiri-toggle { min-height: 40px; }
+  main.mode-single.ui-board-v2 .me-strip .toolbar-red {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    top: auto;
+    max-width: min(62vw, 640px);
+    z-index: 50;
+    padding: 0;
+  }
+  main.mode-single.ui-board-v2 .toolbar-red .tb-row button {
+    min-height: 44px;
+    padding: 0 22px !important;
+    font-size: 16px !important;
+    font-weight: 700;
+    border-radius: var(--jz-rad);
+    background: var(--jz-accent) !important;
+    color: var(--jz-on-accent) !important;
+    box-shadow: var(--jz-shadow);
+  }
+  main.mode-single.ui-board-v2 .toolbar-red .tb-row button:hover { filter: brightness(1.06); }
+  main.mode-single.ui-board-v2 .me-strip .stamp-open-btn {
+    flex: none;
+    margin-left: auto;
+    min-height: 40px;
+    min-width: 44px;
+    padding: 0 10px;
+    font-size: 18px;
+    border-radius: var(--jz-rad);
+    background: var(--jz-sec);
+    border: 1px solid var(--jz-sec-bd);
+    color: var(--jz-ink);
+    box-shadow: none;
+  }
+  /* 操作はスタンプの左 */
+  main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 54px; }
+  /* 手牌の下地は帯と同じ暗い札 */
+  main.mode-single.ui-board-v2 .seat-bottom > :global(section.player) {
+    background: rgba(12, 30, 23, 0.55) !important;
+    border-radius: var(--jz-rad);
+  }
+  main.mode-single.ui-board-v2 .seat-bottom > :global(section.player.active) {
+    border: 2px solid var(--jz-gold) !important;
+    box-shadow: none;
+  }
+
+  /* 卓の header は中身 [お知らせ ・ シュバ追加] が出ている時だけ場所を取る。旧の下線は消す */
+  main.mode-single.ui-board-v2 header { border-bottom: 0; padding: 0; margin: 0; }
+  /* ---- オンラインのお知らせの帯 [V2] ---- */
+  .msg-band { display: none; }
+  main.mode-single.online-game header .msg-band {
+    display: block;
+    justify-self: center;
+    max-width: min(92vw, 720px);
+    margin: 0 auto;
+    padding: 6px 14px;
+    border-radius: var(--jz-rad);
+    background: #f4e3b0;
+    color: #2a1a04;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.35;
+    text-align: center;
+  }
+  /* 帯の操作の行は卓の操作 [中央 ・ 手牌の上 ・ 和了の板] と二重なので卓では出さない。
+     和了 ・ 流局の板が出ていない局の終わりだけ残す [保険] */
+  main.mode-single.online-game header .action-row { display: none; }
+  main.mode-single.online-game header .action-row.round-fallback { display: flex; }
+  main.mode-single header .lizhi-btn.shuvari { min-height: 40px; padding: 0 16px; border-radius: var(--jz-rad); font-weight: 700; }
+
+  /* ---- 次局待ち [R6] ---- */
+  .ready-list { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .ready-chip {
+    padding: 4px 10px;
+    border-radius: var(--jz-rad);
+    font-size: 13px;
+    font-weight: 700;
+    background: rgba(0, 0, 0, 0.06);
+    color: #6b5b3a;
+    border: 1px dashed #b9a272;
+  }
+  .ready-chip.ready { background: #e9f3e4; color: #1e6a3a; border: 1px solid #8cc39a; }
+
+  /* ---- スマホ横 [低い画面] ---- */
+  @media (max-height: 500px) and (orientation: landscape) {
+    main.mode-single.ui-board-v2 {
+      --side-col: clamp(118px, 15vw, 150px);
+      --frame: 3px;
+      column-gap: 6px;
+      row-gap: 3px;
+    }
+    main.mode-single.ui-board-v2 .dora-row { min-height: 32px; }
+    main.mode-single.ui-board-v2 .turn-status { padding: 4px 10px; font-size: 12px; }
+    .table-menu-btn { width: 44px; height: 32px; font-size: 18px; }
+    .seat-card { padding: 5px 7px 7px; gap: 2px; }
+    .sc-wind { width: 22px; height: 22px; font-size: 13px; }
+    .sc-name { font-size: 12px; }
+    .sc-pt .sval { font-size: 16px; }
+    .sc-sub { font-size: 11px; gap: 0 6px; }
+    .sc-nuki-n { font-size: 11px; }
+    main.mode-single.ui-board-v2 .sc-nuki :global(.tile.size-sm) { width: 14px; height: 19px; }
+    .vback { width: 9px; height: 13px; box-shadow: inset 0 -2px 0 var(--jz-back-edge); }
+    main.mode-single.ui-board-v2 .vface :global(.tile.size-sm),
+    main.mode-single.ui-board-v2 .vft :global(.tile.size-sm) { width: 15px; height: 21px; }
+    .me-strip { min-height: 34px; gap: 6px; }
+    .seat-card.sc-me { min-height: 34px; padding: 2px 8px; gap: 8px; }
+    .seat-card.sc-me .sc-pt .sval { font-size: 16px; }
+    .seat-card.sc-me .sc-sub { display: none; }
+    .tm-toggle { min-height: 34px; font-size: 12px; padding: 0 8px; }
+    .tm-toggle input { width: 30px; height: 18px; }
+    .tm-toggle input::after { width: 14px; height: 14px; }
+    .tm-toggle input:checked::after { transform: translateX(12px); }
+    main.mode-single.ui-board-v2 .toolbar-red .tb-row button { min-height: 40px; padding: 0 16px !important; font-size: 15px !important; }
+    main.mode-single.online-game header .msg-band { font-size: 12px; padding: 3px 10px; }
+  }
+
+  /* ---- スマホ縦持ち [2026-10-09 リョー「スマホ版のUIこういうのでもいいかもね」、縦長のスピード麻雀の画面] ----
+     上から: 今だれの番か ・ 上家と下家の札 ・ 正方形の卓 ・ 自分の札と操作 ・ 手牌 2 段 [7 枚 x 2]。
+     抜いた華と北は各席の札の中 [小さな牌と数] */
+  @media (max-width: 700px) and (orientation: portrait) {
+    main.mode-single.ui-board-v2 {
+      --frame: 0px;
+      --tile-w: calc((100vw - 88px) / 7);
+      --score-side: min(50cqh, 42cqw, 240px);
+      --tile-h: calc(var(--tile-w) * 1.375);
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+      grid-template-areas:
+        'top    top'
+        'dora   dora'
+        'nuki   nuki'
+        'left   right'
+        'center center'
+        'bottom bottom';
+      padding:
+        calc(8px + env(safe-area-inset-top))
+        calc(8px + env(safe-area-inset-right))
+        calc(8px + env(safe-area-inset-bottom))
+        calc(8px + env(safe-area-inset-left));
+      column-gap: 6px;
+      row-gap: 6px;
+    }
+    main.mode-single.ui-board-v2 .vplayer { gap: 4px; }
+    main.mode-single.ui-board-v2 .seat-left,
+    main.mode-single.ui-board-v2 .seat-right { justify-content: flex-start; }
+    .seat-card { padding: 6px 8px 8px; gap: 2px; }
+    .sc-wind { width: 22px; height: 22px; font-size: 13px; }
+    .sc-name { font-size: 13px; }
+    .sc-pt .sval { font-size: 18px; }
+    .sc-sub { font-size: 11px; gap: 0 6px; }
+    .sc-nuki-n { font-size: 11px; }
+    main.mode-single.ui-board-v2 .sc-nuki :global(.tile.size-sm) { width: 15px; height: 21px; }
+    .vback { width: 9px; height: 13px; box-shadow: inset 0 -2px 0 var(--jz-back-edge); }
+    main.mode-single.ui-board-v2 .vface :global(.tile.size-sm),
+    main.mode-single.ui-board-v2 .vft :global(.tile.size-sm) { width: 16px; height: 22px; }
+    main.mode-single.ui-board-v2 .vhand { justify-content: flex-start; }
+    main.mode-single.ui-board-v2 .vfulou { justify-content: flex-start; }
+    /* 卓は正方形 [幅いっぱい、高さの残りに収める] */
+    main.mode-single.ui-board-v2 .center-board { border-radius: var(--jz-rad); background: rgba(0, 0, 0, 0.12); }
+    /* 手牌は 7 枚 x 2 段。ツモった牌は 2 段目の右端 */
+    main.mode-single.ui-board-v2 .seat-bottom :global(.hand) {
+      flex-wrap: wrap;
+      justify-content: flex-start;
+      row-gap: 4px;
+      margin: 0 auto;
+    }
+    main.mode-single.ui-board-v2 .seat-bottom :global(.tile-btn.tsumo-tile) { margin-left: 0; }
+    .me-strip { flex-wrap: nowrap; min-height: 40px; gap: 6px; }
+    .seat-card.sc-me { padding: 2px 8px; gap: 8px; min-height: 40px; flex: 1 1 0; min-width: 0; overflow: hidden; }
+    /* 狭いので自分の抜き牌は数だけ */
+    .seat-card.sc-me .sc-nuki :global(.tile) { display: none; }
+    .seat-card.sc-me .sc-nuki-n { margin-left: 0; }
+    .seat-card.sc-me .sc-sub { display: none; }
+    .seat-card.sc-me .sc-pt .sval { font-size: 16px; }
+    .tm-toggle { min-height: 40px; font-size: 13px; padding: 0 8px; }
+    /* 縦持ちは帯が狭いので、操作は帯の上 [卓の下端] に出す */
+    main.mode-single.ui-board-v2 .me-strip .toolbar-red,
+    main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 0; bottom: calc(100% + 6px); max-width: calc(100vw - 16px); }
+    main.mode-single.ui-board-v2 .turn-status { font-size: 13px; padding: 5px 10px; }
+    main.mode-single.online-game header .msg-band { font-size: 13px; }
+    main.mode-single.ui-board-v2 .agari-unified-panel { top: 8px; bottom: 8px; left: 8px; right: 8px; }
+  }
+
+  /* ---- 和了 ・ 流局の板 [V5]: 流局は中身の大きさ [幅 480px まで] で真ん中に。角は 4px ---- */
+  main.mode-single.ui-board-v2 .agari-unified-panel { border-radius: var(--jz-rad); border-width: 1px; }
+  main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small {
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    margin: auto;
+    width: min(480px, calc(100vw - 24px));
+    height: fit-content;
+    max-height: calc(100dvh - 24px);
+    grid-template-rows: auto auto;
+    gap: 12px;
+    padding: 16px 18px;
+  }
+  main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small .agari-left.pingju-only { gap: 10px; }
+  main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small .pingju-title { font-size: 28px; letter-spacing: 0.3em; }
+  main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small .pingju-note { font-size: 15px; color: #4a4030; }
+  .pingju-moves { display: grid; gap: 4px; width: 100%; }
+  .pm-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 12px;
+    align-items: baseline;
+    padding: 6px 10px;
+    border-radius: var(--jz-rad);
+    background: rgba(0, 0, 0, 0.05);
+    font-variant-numeric: tabular-nums;
+  }
+  .pm-name { font-size: 14px; font-weight: 700; color: #2a2418; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pm-delta { font-size: 16px; font-weight: 700; color: #777; min-width: 72px; text-align: right; }
+  .pm-row.up .pm-delta { color: #1e7a38; }
+  .pm-row.down .pm-delta { color: #b23030; }
+  .pm-after { font-size: 14px; color: #4a4030; min-width: 64px; text-align: right; }
+  main.mode-single.ui-board-v2 .agari-unified-panel .agari-left { min-width: 0; }
+  main.mode-single.ui-board-v2 .agari-unified-panel .agari-actions { flex-wrap: wrap; }
+  main.mode-single.ui-board-v2 .agari-unified-panel .agari-actions button {
+    background: var(--jz-accent);
+    color: var(--jz-on-accent);
+    min-height: 44px;
+    padding: 0 20px;
+    border-radius: var(--jz-rad);
+    font-size: 15px;
+    font-weight: 700;
+  }
 </style>

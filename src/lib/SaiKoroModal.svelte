@@ -234,7 +234,7 @@
     padding: clamp(10px, 3dvh, 14px) clamp(12px, 4dvw, 18px);
     z-index: 1010;
     border-radius: 8px;
-    font-family: 'Noto Sans JP', sans-serif;
+    font-family: var(--sans);
     min-width: min(380px, 88dvw);
     max-width: 94dvw;
     max-height: 88dvh;
