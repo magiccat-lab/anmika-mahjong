@@ -3069,16 +3069,6 @@
             <span class="kyotaku">供託 {state.lizhibang}</span>
             <span class="paishu">残り {paishu}</span>
           </div>
-          {#if fxNow && fxTier && fxTier !== 'light'}
-            {#key fxNow.ts}
-              <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-              <div class="fx fx-{fxNow.id} fx-{fxTier} cb-fx" class:fx-skippable={fxTier === 'heavy'} style="--fx-dur: {fxDur}ms" aria-hidden="true"
-                on:click={() => { if (fxTier === 'heavy' && fxNow) skipCutin(fxNow.ts); }}>
-                <span class="fx-word">{FX_LABELS[fxNow.id]}</span>
-                <span class="fx-who">{fxWho}</span>
-              </div>
-            {/key}
-          {/if}
         </div>
       </div>
       <!-- 4 方向 河ゾーン [雀魂風、 6 牌/行で wrap]、 各 player の向きに合わせて回転 -->
@@ -3113,6 +3103,20 @@
   <!-- スタンプ slot bar [画面下、 手牌の上、 左から 上家 / 自分 / 下家]
        [2026-10-09 shun2 R2] 卓の他の部分と同じく自分を下に回した並び [srv*]。旧: 席番号 1/0/2 固定で、
        自分が席 1 以外だと別の人の所に出ていた -->
+  <!-- [2026-10-09 リョー 華の見せ方 4 版目 V1「ダンガンロンパみたいな感じのカットイン宜しく。フォントとかも弄っていいよ」]
+       ツモ ・ ロン (中) とフィーバー (重) は卓の真ん中を斜めの桃色の帯が切り裂き、太い字が叩きつけられて揺れる。黒い暗転は一瞬。
+       語の長さで字の大きさを詰める [フィーバーが帯からはみ出していた]。重はタップで飛ばせる。リーチ ・ ポン ・ カン (軽) は席の札の小札のまま -->
+  {#if viewMode === 'single' && fxNow && fxTier && fxTier !== 'light'}
+    {#key fxNow.ts}
+      <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+      <div class="fx fx-{fxNow.id} fx-{fxTier} dr" class:fx-skippable={fxTier === 'heavy'}
+        style="--fx-dur: {fxDur}ms; --fit: {Math.min(1, 3.2 / FX_LABELS[fxNow.id].length)}" aria-hidden="true"
+        on:click={() => { if (fxTier === 'heavy' && fxNow) skipCutin(fxNow.ts); }}>
+        <div class="dr-band"><span class="fx-word dr-word">{FX_LABELS[fxNow.id]}</span><span class="fx-who dr-who">{fxWho}</span></div>
+      </div>
+    {/key}
+  {/if}
+
   <div class="stamp-slot-bar">
     <div class="stamp-slot stamp-slot-p1"><StampPopup stamp={$game.stamps[srv1]} /></div>
     <div class="stamp-slot stamp-slot-p0"><StampPopup stamp={$game.stamps[srv0]} /></div>
@@ -6038,82 +6042,127 @@
      9/20 の決まりのまま: 卓の変化が先 [100ms 待つ]、河と手牌は覆わない、色は金 1 色、transform と opacity だけ、1 演出 3 DOM。
      中 [ツモ ・ ロン] ・ 重 [フィーバー] は局の札の上に判: 字が大きく入り、輪が広がり、金の光が横切る。和了った人の席の札も金の枠。
      軽 [リーチ ・ ポン ・ カン] は宣言した人の席の札の上端に小札が跳ねるだけ */
-  .cb-fx {
-    position: absolute;
-    inset: -8px;
-    z-index: 20;
-    display: grid;
-    place-items: center;
-    align-content: center;
-    gap: 4px;
+  .dr {
+    --dr-pink: #ff2f8e;
+    --dr-pink2: #c8106a;
+    --dr-h: clamp(96px, 26vh, 230px);
+    --dr-fs: calc(min(13vw, 150px, var(--dr-h) * 0.62) * var(--fit, 1));
+    position: fixed;
+    inset: 0;
+    z-index: 800;
     overflow: hidden;
-    border-radius: var(--jz-rad);
-    border: 2px solid var(--jz-gold);
-    background: var(--jz-panel-solid);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
     pointer-events: none;
-    opacity: 0;
-    animation: cbFxPanel var(--fx-dur) ease-out 100ms forwards;
   }
-  .cb-fx.fx-skippable { pointer-events: auto; cursor: pointer; }
-  .cb-fx::before {
+  .dr.fx-skippable { pointer-events: auto; cursor: pointer; }
+  .dr::before {
     content: '';
     position: absolute;
-    left: 50%;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    animation: drFlash var(--fx-dur) linear both;
+  }
+  .dr.fx-heavy::after {
+    content: '';
+    position: absolute;
+    left: -10%;
+    right: -10%;
     top: 50%;
-    width: 140px;
-    height: 140px;
-    margin: -70px 0 0 -70px;
-    border: 1px solid var(--jz-gold);
-    border-radius: 50%;
-    opacity: 0;
-    animation: cbFxRing var(--fx-dur) ease-out 100ms forwards;
+    height: 40px;
+    margin-top: -20px;
+    z-index: 0;
+    background: linear-gradient(180deg, #111 0 10%, #fff 10% 16%, #111 16% 84%, #fff 84% 90%, #111 90%);
+    transform: rotate(9deg) translateX(120%);
+    animation: drBand2 var(--fx-dur) cubic-bezier(0.2, 0.9, 0.2, 1) both;
   }
-  .cb-fx::after {
-    content: '';
+  .dr-band {
     position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: 45%;
-    background: linear-gradient(90deg, transparent, rgba(233, 205, 126, 0.35), transparent);
-    transform: translateX(-120%);
-    animation: cbFxSweep var(--fx-dur) ease-out 100ms forwards;
+    left: -10%;
+    right: -10%;
+    top: 50%;
+    z-index: 1;
+    height: var(--dr-h);
+    margin-top: calc(var(--dr-h) / -2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+      repeating-linear-gradient(115deg, transparent 0 28px, rgba(0, 0, 0, 0.16) 28px 34px),
+      linear-gradient(180deg, #111 0 7%, var(--dr-pink) 7% 50%, var(--dr-pink2) 50% 93%, #111 93% 100%);
+    box-shadow: 0 0 0 4px #fff inset, 0 10px 30px rgba(0, 0, 0, 0.5);
+    transform: rotate(-7deg) translateX(-120%);
+    animation: drBand var(--fx-dur) cubic-bezier(0.2, 0.9, 0.2, 1) both;
   }
-  .cb-fx .fx-word {
-    position: relative;
+  .dr-word {
     font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif;
-    font-size: clamp(26px, calc(var(--score-side) * 0.17), 52px);
+    font-size: var(--dr-fs);
     line-height: 1;
-    letter-spacing: 0.06em;
-    color: var(--jz-gold) !important;
-    animation: cbFxWord var(--fx-dur) cubic-bezier(0.22, 1, 0.36, 1) 100ms both;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    color: #fff !important;
+    -webkit-text-stroke: calc(var(--dr-fs) * 0.07) #111;
+    paint-order: stroke fill;
+    text-shadow: calc(var(--dr-fs) * 0.06) calc(var(--dr-fs) * 0.06) 0 var(--dr-pink2);
+    opacity: 0;
+    transform: skewX(-12deg) scale(2.4);
+    animation: drWord var(--fx-dur) cubic-bezier(0.2, 1.4, 0.3, 1) both;
   }
-  .cb-fx.fx-heavy .fx-word { font-size: clamp(28px, calc(var(--score-side) * 0.2), 60px); }
-  .cb-fx .fx-who { position: relative; font-size: 13px; font-weight: 700; color: var(--jz-ink) !important; }
-  .seat-card.fx-hit { box-shadow: inset 0 0 0 2px var(--jz-gold), 0 0 0 2px var(--jz-gold), var(--jz-shadow); }
+  .dr-who {
+    position: absolute;
+    right: 14%;
+    bottom: 10%;
+    padding: 3px 14px;
+    background: #111;
+    color: #fff !important;
+    font: 700 clamp(13px, 2vw, 20px) 'Zen Kaku Gothic New', sans-serif;
+    letter-spacing: 0.08em;
+    transform: skewX(-12deg);
+  }
+  @keyframes drFlash { 0% { opacity: 0; } 8%, 80% { opacity: 1; } 100% { opacity: 0; } }
+  @keyframes drBand { 0% { transform: rotate(-7deg) translateX(-120%); } 12%, 82% { transform: rotate(-7deg) translateX(0); } 100% { transform: rotate(-7deg) translateX(120%); } }
+  @keyframes drBand2 { 0%, 10% { transform: rotate(9deg) translateX(120%); } 22%, 82% { transform: rotate(9deg) translateX(0); } 100% { transform: rotate(9deg) translateX(-120%); } }
+  @keyframes drWord {
+    0%, 12% { opacity: 0; transform: skewX(-12deg) scale(2.4); }
+    22% { opacity: 1; transform: skewX(-12deg) scale(0.94); }
+    26% { transform: skewX(-12deg) scale(1.04) translate(4px, -3px); }
+    30% { transform: skewX(-12deg) scale(1) translate(-3px, 2px); }
+    34%, 82% { opacity: 1; transform: skewX(-12deg) scale(1); }
+    100% { opacity: 0; transform: skewX(-12deg) translateX(30px); }
+  }
+  .seat-card.fx-hit { box-shadow: inset 0 0 0 2px #ff2f8e, 0 0 0 2px #ff2f8e, var(--jz-shadow); }
   .sc-fx {
     position: absolute;
     top: -14px;
     left: 10px;
     z-index: 5;
-    padding: 2px 12px;
-    border-radius: var(--jz-rad);
-    border: 1px solid var(--jz-gold);
-    background: var(--jz-panel-solid);
+    padding: 2px 14px;
+    border: 2px solid #111;
+    background: linear-gradient(180deg, #ff2f8e 0 55%, #c8106a 55%);
     pointer-events: none;
     opacity: 0;
-    animation: scFxIn var(--fx-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    transform-origin: left center;
+    animation: scFxIn var(--fx-dur) cubic-bezier(0.2, 1.4, 0.3, 1) forwards;
   }
-  .sc-fx .fx-word { font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: 16px; line-height: 1.2; letter-spacing: 0.06em; color: var(--jz-gold) !important; }
+  .sc-fx .fx-word {
+    display: inline-block;
+    font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif;
+    font-size: 18px;
+    line-height: 1.15;
+    letter-spacing: 0.06em;
+    color: #fff !important;
+    -webkit-text-stroke: 2px #111;
+    paint-order: stroke fill;
+    transform: skewX(-12deg);
+  }
   @keyframes cbFxPanel { 0% { opacity: 0; } 15%, 82% { opacity: 1; } 100% { opacity: 0; } }
   @keyframes cbFxWord { 0% { opacity: 0; transform: scale(1.45); } 25% { opacity: 1; transform: scale(1); } 100% { opacity: 1; transform: scale(1); } }
   @keyframes cbFxRing { 0% { opacity: 0; transform: scale(0.3); } 25% { opacity: 0.7; } 100% { opacity: 0; transform: scale(1.7); } }
   @keyframes cbFxSweep { 0% { transform: translateX(-120%); } 55%, 100% { transform: translateX(300%); } }
-  @keyframes scFxIn { 0% { opacity: 0; transform: translateY(6px) scale(0.9); } 18%, 80% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-4px); } }
+  @keyframes scFxIn { 0% { opacity: 0; transform: skewX(-8deg) scale(1.8); } 20% { opacity: 1; transform: skewX(-8deg) scale(0.95); } 28%, 80% { opacity: 1; transform: skewX(-8deg) scale(1); } 100% { opacity: 0; transform: skewX(-8deg) translateX(10px); } }
   @media (prefers-reduced-motion: reduce) {
-    .cb-fx::before, .cb-fx::after { animation: none; opacity: 0; }
-    .cb-fx .fx-word { animation: none; }
+    .dr::before, .dr.fx-heavy::after { animation: none; opacity: 0; }
+    .dr-band { animation: none; transform: rotate(-7deg); }
+    .dr-word { animation: none; opacity: 1; transform: skewX(-12deg); }
   }
   main.mode-single.ui-board-v2 .cb-panel .score-top {
     grid-area: auto;
