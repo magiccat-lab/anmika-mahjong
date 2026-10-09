@@ -42,6 +42,17 @@ describe('ベース 35 のサイコロは 70 × 2 回 [2026-10-09]', () => {
     expect(sai.rollCount ?? 4).toBe(4);
   });
 
+  it('暗槓だけの四華は面前なので 70 枚 × 4 回 [10-10 通報「4花のサイコロ」、リーチ + p3333 暗槓]', () => {
+    const g = buildRawGame(['p2', 'p3', 'p4', 's2', 's3', 's4', 's6', 's7', 's8', 'z1'], ['z7777']);
+    g.lizhi.add(0);
+    g.huapai[0] = ['f1', 'f2', 'f3', 'f4'];
+    const result = g.hule(0 as PlayerId, 'z1', 1 as PlayerId);
+    expect(result).not.toBeNull();
+    const [sai] = huaSai(result);
+    expect(sai).toEqual(expect.objectContaining({ awardKey: '四華', baseChip: 70 }));
+    expect(sai.rollCount ?? 4).toBe(4);
+  });
+
   it('鳴き四華四北: 1 回目は 70 × 2 回振り、2 回目は 70 × 4 回', () => {
     const g = buildRawGame(['p2', 'p3', 'p4', 's2', 's3', 's4', 's6', 's7', 's8', 'z1'], ['z777=']);
     g.huapai[0] = ['f1', 'f2', 'f3', 'f4'];

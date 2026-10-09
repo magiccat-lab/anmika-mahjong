@@ -3946,7 +3946,8 @@ export class Game3 {
     // 副露時は鳴き四華が 70 × 2 回振り [10-09、旧 35 × 4 回]。鳴き八華は 70。八華四北の300枚は副露でも固定。
     const huaCount = (this as any)._huapaiOwnLengthAtHule?.[player] ?? this.huapai[player].length;
     const nukiTotal = (this.nukidora[player] ?? 0) + (this.nukidoraGold[player] ?? 0);
-    const hasFulou = (sp._fulou?.length ?? 0) > 0;
+    // [2026-10-10 通報「4花のサイコロ」] 暗槓だけは門前。リーチ + 暗槓の四華が鳴き扱いで 2 回振りになっていた
+    const hasFulou = !isMenzenHand(sp);
     // 四華 [春夏秋冬 各 1 枚以上] 条件 [リョー指示 2026-05-12: 自分抜き分で 4 種完備]
     const huaList = this.huapai[player] ?? [];
     const hasHaru = huaList.includes('f1');
