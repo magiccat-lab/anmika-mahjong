@@ -2432,7 +2432,7 @@
   {#if currentRoomId && onlineMe && onlineSpectator}
     <!-- [2026-07-23 観戦モード] 非メンバーは RoomPanel [403] を経由せず接続待ち表示 -->
     <div class="spectator-wait">
-      <h2>👁 部屋 {currentRoomId} を観戦中</h2>
+      <h2>部屋 {currentRoomId} を観戦中</h2>
       <p>対局が始まる [または進行中の盤面が届く] まで待機…</p>
       <button class="mode-toggle" on:click={() => { disconnectOnline(); currentRoomId = null; }}>← やめる</button>
     </div>
@@ -2494,23 +2494,23 @@
   <!-- [2026-07-23 リョー要望 観戦モード] 閲覧専用の明示バナー -->
   {#if onlineSpectator && onlineGameStarted}
     <div class="spectator-banner">
-      <span>👁 観戦中 [部屋 {currentRoomId}]</span>
+      <span>観戦中 [部屋 {currentRoomId}]</span>
       <button on:click={() => { disconnectOnline(); currentRoomId = null; viewMode = 'online'; }}>退出</button>
     </div>
   {/if}
   <!-- [2026-07-24 4人回し Phase6] 抜け番バナー [観戦投影 + サイコロ精算だけ参加。次試合で復帰] -->
   {#if onlineInactive}
     <div class="spectator-banner rotation-inactive">
-      <span>😴 抜け番 [この試合は観戦。サイコロ精算は参加、次の試合で復帰]</span>
+      <span>抜け番 [この試合は観戦。サイコロ精算は参加、次の試合で復帰]</span>
     </div>
   {/if}
   <!-- [2026-07-24 4人回し Phase6] rotation 部屋の room chip [4人分] と現在の抜け番 -->
   {#if onlineGameStarted && onlineActiveMapping && onlineRoomChipLedger}
     <div class="rotation-chip-bar" role="status">
-      <span class="rc-title">🎲 部屋チップ</span>
+      <span class="rc-title">部屋チップ</span>
       {#each onlineMembers as m (m.seat)}
         <span class="rc-entry" class:rc-inactive={m.seat === onlineActiveMapping.inactiveRoomSeat}>
-          {m.seat === onlineActiveMapping.inactiveRoomSeat ? '😴' : ''}{m.username}: {onlineRoomChipLedger[String(m.seat)] ?? 0}
+          {m.seat === onlineActiveMapping.inactiveRoomSeat ? '[抜け番] ' : ''}{m.username}: {onlineRoomChipLedger[String(m.seat)] ?? 0}
         </span>
       {/each}
     </div>
@@ -2782,7 +2782,7 @@
     {#if !onlineGameStarted && $game.pendingSaiKoro && !$game.cpuWinAck}
       <div class="cpu-sai-ack">
         <button class="cpu-sai-ack-btn" on:click={() => { saiKoroOpened = true; game.ackCpuWin(); }}>
-          🎲 CPU のサイコロチャンスを見る
+          CPU のサイコロチャンスを見る
         </button>
       </div>
     {/if}
@@ -2815,7 +2815,7 @@
               </label>
             {/if}
           {:else}
-            <span class="muted-hint">👁 観戦中 [対局者が「次の試合へ」を押すと次が始まる]</span>
+            <span class="muted-hint">観戦中 [対局者が「次の試合へ」を押すと次が始まる]</span>
           {/if}
         {:else if !onlineGameStarted}
           <button class="next-btn" on:click={() => game.nextRound()}>次局へ</button>
@@ -2829,7 +2829,7 @@
             {selfNextRoundReady ? `全員待ち [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]` : `次局へ [${nextRoundReadyShownCount}/${nextRoundReadyTotal}]`}
           </button>
           {:else}
-          <span class="muted-hint">👁 観戦中 [{nextRoundReadyShownCount}/{nextRoundReadyTotal} 次局待ち]</span>
+          <span class="muted-hint">観戦中 [{nextRoundReadyShownCount}/{nextRoundReadyTotal} 次局待ち]</span>
           {/if}
           {#if $game.lastWinner !== null && $game.lastWinner === actorSeat && $game.game.canAgariyame($game.lastWinner as PlayerId)}
             <button class="next-btn agariyame" on:click={() => game.agariyame()}>アガリ止め</button>
@@ -2845,7 +2845,7 @@
       <button on:click={() => game.reset()}>初期化</button>
       <button on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : (onlineGameStarted ? 'オンライン対局の牌譜保存は未対応です' : '安全な手番開始時に保存できます')}>牌譜保存</button>
       <button on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]">状態ダンプ</button>
-      <button on:click={reportBug} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる">🐛 バグ通報</button>
+      <button on:click={reportBug} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる">バグ通報</button>
       {#if onlineGameStarted && currentRoomId}
         <button on:click={requestRewind} disabled={rewindBusy} title="オンラインで事故った時、この局の冒頭まで巻き戻す [PW 必要]">🔧 局頭に戻す</button>
       {/if}
@@ -2885,7 +2885,7 @@
       </span>
       <div class="dora-main">
         {#if feverWaits.length > 0}
-          <span class="fever-inline-label">🔥 フィーバー</span>
+          <span class="fever-inline-label">フィーバー</span>
           {#each feverWaits as fw}
             <span class="fever-inline-player">{seatDisplayNames[fw.player as 0|1|2] ?? `p${fw.player}`}:</span>
             {#each fw.waits as w}
@@ -2905,15 +2905,15 @@
               <label class="tm-toggle" title="他家の手牌を表示"><input type="checkbox" checked={revealAll} on:change={toggleRevealAll}><span>他家の手牌を見る</span></label>
               <label class="tm-toggle" title="CPU の操作を2.5秒遅らせる"><input type="checkbox" bind:checked={cpuSlowMode}><span>CPU を 2.5 秒待たせる</span></label>
               <!-- 打牌アドバイス [2026-07-21 リョー要望]: CPU戦のみ -->
-              <button type="button" class="table-setting-btn advice" class:advice-on={adviceOpen} on:click={() => { adviceOpen = !adviceOpen; tableMenuOpen = false; }} title="CPUと同じ評価で候補打牌を表示" aria-label="打牌の助言">💡 <span class="settings-label">助言</span></button>
-              <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; exportDiagnostics(); }} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ">🩺 <span class="settings-label">状態ダンプ</span></button>
-              <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; reportBug(); }} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報">🐛 <span class="settings-label">バグ通報</span></button>
+              <button type="button" class="table-setting-btn advice" class:advice-on={adviceOpen} on:click={() => { adviceOpen = !adviceOpen; tableMenuOpen = false; }} title="CPUと同じ評価で候補打牌を表示" aria-label="打牌の助言"><span class="settings-label">助言</span></button>
+              <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; exportDiagnostics(); }} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ"><span class="settings-label">状態ダンプ</span></button>
+              <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; reportBug(); }} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報"><span class="settings-label">バグ通報</span></button>
             {:else}
               <!-- [2026-07-22 リョー要望] オンラインにも 鳴きなし/自動アガリ [ツモ切りは手牌の上] -->
               <label class="tm-toggle" title="ポン/カン機会を自動で見送る"><input type="checkbox" bind:checked={onlineNoCall}><span>鳴きなし</span></label>
               <label class="tm-toggle" title="ツモ/ロンできる時に自動で和了"><input type="checkbox" bind:checked={onlineAutoWin}><span>自動アガリ</span></label>
               <!-- [2026-10-09 遊真 C5] オンライン中もバグ通報を押せる [🔧 局頭に戻すは出さない] -->
-              <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; reportBug(); }} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報">🐛 <span class="settings-label">バグ通報</span></button>
+              <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; reportBug(); }} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報"><span class="settings-label">バグ通報</span></button>
               <!-- [2026-10-09 遊真 C3] 抜ける前に 1 回だけページ内で確認する -->
               <button type="button" class="table-setting-btn leave" on:click={() => { tableMenuOpen = false; leaveConfirmOpen = true; }} title="対局から退出" aria-label="対局から退出"><span class="settings-label">退出</span></button>
             {/if}
@@ -3040,7 +3040,7 @@
         {#if !onlineSpectator}
           <label class="tm-toggle tsumokiri-toggle" title="自分の手番を自動でツモ切り"><input type="checkbox" bind:checked={autoTsumoKiri}><span>ツモ切り</span></label>
           <!-- スタンプ button [自家のみ表示、 cosmetic、 game state 副作用なし]。帯の右端に固定 -->
-          <button class="stamp-open-btn" on:click={openStampPallet} title="スタンプ" aria-label="スタンプ">💬</button>
+          <button class="stamp-open-btn" on:click={openStampPallet} title="スタンプ" aria-label="スタンプ">スタンプ</button>
         {/if}
         <!-- 操作 [リーチ ・ カン ・ ポン ・ 北抜き ・ 次へ]: 帯の右端に下を揃えて置き、選択肢が増えたら上へ伸びる [手牌は動かない] -->
         <div class="toolbar toolbar-red">
@@ -3392,9 +3392,9 @@
           {:else if $game.pendingFeverContinue && (!onlineGameStarted || $game.pendingFeverContinue.winner === actorSeat)}
             <button on:click={() => game.continueFever()}>▶ フィーバー継続</button>
           {:else if state.finished}
-            <button on:click={exportPaifu} disabled={!canSavePaifu}>📂 牌譜保存</button>
-            <button on:click={exportDiagnostics}>🩺 状態ダンプ</button>
-            <button on:click={reportBug} disabled={bugReportBusy}>🐛 バグ通報</button>
+            <button on:click={exportPaifu} disabled={!canSavePaifu}>牌譜保存</button>
+            <button on:click={exportDiagnostics}>状態ダンプ</button>
+            <button on:click={reportBug} disabled={bugReportBusy}>バグ通報</button>
             <!-- [2026-07-23 リョー指示] online は全員の同意 vote、solo は従来 checkbox -->
             {#if onlineGameStarted && !onlineSpectator}
               <label style="display:inline-flex; align-items:center; gap:4px; font-size:14px;">
@@ -3411,7 +3411,7 @@
             {#if !onlineGameStarted || !onlineSpectator}
               <button on:click={handleNextMatch}>▶ 次の試合へ</button>
             {:else}
-              <span class="muted-hint">👁 観戦中 [対局者が「次の試合へ」を押すと次が始まる]</span>
+              <span class="muted-hint">観戦中 [対局者が「次の試合へ」を押すと次が始まる]</span>
             {/if}
           {:else}
             <!-- R21 P0 fix: nextRound は host or winner or 親 許容 [server gate]、
@@ -3430,12 +3430,12 @@
               {#if nextRoundWaitList.length > 0}
                 <span class="ready-list" aria-label="次局へを押した人">
                   {#each nextRoundWaitList as w (w.seat)}
-                    <span class="ready-chip" class:ready={w.ready}>{w.ready ? '✓' : 'まだ'} {w.name}</span>
+                    <span class="ready-chip" class:ready={w.ready}>{w.ready ? '済' : 'まだ'} {w.name}</span>
                   {/each}
                 </span>
               {/if}
               {:else}
-              <span class="muted-hint">👁 観戦中 [{nextRoundReadyShownCount}/{nextRoundReadyTotal} 次局待ち]</span>
+              <span class="muted-hint">観戦中 [{nextRoundReadyShownCount}/{nextRoundReadyTotal} 次局待ち]</span>
               {/if}
               {#if $game.lastWinner !== null && $game.lastWinner === actorSeat && $game.game.canAgariyame($game.lastWinner as PlayerId)}
                 <button on:click={() => game.agariyame()}>アガリ止め</button>
@@ -3480,7 +3480,7 @@
   {#if newVersionAvailable && !newVersionToastDismissed}
     <div class="new-version-toast" role="status">
       <span>新しいバージョンがある。リロードで反映してくれ</span>
-      <button on:click={() => location.reload()}>🔄 リロード</button>
+      <button on:click={() => location.reload()}>リロード</button>
       <button class="dismiss" title="あとで" aria-label="あとで" on:click={() => (newVersionToastDismissed = true)}>✕</button>
     </div>
   {/if}
@@ -6112,8 +6112,9 @@
     margin-left: auto;
     min-height: 40px;
     min-width: 44px;
-    padding: 0 10px;
-    font-size: 18px;
+    padding: 0 12px;
+    font-size: 13px;
+    font-weight: 700;
     border-radius: var(--jz-rad);
     background: var(--jz-sec);
     border: 1px solid var(--jz-sec-bd);

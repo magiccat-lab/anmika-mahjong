@@ -126,7 +126,7 @@
 </script>
 
 <div class="lobby">
-  <h2>🀄 アンミカ麻雀 オンライン</h2>
+  <h2>アンミカ麻雀 オンライン</h2>
   {#if loading}
     <p>読み込み中…</p>
   {:else if !me}
@@ -186,9 +186,9 @@
                 <button class="join-btn" on:click={() => joinRoom(r.room_id)} disabled={r.member_count >= (r.rotation_enabled ? 4 : 3)}>入る</button>
               {/if}
               <!-- [2026-07-23 観戦モード] 対局中の部屋は閲覧専用で覗ける -->
-              <button on:click={() => { if (!me) { goLogin(); return; } onSpectateRoom(r.room_id, me); }} title="閲覧専用で見る">👁 観戦</button>
+              <button on:click={() => { if (!me) { goLogin(); return; } onSpectateRoom(r.room_id, me); }} title="閲覧専用で見る">観戦</button>
               {#if me && r.host_user_id === me.user_id}
-                <button on:click={() => deleteRoom(r.room_id)} class="del-btn" title="自分の部屋を削除">🗑️</button>
+                <button on:click={() => deleteRoom(r.room_id)} class="del-btn" title="自分の部屋を削除">削除</button>
               {/if}
             </div>
           </li>

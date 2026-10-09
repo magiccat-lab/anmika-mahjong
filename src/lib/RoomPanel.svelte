@@ -129,7 +129,7 @@
 </script>
 
 <div class="room">
-  <h2>🀄 部屋{room?.match_mode === 'hanchan' ? ' [半荘戦]' : ' [東風戦]'}{room?.rotation_enabled ? ' [4人回し]' : ''}</h2>
+  <h2>部屋{room?.match_mode === 'hanchan' ? ' [半荘戦]' : ' [東風戦]'}{room?.rotation_enabled ? ' [4人回し]' : ''}</h2>
   <!-- [2026-10-09 遊真 B3] 部屋コードを大きく出す [口頭 ・ 画面越しでも読める] -->
   <div class="code-block">
     <div class="code-label">部屋コード</div>
@@ -137,8 +137,8 @@
   </div>
   <p class="hint">招待リンク: <code>{shareLink()}</code></p>
   <div class="invite-actions">
-    <button class="copy" on:click={copyLink}>{copied ? '✓ コピーした' : '📋 コピー'}</button>
-    {#if canShare}<button class="copy share" on:click={shareRoom}>📤 共有</button>{/if}
+    <button class="copy" on:click={copyLink}>{copied ? 'コピーした' : 'コピー'}</button>
+    {#if canShare}<button class="copy share" on:click={shareRoom}>共有</button>{/if}
   </div>
 
   <div class="members">

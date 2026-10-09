@@ -16,25 +16,25 @@
     <h1>ONLINE ANMIKA</h1>
   </div>
   <button class="entry-btn solo" on:click={onSelectSolo}>
-    <span class="btn-main">🀄 一人回しモード</span>
+    <span class="btn-main">一人回しモード</span>
   </button>
   <button class="entry-btn online" on:click={onSelectOnline}>
-    <span class="btn-main">🌐 対戦モード</span>
+    <span class="btn-main">対戦モード</span>
   </button>
   <!-- [2026-07-23 リョー要望] 戦績 [オンライン対戦の記録から集計] -->
   <button class="entry-btn stats" on:click={onSelectStats}>
-    <span class="btn-main">📊 戦績</span>
+    <span class="btn-main">戦績</span>
   </button>
   <!-- [2026-07-23 リョー要望] 名牌譜 [試合記録の再生と名局保存] -->
   <button class="entry-btn replay" on:click={onSelectReplay}>
-    <span class="btn-main">📼 牌譜</span>
+    <span class="btn-main">牌譜</span>
   </button>
   <!-- [2026-09-14] ルールが特殊なので初見の入口を出す -->
   <button class="entry-btn rules" on:click={onSelectRules}>
-    <span class="btn-main">📖 説明書</span>
+    <span class="btn-main">説明書</span>
   </button>
   <button class="entry-btn settings" on:click={onSelectSettings}>
-    <span class="btn-main">⚙️ 画面設定</span>
+    <span class="btn-main">画面設定</span>
   </button>
 </div>
 
