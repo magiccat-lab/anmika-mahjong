@@ -21,6 +21,12 @@
   /** [2026-07-23 総点検 P1] reject/sync 受信時に親が進める復旧カウンタ。
    *  変化したら awaitingRollAck を解除する [送信が握り潰された/弾かれた時の片道切符対策] */
   export let recoveryNonce = 0;
+  /** [2026-10-09 shun] リョー「CPUのサイコロは即結果が出るようにスキップできるボタンもつけて」。
+   *  instant の間は振る演出を回さず、着いた目をそのまま出す */
+  export let instant = false;
+  /** CPU のサイコロの時だけ「スキップ」を出す */
+  export let showSkip = false;
+  export let onSkip: () => void = () => {};
 
   import { onDestroy } from 'svelte';
   import DiceCube from './DiceCube.svelte';
@@ -133,6 +139,17 @@
       revealedRollsCount = Math.min(revealedRollsCount, rolls.length);
       landingQueue = [];
       awaitingRollAck = false;
+    } else if (rolls.length > prevRollsCount && instant) {
+      // スキップ中: 演出なしで着いた目を出す [残っている演出も捨てる]
+      if (rollTimer !== null) { clearTimeout(rollTimer); rollTimer = null; }
+      rolling = false;
+      stopDrumAudio();
+      landingQueue = [];
+      prevRollsCount = rolls.length;
+      revealedRollsCount = rolls.length;
+      const last = rolls[rolls.length - 1];
+      if (last) { displayD1 = last.dice[0]; displayD2 = last.dice[1]; }
+      awaitingRollAck = false;
     } else if (rolls.length > prevRollsCount) {
       // winner / 非 winner 共通: rolls の増分 1 件につき spin 1 回を queue
       for (let i = prevRollsCount; i < rolls.length; i++) {
@@ -150,7 +167,12 @@
 
 {#if chance}
   <div class="modal sai">
-    <div class="title">🎲 サイコロチャンス [{winnerName ?? `player ${winner}`}] - {chance.name}</div>
+    <div class="title-row">
+      <div class="title">サイコロチャンス [{winnerName ?? `player ${winner}`}] - {chance.name}</div>
+      {#if showSkip && !instant}
+        <button class="skip-btn" on:click={onSkip} title="CPU のサイコロの演出を飛ばして結果を出す">スキップ</button>
+      {/if}
+    </div>
     <div class="info">
       {currentIdx + 1} / {chances.length} 件目 | base {chance.baseChip} × {chance.count} 回 × 倍率 {chipMultiplier} = {chance.baseChip * chance.count * chipMultiplier} オール / hit
     </div>
@@ -199,7 +221,7 @@
         {/if}
         <div class="info">残り {rollsLeft} 振り | 現 {hits} hit</div>
         <div class="actions">
-          <button class="roll-btn" on:click={handleRoll} disabled={rolling || awaitingRollAck || landingQueue.length > 0 || !canOperate}>{(rolling || awaitingRollAck || landingQueue.length > 0) ? '🎲 振っています…' : (canOperate ? '🎲 サイコロを振る' : '🎲 上がり者の振り待ち…')}</button>
+          <button class="roll-btn" on:click={handleRoll} disabled={rolling || awaitingRollAck || landingQueue.length > 0 || !canOperate}>{(rolling || awaitingRollAck || landingQueue.length > 0) ? '振っています…' : (canOperate ? 'サイコロを振る' : '上がり者の振り待ち…')}</button>
         </div>
       {:else}
         <div class="result">
@@ -244,6 +266,20 @@
   }
   .modal.sai { border: 2px solid #d4af37; }
   .title { font-weight: bold; margin-bottom: 6px; font-size: 14px; }
+  .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .skip-btn {
+    flex: none;
+    min-height: 36px;
+    padding: 0 14px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    border-radius: 4px;
+    border: 1px solid currentColor;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
   .dice-stage {
     width: 100%;
     max-width: 480px;

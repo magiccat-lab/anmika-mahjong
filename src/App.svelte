@@ -1636,6 +1636,9 @@
             nextRoundPressedLocal = false;
           }
         }
+      } else if (msg.type === 'cpuSaiFast') {
+        // [2026-10-09 shun] 卓の誰かが CPU のサイコロをスキップした。server が刻みを詰めるので、演出も止める
+        cpuSaiFast = true;
       } else if (msg.type === 'stamp') {
         // [2026-10-09 shun2 R2] 他の人のスタンプ。server は room seat で送ってくる。
         // 受け口が無く、他の人の画面に出ていなかった。盤面の game seat に直して出す [自分の分は押した時に出している]
@@ -2218,6 +2221,28 @@
   // R16 fix: 旧 code は window.__game 参照、 R15 P0 #5 で online 中 expose 削除済 → prod fail。
   // svelte $game store を 直接 参照する path に変更 [getStoreValue 経由 同期取得]
   let __cpuSaiKoroLatch = false;
+  let __cpuSaiKoroTimer: ReturnType<typeof setTimeout> | null = null;
+  // [2026-10-09 shun] リョー「CPUのサイコロは即結果が出るようにスキップできるボタンもつけて」。
+  // スキップ後は今のサイコロが終わるまで CPU の出目宣言と振りを待たずに進め、画面は着いた目をそのまま出す。
+  // 結果 [確定の欄] は読めるように、次のチャンスへ進むまでだけ少し待つ。オンラインは server の刻みを詰めてもらう
+  let cpuSaiFast = false;
+  $: if (!$game.pendingSaiKoro) cpuSaiFast = false;
+  const CPU_SAI_FAST_ADVANCE_MS = 1500;
+  function skipCpuSaiKoro(): void {
+    if (onlineGameStarted) {
+      cpuSaiFast = true;
+      const ws = onlineWs;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: 'skipCpuSai' })); } catch { /* 切れていれば演出のまま進む */ }
+      }
+      return;
+    }
+    if (__cpuSaiKoroTimer !== null) { clearTimeout(__cpuSaiKoroTimer); __cpuSaiKoroTimer = null; }
+    __cpuSaiKoroLatch = false;
+    saiKoroOpened = true;
+    if (!$game.cpuWinAck) game.ackCpuWin();
+    cpuSaiFast = true;
+  }
   $: {
     const ps = $game.pendingSaiKoro;
     if (ps && !__cpuSaiKoroLatch) {
@@ -2240,8 +2265,11 @@
         // [2026-05-15 bug 10 fix] CPU saikoro 体感 skip 抑制で 各 step 延長:
         // combo 800→1500ms / roll 1500→2500ms / advance 1500→2000ms
         // [dicebox 物理アニメ + 結果視認 + 次 chance 移行 を 確実に見せる]
-        const stepDelay = !ps0.selectedCombo ? 1500 : (!ps0.finalized ? 2500 : 2000);
-        setTimeout(() => {
+        const stepDelay = cpuSaiFast
+          ? (!ps0.finalized ? 0 : CPU_SAI_FAST_ADVANCE_MS)
+          : (!ps0.selectedCombo ? 1500 : (!ps0.finalized ? 2500 : 2000));
+        __cpuSaiKoroTimer = setTimeout(() => {
+          __cpuSaiKoroTimer = null;
           __cpuSaiKoroLatch = false;
           // R16 P0 #8 fix: window.__game 不依存、 store snapshot を 直接 取得
           const snap = get(game) as any;
@@ -2783,6 +2811,9 @@
       <div class="cpu-sai-ack">
         <button class="cpu-sai-ack-btn" on:click={() => { saiKoroOpened = true; game.ackCpuWin(); }}>
           CPU のサイコロチャンスを見る
+        </button>
+        <button class="cpu-sai-ack-btn cpu-sai-skip-btn" on:click={skipCpuSaiKoro}>
+          結果だけ見る
         </button>
       </div>
     {/if}
@@ -3498,7 +3529,7 @@
     {@const _chanceOwner = (((_curChance as any)?.winner) ?? $game.pendingSaiKoro.winner) as PlayerId}
     <!-- R5 P1 #2 fix: canOperate / chipMultiplier も current chance owner 基準に [ダブロン 2 人目 winner 操作権] -->
     <SaiKoroModal
-      winnerName={onlineGameStarted ? seatDisplayNames[_chanceOwner] : null}
+      winnerName={onlineGameStarted ? seatDisplayNames[_chanceOwner] : (_chanceOwner === selfPlayer ? 'あなた' : `P${_chanceOwner}`)}
       winner={_chanceOwner}
       canOperate={(!onlineGameStarted || _chanceOwner === actorSeat) && (!onlineGameStarted || !!onlineWs)}
       recoveryNonce={saiKoroRecoveryNonce}
@@ -3513,6 +3544,9 @@
       onSelectCombo={(a, b) => game.selectSaiKoroCombo(a, b)}
       onRoll={(override?: [number, number]) => game.rollSaiKoroDice(override)}
       onAdvance={() => game.advanceSaiKoro()}
+      instant={cpuSaiFast}
+      showSkip={!!$game.cpu[_chanceOwner]}
+      onSkip={skipCpuSaiKoro}
     />
   {/if}
 
@@ -4538,7 +4572,10 @@
     bottom: 18vh;
     transform: translateX(-50%);
     z-index: 1200;
+    display: flex;
+    gap: 12px;
   }
+  .cpu-sai-ack-btn.cpu-sai-skip-btn { background: transparent; color: #ffe89b; }
   .cpu-sai-ack-btn {
     padding: 12px 22px;
     border: 2px solid #ffe89b;
@@ -6111,7 +6148,8 @@
     flex: none;
     margin-left: auto;
     min-height: 40px;
-    min-width: 44px;
+    width: 80px;
+    white-space: nowrap;
     padding: 0 12px;
     font-size: 13px;
     font-weight: 700;
@@ -6122,7 +6160,8 @@
     box-shadow: none;
   }
   /* 操作はスタンプの左 */
-  main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 54px; }
+  /* [2026-10-09 shun] リョー「ポン見送るとスタンプが被ってる」: 54px だとスタンプ [約 78px] の上に操作が乗っていた。幅を 80px に決めて、その左に置く */
+  main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 88px; }
   /* 手牌の下地は帯と同じ暗い札 */
   main.mode-single.ui-board-v2 .seat-bottom > :global(section.player) {
     background: rgba(12, 30, 23, 0.55) !important;

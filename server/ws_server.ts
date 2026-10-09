@@ -97,6 +97,11 @@ type DeadlineInfo = {
   revision: number;
 };
 
+/** [2026-10-09 shun] CPU のサイコロをスキップした後の 1 手の間隔 [ms]。0 だと同じ tick で詰まるので少し空ける */
+const CPU_SAI_FAST_STEP_MS = 60;
+/** スキップ後も結果 [確定の欄] は読めるように、次のチャンスへ進む前だけ待つ [solo の App と同じ] */
+const CPU_SAI_FAST_ADVANCE_MS = 1500;
+
 type Room = {
   roomId: string;
   hostUserId: string;
@@ -126,6 +131,8 @@ type Room = {
   cpuProxyTimers: Map<string, ReturnType<typeof setTimeout>>;
   // [2026-10-09 遊真 C1] 直近に張った人間待ちの期限 [無ければ null]
   deadlineInfo: DeadlineInfo | null;
+  /** [2026-10-09 shun] CPU のサイコロを誰かが「スキップ」した。今のサイコロが終わるまで CPU の刻みを詰める */
+  cpuSaiFast?: boolean;
   // [2026-10-09 R3] 席 [room seat] ごとの直近スタンプ時刻 [performance.now() 基準]
   stampLastAt: Map<number, number>;
   // [2026-10-09 遊真 A3] サーバーが保存 POST を出した試合の `${roomInstanceId}:${matchId}`
@@ -1562,6 +1569,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       chipResetVotes: new Set<number>(),
       cpuProxyTimers: new Map(),
       deadlineInfo: null,
+      cpuSaiFast: false,
       stampLastAt: new Map<number, number>(),
       recordedMatchKeys: new Set<string>(),
     };
@@ -2130,6 +2138,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     };
 
     const canonical = authority.canonicalState();
+    if (!canonical.pendingSaiKoro) room.cpuSaiFast = false;
     let postWinOwner: number | null = null;
     let postWinAction: Record<string, unknown> | null = null;
     if (canonical.pendingFuyu) {
@@ -2178,7 +2187,13 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       // 追いつかず「押す前に済んでチップが動いた」体験になる。solo の App 側 driver と同じ
       // 「見える」ペースに合わせる。人間 owner の deadline 代行 [勝手に出目宣言→roll] は
       // 実質チート級の介入なので、離席救済としてだけ長めに残す [env で調整可]。
-      const cpuStepDelay = postWinAction.type === 'selectSaiKoroCombo' ? 1500
+      // [2026-10-09 shun] リョー「CPUのサイコロは即結果が出るようにスキップできるボタンもつけて」。
+      // スキップ後は CPU のサイコロの刻みを詰める [画面は結果だけ出す]。人間のサイコロには効かない
+      const saiStep = postWinAction.type === 'selectSaiKoroCombo' || postWinAction.type === 'rollSaiKoroDice'
+        || postWinAction.type === 'advanceSaiKoro';
+      const cpuStepDelay = room.cpuSaiFast && saiStep
+        ? (postWinAction.type === 'advanceSaiKoro' ? CPU_SAI_FAST_ADVANCE_MS : CPU_SAI_FAST_STEP_MS)
+        : postWinAction.type === 'selectSaiKoroCombo' ? 1500
         : postWinAction.type === 'rollSaiKoroDice' ? 2500
         : postWinAction.type === 'advanceSaiKoro' ? 2000
         : 1500;
@@ -2693,6 +2708,19 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           if (!allowed || target.cpuProxy === value.on) return;
           target.cpuProxy = value.on;
           afterCpuProxyChange(room);
+          scheduleRoomDeadline(room);
+          return;
+        }
+        if ((msg as Record<string, unknown>)?.type === 'skipCpuSai') {
+          // [2026-10-09 shun] CPU のサイコロのスキップ。卓の誰でも押せる [CPU の演出を待たないだけで、出目と点は変わらない]
+          const live = room.authority;
+          const pending = live?.canonicalState().pendingSaiKoro as any;
+          if (!live || !pending || room.cpuSaiFast) return;
+          const chance = pending.chances?.[pending.currentIdx];
+          const owner = chance?.winner ?? pending.winner;
+          if (!cpuDriven(room, memberByGameSeat(room, owner))) return;
+          room.cpuSaiFast = true;
+          broadcast(room, { type: 'cpuSaiFast' });
           scheduleRoomDeadline(room);
           return;
         }

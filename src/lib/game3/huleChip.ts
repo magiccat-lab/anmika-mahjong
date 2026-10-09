@@ -630,7 +630,9 @@ export function applyChipsOnHule(
       }
       label = '夏夏金北 [打点 ×4]';
     } else if (target === 'natsu' && natsus === 1) {
-      label = '夏金北 [+2 段アップ適用済]';
+      // [2026-10-09 shun] 9/14 裁定「夏は向こうにあわせる」で夏 1 枚の金北は段を上げない [game3 の夏の処理]。
+      // 表示だけ旧仕様の「+2 段アップ適用済」が残っていて、上がっていないのに上がった様に見えた
+      label = '夏金北 [夏 1 枚では段は上がらない]';
     } else if (target === 'aki' && akis >= 2 && Number(result._akiRevealCount ?? 0) >= 2) {
       const natsuW = hua.filter((p: string) => p === 'f2').length;
       const reportedFanshu = typeof result.fanshu === 'number'
