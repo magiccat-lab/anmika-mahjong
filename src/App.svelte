@@ -77,6 +77,27 @@
     onDestroy(() => watch.stop());
   }
 
+  // [2026-10-09 shun] 華の帯 [リョー「華めっちゃ大事だからもっと見えるようにして」→ ラフ c]。
+  // 華は種類ごとにまとめ、牌の下に効果を字で出す [ルール表 2-2 の言葉。2 枚ならダブルの効果]
+  // 2 枚 [ダブル] は効果の字で分かるので季節の字は 1 つ [春 祝儀 華×2 / 冬 チューリップ]
+  const HUA_EFFECT: Record<string, [string, string]> = {
+    f1: ['春 祝儀 華×1', '春 祝儀 華×2'],
+    f2: ['夏 打点 +1 段', '夏 打点 +2 段'],
+    f3: ['秋 ドラ +1 枚', '秋 ドラ +2 枚'],
+    f4: ['冬 アリス', '冬 チューリップ'],
+  };
+  function huaGroups(hua: string[], nuki: number, nukiGold: number): Array<{ key: string; tiles: string[]; label: string }> {
+    const groups: Array<{ key: string; tiles: string[]; label: string }> = [];
+    for (const f of ['f1', 'f2', 'f3', 'f4']) {
+      const n = hua.filter((h) => h === f).length;
+      if (n > 0) groups.push({ key: f, tiles: Array(n).fill(f), label: HUA_EFFECT[f][n >= 2 ? 1 : 0] });
+    }
+    if (nuki + nukiGold > 0) {
+      groups.push({ key: 'nuki', tiles: [...Array(nuki).fill('z4'), ...Array(nukiGold).fill('gN')], label: `北 ${nuki + nukiGold} 枚` });
+    }
+    return groups;
+  }
+
   // [2026-07-22 リョー要望] オンラインは P0/P1 じゃなくユーザー名で表示する
   let seatDisplayNames: [string, string, string] = ['P0', 'P1', 'P2'];
   $: {
@@ -2377,8 +2398,6 @@
      札の中の決まった場所に置く [旧: 点は真ん中の板、抜きは卓の上の帯、代打ちは細い列に押し込み] -->
 {#snippet seatCard(p: PlayerId, pos: 'left' | 'right' | 'me')}
   {@const seatMember = onlineGameStarted ? memberAtGameSeat(onlineMembers, onlineActiveMapping, p) : undefined}
-  {@const hua = $game.game.huapai[p] ?? []}
-  {@const nukiN = ($game.game.nukidora[p] ?? 0) + ($game.game.nukidoraGold[p] ?? 0)}
   {@const wind = ['東', '南', '西'][$game.game.zifengZ(p) - 1] ?? ''}
   <div class="seat-card sc-{pos}" class:turn={currentPlayer === p && !$game.roundEnded} class:oya={wind === '東'}>
     <div class="sc-head">
@@ -2394,14 +2413,6 @@
       <span>{$game.game.shuvariUsed[p] ? 'シュバ済' : 'シュバ未'}</span>
       {#if selfPlayer === p || (!onlineGameStarted && revealAll)}<span>シャンテン {$game.game.xiangting(p)}</span>{/if}
     </div>
-    {#if hua.length + nukiN > 0}
-      <div class="sc-nuki" title="抜いた華と北">
-        {#each hua as h}<Tile pai={h} size="sm" />{/each}
-        {#each Array($game.game.nukidora[p] ?? 0) as _}<Tile pai="z4" size="sm" />{/each}
-        {#each Array($game.game.nukidoraGold[p] ?? 0) as _}<Tile pai="gN" size="sm" />{/each}
-        <span class="sc-nuki-n">{hua.length > 0 ? `華 ${hua.length}` : ''}{hua.length > 0 && nukiN > 0 ? ' ・ ' : ''}{nukiN > 0 ? `北 ${nukiN}` : ''}</span>
-      </div>
-    {/if}
     {#if onlineGameStarted}
       {#if pos !== 'me'}
         <OnlineSeatStatus member={seatMember} canToggle={canHostToggleCpuProxy(seatMember, !!onlineRoomMeta?.isHost, onlineMe?.user_id)} onSetCpuProxy={sendSetCpuProxy} />
@@ -2409,6 +2420,27 @@
       <DeadlineBar deadline={onlineDeadline} roomSeat={clientGameToRoomSeat(onlineActiveMapping, p)} />
     {/if}
   </div>
+{/snippet}
+
+<!-- [2026-10-09 shun] 華の帯。上の行に 左 = 上家 ・ 真ん中 = 自分 [金の枠] ・ 右 = 下家 の 3 枚を隣り合わせに並べる。
+     旧: 席の札の中に 18px の牌 [自分の分が分からない、リョー 10-09]。華は種類ごとにまとめて牌の下に効果、北は一段小さく -->
+{#snippet huaPanel(p: PlayerId, pos: 'left' | 'right' | 'me')}
+  {@const groups = huaGroups($game.game.huapai[p] ?? [], $game.game.nukidora[p] ?? 0, $game.game.nukidoraGold[p] ?? 0)}
+  <section class="hua-panel hp-{pos}" class:hp-dense={groups.length >= 4} aria-label="{pos === 'me' ? 'あなた' : (onlineGameStarted ? seatName(p) : `P${p}`)}の華と北">
+    <span class="hp-title">{pos === 'me' ? 'あなたの華' : `${onlineGameStarted ? seatName(p) : `P${p}`} の華`}</span>
+    {#if groups.length === 0}
+      <span class="hp-none">まだなし</span>
+    {:else}
+      <div class="hp-groups">
+        {#each groups as g (g.key)}
+          <div class="hp-group" class:hp-nuki={g.key === 'nuki'}>
+            <div class="hp-tiles">{#each g.tiles as t}<Tile pai={t} size="md" />{/each}</div>
+            <span class="hp-label">{g.label}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </section>
 {/snippet}
 
 {#snippet sideHand(tiles: string[], fulou: any[], rot: 'l' | 'r')}
@@ -2914,6 +2946,11 @@
         <span class="status-dot" aria-hidden="true"></span>
         {actionStatus.text}
       </span>
+      <div class="hua-strip">
+        {@render huaPanel(srv1, 'left')}
+        {@render huaPanel(srv0, 'me')}
+        {@render huaPanel(srv2, 'right')}
+      </div>
       <div class="dora-main">
         {#if feverWaits.length > 0}
           <span class="fever-inline-label">フィーバー</span>
@@ -5357,7 +5394,7 @@
   main.mode-single.ui-board-v2 .score-box .sname { font-size: clamp(8px, calc(var(--score-side) * 0.075), 12px); letter-spacing: 0; white-space: nowrap; }
   main.mode-single.ui-board-v2 .score-box .sval { font-size: clamp(11px, calc(var(--score-side) * 0.115), 20px); letter-spacing: 0; }
   main.mode-single.ui-board-v2 .score-box .ssub { font-size: clamp(7px, calc(var(--score-side) * 0.06), 10px); line-height: 1.15; margin-top: 0; }
-  main.mode-single.ui-board-v2 .score-box .score-side.score-top { font-size: clamp(9px, calc(var(--score-side) * 0.085), 14px); padding: 2px 0; }
+  main.mode-single.ui-board-v2 .score-box .score-side.score-top { font-size: clamp(11px, calc(var(--score-side) * 0.085), 14px); padding: 2px 0; }
   main.mode-single.ui-board-v2 .score-box .benbang { font-size: clamp(9px, calc(var(--score-side) * 0.08), 13px); }
   main.mode-single.ui-board-v2 .score-box .paishu { font-size: clamp(10px, calc(var(--score-side) * 0.10), 16px); }
   main.mode-single.ui-board-v2 .score-box .score-side.score-left,
@@ -5820,6 +5857,15 @@
     --score-side: min(56cqh, 34cqw, 280px);
     --river-tile-h: clamp(15px, calc(var(--score-side) * 0.22), 62px);
   }
+  /* [2026-10-09 shun 華の帯] 広い画面は卓の物を一回り大きく [リョー「空白になってる緑だけの領域が無駄」]。
+     河の上限 62 → 80px、手牌の上限 74 → 80px [86px だとツモ後の 14 枚が手牌の帯からはみ出す]。低い画面 ・ 縦持ちは cq と dvh の式で今のまま */
+  @media (min-height: 700px) and (min-width: 1100px) {
+    main.mode-single.ui-board-v2 {
+      --score-side: min(56cqh, 34cqw, 364px);
+      --river-tile-h: clamp(15px, calc(var(--score-side) * 0.22), 80px);
+      --tile-h: clamp(30px, 11dvh, 80px);
+    }
+  }
   main.mode-single.ui-board-v2 :global(.tile:not(.down)) {
     box-shadow: 0 2px 0 #cdbf9f, 0 3px 3px rgba(0, 0, 0, 0.3);
   }
@@ -6057,9 +6103,6 @@
   .sc-tag.hot { background: #b4442c; color: #fff; }
   .sc-pt .sval { display: inline-block; font-size: 22px; font-weight: 700; line-height: 1.1; color: var(--jz-gold); font-variant-numeric: tabular-nums; }
   .sc-sub { display: flex; flex-wrap: wrap; gap: 0 8px; font-size: 12px; color: var(--jz-sub); }
-  .sc-nuki { display: flex; flex-wrap: wrap; align-items: center; gap: 1px; }
-  main.mode-single.ui-board-v2 .sc-nuki :global(.tile.size-sm) { width: 18px; height: 25px; min-width: 0; min-height: 0; margin: 0; }
-  .sc-nuki-n { margin-left: 6px; font-size: 12px; color: var(--jz-sub); white-space: nowrap; }
   /* [V10] 切断 ・ 代打ちの印と「CPU に替える」は札の中の 1 行 */
   .seat-card :global(.oss) { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px; margin: 0; }
   .seat-card :global(.oss-badge) { font-size: 11px; padding: 2px 6px; border-radius: var(--jz-rad); }
@@ -6103,6 +6146,82 @@
   main.mode-single.ui-board-v2 .vft :global(.tile.size-sm) { width: 20px; height: 28px; min-width: 0; min-height: 0; margin: 0; }
   .vft.vclaimed { display: inline-block; transform: rotate(90deg); margin: 0 4px; }
 
+  /* ---- 華の帯 [2026-10-09 shun、ラフ c + リョー「空白になってる緑だけの領域を活かして」、codex の見直し] ----
+     上の行を卓の幅いっぱいにし、真ん中に 3 人の華の札を隣り合わせに置く [左 = 上家 ・ 真ん中 = 自分 ・ 右 = 下家]。
+     左右の列 [席の札 ・ 伏せ牌] はその下から、河の横の真ん中に来る。
+     牌の段: 手牌 > 自分の華 [手牌の 0.7] > 相手の華 [自分の 0.77] > 北 [華の 0.75] > 伏せ牌。強調は自分の札の金の枠だけ */
+  main.mode-single.ui-board-v2 {
+    --hua-me-h: clamp(30px, calc(var(--tile-h) * 0.7), 60px);
+    --hua-op-h: clamp(24px, calc(var(--hua-me-h) * 0.77), 46px);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'top  top    top'
+      'dora dora   dora'
+      'left center right'
+      'left bottom right';
+  }
+  main.mode-single.ui-board-v2 .dora-row {
+    grid-template-columns: minmax(max-content, 1fr) minmax(0, 1040px) minmax(max-content, 1fr);
+    align-items: center;
+    row-gap: 6px;
+  }
+  main.mode-single.ui-board-v2 .dora-row .turn-status { grid-column: 1; grid-row: 1; justify-self: start; }
+  main.mode-single.ui-board-v2 .dora-row .hua-strip { grid-column: 2; grid-row: 1; }
+  main.mode-single.ui-board-v2 .dora-row .table-menu-wrap { grid-column: 3; grid-row: 1; justify-self: end; }
+  main.mode-single.ui-board-v2 .dora-row .dora-main { grid-column: 2; grid-row: 2; justify-self: center; }
+  main.mode-single.ui-board-v2 .dora-row .dora-main:not(:has(*)) { display: none; }
+  .hua-strip {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 8px;
+    align-items: stretch;
+    min-width: 0;
+  }
+  .hua-panel {
+    --hp-h: var(--hua-op-h);
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 4px;
+    align-content: start;
+    min-width: 0;
+    padding: 6px 10px 8px;
+    border-radius: var(--jz-rad);
+    border: 1px solid var(--jz-panel-bd);
+    background: var(--jz-panel);
+    box-shadow: var(--jz-shadow);
+    color: var(--jz-ink);
+    text-align: left;
+  }
+  .hua-panel.hp-me {
+    --hp-h: var(--hua-me-h);
+    border-color: var(--jz-gold);
+    box-shadow: inset 0 0 0 1px var(--jz-gold), var(--jz-shadow);
+  }
+  .hp-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; color: var(--jz-sub); }
+  .hp-me .hp-title { color: var(--jz-gold); font-size: 14px; }
+  .hp-none { align-self: center; font-size: 12px; color: var(--jz-sub); }
+  .hp-groups { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 14px; min-width: 0; }
+  .hp-group { display: grid; justify-items: center; gap: 3px; }
+  .hp-tiles { display: flex; gap: 2px; }
+  main.mode-single.ui-board-v2 .hua-panel :global(.tile.size-md) {
+    width: calc(var(--hp-h) * 0.727);
+    height: var(--hp-h);
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+  }
+  main.mode-single.ui-board-v2 .hua-panel .hp-nuki :global(.tile.size-md) {
+    width: calc(var(--hp-h) * 0.75 * 0.727);
+    height: calc(var(--hp-h) * 0.75);
+  }
+  .hp-label { font-size: 12px; line-height: 1.2; color: var(--jz-ink); white-space: nowrap; }
+  .hp-nuki .hp-label { color: var(--jz-sub); }
+  /* 4 種類以上 [四華 ・ 八華級] は牌を一回り詰めて、帯の高さが跳ねにくくする */
+  .hua-panel.hp-dense { --hp-h: calc(var(--hua-op-h) * 0.9); }
+  .hua-panel.hp-me.hp-dense { --hp-h: calc(var(--hua-me-h) * 0.8); }
+  .hp-dense .hp-groups { column-gap: 8px; }
+  .hp-dense .hp-label { font-size: 11px; }
+
   /* ---- 手牌のすぐ上の帯: 自分の札 ・ ツモ切り ・ 操作 ---- */
   .me-strip {
     position: relative;
@@ -6121,7 +6240,6 @@
   }
   .seat-card.sc-me .sc-head { flex-wrap: nowrap; }
   .seat-card.sc-me .sc-pt .sval { font-size: 20px; }
-  .seat-card.sc-me .sc-nuki { flex-wrap: nowrap; }
   .tsumokiri-toggle { min-height: 40px; }
   main.mode-single.ui-board-v2 .me-strip .toolbar-red {
     position: absolute;
@@ -6225,8 +6343,6 @@
     .sc-name { font-size: 12px; }
     .sc-pt .sval { font-size: 16px; }
     .sc-sub { font-size: 11px; gap: 0 6px; }
-    .sc-nuki-n { font-size: 11px; }
-    main.mode-single.ui-board-v2 .sc-nuki :global(.tile.size-sm) { width: 14px; height: 19px; }
     .vback { width: 9px; height: 13px; box-shadow: inset 0 -2px 0 var(--jz-back-edge); }
     main.mode-single.ui-board-v2 .vface :global(.tile.size-sm),
     main.mode-single.ui-board-v2 .vft :global(.tile.size-sm) { width: 15px; height: 21px; }
@@ -6240,6 +6356,18 @@
     .tm-toggle input:checked::after { transform: translateX(12px); }
     main.mode-single.ui-board-v2 .toolbar-red .tb-row button { min-height: 40px; padding: 0 16px !important; font-size: 15px !important; }
     main.mode-single.online-game header .msg-band { font-size: 12px; padding: 3px 10px; }
+    /* 華: 名前は札の左に寄せて 1 段 [上の行を低く保つ]。効果の字は自分の札にも出す */
+    main.mode-single.ui-board-v2 { --hua-me-h: 28px; --hua-op-h: 24px; }
+    main.mode-single.ui-board-v2 .dora-row { grid-template-columns: max-content minmax(0, 1fr) max-content; column-gap: 6px; }
+    .hua-strip { gap: 6px; }
+    .hua-panel { grid-template-rows: none; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 6px; padding: 3px 6px; }
+    /* 相手の名前は真下の席の札にあるので、横では札の名前を出さない [狭くて「A_des…」と切れる] */
+    .hp-left .hp-title, .hp-right .hp-title { display: none; }
+    .hua-panel.hp-left, .hua-panel.hp-right { grid-template-columns: minmax(0, 1fr); }
+    .hp-me .hp-title { font-size: 12px; }
+    .hp-none, .hp-label { font-size: 11px; }
+    .hp-groups { gap: 2px 8px; }
+    .hp-group { gap: 1px; }
   }
 
   /* ---- スマホ縦持ち [2026-10-09 リョー「スマホ版のUIこういうのでもいいかもね」、縦長のスピード麻雀の画面] ----
@@ -6249,7 +6377,7 @@
     main.mode-single.ui-board-v2 {
       --frame: 0px;
       --tile-w: calc((100vw - 88px) / 7);
-      --score-side: min(50cqh, 42cqw, 240px);
+      --score-side: min(54cqh, 42cqw, 240px);
       --tile-h: calc(var(--tile-w) * 1.375);
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
@@ -6276,8 +6404,6 @@
     .sc-name { font-size: 13px; }
     .sc-pt .sval { font-size: 18px; }
     .sc-sub { font-size: 11px; gap: 0 6px; }
-    .sc-nuki-n { font-size: 11px; }
-    main.mode-single.ui-board-v2 .sc-nuki :global(.tile.size-sm) { width: 15px; height: 21px; }
     .vback { width: 9px; height: 13px; box-shadow: inset 0 -2px 0 var(--jz-back-edge); }
     main.mode-single.ui-board-v2 .vface :global(.tile.size-sm),
     main.mode-single.ui-board-v2 .vft :global(.tile.size-sm) { width: 16px; height: 22px; }
@@ -6295,9 +6421,6 @@
     main.mode-single.ui-board-v2 .seat-bottom :global(.tile-btn.tsumo-tile) { margin-left: 0; }
     .me-strip { flex-wrap: nowrap; min-height: 40px; gap: 6px; }
     .seat-card.sc-me { padding: 2px 8px; gap: 8px; min-height: 40px; flex: 1 1 0; min-width: 0; overflow: hidden; }
-    /* 狭いので自分の抜き牌は数だけ */
-    .seat-card.sc-me .sc-nuki :global(.tile) { display: none; }
-    .seat-card.sc-me .sc-nuki-n { margin-left: 0; }
     .seat-card.sc-me .sc-sub { display: none; }
     .seat-card.sc-me .sc-pt .sval { font-size: 16px; }
     .tm-toggle { min-height: 40px; font-size: 13px; padding: 0 8px; }
@@ -6306,6 +6429,38 @@
     main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 0; bottom: calc(100% + 6px); max-width: calc(100vw - 16px); }
     main.mode-single.ui-board-v2 .turn-status { font-size: 13px; padding: 5px 10px; }
     main.mode-single.online-game header .msg-band { font-size: 13px; }
+    /* 華 [codex: 390px で 3 人横並びは無理]: 自分の札は上の行の 2 段目に幅いっぱい、相手の華は各自の席の札の真上に付ける。
+       上の行と華の帯は display:contents で外し、中身を卓の grid に直接置く [同じ DOM のまま置き場だけ変える] */
+    main.mode-single.ui-board-v2 { --hua-me-h: 34px; --hua-op-h: 26px; }
+    main.mode-single.ui-board-v2 {
+      grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr) auto;
+      grid-template-areas:
+        'top    top'
+        'stat   menu'
+        'hme    hme'
+        'fever  fever'
+        'hl     hr'
+        'left   right'
+        'center center'
+        'bottom bottom';
+    }
+    main.mode-single.ui-board-v2 .dora-row,
+    main.mode-single.ui-board-v2 .dora-row .hua-strip { display: contents; }
+    main.mode-single.ui-board-v2 .dora-row .turn-status { grid-area: stat; }
+    main.mode-single.ui-board-v2 .dora-row .table-menu-wrap { grid-area: menu; align-self: center; }
+    main.mode-single.ui-board-v2 .dora-row .dora-main { grid-area: fever; }
+    .hua-panel.hp-me { grid-area: hme; grid-template-rows: none; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 10px; }
+    .hua-panel.hp-left { grid-area: hl; }
+    .hua-panel.hp-right { grid-area: hr; }
+    /* 相手の華の札と席の札を 1 枚に見せる [二重の枠を作らない]。名前は席の札に任せる */
+    .hua-panel.hp-left, .hua-panel.hp-right { border-bottom: 0; border-radius: var(--jz-rad) var(--jz-rad) 0 0; box-shadow: none; margin-bottom: -6px; padding: 5px 8px 4px; }
+    .hp-left .hp-title, .hp-right .hp-title { display: none; }
+    main.mode-single.ui-board-v2 .seat-left .seat-card,
+    main.mode-single.ui-board-v2 .seat-right .seat-card { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
+    .hua-panel { padding: 4px 8px 6px; gap: 3px; }
+    .hp-none, .hp-label { font-size: 11px; }
+    .hp-me .hp-title { font-size: 12px; }
+    .hp-groups { gap: 3px 8px; }
     main.mode-single.ui-board-v2 .agari-unified-panel { top: 8px; bottom: 8px; left: 8px; right: 8px; }
   }
 
