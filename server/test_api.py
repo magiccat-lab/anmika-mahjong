@@ -552,3 +552,86 @@ def test_list_rooms_my_seat_single_select(env, monkeypatch):
 
 def test_list_rooms_requires_login(env):
     assert env.client.get("/api/rooms").status_code == 401
+
+
+# ---------------- R3: 事故復帰 [rewind] の入口 ----------------
+
+
+class _FakeRewindResponse:
+    status_code = 200
+
+    def json(self):
+        return {"ok": True, "dropped": 3}
+
+
+@pytest.fixture()
+def rewind_env(env, monkeypatch):
+    monkeypatch.setattr(appmod, "RECOVERY_PASSWORD", "s3cret-パス")
+    monkeypatch.setattr(appmod, "REWIND_REQUIRE_MEMBER", True)
+    appmod._REWIND_FAILS.clear()
+    relayed: list[str] = []
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, **kw):
+            relayed.append(url)
+            return _FakeRewindResponse()
+
+    monkeypatch.setattr(appmod.httpx, "AsyncClient", FakeClient)
+    add_room("RWROOM", "u1", "playing", [("u1", 0), ("u2", 1)])
+    add_user("outsider")
+    return SimpleNamespace(client=env.client, relayed=relayed)
+
+
+def _rewind(client, password, room_id="RWROOM"):
+    return client.post(f"/api/rooms/{room_id}/rewind", json={"password": password})
+
+
+def test_rewind_needs_login(rewind_env):
+    assert _rewind(rewind_env.client, "s3cret-パス").status_code == 401
+    assert rewind_env.relayed == []
+
+
+def test_rewind_needs_a_seat_in_the_room(rewind_env):
+    login(rewind_env.client, "outsider")
+    r = _rewind(rewind_env.client, "s3cret-パス")
+    assert r.status_code == 403 and r.json()["detail"] == "not a room member"
+    assert rewind_env.relayed == []
+
+
+def test_rewind_member_with_right_password_goes_through_even_with_non_ascii_password(rewind_env):
+    login(rewind_env.client, "u2")  # host でなくても席があれば通る
+    r = _rewind(rewind_env.client, "s3cret-パス")
+    assert r.status_code == 200 and r.json() == {"ok": True, "dropped": 3}
+    assert len(rewind_env.relayed) == 1
+
+
+def test_rewind_wrong_password_is_403_and_non_ascii_wrong_password_is_not_a_500(rewind_env):
+    login(rewind_env.client, "u1")
+    assert _rewind(rewind_env.client, "nope").status_code == 403
+    assert _rewind(rewind_env.client, "ぱすわーど").status_code == 403
+    assert rewind_env.relayed == []
+
+
+def test_rewind_locks_out_after_repeated_failures_even_for_the_right_password(rewind_env):
+    login(rewind_env.client, "u1")
+    for _ in range(appmod._REWIND_FAIL_LIMIT_PER_USER):
+        assert _rewind(rewind_env.client, "bad").status_code == 403
+    assert _rewind(rewind_env.client, "s3cret-パス").status_code == 429
+    assert rewind_env.relayed == []
+    # 別のユーザーの枠は別 [全体の上限に届くまで]
+    login(rewind_env.client, "u2")
+    assert _rewind(rewind_env.client, "s3cret-パス").status_code == 200
+
+
+def test_rewind_member_check_can_be_switched_off(rewind_env, monkeypatch):
+    monkeypatch.setattr(appmod, "REWIND_REQUIRE_MEMBER", False)
+    assert _rewind(rewind_env.client, "s3cret-パス").status_code == 200  # 未ログインでも PW だけで通る [従来]

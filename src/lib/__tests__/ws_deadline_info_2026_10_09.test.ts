@@ -147,24 +147,33 @@ describe('deadline 通知 [2026-10-09 C1]', () => {
     expect(specDeadline.remainingMs).toBeLessThanOrEqual(TURN_MS - 400);
   });
 
-  it('反応窓は kind:reaction で待たれている人間席だけを room seat で示す', async () => {
+  it('反応窓は kind:reaction で、待たれている本人にだけ自分の room seat を示す [他席・観戦者には none]', async () => {
     const { room, clients, url } = await bootRoom('DL0003');
     const current = room.authority!.currentPlayer();
     const reactor = (current + 1) % 3;
+    const bystander = (current + 2) % 3;
     // 反応窓を直接立てる [実際の牌の巡りに依存しない]。再接続が scheduleRoomDeadline を通す
     room.authority!.ronCandidates = [reactor as 0 | 1 | 2];
-    const seen = clients[current].messages.length;
+    const spectator = await connect(url('watcher', -1, false, true));
     const trigger = await connect(url(`u${current}`, current, current === 0));
     await waitUntil(() => trigger.messages.find((m) => m.type === 'sync'), 3000, 'sync');
+    // [2026-10-09 R1] 鳴ける/ロンできる席の一覧は全員に配らない [待ちが見えるため]
     const reaction = await waitUntil(
-      () => deadlines(clients[(current + 2) % 3]).find((m) => m.kind === 'reaction'),
+      () => deadlines(clients[reactor]).find((m) => m.kind === 'reaction'),
       3000, 'reaction deadline',
     );
     expect(reaction.seats).toEqual([reactor]);
     expect(reaction.remainingMs).toBeGreaterThan(TURN_MS - 1000);
     expect(reaction.remainingMs).toBeLessThanOrEqual(TURN_MS);
     expect(room.deadlineInfo).toMatchObject({ kind: 'reaction', seats: [reactor] });
-    expect(seen).toBeGreaterThanOrEqual(0);
+    const none = await waitUntil(
+      () => deadlines(clients[bystander]).filter((m) => m.revision === reaction.revision).pop(),
+      3000, 'bystander deadline',
+    );
+    expect(none).toMatchObject({ kind: 'none', seats: [], remainingMs: 0 });
+    expect(deadlines(clients[bystander]).some((m) => m.kind === 'reaction')).toBe(false);
+    expect(deadlines(trigger).some((m) => m.kind === 'reaction')).toBe(false);
+    expect(deadlines(spectator).some((m) => m.kind === 'reaction')).toBe(false);
   });
 
   it('CPU 代行席だけの反応窓は kind:none で、reactionTimeoutMs を待たず 750ms 級で処理される', async () => {
