@@ -35,7 +35,8 @@ test('FX02: all six words, three seats, three DOM, queue and heavy skip', async 
     await page.evaluate(({ id, seat }) => (window as any).__gameStore.enqueueCutin(id, seat), { id, seat: index % 3 });
     await page.clock.runFor(350);
     await expect(page.locator('.fx')).toBeVisible();
-    expect(await page.locator('.fx *').count()).toBe(2);
+    // [2026-10-09 華の見せ方 3 版目 X3] 中 ・ 重は真ん中の局の札の上 [語 + 誰]、軽は席の札の上端の小札 [語だけ]
+    expect(await page.locator('.fx *').count()).toBe(['pon', 'kan', 'reach'].includes(id) ? 1 : 2);
     // [2026-09-20] 語は img からサブセットフォントの実テキストになった。
     // 「字が出ているか」は、語が入っていて幅を持っている事で見る
     const word = page.locator('.fx-word');

@@ -36,9 +36,9 @@
   import FeverWaitsPanel from './lib/FeverWaitsPanel.svelte';
   import StampPallet from './lib/StampPallet.svelte';
   import StampPopup from './lib/StampPopup.svelte';
-  import CutinOverlay from './lib/CutinOverlay.svelte';
+  import { FX_LABELS } from './lib/fxArtwork';
   import LizhiControls from './lib/LizhiControls.svelte';
-  import { CUTIN_DURATION_MS, cutinDurationMs, game, isFeverForcedTsumogiri, type StampId, type StoreState } from './lib/store';
+  import { CUTIN_DURATION_MS, CUTIN_TIER, cutinDurationMs, game, isFeverForcedTsumogiri, type StampId, type StoreState } from './lib/store';
   import type { PlayerId } from './lib/types';
   import type { FeverCheck } from './lib/game3/feverLizhi';
   import { parseFulouList, fulouPhysicalFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
@@ -125,10 +125,17 @@
   });
   /** [2026-09-20 原則 6] 重い演出はタップで即終了。タイマーの所有者は App のままで、
    *  overlay は「押された」を知らせるだけ。ここで自分の予約を畳んでから畳む */
-  function onCutinSkip(event: CustomEvent<{ ts: number }>): void {
+  function skipCutin(ts: number): void {
     if (cutinTimer !== null) { clearTimeout(cutinTimer); cutinTimer = null; }
-    game.finishCutin(event.detail.ts);
+    game.finishCutin(ts);
   }
+  // [2026-10-09 リョー 華の見せ方 3 版目 X3「真ん中にカットイン演出で」] 演出の置き場を席の側の帯から変える。
+  // 中 [ツモ ・ ロン] と 重 [フィーバー] は真ん中の局の札の上、軽 [リーチ ・ ポン ・ カン] は宣言した人の席の札の上端の小札。
+  // 座は game seat のまま席の札 [seatCard(p)] に当てるので、オンラインで自分が席 0 でなくても左右を取り違えない
+  $: fxNow = $game.cutin;
+  $: fxTier = fxNow ? CUTIN_TIER[fxNow.id] : null;
+  $: fxDur = cutinDurationMs(fxNow?.id);
+  $: fxWho = !fxNow || fxNow.seat === undefined ? '' : (onlineGameStarted ? seatName(fxNow.seat) : (fxNow.seat === selfPlayer ? 'あなた' : `P${fxNow.seat}`));
   // [2026-07-23 Sol調査: ポッチ演出割り込み] 演出は排他で直列に出す
   // [cutin → 白ぽっち開示 → 選択モーダル → サイコロ]。
   // 主因は PochiReveal が独立キュー + z-index 9999 で他演出を覆っていた事
@@ -2399,7 +2406,10 @@
 {#snippet seatCard(p: PlayerId, pos: 'left' | 'right' | 'me')}
   {@const seatMember = onlineGameStarted ? memberAtGameSeat(onlineMembers, onlineActiveMapping, p) : undefined}
   {@const wind = ['東', '南', '西'][$game.game.zifengZ(p) - 1] ?? ''}
-  <div class="seat-card sc-{pos}" class:turn={currentPlayer === p && !$game.roundEnded} class:oya={wind === '東'}>
+  <div class="seat-card sc-{pos}" class:turn={currentPlayer === p && !$game.roundEnded} class:oya={wind === '東'} class:fx-hit={!!fxNow && fxTier !== 'light' && fxNow.seat === p}>
+    {#if fxNow && fxTier === 'light' && fxNow.seat === p}
+      {#key fxNow.ts}<span class="fx fx-{fxNow.id} fx-light sc-fx" style="--fx-dur: {fxDur}ms" aria-hidden="true"><span class="fx-word">{FX_LABELS[fxNow.id]}</span></span>{/key}
+    {/if}
     <div class="sc-head">
       <span class="sc-wind" title={wind === '東' ? '親' : ''}>{wind}</span>
       <span class="sc-name">{onlineGameStarted ? seatName(p) : (pos === 'me' ? 'あなた' : `P${p}`)}</span>
@@ -3059,6 +3069,16 @@
             <span class="kyotaku">供託 {state.lizhibang}</span>
             <span class="paishu">残り {paishu}</span>
           </div>
+          {#if fxNow && fxTier && fxTier !== 'light'}
+            {#key fxNow.ts}
+              <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+              <div class="fx fx-{fxNow.id} fx-{fxTier} cb-fx" class:fx-skippable={fxTier === 'heavy'} style="--fx-dur: {fxDur}ms" aria-hidden="true"
+                on:click={() => { if (fxTier === 'heavy' && fxNow) skipCutin(fxNow.ts); }}>
+                <span class="fx-word">{FX_LABELS[fxNow.id]}</span>
+                <span class="fx-who">{fxWho}</span>
+              </div>
+            {/key}
+          {/if}
         </div>
       </div>
       <!-- 4 方向 河ゾーン [雀魂風、 6 牌/行で wrap]、 各 player の向きに合わせて回転 -->
@@ -3098,7 +3118,6 @@
     <div class="stamp-slot stamp-slot-p0"><StampPopup stamp={$game.stamps[srv0]} /></div>
     <div class="stamp-slot stamp-slot-p2"><StampPopup stamp={$game.stamps[srv2]} /></div>
   </div>
-  <CutinOverlay cutin={$game.cutin} on:skip={onCutinSkip} />
 
   <div class="seat seat-bottom" style="position:relative">
     {#if viewMode === 'single'}
@@ -6001,6 +6020,7 @@
     overflow: visible;
   }
   .cb-panel {
+    position: relative;
     display: grid;
     justify-items: center;
     gap: 4px;
@@ -6012,6 +6032,88 @@
     box-shadow: var(--jz-shadow);
     text-align: center;
     color: var(--jz-ink);
+  }
+
+  /* ---- カットイン [2026-10-09 華の見せ方 3 版目 X3 案 c + 「真ん中にカットイン演出で」] ----
+     9/20 の決まりのまま: 卓の変化が先 [100ms 待つ]、河と手牌は覆わない、色は金 1 色、transform と opacity だけ、1 演出 3 DOM。
+     中 [ツモ ・ ロン] ・ 重 [フィーバー] は局の札の上に判: 字が大きく入り、輪が広がり、金の光が横切る。和了った人の席の札も金の枠。
+     軽 [リーチ ・ ポン ・ カン] は宣言した人の席の札の上端に小札が跳ねるだけ */
+  .cb-fx {
+    position: absolute;
+    inset: -8px;
+    z-index: 20;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 4px;
+    overflow: hidden;
+    border-radius: var(--jz-rad);
+    border: 2px solid var(--jz-gold);
+    background: var(--jz-panel-solid);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    opacity: 0;
+    animation: cbFxPanel var(--fx-dur) ease-out 100ms forwards;
+  }
+  .cb-fx.fx-skippable { pointer-events: auto; cursor: pointer; }
+  .cb-fx::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 140px;
+    height: 140px;
+    margin: -70px 0 0 -70px;
+    border: 1px solid var(--jz-gold);
+    border-radius: 50%;
+    opacity: 0;
+    animation: cbFxRing var(--fx-dur) ease-out 100ms forwards;
+  }
+  .cb-fx::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 45%;
+    background: linear-gradient(90deg, transparent, rgba(233, 205, 126, 0.35), transparent);
+    transform: translateX(-120%);
+    animation: cbFxSweep var(--fx-dur) ease-out 100ms forwards;
+  }
+  .cb-fx .fx-word {
+    position: relative;
+    font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif;
+    font-size: clamp(26px, calc(var(--score-side) * 0.17), 52px);
+    line-height: 1;
+    letter-spacing: 0.06em;
+    color: var(--jz-gold) !important;
+    animation: cbFxWord var(--fx-dur) cubic-bezier(0.22, 1, 0.36, 1) 100ms both;
+  }
+  .cb-fx.fx-heavy .fx-word { font-size: clamp(28px, calc(var(--score-side) * 0.2), 60px); }
+  .cb-fx .fx-who { position: relative; font-size: 13px; font-weight: 700; color: var(--jz-ink) !important; }
+  .seat-card.fx-hit { box-shadow: inset 0 0 0 2px var(--jz-gold), 0 0 0 2px var(--jz-gold), var(--jz-shadow); }
+  .sc-fx {
+    position: absolute;
+    top: -14px;
+    left: 10px;
+    z-index: 5;
+    padding: 2px 12px;
+    border-radius: var(--jz-rad);
+    border: 1px solid var(--jz-gold);
+    background: var(--jz-panel-solid);
+    pointer-events: none;
+    opacity: 0;
+    animation: scFxIn var(--fx-dur) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .sc-fx .fx-word { font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: 16px; line-height: 1.2; letter-spacing: 0.06em; color: var(--jz-gold) !important; }
+  @keyframes cbFxPanel { 0% { opacity: 0; } 15%, 82% { opacity: 1; } 100% { opacity: 0; } }
+  @keyframes cbFxWord { 0% { opacity: 0; transform: scale(1.45); } 25% { opacity: 1; transform: scale(1); } 100% { opacity: 1; transform: scale(1); } }
+  @keyframes cbFxRing { 0% { opacity: 0; transform: scale(0.3); } 25% { opacity: 0.7; } 100% { opacity: 0; transform: scale(1.7); } }
+  @keyframes cbFxSweep { 0% { transform: translateX(-120%); } 55%, 100% { transform: translateX(300%); } }
+  @keyframes scFxIn { 0% { opacity: 0; transform: translateY(6px) scale(0.9); } 18%, 80% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-4px); } }
+  @media (prefers-reduced-motion: reduce) {
+    .cb-fx::before, .cb-fx::after { animation: none; opacity: 0; }
+    .cb-fx .fx-word { animation: none; }
   }
   main.mode-single.ui-board-v2 .cb-panel .score-top {
     grid-area: auto;

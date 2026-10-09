@@ -93,6 +93,9 @@
   $: svg = paiSvg(pai);
   $: isRed = pai && pai[1] === '0';
   $: isRainbow = pai === 'np3' || pai === 'ns3' || pai === 'nz3';
+  // [2026-10-09 リョー 華の見せ方 3 版目 T2「季節の色」] 華の牌は鉢植えの絵がほぼ同じで、季節は右上の小さい字だけだった。
+  // 牌の地と下の厚みを季節の色にする [春 桜 ・ 夏 若葉 ・ 秋 紅葉 ・ 冬 雪空]。絵と字は今のまま。手牌 ・ 河 ・ ドラ表示 ・ 華の帯で同じ
+  $: hua = face !== 'down' && /^f[1-4]$/.test(pai ?? '') ? pai : '';
 
   // [2026-09-14] 色彩調整。ぽっち 4 色・赤ドラ・金は色だけで区別されているので、
   // 設定が入っている時は右上に記号を重ねる [色が見分けにくい人向け]。
@@ -107,7 +110,7 @@
     : '';
 </script>
 
-<span class="tile {face} size-{size}" class:red={isRed} class:rainbow={isRainbow}>
+<span class="tile {face} size-{size} {hua ? `hua hua-${hua}` : ''}" class:red={isRed} class:rainbow={isRainbow}>
   {#if face === 'down'}
     <img class="tile-img" src="/tiles/Back.svg" alt="伏せ" />
   {:else if svg}
@@ -168,6 +171,20 @@
     border-image: linear-gradient(135deg, #ff3333, #ffaa00, #33cc33, #3399ff, #cc33ff) 1;
     border-width: 2px;
     border-style: solid;
+  }
+  .tile.hua-f1 { --hua-col: #d8708f; background: #f7dbe3; border-color: #d8708f; }
+  .tile.hua-f2 { --hua-col: #4f9a5a; background: #dcefd8; border-color: #4f9a5a; }
+  .tile.hua-f3 { --hua-col: #c8692c; background: #f6dfca; border-color: #c8692c; }
+  .tile.hua-f4 { --hua-col: #4a7fb8; background: #d9e6f5; border-color: #4a7fb8; }
+  .tile.hua::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 12%;
+    background: var(--hua-col);
+    pointer-events: none;
   }
   .tile-img {
     width: 100%;
