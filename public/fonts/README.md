@@ -1,4 +1,4 @@
-# fx-delagothicone-subset.woff2
+# fx-mochiypopone-subset.woff2 (2026-10-09 から。前は fx-delagothicone-subset.woff2)
 
 演出の語 (リーチ / ロン / ツモ / フィーバー / カン / ポン / 白ぽっち / 正 / 逆) 専用のサブセット。
 
@@ -35,3 +35,9 @@
   ブラウザは画面に出た字の分割だけを読む (全部で 3.5MB あるが、1 画面で読むのは 10 個前後)
 - 読み込み: `index.html` の `<link rel="stylesheet" href="/fonts/zkgn/zkgn.css">`、使う所は `src/app.css` の `--sans`
 - 取り直す時は同じ URL を Chrome の UA で取り、上と同じ名前 (`zkgn-<太さ>-<連番>.woff2`) で保存する
+
+## 2026-10-09 Mochiy Pop One に替えた
+
+- リョー「iでいい」(カットインをダンガンロンパ風の帯にした時、字体 9 つを同じ帯で比べた中から)。
+  比べたのは Dela Gothic One ・ Noto Serif JP 900 ・ Zen Old Mincho 900 ・ Potta One ・ Chokokutai ・ Darumadrop One ・ RocknRoll One ・ Rampart One ・ Mochiy Pop One
+- 取り方は同じ (`css2?family=Mochiy+Pop+One&text=<必要な字>`)。演出の語に加えて「あなた」と P0〜3 も入れた (帯の右下の名前は本文の字なので要らないが、残しても数 KB)

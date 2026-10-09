@@ -1,12 +1,11 @@
-/* 演出の語だけに使うサブセット [2026-09-20 リョー「ゆうた one のフォントで
-   カッコイイのあるでしょ」]。Dela Gothic One の必要 22 グリフだけ 2.9KB。
-   self-host (SIL OFL 1.1)。「〜One」系 8 種を実際の帯で見比べて選んだ。
+/* 演出の語だけに使うサブセット。2026-10-09 リョー「iでいい」(カットインの字体 9 つの比べ) で
+   Dela Gothic One から Mochiy Pop One に替えた。使う字だけ取り出して self-host (SIL OFL 1.1)。
    取り方と増やし方は public/fonts/README.md。
    font-display: block = 読み込み前は出さない。演出は 0.7 秒なので、
    違う字で出てから入れ替わるより、少し遅れて正しい字が出る方がいい */
 @font-face {
   font-family: 'FX Kana';
-  src: url('/fonts/fx-delagothicone-subset.woff2') format('woff2');
+  src: url('/fonts/fx-mochiypopone-subset.woff2') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: block;

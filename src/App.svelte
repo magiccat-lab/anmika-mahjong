@@ -2406,10 +2406,7 @@
 {#snippet seatCard(p: PlayerId, pos: 'left' | 'right' | 'me')}
   {@const seatMember = onlineGameStarted ? memberAtGameSeat(onlineMembers, onlineActiveMapping, p) : undefined}
   {@const wind = ['東', '南', '西'][$game.game.zifengZ(p) - 1] ?? ''}
-  <div class="seat-card sc-{pos}" class:turn={currentPlayer === p && !$game.roundEnded} class:oya={wind === '東'} class:fx-hit={!!fxNow && fxTier !== 'light' && fxNow.seat === p}>
-    {#if fxNow && fxTier === 'light' && fxNow.seat === p}
-      {#key fxNow.ts}<span class="fx fx-{fxNow.id} fx-light sc-fx" style="--fx-dur: {fxDur}ms" aria-hidden="true"><span class="fx-word">{FX_LABELS[fxNow.id]}</span></span>{/key}
-    {/if}
+  <div class="seat-card sc-{pos}" class:turn={currentPlayer === p && !$game.roundEnded} class:oya={wind === '東'} class:fx-hit={!!fxNow && fxNow.seat === p}>
     <div class="sc-head">
       <span class="sc-wind" title={wind === '東' ? '親' : ''}>{wind}</span>
       <span class="sc-name">{onlineGameStarted ? seatName(p) : (pos === 'me' ? 'あなた' : `P${p}`)}</span>
@@ -3103,10 +3100,11 @@
   <!-- スタンプ slot bar [画面下、 手牌の上、 左から 上家 / 自分 / 下家]
        [2026-10-09 shun2 R2] 卓の他の部分と同じく自分を下に回した並び [srv*]。旧: 席番号 1/0/2 固定で、
        自分が席 1 以外だと別の人の所に出ていた -->
-  <!-- [2026-10-09 リョー 華の見せ方 4 版目 V1「ダンガンロンパみたいな感じのカットイン宜しく。フォントとかも弄っていいよ」]
-       ツモ ・ ロン (中) とフィーバー (重) は卓の真ん中を斜めの桃色の帯が切り裂き、太い字が叩きつけられて揺れる。黒い暗転は一瞬。
-       語の長さで字の大きさを詰める [フィーバーが帯からはみ出していた]。重はタップで飛ばせる。リーチ ・ ポン ・ カン (軽) は席の札の小札のまま -->
-  {#if viewMode === 'single' && fxNow && fxTier && fxTier !== 'light'}
+  <!-- [2026-10-09 リョー 華の見せ方 4 版目 V1「ダンガンロンパみたいな感じのカットイン宜しく。フォントとかも弄っていいよ」、
+       6 版目「iでいい」「2かな」V3 b] 卓の真ん中を斜めの金と黒の帯が切り裂き、ポップな太い字が叩きつけられて揺れる。
+       ツモ ・ ロン (中) とフィーバー (重) は暗転つき、リーチ ・ ポン ・ カン (軽) は細く短い帯で暗転なし [局の中で何度も出るので]。
+       語の長さで字の大きさを詰める。重はタップで飛ばせる。宣言した人の席の札は金の枠 -->
+  {#if viewMode === 'single' && fxNow && fxTier}
     {#key fxNow.ts}
       <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
       <div class="fx fx-{fxNow.id} fx-{fxTier} dr" class:fx-skippable={fxTier === 'heavy'}
@@ -6043,8 +6041,9 @@
      中 [ツモ ・ ロン] ・ 重 [フィーバー] は局の札の上に判: 字が大きく入り、輪が広がり、金の光が横切る。和了った人の席の札も金の枠。
      軽 [リーチ ・ ポン ・ カン] は宣言した人の席の札の上端に小札が跳ねるだけ */
   .dr {
-    --dr-pink: #ff2f8e;
-    --dr-pink2: #c8106a;
+    --dr-pink: #f2d27a;
+    --dr-pink2: #b8862b;
+    --dr-shadow: #6b4a12;
     --dr-h: clamp(96px, 26vh, 230px);
     --dr-fs: calc(min(13vw, 150px, var(--dr-h) * 0.62) * var(--fit, 1));
     position: fixed;
@@ -6054,6 +6053,8 @@
     pointer-events: none;
   }
   .dr.fx-skippable { pointer-events: auto; cursor: pointer; }
+  .dr.fx-light { --dr-h: clamp(64px, 15vh, 130px); --dr-fs: calc(min(9vw, 96px, var(--dr-h) * 0.62) * var(--fit, 1)); }
+  .dr.fx-light::before { display: none; }
   .dr::before {
     content: '';
     position: absolute;
@@ -6102,7 +6103,7 @@
     color: #fff !important;
     -webkit-text-stroke: calc(var(--dr-fs) * 0.07) #111;
     paint-order: stroke fill;
-    text-shadow: calc(var(--dr-fs) * 0.06) calc(var(--dr-fs) * 0.06) 0 var(--dr-pink2);
+    text-shadow: calc(var(--dr-fs) * 0.06) calc(var(--dr-fs) * 0.06) 0 var(--dr-shadow);
     opacity: 0;
     transform: skewX(-12deg) scale(2.4);
     animation: drWord var(--fx-dur) cubic-bezier(0.2, 1.4, 0.3, 1) both;
@@ -6129,36 +6130,7 @@
     34%, 82% { opacity: 1; transform: skewX(-12deg) scale(1); }
     100% { opacity: 0; transform: skewX(-12deg) translateX(30px); }
   }
-  .seat-card.fx-hit { box-shadow: inset 0 0 0 2px #ff2f8e, 0 0 0 2px #ff2f8e, var(--jz-shadow); }
-  .sc-fx {
-    position: absolute;
-    top: -14px;
-    left: 10px;
-    z-index: 5;
-    padding: 2px 14px;
-    border: 2px solid #111;
-    background: linear-gradient(180deg, #ff2f8e 0 55%, #c8106a 55%);
-    pointer-events: none;
-    opacity: 0;
-    transform-origin: left center;
-    animation: scFxIn var(--fx-dur) cubic-bezier(0.2, 1.4, 0.3, 1) forwards;
-  }
-  .sc-fx .fx-word {
-    display: inline-block;
-    font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif;
-    font-size: 18px;
-    line-height: 1.15;
-    letter-spacing: 0.06em;
-    color: #fff !important;
-    -webkit-text-stroke: 2px #111;
-    paint-order: stroke fill;
-    transform: skewX(-12deg);
-  }
-  @keyframes cbFxPanel { 0% { opacity: 0; } 15%, 82% { opacity: 1; } 100% { opacity: 0; } }
-  @keyframes cbFxWord { 0% { opacity: 0; transform: scale(1.45); } 25% { opacity: 1; transform: scale(1); } 100% { opacity: 1; transform: scale(1); } }
-  @keyframes cbFxRing { 0% { opacity: 0; transform: scale(0.3); } 25% { opacity: 0.7; } 100% { opacity: 0; transform: scale(1.7); } }
-  @keyframes cbFxSweep { 0% { transform: translateX(-120%); } 55%, 100% { transform: translateX(300%); } }
-  @keyframes scFxIn { 0% { opacity: 0; transform: skewX(-8deg) scale(1.8); } 20% { opacity: 1; transform: skewX(-8deg) scale(0.95); } 28%, 80% { opacity: 1; transform: skewX(-8deg) scale(1); } 100% { opacity: 0; transform: skewX(-8deg) translateX(10px); } }
+  .seat-card.fx-hit { box-shadow: inset 0 0 0 2px var(--jz-gold), 0 0 0 2px var(--jz-gold), var(--jz-shadow); }
   @media (prefers-reduced-motion: reduce) {
     .dr::before, .dr.fx-heavy::after { animation: none; opacity: 0; }
     .dr-band { animation: none; transform: rotate(-7deg); }
