@@ -1,7 +1,13 @@
 // lizhi 関連 bug 自走検査 [yuma 2026-05-14]
 //   bug 1: リーチ button 非自家側で表示されない事 [toolbar self filter]
 //   bug 2: 河で `_` 付き tile が 1 件のみ [複数 `_` でも UI 上 1 件しか rotate されない]
+// [2026-10-09 R3] 上の 2 本は実際にはリーチを押さず [online 側は他家にボタンが無い事を見るだけ、
+// 「厳密」側は solo で state を直接書き換える]、リーチが通らなくなっても落ちなかった。
+// 最後の describe が online の実物で宣言する [固定の山 + 本人がリーチ → 宣言牌を切る → サーバー確定の確認]。
 import { test, expect, BrowserContext, Page } from '@playwright/test';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import path from 'node:path';
 
 const BASE = process.env.ANMIKA_BASE_URL ?? 'http://127.0.0.1:18990';
 const HAS_SERVER_AUTH = process.env.ANMIKA_E2E_SERVER_AUTH === '1';
@@ -168,3 +174,126 @@ test('bug 2 厳密検証: lizhi 宣言→多回 dapai で 河 _ は 1 件のみ 
     await ctxA.close();
   }
 });
+
+// ---------------------------------------------------------------------------
+// 実際にリーチを宣言する online e2e [2026-10-09 R3]
+// 固定の山 [tests/fixtures/lizhi_pool.json: 親が配牌直後にリーチできる山。作り直しは
+// tools/find_lizhi_pool.mts] を test-only の set-pool control seam で渡し、host 1 人 + CPU 2 で回す。
+// control seam は testControlsEnabled の harness entry だけに生える [通常起動は 404]ので、
+// runner の共通 stack ではなく専用の stack [api 18894 / ws 18895 / ws internal 18896] を自前で張る。
+// ---------------------------------------------------------------------------
+const ROOT = process.cwd();
+const L_API_PORT = 18894;
+const L_WS_PORT = 18895;
+const L_WS_INTERNAL_PORT = 18896;
+const L_BASE = `http://127.0.0.1:${L_API_PORT}`;
+const L_SECRET = 'anmika-lizhi-online-secret';
+const L_TMP = path.join(ROOT, '.tmp', 'lizhi-online');
+const L_ENV = {
+  ...process.env,
+  ANMIKA_TEST_AUTH: '1',
+  ANMIKA_REQUIRE_SECRET: '0',
+  ANMIKA_SESSION_SECRET: L_SECRET,
+  ANMIKA_WS_SECRET: L_SECRET,
+  ANMIKA_INTERNAL_SECRET: L_SECRET,
+  ANMIKA_PUBLIC_BASE_URL: L_BASE,
+  ANMIKA_WS_PUBLIC_URL: `ws://127.0.0.1:${L_WS_PORT}`,
+  ANMIKA_API_BASE: L_BASE,
+  ANMIKA_WS_PORT: String(L_WS_PORT),
+  ANMIKA_WS_INTERNAL_PORT: String(L_WS_INTERNAL_PORT),
+  ANMIKA_WS_INTERNAL_BASE: `http://127.0.0.1:${L_WS_INTERNAL_PORT}`,
+  ANMIKA_WS_LOG: '0',
+};
+
+async function waitHttp(url: string, timeoutMs = 30000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const r = await fetch(url);
+      if (r.status < 500) return;
+    } catch { /* boot 中 */ }
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${url}`);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+}
+
+test.describe('リーチ宣言 [online 実物・固定の山]', () => {
+  let apiProc: ChildProcess | null = null;
+  let wsProc: ChildProcess | null = null;
+
+  test.beforeAll(async () => {
+    rmSync(L_TMP, { recursive: true, force: true });
+    mkdirSync(L_TMP, { recursive: true });
+    // api と ws は別々の sqlite を使う [同じファイルだと起動時に database is locked になる]
+    wsProc = spawn(process.execPath, ['--import', 'tsx', 'server/ws_server_test_harness.ts'], {
+      cwd: ROOT, env: { ...L_ENV, ANMIKA_DB_PATH: path.join(L_TMP, 'ws.sqlite3') }, stdio: 'ignore',
+    });
+    apiProc = spawn(
+      process.env.PYTHON ?? path.join(ROOT, '.venv', 'bin', 'python3'),
+      ['-m', 'uvicorn', 'server.app:app', '--host', '127.0.0.1', '--port', String(L_API_PORT)],
+      { cwd: ROOT, env: { ...L_ENV, ANMIKA_DB_PATH: path.join(L_TMP, 'api.sqlite3') }, stdio: 'ignore' },
+    );
+    await waitHttp(`${L_BASE}/api/rooms`);
+  });
+
+  test.afterAll(async () => {
+    // 停止は自前 child の PID 限定
+    for (const proc of [apiProc, wsProc]) {
+      if (proc && !proc.killed) proc.kill('SIGTERM');
+    }
+    rmSync(L_TMP, { recursive: true, force: true });
+  });
+
+  test('親が配牌直後に通常リーチ → 宣言牌を切ると、サーバー確定のリーチが画面に出る', async ({ browser }) => {
+    test.setTimeout(120000);
+    const pool = JSON.parse(readFileSync(path.join(ROOT, 'tests', 'fixtures', 'lizhi_pool.json'), 'utf8')) as string[];
+    const ctx = await browser.newContext();
+    try {
+      const uid = `lzReal_${Date.now()}`;
+      const login = await ctx.request.post(`${L_BASE}/auth/test/login`, { data: { user_id: uid, username: 'リーチ検証' } });
+      expect(login.ok(), `login ${login.status()}`).toBeTruthy();
+      const create = await ctx.request.post(`${L_BASE}/api/rooms`, { data: { cpu_count: 2, match_mode: 'tonpu' } });
+      expect(create.ok(), `create room ${create.status()}`).toBeTruthy();
+      const { room_id: roomId } = await create.json();
+      expect((await ctx.request.post(`${L_BASE}/api/rooms/${roomId}/start`, { data: {} })).ok()).toBeTruthy();
+
+      // 山を渡してから開く [host の接続が start を送る]
+      const setPool = await fetch(`http://127.0.0.1:${L_WS_INTERNAL_PORT}/internal/test/set-pool`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-anmika-internal-secret': L_SECRET },
+        body: JSON.stringify({ room_id: roomId, pool }),
+      });
+      expect(((await setPool.json()) as { ok?: boolean }).ok, 'set-pool').toBe(true);
+
+      const page = await ctx.newPage();
+      await page.goto(`${L_BASE}/?room=${roomId}`);
+      await expect(page.locator('section.player').first()).toBeVisible({ timeout: 30000 });
+
+      // 配牌直後: 親はまだリーチしていない
+      const lizhiSeats = () => page.evaluate(() => [...((window as any).__game?.game?.lizhi ?? [])] as number[]);
+      await expect.poll(lizhiSeats, { timeout: 15000 }).toEqual([]);
+
+      // リーチ種別 [通常] を押す → 宣言牌の選択に入る
+      const normal = page.locator('button.lizhi-choice.normal').first(); // 画面に 2 か所 [header と盤面脇] 出る
+      await expect(normal, '通常リーチのボタンが出ていない').toBeEnabled({ timeout: 30000 });
+      await normal.click();
+      await expect(page.locator('[data-testid="lizhi-selection-status"]').first()).toBeVisible({ timeout: 10000 });
+
+      // 宣言牌 [候補は 1 枚] を切る
+      const candidate = page.locator('section.player button.tile-btn[data-lizhi-candidate="true"]');
+      await expect(candidate).toHaveCount(1, { timeout: 10000 });
+      await candidate.click();
+
+      // サーバーが受理して投影が戻る: 自分のリーチが立ち、河のリーチ牌が 1 枚、宣言の途中状態が残らない
+      await expect.poll(lizhiSeats, { timeout: 20000, message: 'リーチが確定しない' }).toEqual([0]);
+      await expect(page.locator('.hez-tile.lizhi-tile, .he-tile.lizhi-tile').first()).toBeVisible({ timeout: 10000 }); // 盤面は幅違いで 2 か所に描かれる
+      const river = await page.evaluate(() => (window as any).__game.game.he.get(0)._pai as string[]);
+      expect(river.filter((t) => t.endsWith('*') || t.endsWith('__')).length, `河: ${river.join(',')}`).toBe(1);
+      const pending = await page.evaluate(() => (window as any).__game.lizhiPending);
+      expect(pending, 'リーチ宣言の途中状態が残っている').toBeNull();
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+

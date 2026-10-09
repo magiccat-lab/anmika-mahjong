@@ -728,6 +728,34 @@ async def _notify_ws_purge(room_id: str) -> None:
 # 内部 API は 127.0.0.1 のみ listening でブラウザから直接叩けないため、ここで中継する。
 # パスワードは環境変数 1 個 [リョー裁定]。未設定なら機能ごと無効。
 RECOVERY_PASSWORD = os.environ.get("ANMIKA_RECOVERY_PASSWORD", "")
+# [2026-10-09 R3] PW に加えて「ログイン済みで、その部屋の席に座っている人」だけが叩ける
+# [PW が漏れても、ログインしていない/部屋の外の人は巻き戻せない]。緊急時に部屋の外から
+# curl で叩く運用なら ANMIKA_REWIND_REQUIRE_MEMBER=0 で外せる
+REWIND_REQUIRE_MEMBER = os.environ.get("ANMIKA_REWIND_REQUIRE_MEMBER", "1") != "0"
+# PW の総当たり対策: 失敗が 5 回/10 分を超えたら、そのユーザーは正しい PW でも 429。
+# ユーザーを束ねない全体の上限 [アカウントを使い捨てても止まる] も別に持つ
+_REWIND_FAIL_WINDOW_SEC = 600.0
+_REWIND_FAIL_LIMIT_PER_USER = 5
+_REWIND_FAIL_LIMIT_GLOBAL = 30
+_REWIND_FAILS: dict[str, list[float]] = {}
+
+
+def _rewind_recent_fails(key: str, now: float) -> list[float]:
+    hits = [t for t in _REWIND_FAILS.get(key, []) if now - t < _REWIND_FAIL_WINDOW_SEC]
+    _REWIND_FAILS[key] = hits
+    return hits
+
+
+def _rewind_locked(user_id: str, now: float) -> bool:
+    return (
+        len(_rewind_recent_fails(f"u:{user_id}", now)) >= _REWIND_FAIL_LIMIT_PER_USER
+        or len(_rewind_recent_fails("*", now)) >= _REWIND_FAIL_LIMIT_GLOBAL
+    )
+
+
+def _rewind_record_fail(user_id: str, now: float) -> None:
+    _rewind_recent_fails(f"u:{user_id}", now).append(now)
+    _rewind_recent_fails("*", now).append(now)
 
 
 @app.post("/api/rooms/{room_id}/rewind")
@@ -735,16 +763,37 @@ async def rewind_room(room_id: str, request: Request):
     """Rewind a stuck room to the head of its current round (password gated)."""
     if not RECOVERY_PASSWORD:
         raise HTTPException(status_code=503, detail="recovery password not configured")
+    u = current_user(request)
+    if REWIND_REQUIRE_MEMBER:
+        if not u:
+            raise HTTPException(status_code=401, detail="login required")
+        with db_conn() as c:
+            seated = c.execute(
+                "SELECT 1 FROM room_members WHERE room_id=? AND user_id=?",
+                (room_id, u["user_id"]),
+            ).fetchone()
+        if not seated:
+            log.warning("rewind rejected: not a room member room=%s user=%s", room_id, u["user_id"])
+            raise HTTPException(status_code=403, detail="not a room member")
+    caller = str((u or {}).get("user_id") or "anon")
+    now = _time.time()
+    if _rewind_locked(caller, now):
+        log.warning("rewind rejected: too many bad passwords room=%s user=%s", room_id, caller)
+        raise HTTPException(status_code=429, detail="too many attempts")
     try:
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="bad request")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="bad request")
     supplied = body.get("password")
     if not isinstance(supplied, str):
         raise HTTPException(status_code=400, detail="missing password")
-    # 文字数の違いだけでも早期 return しないよう compare_digest で比較する
-    if not _secrets.compare_digest(supplied, RECOVERY_PASSWORD):
-        log.warning("rewind rejected: bad password room=%s", room_id)
+    # 文字数の違いだけでも早期 return しないよう、bytes にして compare_digest で比較する
+    # [str のまま非 ASCII を渡すと TypeError で 500 になり、比較自体も飛ばせてしまう]
+    if not _secrets.compare_digest(supplied.encode("utf-8"), RECOVERY_PASSWORD.encode("utf-8")):
+        _rewind_record_fail(caller, now)
+        log.warning("rewind rejected: bad password room=%s user=%s", room_id, caller)
         raise HTTPException(status_code=403, detail="bad password")
     try:
         async with httpx.AsyncClient(timeout=10) as cli:

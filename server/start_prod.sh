@@ -54,8 +54,8 @@ start_one() {
   echo "$name: started (pid $(cat "$pidfile"))"
 }
 
-start_one api "$PY" -m uvicorn server.app:app --host 127.0.0.1 --port 8790
-start_one static "$PY" -m uvicorn server.app:app --host 127.0.0.1 --port 8080
+start_one api "$PY" -m uvicorn server.app:app --host 127.0.0.1 --port 8790 --ws-max-size 65536
+start_one static "$PY" -m uvicorn server.app:app --host 127.0.0.1 --port 8080 --ws-max-size 65536
 start_one ws node --import tsx server/ws_server.ts
 
 sleep 2

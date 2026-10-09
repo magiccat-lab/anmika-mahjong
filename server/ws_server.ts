@@ -47,6 +47,12 @@ const STAMP_IDS = new Set([
   'shunkashutou', 'kita4', 'konmika', 'shubapotsumo',
   'doko', 'gyakushubatsumo', 'plus', 'saikoro',
 ]);
+// [2026-10-09 R3] 1 frame の上限。client が送るのは action / resync / stamp 等の小さな JSON だけ
+// [数百 B。バグ通報の状態ダンプは ws ではなく HTTP POST /api/bugreport]。ws 既定の 100MB のままだと
+// 認証済みの席から巨大 frame で server を膨らませられる。超えた接続は ws が 1009 で閉じる
+const MAX_WS_PAYLOAD_BYTES = 64 * 1024;
+// スタンプは 1 席 1 秒に 1 回まで [超えた分は黙って捨てる]
+const STAMP_MIN_INTERVAL_MS = 1000;
 const PLAYER_FIELD_ACTIONS = new Set(['ron', 'pass', 'pon', 'damingang', 'shuvari']);
 
 type WsTokenPayload = {
@@ -120,6 +126,8 @@ type Room = {
   cpuProxyTimers: Map<string, ReturnType<typeof setTimeout>>;
   // [2026-10-09 遊真 C1] 直近に張った人間待ちの期限 [無ければ null]
   deadlineInfo: DeadlineInfo | null;
+  // [2026-10-09 R3] 席 [room seat] ごとの直近スタンプ時刻 [performance.now() 基準]
+  stampLastAt: Map<number, number>;
   // [2026-10-09 遊真 A3] サーバーが保存 POST を出した試合の `${roomInstanceId}:${matchId}`
   recordedMatchKeys: Set<string>;
 };
@@ -826,6 +834,20 @@ export function shouldRevealUra(authority: RoomAuthority): boolean {
 }
 
 /**
+ * [2026-10-09 R1] 反応窓を開いた時に store が積む文言 [「ロン可能: player 1,2」「槍槓 ron 候補 p1 の判断待ち」
+ * 「北抜きロン可能: player 1」] は、鳴ける/ロンできる席の一覧そのもの。projection で全席に配ると
+ * 「誰がその牌でアガれたか」[= 待ち] が見えるので、本人にだけ本人の席を示す形に直す。
+ * 他の席には出さない [null]。この形でない文言はそのまま返す。
+ */
+export function reactionCandidateMessage(message: unknown, own: number | null, ownIsRonCandidate: boolean): unknown {
+  if (typeof message !== 'string') return message;
+  const isNorthRon = message.startsWith('北抜きロン可能:');
+  if (!isNorthRon && !message.startsWith('ロン可能:') && !message.includes('槍槓 ron 候補')) return message;
+  if (!ownIsRonCandidate || own === null) return null;
+  return `${isNorthRon ? '北抜きロン可能' : 'ロン可能'}: player ${own}`;
+}
+
+/**
  * Seat-scoped canonical state.  A client may optimistically run its local
  * reducer for animation, but this projection is the source of truth after
  * every accepted command and on every reconnect.
@@ -1022,7 +1044,9 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       // S-02 の反応窓マスクが最優先
       message: reactionWindowOpen && isPostWinState(state)
         ? 'ロン宣言 受付中 [他家の判断待ち]'
-        : (state.lizhiPending !== null && state.lizhiPending !== own ? null : state.message),
+        : (state.lizhiPending !== null && state.lizhiPending !== own
+          ? null
+          : reactionCandidateMessage(state.message, own, ownRonCandidates.length > 0)),
       cpu: structuredClone(state.cpu),
       lizhiPending: state.lizhiPending === own ? own : null,
       // The two-stage declaration choice is private to the acting seat until
@@ -1130,6 +1154,11 @@ function sanitizeActionForSeat(actionInput: Record<string, unknown>, recipientSe
   return action;
 }
 
+/** 見送り [pass] は本人以外に seat を渡さない action */
+export function isPrivatePassAction(action: Record<string, unknown>): boolean {
+  return action?.type === 'pass';
+}
+
 function actionRelay(
   command: AcceptedRoomCommand,
   snapshot: CanonicalRoomSnapshot,
@@ -1144,17 +1173,27 @@ function actionRelay(
     ? null
     : roomToGameSeat(mapping, recipientRoomSeat);
   const projectionSeat = recipientGameSeat ?? SPECTATOR_SEAT;
-  const action = sanitizeActionForSeat(command.action, projectionSeat);
+  let action = sanitizeActionForSeat(command.action, projectionSeat);
   if (authority) action._state = captureSeatProjection(authority, projectionSeat);
+  // [2026-10-09 R1] 鳴き・ロンの見送り [pass] は本人とサーバーの間だけで運ぶ。他の席と観戦者には
+  // 「誰が見送ったか」「見送りがあったか」を載せず、revision を進めるだけの中立な progress にする
+  // [見送り = その牌が待ちではない/鳴けた、の盗み見を塞ぐ。client は _state の hydrate だけで進む]。
+  // from_seat は受信者自身の席 [client の seat 検証 0..2 を通すための伏せ値。観戦/抜け番は 0]
+  const actorRoomSeat = command.actorRoomSeat ?? command.actorSeat;
+  const neutral = isPrivatePassAction(command.action) && recipientRoomSeat !== actorRoomSeat;
+  if (neutral) {
+    const { player: _passSeat, ...rest } = action;
+    action = { ...rest, type: 'progress' };
+  }
   return {
     type: 'action',
-    commandId: command.commandId,
+    commandId: neutral ? `progress:${command.revision}` : command.commandId,
     revision: command.revision,
     matchId: snapshot.matchId,
     roundId: snapshot.roundId,
-    from_seat: command.actorSeat,
-    from_room_seat: command.actorRoomSeat ?? command.actorSeat,
-    from_user_id: command.fromUserId,
+    from_seat: neutral ? (recipientGameSeat ?? 0) : command.actorSeat,
+    from_room_seat: neutral ? Math.max(0, recipientRoomSeat) : actorRoomSeat,
+    from_user_id: neutral ? '' : command.fromUserId,
     duplicate,
     // [2026-07-23 4人回し Phase3] client の actorGameSeat 分離と room chip 表示用
     recipientRoomSeat,
@@ -1204,6 +1243,14 @@ function broadcast(room: Room, payload: unknown): void {
   for (const member of room.members.values()) sendJson(member.ws, payload);
   // [2026-07-23 観戦モード] broadcast は public payload のみ [lobby/stamp/ready 等] なのでそのまま流す
   for (const spectator of room.spectators.values()) sendJson(spectator.ws, payload);
+}
+
+/** スタンプ連打の間引き。通すなら true [その席の時刻を更新]、1 秒以内の 2 発目以降は false */
+export function allowStamp(room: Pick<Room, 'stampLastAt'>, roomSeat: number, now = performance.now()): boolean {
+  const last = room.stampLastAt.get(roomSeat);
+  if (last !== undefined && now - last < STAMP_MIN_INTERVAL_MS) return false;
+  room.stampLastAt.set(roomSeat, now);
+  return true;
 }
 
 function broadcastAction(room: Room, command: AcceptedRoomCommand): void {
@@ -1515,6 +1562,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       chipResetVotes: new Set<number>(),
       cpuProxyTimers: new Map(),
       deadlineInfo: null,
+      stampLastAt: new Map<number, number>(),
       recordedMatchKeys: new Set<string>(),
     };
     for (const member of snapshot.start?.members ?? []) {
@@ -1628,8 +1676,28 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     revision: info.revision,
   });
 
+  // [2026-10-09 R1] 反応窓 [kind:reaction] の seats は「鳴ける/ロンできる席」そのものなので、
+  // 全員には配らない。本人の席だけ載せ、それ以外の受信者には kind:none を返す
+  // [待たれている席が一人ずつ消えていく = 誰が見送ったかも漏れる]。turn / postWin は卓上で公開済みの情報
+  const deadlinePayloadFor = (info: DeadlineInfo, recipientRoomSeat: number) => {
+    if (info.kind !== 'reaction') return deadlinePayload(info);
+    const own = info.seats.filter((seat) => seat === recipientRoomSeat);
+    if (own.length === 0) return { type: 'deadline', kind: 'none', seats: [], remainingMs: 0, revision: info.revision };
+    return { ...deadlinePayload(info), seats: own };
+  };
+
   const sendDeadlineStateTo = (ws: WebSocket | null, room: Room): void => {
-    if (room.deadlineInfo) sendJson(ws, deadlinePayload(room.deadlineInfo));
+    if (!room.deadlineInfo) return;
+    let recipientRoomSeat = SPECTATOR_SEAT;
+    for (const member of room.members.values()) {
+      if (member.ws === ws) { recipientRoomSeat = member.seat; break; }
+    }
+    sendJson(ws, deadlinePayloadFor(room.deadlineInfo, recipientRoomSeat));
+  };
+
+  const broadcastDeadline = (room: Room, info: DeadlineInfo): void => {
+    for (const member of room.members.values()) sendJson(member.ws, deadlinePayloadFor(info, member.seat));
+    for (const spectator of room.spectators.values()) sendJson(spectator.ws, deadlinePayloadFor(info, SPECTATOR_SEAT));
   };
 
   // [2026-10-09 遊真 A3] 終わった試合をサーバー自身が API に保存する [host が落ちていても残る]。
@@ -1724,7 +1792,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         return { reason: 'invalid stampId' };
       }
       // WSA: stamp は revision を進めない。broadcast だけして早期 return
-      broadcast(room, { type: 'stamp', seat: actorSeat, stampId: action.stampId });
+      // [2026-10-09 R3] 連打は黙って捨てる [accepted 扱いで ack は返る。再送の理由を作らない]
+      if (allowStamp(room, actorRoomSeatHint ?? actorSeat)) {
+        broadcast(room, { type: 'stamp', seat: actorSeat, stampId: action.stampId });
+      }
       return { reason: null };
     } else {
       if (!room.authority) return { reason: 'authority not initialized' };
@@ -2055,7 +2126,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         endsAt: performance.now() + Math.max(0, delayMs),
         revision,
       };
-      broadcast(room, deadlinePayload(room.deadlineInfo));
+      broadcastDeadline(room, room.deadlineInfo);
     };
 
     const canonical = authority.canonicalState();
@@ -2292,6 +2363,16 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     }, Math.max(0, delay));
   };
 
+  // [2026-10-09 R3] test-only: 次の start だけ使う固定の山 [testControlsEnabled の harness entry だけ。
+  // set-pool control seam が積む。通常起動では常に空]。リーチ等の e2e が決定的な配牌で回るための道具
+  const testPools = new Map<string, string[]>();
+  const takeTestPool = (roomId: string): string[] | null => {
+    if (!testControlsEnabled) return null;
+    const pool = testPools.get(roomId) ?? null;
+    testPools.delete(roomId);
+    return pool;
+  };
+
   const startRoom = (room: Room, qijia: number): void => {
     if (room.snapshot.started) return;
     const roomMembersAll = Array.from(room.members.values())
@@ -2314,7 +2395,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       : undefined;
     const members = initialMapping ? activeTrioForStart(roomMembersAll, initialMapping) : roomMembersAll;
     const start: RoomStartSnapshot = {
-      preShuffledPool: serverShuffledPool(),
+      preShuffledPool: takeTestPool(room.roomId) ?? serverShuffledPool(),
       qijia,
       members,
       changshu,
@@ -2394,7 +2475,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     scheduleRoomDeadline(room);
   };
 
-  const wss = new WebSocketServer({ port });
+  const wss = new WebSocketServer({ port, maxPayload: MAX_WS_PAYLOAD_BYTES });
   log(`[anmika-ws] authoritative endpoint listening on :${port}`);
 
   // [2026-10-09 遊真 A1] listen / accept 層の error で process を落とさない [記録だけ残す]。
@@ -2619,6 +2700,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           const value = msg as Record<string, unknown>;
           if (!room.snapshot.started) return;
           if (typeof value.stampId !== 'string' || !STAMP_IDS.has(value.stampId as string)) return;
+          if (!allowStamp(room, payload.seat)) return;
           broadcast(room, { type: 'stamp', seat: payload.seat, stampId: value.stampId });
           return;
         }
@@ -2812,6 +2894,28 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           }
         }).catch((error) => warn('[anmika-ws] force-finish failed', error)));
         log(`[anmika-ws] TEST force-finish-match room=${room_id}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (_) { res.writeHead(400); res.end('bad request'); }
+      return;
+    }
+    // [2026-10-09 R3] test-only: その部屋の次の start で使う山を渡す [force-finish-match と同じ gate]
+    if (req.method === 'POST' && req.url === '/internal/test/set-pool') {
+      if (!testControlsEnabled) { res.writeHead(404); res.end('not found'); return; }
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        const { room_id, pool } = body;
+        if (typeof room_id !== 'string' || !Array.isArray(pool) || !pool.every((tile) => typeof tile === 'string')) {
+          res.writeHead(400); res.end('bad request'); return;
+        }
+        if (rooms.get(room_id)?.snapshot.started) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, reason: 'room already started' }));
+          return;
+        }
+        testPools.set(room_id, pool as string[]);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (_) { res.writeHead(400); res.end('bad request'); }
