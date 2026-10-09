@@ -3031,6 +3031,9 @@ export function createGameStore() {
         s.lastHuleResult = null;
         clearReactionStage(s);
         s.roundEnded = false;
+        // [2026-10-09 リョー報告] CPU 和了の確認待ちは前の局の物。板の「次局へ」で進めた時も戻す
+        // [持ち越すと次に人間がサイコロ付きで上がった時「CPU のサイコロチャンスを見る」が出て板が開かない]
+        s.cpuWinAck = true;
         s.message = null;
         s.lizhiPending = null;
         s = applyFeverAutoTsumokiri(s);

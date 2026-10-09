@@ -84,7 +84,7 @@ test('screenshot audit: menu / table / cutin / round end', async ({ page }) => {
       await page.evaluate(() => (window as any).__gameStore.continueFever());
     } else if (st.pendingSaiKoro) {
       // サイコロはUI経由で開いて各フェーズを撮る [演出確認用]
-      const ackBtn = page.locator('.cpu-sai-ack-btn');
+      const ackBtn = page.locator('.cpu-sai-ack-btn:not(.cpu-sai-skip-btn)');
       if ((await ackBtn.count()) > 0) {
         await page.screenshot({ path: `${OUT}/07a_saikoro_ack.png` });
         await ackBtn.click();

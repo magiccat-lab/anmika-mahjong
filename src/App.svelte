@@ -2259,6 +2259,12 @@
   // 結果 [確定の欄] は読めるように、次のチャンスへ進むまでだけ少し待つ。オンラインは server の刻みを詰めてもらう
   let cpuSaiFast = false;
   $: if (!$game.pendingSaiKoro) cpuSaiFast = false;
+  $: saiAckOwnerIsCpu = (() => {
+    const ps = $game.pendingSaiKoro;
+    if (!ps) return false;
+    const cur = ps.chances[ps.currentIdx] as any;
+    return !!$game.cpu[(cur?.winner ?? ps.winner) as PlayerId];
+  })();
   const CPU_SAI_FAST_ADVANCE_MS = 1500;
   function skipCpuSaiKoro(): void {
     if (onlineGameStarted) {
@@ -2852,12 +2858,15 @@
          オンライン中は server authority が駆動するので出さない -->
     {#if !onlineGameStarted && $game.pendingSaiKoro && !$game.cpuWinAck}
       <div class="cpu-sai-ack">
+        <!-- [2026-10-09 リョー「これCPUじゃなくてプレイヤーだし」] 字は今のサイコロの持ち主で変える。飛ばすのは CPU の時だけ -->
         <button class="cpu-sai-ack-btn" on:click={() => { saiKoroOpened = true; game.ackCpuWin(); }}>
-          CPU のサイコロチャンスを見る
+          {saiAckOwnerIsCpu ? 'CPU のサイコロチャンスを見る' : 'サイコロチャンスへ'}
         </button>
-        <button class="cpu-sai-ack-btn cpu-sai-skip-btn" on:click={skipCpuSaiKoro}>
-          結果だけ見る
-        </button>
+        {#if saiAckOwnerIsCpu}
+          <button class="cpu-sai-ack-btn cpu-sai-skip-btn" on:click={skipCpuSaiKoro}>
+            結果だけ見る
+          </button>
+        {/if}
       </div>
     {/if}
     <!-- [2026-07-22 リョー報告: サイコロが他の人に表示されない] SaiKoroModal は
@@ -4637,7 +4646,9 @@
     display: flex;
     gap: 12px;
   }
-  .cpu-sai-ack-btn.cpu-sai-skip-btn { background: transparent; color: #ffe89b; }
+  /* 局の板 [明るい地] の上にも出るので地を敷く [透明だと字が見えなかった、2026-10-09 リョー] */
+  .cpu-sai-ack-btn.cpu-sai-skip-btn { background: rgba(20, 16, 12, 0.88); color: #ffe89b; }
+  .cpu-sai-ack-btn.cpu-sai-skip-btn:hover { background: rgba(44, 34, 22, 0.94); }
   .cpu-sai-ack-btn {
     padding: 12px 22px;
     border: 2px solid #ffe89b;
