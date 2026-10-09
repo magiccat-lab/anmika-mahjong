@@ -48,7 +48,9 @@ test('solo table stays readable at representative viewport sizes', async ({ page
       // [2026-10-09 shun2] 縦持ちの卓を作ったので「横向きにして」は出さず、手牌 14 枚が 2 段に収まる
       await expect(page.locator('.orientation-notice')).toBeHidden();
       const tops = await page.locator('.seat-bottom .tile-btn').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
-      expect(new Set(tops).size).toBeLessThanOrEqual(2);
+      // 浮かせた牌 [ツモ牌 ・ 候補の強調] は数 px ずれるので、20px 以上離れた時だけ別の段と数える
+      const rows = [...tops].sort((a, b) => a - b).filter((t, i, arr) => i === 0 || t - arr[i - 1] > 20).length;
+      expect(rows).toBeLessThanOrEqual(2);
     }
 
   }

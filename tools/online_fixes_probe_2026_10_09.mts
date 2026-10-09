@@ -203,6 +203,8 @@ async function main(): Promise<void> {
     check('C2 戻ったら帯が消える', !stillDown);
 
     // C3 / C5
+    // [2026-10-09 shun2 V9] 🐛 と退出は右上の ⋯ の中
+    await two.page.locator('.table-menu-btn').click();
     check('C5 対局中に 🐛 が出る', await visible(two.page, 'button[aria-label="バグ通報"]'));
     await two.page.locator('button[aria-label="対局から退出"]').click();
     const dialog = await poll(() => visible(two.page, '.leave-confirm'), (v) => v, 3_000);
@@ -212,6 +214,7 @@ async function main(): Promise<void> {
     check('C3 「戻る」で対局に残る', await visible(two.page, 'main.mode-single'));
 
     // A3: host が抜ける → 試合が終わる → 残りの人が「次の試合へ」→ server が戦績を記録
+    await host.page.locator('.table-menu-btn').click();
     await host.page.locator('button[aria-label="対局から退出"]').click();
     await host.page.locator('.leave-confirm-yes').click();
     await host.page.waitForTimeout(1500);

@@ -274,10 +274,10 @@ test.describe('リーチ宣言 [online 実物・固定の山]', () => {
       await expect.poll(lizhiSeats, { timeout: 15000 }).toEqual([]);
 
       // リーチ種別 [通常] を押す → 宣言牌の選択に入る
-      const normal = page.locator('button.lizhi-choice.normal').first(); // 画面に 2 か所 [header と盤面脇] 出る
+      const normal = page.locator('button.lizhi-choice.normal:visible').first(); // [2026-10-09 shun2 R5] 見えるのは手牌の上の 1 か所だけ [header の行は卓では隠す]
       await expect(normal, '通常リーチのボタンが出ていない').toBeEnabled({ timeout: 30000 });
       await normal.click();
-      await expect(page.locator('[data-testid="lizhi-selection-status"]').first()).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('[data-testid="lizhi-selection-status"]:visible').first()).toBeVisible({ timeout: 10000 });
 
       // 宣言牌 [候補は 1 枚] を切る
       const candidate = page.locator('section.player button.tile-btn[data-lizhi-candidate="true"]');
@@ -286,7 +286,7 @@ test.describe('リーチ宣言 [online 実物・固定の山]', () => {
 
       // サーバーが受理して投影が戻る: 自分のリーチが立ち、河のリーチ牌が 1 枚、宣言の途中状態が残らない
       await expect.poll(lizhiSeats, { timeout: 20000, message: 'リーチが確定しない' }).toEqual([0]);
-      await expect(page.locator('.hez-tile.lizhi-tile, .he-tile.lizhi-tile').first()).toBeVisible({ timeout: 10000 }); // 盤面は幅違いで 2 か所に描かれる
+      await expect(page.locator('.hez-tile.lizhi-tile:visible, .he-tile.lizhi-tile:visible').first()).toBeVisible({ timeout: 10000 }); // 盤面は幅違いで 2 か所に描かれる
       const river = await page.evaluate(() => (window as any).__game.game.he.get(0)._pai as string[]);
       expect(river.filter((t) => t.endsWith('*') || t.endsWith('__')).length, `河: ${river.join(',')}`).toBe(1);
       const pending = await page.evaluate(() => (window as any).__game.lizhiPending);
