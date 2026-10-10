@@ -189,7 +189,9 @@ export function canFeverLizhi(shoupai: any): FeverCheck {
       ok = true;
     } else if (handCount + ankanCount >= 3) {
       // American七対子で同じ7の4枚を二対子として取れる形は、暗刻が確定しない。
-      if (handCount === 4) {
+      // 3枚でも、American七対子のテンパイなら4枚目の7待ちで7が2対子になる解がある
+      // [2026-10-11 通報「アメチーテンパイフィーバーが可能」: p1 p7×3 p8 s4 s9 z3 の形で FEVER が出た]
+      if (handCount >= 3) {
         try {
           if (americanChitoiXiangting(shoupai) <= 0) {
             ok = false;

@@ -233,6 +233,31 @@ describe('canonical flow-rule regressions', () => {
     expect(canFeverLizhi(sp).ok).toBe(false);
   });
 
+  it('American七対子で3枚の7に4枚目を待つ形も固定暗刻ではない [10-11 通報「アメチーテンパイフィーバーが可能」]', () => {
+    // p1 p7×3 p8 s4 s9 z3 の対子 + p7×3: 通常形はノーテン、American七対子で p7 単騎 (4枚目で 2 対子)
+    const sp = buildShoupai([
+      'p1','p1','p7','p7','p7','p8','p8',
+      's4','s4','s9','s9','z3','z3',
+    ]);
+    expect(canFeverLizhi(sp).ok).toBe(false);
+  });
+
+  it('7暗刻と American七対子の両方でテンパイなら、7が対子になる解があるので固定暗刻ではない', () => {
+    // 通常形は p777 p123 p123 + s44 z33 のシャンポン待ち、American七対子は p7 待ち
+    const sp = buildShoupai([
+      'p1','p1','p2','p2','p3','p3','p7','p7','p7',
+      's4','s4','z3','z3',
+    ]);
+    expect(canFeverLizhi(sp).ok).toBe(false);
+  });
+
+  it('American七対子でテンパイしていない 7 の暗刻は今まで通りフィーバーできる', () => {
+    const sp = buildShoupai([
+      'p7','p7','p7','s1','s2','s3','s4','s5','s6','m9','m9','z3','z3',
+    ]);
+    expect(canFeverLizhi(sp).ok).toBe(true);
+  });
+
   it('7暗刻3種と虹3種の複合はクアドラプルFEVER', () => {
     const zeros = () => Array(10).fill(0);
     const sp: any = {
