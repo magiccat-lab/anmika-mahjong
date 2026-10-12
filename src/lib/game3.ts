@@ -385,6 +385,47 @@ function natsuBaseOf(fanshu: number, fu: number): number {
   return raw >= 1920 ? 2000 : raw;
 }
 
+/** 三連刻の判定用: 手牌 [_bp の形] から suit の ks を刻子として 3 枚ずつ抜いた残りが、面子 + 雀頭 1 つになるか。
+ *  _bp[s][0] は赤 5 の内数なので数えない。字牌は刻子だけ。 */
+export function restFormsMentsuAndPair(bp: Record<string, number[]>, suit: string, ks: number[]): boolean {
+  const rest: Record<string, number[]> = {};
+  for (const s of ['m', 'p', 's', 'z']) {
+    const len = s === 'z' ? 8 : 10;
+    rest[s] = Array.from({ length: len }, (_, i) => (i === 0 ? 0 : (bp[s]?.[i] ?? 0)));
+  }
+  for (const k of ks) {
+    if ((rest[suit][k] ?? 0) < 3) return false;
+    rest[suit][k] -= 3;
+  }
+  const allMentsu = (c: number[], honor: boolean): boolean => {
+    const i = c.findIndex((v, idx) => idx > 0 && v > 0);
+    if (i < 0) return true;
+    if (c[i] >= 3) {
+      c[i] -= 3;
+      const ok = allMentsu(c, honor);
+      c[i] += 3;
+      if (ok) return true;
+    }
+    if (!honor && i <= 7 && c[i + 1] > 0 && c[i + 2] > 0) {
+      c[i] -= 1; c[i + 1] -= 1; c[i + 2] -= 1;
+      const ok = allMentsu(c, honor);
+      c[i] += 1; c[i + 1] += 1; c[i + 2] += 1;
+      if (ok) return true;
+    }
+    return false;
+  };
+  for (const s of ['m', 'p', 's', 'z']) {
+    for (let k = 1; k < rest[s].length; k++) {
+      if (rest[s][k] < 2) continue;
+      rest[s][k] -= 2;
+      const ok = ['m', 'p', 's', 'z'].every((t) => allMentsu(rest[t], t === 'z'));
+      rest[s][k] += 2;
+      if (ok) return true;
+    }
+  }
+  return false;
+}
+
 export class Game3 {
   state: GameState;
   shan: Shan3;
@@ -3870,13 +3911,14 @@ export class Game3 {
 
     // 三連刻 [同種 連番 3 つの刻子]: 全 player の bingpai check で n,n+1,n+2 の刻子
     // R9 P1 #1 fix: _bp [ロン牌込み] で 判定、 ロン牌で 3 つ目の 刻子完成 取りこぼし防止
+    // 2026-10-12 通報 [33344455567s]: 枚数が 3 枚あるだけでは刻子と言えない [s5 を雀頭と順子に使っていた]。
+    // 手牌の 3 つを抜いた残りが 面子 + 雀頭 になる時だけ付ける。
     for (const s of ['m', 'p', 's']) {
       for (let n = 1; n <= 7; n++) {
-        const tripletAt = (k: number) => {
-          if (((_bp as any)[s]?.[k] ?? 0) >= 3) return true;
-          return sp._fulou.some((m: string) => m.match(new RegExp(`^${s}${k}{3}`)));
-        };
-        if (tripletAt(n) && tripletAt(n + 1) && tripletAt(n + 2)) {
+        const fulouTriplet = (k: number) => sp._fulou.some((m: string) => m.match(new RegExp(`^${s}${k}{3}`)));
+        const tripletAt = (k: number) => fulouTriplet(k) || ((_bp as any)[s]?.[k] ?? 0) >= 3;
+        if (tripletAt(n) && tripletAt(n + 1) && tripletAt(n + 2)
+            && restFormsMentsuAndPair(_bp, s, [n, n + 1, n + 2].filter((k) => !fulouTriplet(k)))) {
           result.hupai.push({ name: `三連刻 [${s}${n}-${n + 2}]`, fanshu: 4 });
           if (result.fanshu !== undefined) result.fanshu += 4;
           break;
