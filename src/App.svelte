@@ -2188,6 +2188,8 @@
   let resetChipOnNextMatch = false;
   // R16 P0 #3 fix: 試合開始時 chipLedger snapshot、 chip_delta = total - this[seat] で計算
   let matchStartChipLedger: Record<number, number> = { 0: 0, 1: 0, 2: 0 };
+  // 終局パネルの見出しと「この東風」の列名 [Game3.changshu: 0=一局戦、 1=東風、 2=東南]
+  const matchLabelOf = (changshu: number | undefined) => (changshu === 2 ? '半荘' : changshu === 0 ? '一局' : '東風');
   async function handleNextMatch() {
     // 順序は 「1. resetChip 確認 → 2. nextMatch 実行」。resetChip キャンセル後に進まないようにする
     if (resetChipOnNextMatch) {
@@ -3293,6 +3295,8 @@
       zifengZ={(p) => $game.game.zifengZ(p as any)}
       chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)}
       finalScore={$game.game.getFinalScore()}
+      matchStart={[0,1,2].map(p => matchStartChipLedger[p] ?? 0)}
+      matchLabel={matchLabelOf($game.game.changshu)}
     />
   {/if}
 
@@ -3356,7 +3360,7 @@
       class:kinpei-only={!!$game.pendingKinpei && !$game.pendingKinpei.preview && !$game.lastHuleResult && !state.finished && !$game.pendingPingju}>
       <div class="agari-left" class:pingju-only={$game.pendingPingju && !$game.lastHuleResult && !state.finished}>
         {#if state.finished}
-          <GameEndPanel names={seatDisplayNames} ranking={$game.game.getRanking()} zifengZ={(p) => $game.game.zifengZ(p as any)} chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)} finalScore={$game.game.getFinalScore()} />
+          <GameEndPanel names={seatDisplayNames} ranking={$game.game.getRanking()} zifengZ={(p) => $game.game.zifengZ(p as any)} chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)} finalScore={$game.game.getFinalScore()} matchStart={[0,1,2].map(p => matchStartChipLedger[p] ?? 0)} matchLabel={matchLabelOf($game.game.changshu)} />
         {/if}
         {#if $game.pendingPingju && !$game.lastHuleResult}
           <div class="pingju-head">
