@@ -31,7 +31,7 @@ describe('D-12: FEVER 待ち枯れの再判定', () => {
     (g.shan as any)._pai = ((g.shan as any)._pai as string[]).filter((p) => toCorePai(p) !== 's9');
     const after = confirmPendingFeverBeforeDraw(s);
     expect(after.pendingPingju || after.roundEnded).toBe(true);
-    expect(String(after.message)).toContain('待ち牌全消失');
+    expect(String(after.message)).toContain('待ち牌が山に残っていない');
   });
 
   it('待ち牌が山に残っていれば通常進行する', () => {

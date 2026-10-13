@@ -3477,7 +3477,9 @@ export function confirmPendingFeverBeforeDraw(s: StoreState): StoreState {
   if (player !== null) {
     s.game.confirmFeverDeclaration(player);
     if (s.game.isFeverWaitExhausted(player)) {
-      return applyPingjuTransition(s, '🔥 フィーバー立直成立、待ち牌全消失で1人テンパイ流局:');
+      // [2026-10-13 通報] 待ちの残り枚数の表示は見える牌から数える (王牌の中も「残り」に入る) が、流局は王牌を数えない。
+      // 「待ち牌全消失」だと残り 1 と出ている時に食い違って見えたので、山に無いことと残りの居場所を書く
+      return applyPingjuTransition(s, '🔥 フィーバー立直成立、待ち牌が山に残っていない (残りは王牌か他家の手の中) ので1人テンパイ流局:');
     }
   }
   // [2026-07-21 監査 D-12 fix] 宣言直後だけでなく、打牌が確定して次ツモへ進む直前
@@ -3487,7 +3489,7 @@ export function confirmPendingFeverBeforeDraw(s: StoreState): StoreState {
   for (const p of [0, 1, 2] as const) {
     if (!s.game.feverActive[p]) continue;
     if (s.game.isFeverWaitExhausted(p)) {
-      return applyPingjuTransition(s, `🔥 FEVER 待ち牌全消失 [p${p}]、1人テンパイ流局:`);
+      return applyPingjuTransition(s, `🔥 FEVER 待ち牌が山に残っていない [p${p}] (残りは王牌か他家の手の中)、1人テンパイ流局:`);
     }
   }
   return s;
