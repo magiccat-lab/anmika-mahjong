@@ -3108,7 +3108,8 @@ export function createGameStore() {
         // ツモ和了可ならユーザー判断待ち
         if (s.game.canTsumo(player)) return { ...s };
         // 待ち不変の暗槓候補があれば自動カン [majiang-core の rule.リーチ後暗槓許可レベル=2 で filter]
-        const kanCands = s.game.getKanCandidates(player);
+        // ぽっち (白 ・ 一発の 1p2p) のカンは選べるので自動にしない [2026-10-13 リョー]
+        const kanCands = s.game.getForcedLizhiKanCandidates(player);
         if (kanCands.length > 0) {
           dlog('[auto kan]', { player, mianzi: kanCands[0] });
           const replacement = s.game.declareKan(player, kanCands[0]);

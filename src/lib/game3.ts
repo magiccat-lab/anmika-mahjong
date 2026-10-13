@@ -4894,7 +4894,20 @@ export class Game3 {
   /** リーチ後に強制される、待ち不変の合法暗槓候補。 */
   getForcedLizhiKanCandidates(player: PlayerId): string[] {
     if (!this.lizhi.has(player)) return [];
+    // [2026-10-13 リョー「ポッチは選択できるよ、一発1p2pと白だけね」] ぽっちを引いた時の
+    // カンは強制にしない (カンするかは本人が選ぶ。候補は getKanCandidates に残る)
+    if (this.isLizhiPochiDraw(player)) return [];
     return this.getKanCandidates(player);
+  }
+
+  /** リーチ後のツモがぽっちか: 白 (4 枚とも色付きのぽっち) か、リーチ一発の 1p ・ 2p (でかぽっち)。 */
+  isLizhiPochiDraw(player: PlayerId): boolean {
+    const sp = this.shoupai.get(player);
+    const zimo = sp?._zimo;
+    if (typeof zimo !== 'string' || zimo.length > 3) return false;
+    const core = toCorePai(zimo).replace('0', '5');
+    if (core === 'z5') return true;
+    return !!this.yifaActive[player] && (core === 'p1' || core === 'p2');
   }
 
   /** リーチ後暗槓の前後で待ちが完全一致するか。判定不能時は安全側で不可。 */

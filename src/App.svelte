@@ -2077,7 +2077,10 @@
     const phaseReady = isAutoActionPhaseReady(snap, player as PlayerId)
       && !snap.game.canTsumo(player)
       // [2026-09-14] 自動抜きが動く局面はそちらに譲る [抜いてから切る]
-      && !(autoNukiEnabled && snap.game.canNukiBei(player as PlayerId));
+      && !(autoNukiEnabled && snap.game.canNukiBei(player as PlayerId))
+      // [2026-10-13 リョー「ポッチは選択できるよ」] リーチ中にカンできる時は自動で切らずに本人を待つ
+      // (ぽっちのカンは選べる。強制のカンもボタンで押す)
+      && !(snap.game.lizhi.has(player) && snap.game.getKanCandidates(player).length > 0);
     // [2026-07-21 リョー報告 stuck dump] フィーバー強制ツモ切りの人間手番は選択の
     // 余地が無いのに手動待ちで、進行が止まって見えた。リーチ中と同じ扱いで自動対象に
     // 含める。北ツモ [canNukiBei] の時だけ抜き/ツモ切りの選択が残るため自動しない
