@@ -635,3 +635,27 @@ def test_rewind_locks_out_after_repeated_failures_even_for_the_right_password(re
 def test_rewind_member_check_can_be_switched_off(rewind_env, monkeypatch):
     monkeypatch.setattr(appmod, "REWIND_REQUIRE_MEMBER", False)
     assert _rewind(rewind_env.client, "s3cret-パス").status_code == 200  # 未ログインでも PW だけで通る [従来]
+
+
+# [2026-10-13 リョー「部屋を閉じるときに…まとめるようにしてほしい」] 部屋のまとめの一覧と画像
+def test_summaries_list_and_image(env, monkeypatch, tmp_path):
+    root = tmp_path / "summaries"
+    for sid, n in (("GFIO-20261013-2310", 22), ("ABCD-20261012-2200", 3)):
+        d = root / sid
+        d.mkdir(parents=True)
+        (d / "summary.json").write_text(json.dumps({"room": sid.split("-")[0], "n": n, "first": "10/13 20:51", "last": "23:03",
+                                                    "ranking": [{"name": "isg.", "total": 236}]}), encoding="utf-8")
+        (d / "overview.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    (root / "../escape.png").write_bytes(b"x")
+    monkeypatch.setattr(appmod, "SUMMARY_DIR", root)
+    c = env.client
+    assert c.get("/api/summaries").status_code == 401
+    login(c, "u1")
+    got = c.get("/api/summaries").json()["summaries"]
+    assert [s["id"] for s in got] == ["GFIO-20261013-2310", "ABCD-20261012-2200"]
+    assert got[0]["images"] == ["/api/summaries/GFIO-20261013-2310/overview.png"]
+    assert [s["id"] for s in c.get("/api/summaries?room=ABCD").json()["summaries"]] == ["ABCD-20261012-2200"]
+    r = c.get("/api/summaries/GFIO-20261013-2310/overview.png")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    assert c.get("/api/summaries/GFIO-20261013-2310/summary.json").status_code == 404
+    assert c.get("/api/summaries/..%2Fescape/overview.png").status_code == 404

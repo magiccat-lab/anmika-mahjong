@@ -18,6 +18,7 @@ import html
 import json
 import logging
 import os
+import re
 import secrets as _secrets
 import sqlite3
 import time as _time
@@ -2226,6 +2227,55 @@ async def list_matches(request: Request):
             d["members"] = names
             out.append(d)
     return {"matches": out}
+
+
+# [2026-10-13 リョー「部屋を閉じるときに、その部屋でのチップ推移とか最高打点とかハイライトみたいなところとかまとめるようにしてほしい」]
+# 部屋のまとめの画像 [チップの推移 ・ 個人成績] は秘書の scripts/anmika_room_summary.py が閉じた部屋と 30 分打たれていない部屋で作り、
+# server/data/summaries/<部屋>-<日時>/ に置く。ここは一覧と画像を返すだけ
+SUMMARY_DIR = Path(os.environ.get("ANMIKA_SUMMARY_DIR", str(DB_PATH.parent / "summaries")))
+_SUMMARY_ID_RE = re.compile(r"^[A-Za-z0-9]{1,16}-\d{8}-\d{4}$")
+_SUMMARY_FILES = ("overview.png", "stats.png")
+
+
+@app.get("/api/summaries")
+async def list_summaries(request: Request):
+    """部屋のまとめ [新しい順]。ログイン必須"""
+    if not current_user(request):
+        raise HTTPException(status_code=401, detail="login required")
+    try:
+        limit = min(30, max(1, int(request.query_params.get("limit") or 10)))
+    except Exception:
+        limit = 10
+    room = (request.query_params.get("room") or "").strip()
+    out = []
+    if SUMMARY_DIR.is_dir():
+        for d in sorted(SUMMARY_DIR.iterdir(), key=lambda p: p.name.split("-", 1)[-1], reverse=True):
+            if not _SUMMARY_ID_RE.match(d.name) or (room and not d.name.startswith(room + "-")):
+                continue
+            try:
+                meta = json.loads((d / "summary.json").read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            out.append({
+                "id": d.name, "room": meta.get("room"), "n": meta.get("n"), "first": meta.get("first"), "last": meta.get("last"),
+                "ranking": meta.get("ranking") or [],
+                "images": [f"/api/summaries/{d.name}/{f}" for f in _SUMMARY_FILES if (d / f).exists()],
+            })
+            if len(out) >= limit:
+                break
+    return {"summaries": out}
+
+
+@app.get("/api/summaries/{sid}/{name}")
+async def get_summary_image(sid: str, name: str, request: Request):
+    if not current_user(request):
+        raise HTTPException(status_code=401, detail="login required")
+    if not _SUMMARY_ID_RE.match(sid) or name not in _SUMMARY_FILES:
+        raise HTTPException(status_code=404, detail="not found")
+    path = SUMMARY_DIR / sid / name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.get("/api/matches/public")

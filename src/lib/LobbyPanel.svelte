@@ -112,16 +112,36 @@
     }
   }
 
+  // [2026-10-13 リョー「部屋を閉じるときに…まとめるようにしてほしい」] 閉じた部屋と 30 分打たれていない部屋のまとめ
+  // [チップの推移 ・ 個人成績の画像 2 枚] をサーバーが作るので、新しい物から並べて開けるようにする
+  type Summary = { id: string; room: string; n: number; first: string; last: string; ranking: { name: string; total: number }[]; images: string[] };
+  let summaries: Summary[] = [];
+  let openSummary: Summary | null = null;
+  async function refreshSummaries() {
+    try {
+      const r = await fetch(`${API_BASE}/api/summaries?limit=5`, { credentials: 'include' });
+      if (r.ok) summaries = (await r.json()).summaries ?? [];
+    } catch {
+      // 一覧が取れない時は出さないだけ
+    }
+  }
+
   let pollTimer: ReturnType<typeof setInterval> | undefined;
+  let summaryTimer: ReturnType<typeof setInterval> | undefined;
   onMount(async () => {
     await refreshMe();
     await refreshRooms();
     loading = false;
     // 定期 refresh、 onDestroy で cleanup [2026-05-16 yuma fix: 旧版 leak]
     pollTimer = setInterval(refreshRooms, 5000);
+    if (me) {
+      await refreshSummaries();
+      summaryTimer = setInterval(refreshSummaries, 30000);
+    }
   });
   onDestroy(() => {
     if (pollTimer) clearInterval(pollTimer);
+    if (summaryTimer) clearInterval(summaryTimer);
   });
 </script>
 
@@ -195,11 +215,50 @@
         {/each}
       </ul>
     {/if}
+    {#if summaries.length > 0}
+      <h3>部屋のまとめ</h3>
+      <ul class="room-list summary-list">
+        {#each summaries as sm}
+          <li class="room">
+            <div class="room-info">
+              <strong>{sm.room}</strong> 東風 {sm.n} 戦 <span class="host">{sm.first}〜{sm.last}</span>
+              {#if sm.ranking[0]}<span class="mine"> 1 位 {sm.ranking[0].name} {sm.ranking[0].total >= 0 ? '+' : ''}{sm.ranking[0].total}</span>{/if}
+            </div>
+            <div class="room-btns"><button class="summary-btn" on:click={() => (openSummary = sm)}>見る</button></div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
     {#if error}<p class="error">{error}</p>{/if}
   {/if}
 </div>
+{#if openSummary}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+  <div class="summary-modal" role="dialog" aria-modal="true" tabindex="-1" aria-label="部屋 {openSummary.room} のまとめ"
+    on:click|self={() => (openSummary = null)} on:keydown={(e) => { if (e.key === 'Escape') openSummary = null; }}>
+    <div class="summary-body">
+      <div class="summary-head"><strong>部屋 {openSummary.room} のまとめ</strong><button on:click={() => (openSummary = null)}>閉じる</button></div>
+      {#each openSummary.images as src}
+        <img src={`${API_BASE}${src}`} alt="部屋 {openSummary.room} のまとめ" />
+      {/each}
+    </div>
+  </div>
+{/if}
 
 <style>
+  .summary-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: grid;
+    place-items: start center;
+    overflow-y: auto;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.7);
+  }
+  .summary-body { width: min(1280px, 100%); display: grid; gap: 10px; }
+  .summary-head { display: flex; justify-content: space-between; align-items: center; color: var(--jz-ink); }
+  .summary-body img { width: 100%; height: auto; border-radius: var(--jz-rad); border: 1px solid var(--jz-panel-bd); }
   /* [2026-10-09 shun2 見た目 b / V3 V8] 卓と同じ札 ・ 字 ・ ボタン。スマホ縦は設定を縦に積み、
      作るボタンは横いっぱいの 1 行 [旧: 「新しい部屋を作る」「入る」が 1 字ずつ縦に崩れていた] */
   .lobby {
