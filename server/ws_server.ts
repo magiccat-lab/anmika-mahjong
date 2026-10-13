@@ -518,6 +518,8 @@ export function restoreAuthority(
       }
     }
     jumped.takeCanonicalChipEffects();
+    // 読み直しで積まれた演出 cutin は捨てる [下の頭から読む方と同じ]
+    jumped.takePendingCutins();
     return jumped;
   }
   for (const command of cmds) {
@@ -531,6 +533,10 @@ export function restoreAuthority(
   // room ledger は command に焼かれた _roomChipDelta の fold が正で、ここで drain
   // しないと次の live accept が全履歴分の delta を二重に焼く。
   authority.takeCanonicalChipEffects();
+  // [2026-10-13 リョー「サーバー更新した時に前の演出がもっかい色々再生される問題があるっぽい」]
+  // replay の各 command が積んだ演出 cutin [リーチ ・ ツモ ・ 4北 ・ プラ転 …] は新しい ts で残る。
+  // drain しないと再起動後の最初の同期 [と reject 後の作り直しの次の手] で全員に昔の演出が流れる
+  authority.takePendingCutins();
   return authority;
 }
 
