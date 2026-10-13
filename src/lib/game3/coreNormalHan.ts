@@ -430,6 +430,16 @@ const ANMIKA_FAN: Array<[string, number, number]> = [
 ];
 
 /**
+ * ドラ ・ 裏ドラだけの翻 [面子分解しない]。国士の 7 萬を 1 萬に置いて数え直す時に、
+ * ドラだけは置く前の牌姿で数える [7 萬を 1 萬のドラとして数えない、2026-10-13]
+ */
+export function doraHanOf(shoupai: any, rongpai: string | null, baopai: string[], fubaopai: string[] | null): number {
+  return get_post_hupai(shoupai, rongpai, baopai ?? [], fubaopai ?? null)
+    .filter((h: any) => h.name === 'ドラ' || h.name === '裏ドラ')
+    .reduce((sum: number, h: any) => sum + h.fanshu, 0);
+}
+
+/**
  * 役満手の「役満を除いた通常役のハン数」。13 翻超過祝儀の母数に使う。
  * 面子分解ごとに数えて最大を採る [本家 hule は打点で選ぶが、ここは母数なので翻で選ぶ]。
  * ドラ [param.baopai / fubaopai] も本家と同じ経路で数える。

@@ -164,7 +164,7 @@ import { computeChipMultiplier as computeChipMultiplierHelper, applyChipOall as 
 import { getTingpaiList as getTingpaiListHelper, getTingpaiListBeforeZimo as getTingpaiListBeforeZimoHelper, canTsumoWithPochiSwap as canTsumoWithPochiSwapHelper, americanChitoiXiangting, americanChitoiComplete, countAmericanChitoiQuads } from './game3/tingpai';
 import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotHelper, type PreHuleSnapshot } from './game3/snapshot';
 import { applyFuyuChip as applyFuyuChipHelper, applyChipsOnHule as applyChipsOnHuleHelper, type HuleChipCtx, type FuyuAdvanceResult, type FuyuRevealState } from './game3/huleChip';
-import { normalHanForYakuman } from './game3/coreNormalHan';
+import { doraHanOf, normalHanForYakuman } from './game3/coreNormalHan';
 import { physicalDiscardCandidates, resolvePhysicalDiscardPai, restorePhysicalHandState, snapshotPhysicalHandState } from './game3/tileIdentity';
 import { evaluateWinPoints } from './game3/settlement';
 import {
@@ -3148,11 +3148,30 @@ export class Game3 {
         // ぽっち置換や m7→m1 置換で和了った手は、置換後の牌姿でないと分解できない
         const spForCount = (result as any)._spUsed ?? sp;
         const ronForCount = (result as any)._ronpaiUsed !== undefined ? (result as any)._ronpaiUsed : ronpaiWithDir;
-        const coreHan = normalHanForYakuman(spForCount, ronForCount, param);
+        let coreHan = normalHanForYakuman(spForCount, ronForCount, param);
+        // [2026-10-13 リョー「13ハンをオーバーした分の祝儀は入ってないんじゃね」で総点検]
+        // 国士無双 [7 萬 = 1 萬] は anmikaTry7mYakuman が置いた牌姿を残さないので、7 萬のままだと
+        // 分解できず母数が 0 になっていた。7 萬を 1 萬に置いて数え直し、ドラだけは元の牌姿で数える
+        if (coreHan === 0 && (result as any)._spUsed === undefined && (sp._bingpai.m?.[7] ?? 0) > 0) {
+          const sp7 = sp.clone();
+          sp7._bingpai.m[1] = (sp7._bingpai.m[1] ?? 0) + sp7._bingpai.m[7];
+          sp7._bingpai.m[7] = 0;
+          if (sp7._zimo === 'm7') sp7._zimo = 'm1';
+          const ron7 = typeof ronpaiWithDir === 'string' && ronpaiWithDir.startsWith('m7')
+            ? 'm1' + ronpaiWithDir.slice(2) : ronpaiWithDir;
+          const han7 = normalHanForYakuman(sp7, ron7, { ...param, baopai: [], fubaopai: null });
+          if (han7 > 0) coreHan = han7 + doraHanOf(sp, ronpaiWithDir, param.baopai ?? [], param.fubaopai ?? null);
+        }
         // 抜きドラ / 北ドラ は役満だと上の block を通らないので、母数にだけ足す
         const nukiFan = nuki > 0 ? (nuki >= 4 ? 8 : nuki) : 0;
         const nukiDoraFan = (baopaiHasZ3 + fubaopaiHasZ3) * nuki;
-        if (coreHan > 0) result._excessHanBase = coreHan + nukiFan + nukiDoraFan;
+        // majiang-core が知らないアンミカの通常役 [三連刻 ・ 嵌八萬の 789 三色 ・ アメリカ七対子] は
+        // hupai に数で残っているので足す。ルールブック 3-2「通常の役として翻数を数え上げ」
+        // [huleChip は hupai の合計とこの母数の大きい方を採るので二重にはならない]
+        const anmikaOnlyFan = (result.hupai ?? [])
+          .filter((h: any) => typeof h.fanshu === 'number' && /^(三連刻|789 三色|アメリカ七対子)/.test(String(h.name)))
+          .reduce((sum: number, h: any) => sum + h.fanshu, 0);
+        if (coreHan > 0) result._excessHanBase = coreHan + nukiFan + nukiDoraFan + anmikaOnlyFan;
       } catch {
         // 牌姿が majiang-core で分解できない手 [嵌八萬のぽっち埋め等] は従来どおり
       }
