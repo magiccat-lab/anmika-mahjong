@@ -66,3 +66,23 @@ describe('流局でテンパイの人の手牌が見える', () => {
     }
   });
 });
+
+// [2026-10-13 観戦の画面が「同期に失敗し続けています」] App は観戦の mySeat を undefined で渡す
+// (席契約の recipientGameSeat が null のため)。spectator: true なら store が -1 で持ち、hydrate を通す
+import { createGameStore } from '../store';
+
+describe('観戦の画面が盤面を受け取れる', () => {
+  it('spectator: true で mySeat 無しでも、観戦の projection を hydrate できる', () => {
+    const authority = createRoomAuthority({ preShuffledPool: pool(), qijia: 0, changshu: 1 });
+    const projection: any = captureSeatProjection(authority, -1);
+    const game = createGameStore();
+    game.initOnlineGame({
+      ws: { readyState: 0, send() {} } as unknown as WebSocket,
+      qijia: 0,
+      mySeat: undefined,
+      spectator: true,
+      blindStart: { hands: { 0: [], 1: [], 2: [] }, firstZimo: '', paishu: projection.shan.paishu, baopai: projection.shan.baopai, fubaopai: null },
+    } as any);
+    expect(game.hydrateOnlineProjection(projection)).toBe(true);
+  });
+});

@@ -849,7 +849,10 @@ export function createGameStore() {
     }) {
       onlineWs = opts.ws;
       onlineMode = true;
-      myOnlineSeat = opts.mySeat ?? null;
+      // [2026-10-13 観戦の画面が真っ白のまま「同期に失敗し続けています」] 観戦は席を -1 で持つ。
+      // 7/23 の 4 人回しの席契約から、観戦の mySeat は recipientGameSeat (null) 由来の undefined で渡り、
+      // null のままだと projection.recipientSeat (-1) と合わず hydrate を全部はじいていた
+      myOnlineSeat = opts.spectator ? -1 : (opts.mySeat ?? null);
       iAmHost = opts.isHost ?? false;
       onlineSpectator = opts.spectator ?? false;
       hostSeat = opts.hostSeat ?? null;

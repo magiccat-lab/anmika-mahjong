@@ -21,7 +21,8 @@ function finishedAuthority() {
 
 function clientAt(seat: 0 | 1 | 2, opts: { isHost: boolean; spectator?: boolean }) {
   const a = finishedAuthority();
-  const projection: any = captureSeatProjection(a, seat);
+  // 観戦は席 -1 の projection を受ける (2026-10-13: store は spectator を -1 で持つ)
+  const projection: any = captureSeatProjection(a, opts.spectator ? -1 : seat);
   const sent: any[] = [];
   const ws = { readyState: 1, send: (raw: string) => { sent.push(JSON.parse(raw)); } } as unknown as WebSocket;
   const game = createGameStore();
