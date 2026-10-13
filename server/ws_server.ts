@@ -888,6 +888,17 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
     maskedPochi[recipientSeat] = { ...game.pochiHand[recipientSeat] };
   }
   const { waitInfo: feverWaitPublicInfo, waitsByDeclarer } = confirmedFeverWaitInfo(game);
+  // [2026-10-13 リョー「テンパイ時にテンパイ者の牌姿が見えるようにして」] 流局 (和了者なし) では
+  // テンパイの人の手牌を全席に見せる。ノーテンの人は伏せたまま
+  const pingjuOpen = !!state.pendingPingju && (state.lastWinner === null || state.lastWinner === undefined);
+  const isPingjuTenpai = (player: 0 | 1 | 2): boolean => {
+    if (!pingjuOpen) return false;
+    try {
+      return (game.getTingpaiList?.(player) ?? []).length > 0;
+    } catch {
+      return false;
+    }
+  };
   const publicHands: Record<number, Record<string, unknown>> = {};
   for (const player of [0, 1, 2] as const) {
     const sp: any = game.shoupai.get(player);
@@ -896,9 +907,13 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
     // 通常の和了は勝者以外の画面で手牌が裏のままだった
     const isPostWinRevealedWinner = revealPostWinPrivateState
       && postWinWinners(state).has(player);
+    // [2026-10-13 リョー「観戦の時みんなの手配見れないんだけどなんで」] 観戦 (と抜け番) は全員の手牌を見せる。
+    // 7/23 に観戦を作った時は全員伏せていた。privateHand は今まで通り送らない
     const publiclyRevealed = game.openLizhi.has(player)
       || (game.feverActive[player] && game.feverDeclareDapaiPlayer !== player)
-      || isPostWinRevealedWinner;
+      || isPostWinRevealedWinner
+      || recipientSeat === SPECTATOR_SEAT
+      || isPingjuTenpai(player);
     const exposedWaits = new Set<string>();
     for (const [declarer, waits] of waitsByDeclarer) {
       if (declarer === player) continue;

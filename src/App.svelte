@@ -1047,6 +1047,12 @@
     if (core.length >= 2 && core[1] === '0') return core[0] + '5';
     return core;
   }
+  // [2026-10-13 リョー「テンパイ時にテンパイ者の牌姿が見えるようにして」] 流局で、サーバーが
+  // テンパイの人の手牌を送ってきた席 (伏せ = _ が 0) は表で見せる。$game を引数で受けて再描画させる
+  function pingjuShown(g: any, seat: number): boolean {
+    return onlineGameStarted && !!g.pendingPingju && (g.lastWinner === null || g.lastWinner === undefined)
+      && (g.game.shoupai.get(seat as 0|1|2)?._bingpai?._ ?? 1) === 0;
+  }
   function computeSideTiles(
     tiles: string[], seat: number, waitCores: Set<string>, reveal: boolean, self: number,
   ): string[] {
@@ -1066,8 +1072,9 @@
       return ($game.game.feverDeclareTing?.[p] ?? []);
     })
   );
-  $: sideTiles1 = computeSideTiles(shoupai1, srv1, feverRevealCores, revealAll, selfPlayer);
-  $: sideTiles2 = computeSideTiles(shoupai2, srv2, feverRevealCores, revealAll, selfPlayer);
+  // 観戦は全員の手牌を表で見せる (2026-10-13 リョー)。サーバーが観戦にだけ手牌を送る
+  $: sideTiles1 = computeSideTiles(shoupai1, srv1, feverRevealCores, revealAll || onlineSpectator || pingjuShown($game, srv1), selfPlayer);
+  $: sideTiles2 = computeSideTiles(shoupai2, srv2, feverRevealCores, revealAll || onlineSpectator || pingjuShown($game, srv2), selfPlayer);
 
   // リーチ宣言牌候補 [リーチ button 押下後に表示、 候補以外を grayout]
   // 2026-07-16 リョー裁定: フィーバー宣言中はフィーバーが成立する宣言牌だけに絞る
@@ -3217,7 +3224,7 @@
       nukidoraGold={$game.game.nukidoraGold[srv0] ?? 0}
       goldHandZ={$game.game.goldHand[srv0].z}
       he={he0}
-      revealHand={selfPlayer === srv0 || (!onlineGameStarted && revealAll) || $game.game.openLizhi.has(srv0) || $game.game.isFeverConfirmed(srv0)}
+      revealHand={selfPlayer === srv0 || (!onlineGameStarted && revealAll) || onlineSpectator || pingjuShown($game, srv0) || $game.game.openLizhi.has(srv0) || $game.game.isFeverConfirmed(srv0)}
       lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv0), shoupai0)}
       isLizhiCand={isLizhiCand}
       isNakiCand={isNakiCand}
@@ -3245,7 +3252,7 @@
         nukidoraGold={$game.game.nukidoraGold[srv1] ?? 0}
         goldHandZ={$game.game.goldHand[srv1].z}
         he={he1}
-        revealHand={selfPlayer === srv1 || (!onlineGameStarted && revealAll) || $game.game.openLizhi.has(srv1) || $game.game.isFeverConfirmed(srv1)}
+        revealHand={selfPlayer === srv1 || (!onlineGameStarted && revealAll) || onlineSpectator || pingjuShown($game, srv1) || $game.game.openLizhi.has(srv1) || $game.game.isFeverConfirmed(srv1)}
         lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv1), shoupai1)}
         isLizhiCand={isLizhiCand}
         lizhiPending={$game.lizhiPending === currentPlayer}
@@ -3272,7 +3279,7 @@
         nukidoraGold={$game.game.nukidoraGold[srv2] ?? 0}
         goldHandZ={$game.game.goldHand[srv2].z}
         he={he2}
-        revealHand={selfPlayer === srv2 || (!onlineGameStarted && revealAll) || $game.game.openLizhi.has(srv2) || $game.game.isFeverConfirmed(srv2)}
+        revealHand={selfPlayer === srv2 || (!onlineGameStarted && revealAll) || onlineSpectator || pingjuShown($game, srv2) || $game.game.openLizhi.has(srv2) || $game.game.isFeverConfirmed(srv2)}
         lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv2), shoupai2)}
         isLizhiCand={isLizhiCand}
         lizhiPending={$game.lizhiPending === currentPlayer}

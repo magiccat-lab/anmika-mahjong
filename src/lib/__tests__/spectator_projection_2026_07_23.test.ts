@@ -31,7 +31,8 @@ describe('観戦 projection [seat=-1]', () => {
     expect(projection.goldHand ?? null).not.toBeTruthy();
   });
 
-  it('client は seat=-1 のまま hydrate でき、全席が伏せ手になる', () => {
+  // [2026-10-13 リョー「観戦の時みんなの手配見れないんだけどなんで」] 観戦は全員の手牌を表で受け取る
+  it('client は seat=-1 のまま hydrate でき、全席の手牌が表になる', () => {
     const a = createRoomAuthority({ preShuffledPool: pool(), qijia: 0, changshu: 2 });
     const projection: any = captureSeatProjection(a, -1);
     const game = createGameStore();
@@ -52,13 +53,13 @@ describe('観戦 projection [seat=-1]', () => {
     const state: any = get(game);
     for (const seat of [0, 1, 2] as const) {
       const sp = state.game.shoupai.get(seat);
-      // 具体牌は 1 枚も知らない [全部 _ = 伏せ]
+      // 具体牌が全部わかる [伏せ = _ は 0]
       const known = ['m', 'p', 's', 'z'].reduce(
         (total, suit) => total + (sp?._bingpai?.[suit] ?? []).reduce((x: number, n: number) => x + (n ?? 0), 0),
         0,
       );
-      expect(known).toBe(0);
-      expect(sp._bingpai._).toBeGreaterThan(0);
+      expect(known).toBeGreaterThan(0);
+      expect(sp._bingpai._ ?? 0).toBe(0);
     }
     // changshu も projection.gameConfig から採用される
     expect(state.game.changshu).toBe(2);
