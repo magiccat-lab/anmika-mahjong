@@ -7,7 +7,8 @@
 // [本待ち] なら通常ツモ和了。ぽっち扱いの副作用 [色 / 倍率 / 金北自動 / swap / 役 / サイコロ]
 // を一切付けず、支払いも通常 [正] のまま。待ちに含まれない時は旧挙動 [p2=黄 逆払い / p1=緑] 不変。
 // [2026-10-09 リョー裁定 2] 本待ちでも一発ツモのサイコロ [でかぽっち] は出す。同日「ベース35は全部ベース70の2回に」で base70 × 2 回。
-// 白待ちの白ぽっち即ツモと同じ形で、避けるのは 2p の逆払いだけ = 本待ち 2p のサイコロは +。
+// [2026-10-13 リョー裁定 3] 正規のアガリで逆ぽっちを避けたならサイコロも振らない = 本待ち 2p はサイコロ無し。
+// 本待ち 1p は逆ではないので 10-09 のままサイコロ + を振る。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { buildShoupai, type Game3 } from '../game3';
@@ -117,7 +118,7 @@ function rollDekaSaiAllHit(store: Store, game: Game3, player: PlayerId): number 
   return game.chipLedger[player] - before;
 }
 
-/** 本待ち = 通常ツモ: ぽっち副作用ゼロ + 正の支払い + 一発ツモのサイコロ [+] */
+/** 本待ち = 通常ツモ: ぽっち副作用ゼロ + 正の支払い。1p は一発ツモのサイコロ [+]、2p はサイコロ無し */
 function expectNormalTsumo(ctx: ReturnType<typeof riichiYifaDraw>, pai: 'p1' | 'p2') {
   const { store, game, player, others, multBefore, defenBefore, kinpeiAuto } = ctx;
   expect(game.getTingpaiListBeforeZimo(player)).toContain(pai);
@@ -139,7 +140,7 @@ function expectNormalTsumo(ctx: ReturnType<typeof riichiYifaDraw>, pai: 'p1' | '
   expect(dry._dekapochiFrom).toBeUndefined();
   expect(hupaiNames(dry).some((n) => n.includes('一発'))).toBe(true);
 
-  // store.tsumo(): 通常 [正] の支払い + でかぽっちサイコロ [10-09 裁定、倍率は中立のまま]
+  // store.tsumo(): 通常 [正] の支払い。1p は でかぽっちサイコロ [10-09 裁定、倍率は中立のまま]
   const s = tsumoThroughStore(store, player);
   const result = s.lastHuleResult;
   expect(hupaiNames(result).some((n) => n.includes('でかぽっち'))).toBe(false);
@@ -148,15 +149,21 @@ function expectNormalTsumo(ctx: ReturnType<typeof riichiYifaDraw>, pai: 'p1' | '
   expect(result.defen).toBeGreaterThan(0);
   expect(game.state.defen[player]).toBeGreaterThan(defenBefore[player]);
   for (const o of others) expect(game.state.defen[o]).toBeLessThan(defenBefore[o]);
+  expect(game.pochiMultiplier[player]).toEqual(NEUTRAL);
+  expect(game.pochiPaymentMode[player]).toBe(false);
+  expect(game.shan.lastZimoPochi ?? null).toBeNull();
+  if (pai === 'p2') {
+    // [10-13] 逆払いを避けた 2p はサイコロも振らない
+    expect(dekaChances(result.saiKoroChances)).toEqual([]);
+    expect(dekaChances(s.pendingSaiKoro?.chances)).toEqual([]);
+    return;
+  }
   expect(dekaChances(result.saiKoroChances)).toEqual([
     expect.objectContaining({ awardKey: 'でかぽっち', baseChip: 70, rollCount: 2, plusMinus: '+', mode: 'tsumo' }),
   ]);
   expect(dekaChances(s.pendingSaiKoro?.chances)).toHaveLength(1);
-  expect(game.pochiMultiplier[player]).toEqual(NEUTRAL);
-  expect(game.pochiPaymentMode[player]).toBe(false);
-  expect(game.shan.lastZimoPochi ?? null).toBeNull();
 
-  // 2 投全部当たり = 70 × 2 オール。p2 でも逆払いにならず勝者の祝儀が増える
+  // 2 投全部当たり = 70 × 2 オール。勝者の祝儀が増える
   const gained = rollDekaSaiAllHit(store, game, player);
   expect(gained).toBeGreaterThan(0);
 }
@@ -169,7 +176,7 @@ const P2_KANCHAN = ['p1', 'p3', 's1', 's2', 's3', 's5', 's6', 's7', 's9', 's9', 
 // p2p3 両面 [待ち p1 / p4] + s123 s567 s999 z11
 const P1_RYANMEN = ['p2', 'p3', 's1', 's2', 's3', 's5', 's6', 's7', 's9', 's9', 's9', 'z1', 'z1'];
 
-describe('でかぽっち 本待ち裁定 [2026-09-02 / 10-09]: 待ちに本物の p1/p2 が含まれれば通常ツモ + サイコロ', () => {
+describe('でかぽっち 本待ち裁定 [2026-09-02 / 10-09 / 10-13]: 待ちに本物の p1/p2 が含まれれば通常ツモ (サイコロは 1p だけ)', () => {
   let warn: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -179,7 +186,7 @@ describe('でかぽっち 本待ち裁定 [2026-09-02 / 10-09]: 待ちに本物�
     vi.restoreAllMocks();
   });
 
-  it('本待ち p2 [p1p3 嵌張] を一発ツモ → 黄ぽっち扱いにならず通常の正払いツモ和了 + サイコロ +', () => {
+  it('本待ち p2 [p1p3 嵌張] を一発ツモ → 黄ぽっち扱いにならず通常の正払いツモ和了、サイコロも振らない', () => {
     const ctx = riichiYifaDraw(P2_KANCHAN, 'p2');
     expect(ctx.tingBefore).toEqual(['p2']);
     expectNormalTsumo(ctx, 'p2');
@@ -247,5 +254,43 @@ describe('でかぽっち 本待ち裁定 [2026-09-02 / 10-09]: 待ちに本物�
     expect(result._pochiPaymentApplied).toBeFalsy();
     expect(game.state.defen[player]).toBeGreaterThan(defenBefore[player]);
     expect(dekaChances(result.saiKoroChances)).toHaveLength(1);
+  });
+});
+
+// [2026-10-13 リョー「正規のアガリなら逆ポッチは回避できるからそれに付随するサイコロも回避できるじゃん」]
+// 白待ちで赤 / 黄の白ぽっちを一発ツモ = 逆ぽっちを避けた正規のアガリなので、ぽっちのサイコロも振らない。
+// 青 / 緑は逆ではないので今まで通り振る
+// s123 s567 s999 p234 + 白単騎 [待ち z5 のみ]
+const WHITE_TANKI = ['p2', 'p3', 'p4', 's1', 's2', 's3', 's5', 's6', 's7', 's9', 's9', 's9', 'z5'];
+const pochiChances = (chances: any[] | null | undefined): any[] =>
+  (chances ?? []).filter((c: any) => String(c.awardKey).startsWith('白ぽっち'));
+
+describe('白待ちで逆ぽっちを避けたツモはサイコロを振らない [2026-10-13]', () => {
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+    vi.restoreAllMocks();
+  });
+
+  for (const raw of ['z5r', 'z5y']) {
+    it(`白待ちで ${raw} を一発ツモ → 正払いの通常ツモ、ぽっちのサイコロ無し`, () => {
+      const ctx = riichiYifaDraw(WHITE_TANKI, raw);
+      const { store, game, player, defenBefore } = ctx;
+      expect(ctx.tingBefore).toEqual(['z5']);
+      expect(game.pochiMultiplier[player]).toEqual(NEUTRAL);
+      const s = tsumoThroughStore(store, player);
+      expect(s.lastHuleResult._pochiPaymentApplied).toBeFalsy();
+      expect(game.state.defen[player]).toBeGreaterThan(defenBefore[player]);
+      expect(pochiChances(s.lastHuleResult.saiKoroChances)).toEqual([]);
+    });
+  }
+
+  it('対照: 白待ちで z5b を一発ツモ → 白ぽっち即ツモのサイコロは今まで通り出る', () => {
+    const ctx = riichiYifaDraw(WHITE_TANKI, 'z5b');
+    const s = tsumoThroughStore(ctx.store, ctx.player);
+    expect(pochiChances(s.lastHuleResult.saiKoroChances).map((c: any) => c.awardKey)).toContain('白ぽっち即ツモ');
   });
 });

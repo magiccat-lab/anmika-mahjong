@@ -4268,12 +4268,18 @@ export class Game3 {
     const lastZimoIsZ5 = this.lastZimoInfo.pai
       ? toCorePai(this.lastZimoInfo.pai as string) === 'z5'
       : false;
+    // [2026-10-13 リョー「正規のアガリなら逆ポッチは回避できるからそれに付随するサイコロも回避できるじゃん。
+    //  回避するなら振らなくていいよ」] 本待ちで逆ぽっち [赤 / 黄] を避けたツモはサイコロも振らない。
+    // リーチ後の白待ちの赤 / 黄の白ぽっちと、本待ちの 2p 一発ツモ。青 / 緑と本待ちの 1p は逆ではないので今まで通り振る
+    const tingBeforeWin = loser === null ? this.getTingpaiListBeforeZimo(winner) : [];
     const isPochiTsumo =
       loser === null
       && zimoIsZ5
       && this.lastZimoInfo.player === winner
       && lastZimoIsZ5
-      && !!this.lastZimoInfo.pochi;
+      && !!this.lastZimoInfo.pochi
+      && !(this.lizhi.has(winner) && tingBeforeWin.includes('z5')
+        && (this.lastZimoInfo.pochi === 'red' || this.lastZimoInfo.pochi === 'yellow'));
     if (isPochiTsumo && chipDelta === 0) {
       result.saiKoroChances = result.saiKoroChances ?? [];
       result.saiKoroChances.push({ awardKey: '白ぽっちツモ祝儀0', name: '白ぽっちツモ祝儀 0 枚', baseChip: 70, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
@@ -4284,8 +4290,8 @@ export class Game3 {
     }
     // でかぽっち即ツモ → サイコロ base 70 を 2 回振り [10-09 リョー、旧 35 × 4 回]。2p [黄扱い] の負号は
     // ツモ時に applyPochiColorMultiplier(yellow) 済みの倍率が自動で符号反転する。
-    // [2026-10-09 リョー裁定] 本待ちの p1/p2 一発ツモもサイコロは出す [白待ちの白ぽっち即ツモと同型]。
-    // 本待ちは zimo() が黄倍率を掛けないので 2p でも + [避けるのは逆払いだけ]
+    // [2026-10-09 リョー裁定] 本待ちの 1p 一発ツモもサイコロは出す。本待ちの 2p は逆払いを避けたので
+    // サイコロも振らない [10-13 裁定、上の白待ちの赤 / 黄と同じ]
     const zimoCoreDeka = sp_w?._zimo ? toCorePai(sp_w._zimo) : null;
     const isDekapochiTsumo =
       loser === null
@@ -4293,7 +4299,7 @@ export class Game3 {
       && this.lizhi.has(winner)
       && (zimoCoreDeka === 'p1' || zimoCoreDeka === 'p2')
       && ((result.hupai ?? []).some((h: any) => h.name?.includes('でかぽっち'))
-        || this.getTingpaiListBeforeZimo(winner).includes(zimoCoreDeka));
+        || (zimoCoreDeka === 'p1' && tingBeforeWin.includes('p1')));
     if (isDekapochiTsumo) {
       result.saiKoroChances = result.saiKoroChances ?? [];
       result.saiKoroChances.push({ awardKey: 'でかぽっち', name: 'でかぽっち', baseChip: 70, rollCount: 2, shuvariApplicable: true, count: 1, plusMinus: '+', mode: 'tsumo' });
