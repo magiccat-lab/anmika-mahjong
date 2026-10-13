@@ -543,12 +543,18 @@ export function applyChipsOnHule(
 
   const dama = result.damanguan ?? 0;
   if (dama > 0) {
-    const tsumoChips = [5, 5, 7, 9][Math.min(dama, 3)] ?? 5;
-    const ronChips = [10, 10, 14, 18][Math.min(dama, 3)] ?? 10;
+    // [2026-10-14 通報「本役満ツモ+夏が5倍満扱いになってない」] 夏で本役満を上げた時 (8000→10000 / 12000 基本点) は、
+    // 打点は五倍満 ・ 六倍満になっていたのに、祝儀は damanguan の段のまま 5 オールだった。
+    // 数えの側 (下の rankChipBase) と同じく、夏の段上げを入れた基本点の段も見て高い方を取る
+    const rb = rankChipBase(result);
+    const level = Math.max(dama, rb >= 12000 ? 3 : rb >= 10000 ? 2 : 1);
+    const tsumoChips = [5, 5, 7, 9][Math.min(level, 3)] ?? 5;
+    const ronChips = [10, 10, 14, 18][Math.min(level, 3)] ?? 10;
+    const rankNote = level > dama ? (level >= 3 ? ' [夏で 6 倍満]' : ' [夏で 5 倍満]') : '';
     if (loser === null) {
-      ctx.applyChipOall(winner, tsumoChips, { label: `役満ツモ ×${dama}` });
+      ctx.applyChipOall(winner, tsumoChips, { label: `役満ツモ ×${dama}${rankNote}` });
     } else {
-      ctx.applyChipFromLoser(winner, loser, ronChips, { label: `役満ロン ×${dama}` });
+      ctx.applyChipFromLoser(winner, loser, ronChips, { label: `役満ロン ×${dama}${rankNote}` });
     }
     // 打点ランク祝儀とは別枠の「本役満 10 枚オール」。
     // ロンでも同卓者全員が 10 枚ずつ支払う。
