@@ -1259,7 +1259,7 @@ export function createGameStore() {
       }
     },
     /** 打牌 → ロン / ポン候補判定 [CPU 自動応答込み]、 meta で河の色記録 */
-    discard(pai: string, meta?: { gold?: boolean; pochi?: 'blue' | 'red' | 'green' | 'yellow' }) {
+    discard(pai: string, meta?: { gold?: boolean; pochi?: 'blue' | 'red' | 'green' | 'yellow'; tsumogiri?: boolean }) {
       if (!checkOnlineGate({ type: 'discard' }, 'currentPlayer')) return;
       if (sendOnlineAction({ type: 'discard', pai, meta })) return;
       update((s) => {
@@ -3541,7 +3541,7 @@ export function triggerSaiKoroIfAny(s: StoreState, result: any, winner: number):
   return s;
 }
 
-export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean; pochi?: 'blue' | 'red' | 'green' | 'yellow' }): StoreState {
+export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean; pochi?: 'blue' | 'red' | 'green' | 'yellow'; tsumogiri?: boolean }): StoreState {
   // 局終了・反応待ち・和了後 modal 中は no-op。自動進行ボタンや遅延 action が
   // 勝利局面を打牌で上書きすると復帰不能になるため、最下層でも必ず止める。
   if (isLiveTurnActionBlocked(s)) return { ...s };

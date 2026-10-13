@@ -1491,7 +1491,7 @@ export class Game3 {
     });
   }
 
-  dapai(pai: Pai, meta?: { gold?: boolean; pochi?: 'blue' | 'red' | 'green' | 'yellow' }): void {
+  dapai(pai: Pai, meta?: { gold?: boolean; pochi?: 'blue' | 'red' | 'green' | 'yellow'; tsumogiri?: boolean }): void {
     // 新しい打牌が起きた = 直前の打牌へのロン権は消えた [副露を挟んだ場合もここで閉じる]
     this.closeRonWindow();
     // R8 P0 #3 fix: 加槓 window は dapai 時点で必ず clear、 嶺上ツモ後の通常打牌に
@@ -1584,7 +1584,11 @@ export class Game3 {
     //   注: 副露直後 [_zimo に mianzi が入る] / 北抜き / 嶺上 でも lastZimoInfo は
     //       常に最新 zimo を反映している、 副露後の 1 打目は lastZimoInfo.player !== player
     //       か lastZimoInfo.pai !== pai なので 自然に手出し扱い
-    const isTsumogiri = this.lastZimoInfo.player === player && this.lastZimoInfo.pai === paiForHand;
+    // [2026-10-13 リョー「からぎりがツモギリ扱いになってるとかあるかも」] 牌の種類だけで見ると、ツモった牌と
+    // 同じ牌を手から切る空切りもツモ切りになる。画面がどの牌を押したか [meta.tsumogiri] を送ってきた時はそれに従う。
+    // 送ってこない打牌 [CPU ・ 自動ツモ切り ・ 旧版の画面] は今まで通り種類で見る
+    const sameAsZimo = this.lastZimoInfo.player === player && this.lastZimoInfo.pai === paiForHand;
+    const isTsumogiri = typeof meta?.tsumogiri === 'boolean' ? meta.tsumogiri && sameAsZimo : sameAsZimo;
     this.discardLog[player].push({ pai: paiForHand, gold: isGold, pochi: pochiColor, tsumogiri: isTsumogiri });
     this.events.push({ type: 'dapai', player, pai: paiForHand });
     // この打牌のロン受付を開く [見逃しフリテン判定用]。次の dapai / zimo で閉じる

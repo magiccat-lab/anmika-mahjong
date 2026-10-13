@@ -909,7 +909,7 @@
     });
   }
 
-  function onTileClick(player: number, pai: string) {
+  function onTileClick(player: number, pai: string, fromZimo?: boolean) {
     if (player !== currentPlayer) return; // 自家以外は無視
     // 2026-05-14 codex review #3 fix: modal / ロン / 副露待ち / フィーバー継続 中の手牌クリック を
     // game.discard へ到達させない、 各種 modal pending 中の打牌入力を遮断
@@ -977,7 +977,8 @@
         return;
       }
     }
-    game.discard(actualPai, meta);
+    // 押したのがツモった牌か手の中の同じ牌 [空切り] かを送る [2026-10-13]
+    game.discard(actualPai, typeof fromZimo === 'boolean' ? { ...(meta ?? {}), tsumogiri: fromZimo } : meta);
   }
 
   type FeverWaitRow = {
@@ -2496,6 +2497,25 @@
   {/if}
 {/snippet}
 
+{#snippet wallHand(tiles: string[], fulou: any[], side: 'l' | 'r', zimoIdx: number)}
+  <!-- [2026-10-13 リョー「観戦のときは全員の手配がちゃんと三方壁に沿うようにしてみせるのと、りーぱいもしてよ」]
+       観戦では左右の人の手牌を卓の左右の辺に縦に並べる。向きは河と同じ [左は上から下、右は下から上]。
+       並びは理牌の順で、ツモった牌は少し離す -->
+  <div class="wall-hand wall-{side}">
+    {#each tiles as t, i}
+      <span class="wall-tile" class:wall-zimo={i === zimoIdx}>
+        {#if t === 'back'}<span class="wall-back back-{state.jushu % 2 === 0 ? 'a' : 'b'}"></span>{:else}<Tile pai={t} size="md" />{/if}
+      </span>
+    {/each}
+    {#each fulou as m}
+      <span class="wall-meld">
+        {#each m.tiles as t, ti}<span class="wall-tile" class:wall-claimed={ti === m.rotateIdx}><Tile pai={t} size="md" /></span>{/each}
+        {#if m.kakanTile}<span class="wall-tile wall-claimed"><Tile pai={m.kakanTile} size="md" /></span>{/if}
+      </span>
+    {/each}
+  </div>
+{/snippet}
+
 {#if appMode === 'menu'}
   <EntryMenu
     onSelectSolo={() => { appMode = 'started'; viewMode = 'single'; }}
@@ -3118,6 +3138,10 @@
           </span>
         {/each}
       </div>
+      {#if onlineSpectator}
+        {@render wallHand(sideTiles1, fulou1, 'l', lastZimoIndex($game.game.shoupai.get(srv1), shoupai1))}
+        {@render wallHand(sideTiles2, fulou2, 'r', lastZimoIndex($game.game.shoupai.get(srv2), shoupai2))}
+      {/if}
     </div>
     <!-- [2026-10-09 shun2 V7] 抜いた華と北は席の札の中に出す [旧: 卓の上の 3 枠の帯] -->
   {/if}
@@ -6297,6 +6321,70 @@
   main.mode-single.ui-board-v2 .vfulou-group { flex-direction: row; align-items: flex-end; gap: 1px; margin: 0; padding: 0; border: 0; }
   main.mode-single.ui-board-v2 .vft :global(.tile.size-sm) { width: 20px; height: 28px; min-width: 0; min-height: 0; margin: 0; }
   .vft.vclaimed { display: inline-block; transform: rotate(90deg); margin: 0 4px; }
+
+  /* ---- 観戦: 左右の人の手牌を卓の辺に縦に並べる [2026-10-13 リョー「三方壁に沿うように」] ----
+     卓の枠 [center-board] の左右の端に置く。牌の大きさは枠の高さから決め、河と得点の箱はその分だけ内に寄せる */
+  main.mode-single.ui-board-v2.spectating {
+    --wall-h: clamp(18px, calc(100cqh / 12.5), 46px);
+    --wall-w: calc(var(--wall-h) * 0.727);
+    --score-side: min(56cqh, calc((100cqw - 2 * var(--wall-h) - 32px) / 2.9), 340px);
+  }
+  main.mode-single.ui-board-v2.spectating .center-board { position: relative; }
+  .wall-hand {
+    position: absolute;
+    top: 50%;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    max-height: 100%;
+    flex-wrap: wrap;
+    align-content: flex-start;
+  }
+  /* 左の人: 上から下へ。折り返しは卓の内側 [右] */
+  .wall-hand.wall-l { left: 0; flex-direction: column; transform: translateY(-50%); }
+  /* 右の人: 下から上へ [河と同じ]。折り返しは卓の内側 [左] */
+  .wall-hand.wall-r { right: 0; flex-direction: column-reverse; flex-wrap: wrap-reverse; transform: translateY(-50%); }
+  .wall-tile {
+    position: relative;
+    display: block;
+    flex: none;
+    width: var(--wall-h);
+    height: var(--wall-w);
+  }
+  main.mode-single.ui-board-v2 .wall-tile :global(.tile.size-md) {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--wall-w);
+    height: var(--wall-h);
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+  }
+  main.mode-single.ui-board-v2 .wall-l .wall-tile :global(.tile.size-md) { transform: translate(-50%, -50%) rotate(90deg); }
+  main.mode-single.ui-board-v2 .wall-r .wall-tile :global(.tile.size-md) { transform: translate(-50%, -50%) rotate(-90deg); }
+  /* 鳴いた牌の取った 1 枚は横の家でも直立 [2026-07-16 リョー指示、伏せない vtile と同じ] */
+  .wall-tile.wall-claimed { width: var(--wall-w); height: var(--wall-h); }
+  main.mode-single.ui-board-v2 .wall-hand .wall-claimed :global(.tile.size-md) { transform: translate(-50%, -50%); }
+  /* ツモった牌は手牌から少し離す */
+  .wall-l .wall-tile.wall-zimo { margin-top: calc(var(--wall-w) * 0.45); }
+  .wall-r .wall-tile.wall-zimo { margin-bottom: calc(var(--wall-w) * 0.45); }
+  .wall-meld { display: flex; flex-direction: inherit; align-items: center; gap: 1px; }
+  .wall-l .wall-meld { margin-top: calc(var(--wall-w) * 0.45); }
+  .wall-r .wall-meld { margin-bottom: calc(var(--wall-w) * 0.45); }
+  .wall-back {
+    position: absolute;
+    inset: 1px;
+    border-radius: 2px;
+    background: var(--jz-back);
+    box-shadow: inset -3px 0 0 var(--jz-back-edge);
+  }
+  .wall-back.back-b { background: #3e4f6b; }
+  /* 観戦では席の札の下の小さな手牌は出さない [卓の辺に出している] */
+  main.mode-single.ui-board-v2.spectating .seat-left .vhand,
+  main.mode-single.ui-board-v2.spectating .seat-left .vfulou,
+  main.mode-single.ui-board-v2.spectating .seat-right .vhand,
+  main.mode-single.ui-board-v2.spectating .seat-right .vfulou { display: none; }
 
   /* ---- 華の帯 [2026-10-09 shun、ラフ c + リョー「空白になってる緑だけの領域を活かして」、codex の見直し] ----
      上の行を卓の幅いっぱいにし、真ん中に 3 人の華の札を隣り合わせに置く [左 = 上家 ・ 真ん中 = 自分 ・ 右 = 下家]。

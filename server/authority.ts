@@ -606,7 +606,7 @@ export class RoomAuthority {
     return null;
   }
 
-  private applyDiscard(actor: PlayerId, paiValue: string, meta?: { gold?: boolean; pochi?: any }): string | null {
+  private applyDiscard(actor: PlayerId, paiValue: string, meta?: { gold?: boolean; pochi?: any; tsumogiri?: boolean }): string | null {
     const currentErr = this.requireCurrent(actor, 'discard');
     if (currentErr) return currentErr;
     const pendingErr = this.requireNoReactionPending('discard');

@@ -22,7 +22,8 @@
   export let isDoraPai: (t: string) => boolean = () => false;
   export let lizhiPending: boolean = false;
   export let lizhiKindLabel: string = 'リーチ';
-  export let onTileClick: (p: number, t: string) => void = () => {};
+  // fromZimo: 押したのがツモった牌そのものか [空切りとツモ切りを分ける、2026-10-13]
+  export let onTileClick: (p: number, t: string, fromZimo?: boolean) => void = () => {};
   export let disabled: boolean = false;
   export let shuvariActive: boolean = false;
 </script>
@@ -46,7 +47,7 @@
         aria-label={isPendingCandidate ? `${lizhiKindLabel}の宣言牌として${lizhiPaiLabel(t)}を切る` : undefined}
         title={isPendingCandidate ? `${lizhiKindLabel}: ${lizhiPaiLabel(t)}を切る` : undefined}
         data-lizhi-candidate={isPendingCandidate ? 'true' : undefined}
-        on:click={() => onTileClick(player, t)}
+        on:click={() => onTileClick(player, t, i === lastZimoIdx)}
         disabled={disabled || !isCurrent}
       >
         <Tile pai={t} face={revealHand ? 'up' : 'down'} />
