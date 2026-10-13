@@ -48,7 +48,13 @@ for (const command of commands) {
   else segments[segments.length - 1].push(command);
 }
 
-type Dice = { match: number; seat: number; user: string; name: string; rolls: number; hits: number; chip: number; revision: number };
+// base / sign / shuba は読み直しで付ける [合わなくなった東風は 0 / '' / null のまま]。
+// 10-14 先輩「サイコロはベースと±別でちゃんと出したいね。あとシュバと順当な当てとね、その辺も整理して」
+//  - hitChip = 出目当ての分 [ゾロ目でない投げの command の _roomChipDelta]、zoroChip = シュバの連続ゾロ目特典の分 [ゾロ目の投げ]
+type Dice = {
+  match: number; seat: number; user: string; name: string; rolls: number; hits: number; chip: number; revision: number;
+  zoros: number; hitChip: number; zoroChip: number; base: number; mult: number; sign: '' | '+' | '-'; shuba: boolean | null;
+};
 type Hule = { match: number; seat: number | null; ron: boolean; defen: number; hand: string; revision: number };
 // 1 局で動いた祝儀 (アガリ ・ サイコロ ・ 華 ・ 流局のテンパイ料も全部)。局の切れ目は nextRound。
 // 10-14 先輩「局で100枚以上動いた部分とかサイコロとかハイライトで3枚目以降の画像として」
@@ -84,13 +90,24 @@ segments.forEach((segment, index) => {
     const delta = (action._roomChipDelta ?? {}) as Record<string, number>;
     if (action.type === 'selectSaiKoroCombo') {
       if (!current) {
-        current = { match, seat: command.actorSeat, user: roomSeatUser[command.actorSeat] ?? '', name: '', rolls: 0, hits: 0, chip: 0, revision: command.revision };
+        current = {
+          match, seat: command.actorSeat, user: roomSeatUser[command.actorSeat] ?? '', name: '', rolls: 0, hits: 0, chip: 0, revision: command.revision,
+          zoros: 0, hitChip: 0, zoroChip: 0, base: 0, mult: 0, sign: '', shuba: null,
+        };
       }
       combo = [Math.min(action.small, action.large), Math.max(action.small, action.large)];
     }
-    if (current) current.chip += Number(delta[String(current.seat)] ?? 0);
-    if (current && action.type === 'rollSaiKoroDice' && Array.isArray(action.override) && combo) {
-      const [d1, d2] = action.override as [number, number];
+    const mineDelta = current ? Number(delta[String(current.seat)] ?? 0) : 0;
+    if (current) current.chip += mineDelta;
+    const rolled = action.type === 'rollSaiKoroDice' && Array.isArray(action.override) ? action.override as [number, number] : null;
+    if (current && rolled && rolled[0] === rolled[1]) {
+      current.zoros += 1;
+      current.zoroChip += mineDelta;
+    } else if (current) {
+      current.hitChip += mineDelta;
+    }
+    if (current && rolled && combo) {
+      const [d1, d2] = rolled;
       current.rolls += 1;
       if (d1 !== d2 && Math.min(d1, d2) === combo[0] && Math.max(d1, d2) === combo[1]) current.hits += 1;
     }
@@ -126,7 +143,17 @@ segments.forEach((segment, index) => {
       const ps = before.pendingSaiKoro;
       const chance = ps.chances[ps.currentIdx] ?? {};
       const target = mine.find((d) => d.revision === command.revision);
-      if (target) target.name = String(chance.name ?? chance.awardKey ?? '');
+      if (target) {
+        target.name = String(chance.name ?? chance.awardKey ?? '');
+        target.base = Number(chance.baseChip ?? 0);
+        // ± は払いの倍率の符号 [逆ぽっちは base が正のまま倍率で払いに回る。store.rollSaiKoroDice と同じ opts]
+        const roller = Number(chance.winner ?? ps.winner) as 0 | 1 | 2;
+        const mode = chance.mode === 'ron' ? 'ron' : 'tsumo';
+        target.mult = before.game.computeChipMultiplier(roller, { bypassShuvari: true, bypassPochi: mode === 'ron', mode });
+        target.sign = target.mult < 0 ? '-' : '+';
+        // シュバサイ = 役固有の常時シュバ、またはシュバ適用のサイコロ × シュバ宣言中 [store.rollSaiKoroDice と同じ判定]
+        target.shuba = chance.alwaysShuvari === true || (chance.shuvariApplicable === true && !!before.game.shuvariActive?.[roller]);
+      }
     }
     const eventsBefore = (before.game.events ?? []).length;
     const reason = authority.validateAndApply(command.actorSeat, structuredClone(command.action), members);
