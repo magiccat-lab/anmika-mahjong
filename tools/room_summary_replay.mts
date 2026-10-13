@@ -49,14 +49,34 @@ for (const command of commands) {
 }
 
 type Dice = { match: number; seat: number; user: string; name: string; rolls: number; hits: number; chip: number; revision: number };
-type Hule = { match: number; seat: number | null; ron: boolean; defen: number; hand: string };
+type Hule = { match: number; seat: number | null; ron: boolean; defen: number; hand: string; revision: number };
+// 1 局で動いた祝儀 (アガリ ・ サイコロ ・ 華 ・ 流局のテンパイ料も全部)。局の切れ目は nextRound。
+// 10-14 先輩「局で100枚以上動いた部分とかサイコロとかハイライトで3枚目以降の画像として」
+type Hand = { match: number; ordinal: number; delta: Record<string, number>; hules: number; firstRevision: number; lastRevision: number };
 const dice: Dice[] = [];
 const hules: Hule[] = [];
 const diverged: Array<{ match: number; revision: number; reason: string }> = [];
+const hands: Hand[] = [];
 
-// 1. 記録だけで数えるサイコロ
+// 1. 記録だけで数えるサイコロと、局ごとの祝儀の動き
 segments.forEach((segment, index) => {
   const match = index + 1;
+  let hand: Hand | null = null;
+  for (const command of segment) {
+    const action = command.action as Record<string, any>;
+    if (action.type === 'nextMatch' || action.type === 'nextRound') {
+      if (hand) hands.push(hand);
+      hand = null;
+      if (action.type === 'nextMatch') continue;
+    }
+    if (!hand) hand = { match, ordinal: hands.filter((h) => h.match === match).length + 1, delta: {}, hules: 0, firstRevision: command.revision, lastRevision: command.revision };
+    hand.lastRevision = command.revision;
+    if (action.type === 'tsumo' || action.type === 'ron') hand.hules += 1;
+    for (const [seat, v] of Object.entries((action._roomChipDelta ?? {}) as Record<string, number>)) {
+      hand.delta[seat] = (hand.delta[seat] ?? 0) + Number(v || 0);
+    }
+  }
+  if (hand) hands.push(hand);
   let current: Dice | null = null;
   let combo: [number, number] | null = null;
   for (const command of segment) {
@@ -120,9 +140,9 @@ segments.forEach((segment, index) => {
     // アガリは game の hule event で拾う [華や金北を選ぶ和了は tsumo の command の後で確定する]
     for (const event of (after.game.events ?? []).slice(eventsBefore)) {
       if (event?.type !== 'hule') continue;
-      hules.push({ match, seat: event.player, ron: !!event.isRon, defen: Number(event.defen ?? 0), hand: String(after.game.shoupai.get(event.player)?.toString?.() ?? '') });
+      hules.push({ match, seat: event.player, ron: !!event.isRon, defen: Number(event.defen ?? 0), hand: String(after.game.shoupai.get(event.player)?.toString?.() ?? ''), revision: command.revision });
     }
   }
 });
 
-console.log(JSON.stringify({ room: roomId, matches_started: segments.length, room_seat_user: roomSeatUser, dice, hules, diverged }));
+console.log(JSON.stringify({ room: roomId, matches_started: segments.length, room_seat_user: roomSeatUser, dice, hules, hands, diverged }));

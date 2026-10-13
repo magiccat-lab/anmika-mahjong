@@ -2235,6 +2235,8 @@ async def list_matches(request: Request):
 SUMMARY_DIR = Path(os.environ.get("ANMIKA_SUMMARY_DIR", str(DB_PATH.parent / "summaries")))
 _SUMMARY_ID_RE = re.compile(r"^[A-Za-z0-9]{1,16}-\d{8}-\d{4}$")
 _SUMMARY_FILES = ("overview.png", "stats.png")
+# 3 枚目からのハイライト (10-14 先輩「局で100枚以上動いた部分とかサイコロとかハイライトで3枚目以降の画像として」)
+_SUMMARY_FILE_RE = re.compile(r"^(overview|stats|highlight_\d{1,2})\.png$")
 
 
 @app.get("/api/summaries")
@@ -2259,7 +2261,8 @@ async def list_summaries(request: Request):
             out.append({
                 "id": d.name, "room": meta.get("room"), "n": meta.get("n"), "first": meta.get("first"), "last": meta.get("last"),
                 "ranking": meta.get("ranking") or [],
-                "images": [f"/api/summaries/{d.name}/{f}" for f in _SUMMARY_FILES if (d / f).exists()],
+                "images": [f"/api/summaries/{d.name}/{f}" for f in (meta.get("images") or _SUMMARY_FILES)
+                           if _SUMMARY_FILE_RE.match(str(f)) and (d / f).exists()],
             })
             if len(out) >= limit:
                 break
@@ -2270,7 +2273,7 @@ async def list_summaries(request: Request):
 async def get_summary_image(sid: str, name: str, request: Request):
     if not current_user(request):
         raise HTTPException(status_code=401, detail="login required")
-    if not _SUMMARY_ID_RE.match(sid) or name not in _SUMMARY_FILES:
+    if not _SUMMARY_ID_RE.match(sid) or not _SUMMARY_FILE_RE.match(name):
         raise HTTPException(status_code=404, detail="not found")
     path = SUMMARY_DIR / sid / name
     if not path.is_file():

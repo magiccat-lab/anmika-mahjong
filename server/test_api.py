@@ -658,4 +658,11 @@ def test_summaries_list_and_image(env, monkeypatch, tmp_path):
     r = c.get("/api/summaries/GFIO-20261013-2310/overview.png")
     assert r.status_code == 200 and r.headers["content-type"] == "image/png"
     assert c.get("/api/summaries/GFIO-20261013-2310/summary.json").status_code == 404
+    (root / "GFIO-20261013-2310" / "highlight_1.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    meta = json.loads((root / "GFIO-20261013-2310" / "summary.json").read_text(encoding="utf-8"))
+    meta["images"] = ["overview.png", "highlight_1.png"]
+    (root / "GFIO-20261013-2310" / "summary.json").write_text(json.dumps(meta), encoding="utf-8")
+    got = c.get("/api/summaries?room=GFIO").json()["summaries"][0]
+    assert got["images"] == ["/api/summaries/GFIO-20261013-2310/overview.png", "/api/summaries/GFIO-20261013-2310/highlight_1.png"]
+    assert c.get("/api/summaries/GFIO-20261013-2310/highlight_1.png").status_code == 200
     assert c.get("/api/summaries/..%2Fescape/overview.png").status_code == 404
