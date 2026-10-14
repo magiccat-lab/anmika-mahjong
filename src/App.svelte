@@ -147,26 +147,44 @@
 
   // [2026-10-14 リョー「フィーバー中に流れるようにしたい、私用で権利大丈夫だからmp3で流してほしい」]
   // 誰かのフィーバー中は、アン ミカさんの「アンミカーニバル」を繰り返し流す。オンラインでも各自の画面で鳴る。
-  // 曲は public/sounds/bgm/ (git には入れない)。ミュートの設定なら鳴らさず、フィーバーが終われば頭に戻して止める
+  // 曲は public/sounds/bgm/ (git には入れない)。ミュートの設定なら鳴らさない。
+  // フィーバーが終わったら 2.5 秒かけて音を下げてから止め、頭に戻す (同じ日「曲は最後フェードとかかけてあげてね」)。
+  // 下げている途中でまたフィーバーになれば、そのまま音量を戻して続ける
   const FEVER_BGM = '/sounds/bgm/anmika_carnival.mp3';
+  const FEVER_BGM_VOLUME = 0.5;
+  const FEVER_BGM_FADE_MS = 2500;
   let feverBgm: HTMLAudioElement | null = null;
+  let feverBgmFade: ReturnType<typeof setInterval> | null = null;
   $: someoneFeverBgm = ([0, 1, 2] as const).some((p) => !!$game.game.feverActive?.[p]);
   $: syncFeverBgm(someoneFeverBgm && !$prefs.muted && appMode !== 'menu');
+  function stopFeverBgmFade(): void {
+    if (feverBgmFade !== null) { clearInterval(feverBgmFade); feverBgmFade = null; }
+  }
   function syncFeverBgm(on: boolean): void {
     if (typeof window === 'undefined') return;
     if (on) {
+      stopFeverBgmFade();
       if (!feverBgm) {
         feverBgm = new Audio(FEVER_BGM);
         feverBgm.loop = true;
-        feverBgm.volume = 0.5;
       }
+      feverBgm.volume = FEVER_BGM_VOLUME;
       if (feverBgm.paused) feverBgm.play().catch(() => { /* まだ画面を触っていない時は鳴らせない。次の変化で鳴らす */ });
-    } else if (feverBgm && !feverBgm.paused) {
-      feverBgm.pause();
-      feverBgm.currentTime = 0;
+    } else if (feverBgm && !feverBgm.paused && feverBgmFade === null) {
+      const audio = feverBgm;
+      const stepMs = 100;
+      const step = FEVER_BGM_VOLUME / (FEVER_BGM_FADE_MS / stepMs);
+      feverBgmFade = setInterval(() => {
+        const v = audio.volume - step;
+        if (v > 0.001) { audio.volume = v; return; }
+        stopFeverBgmFade();
+        audio.pause();
+        audio.currentTime = 0;
+        audio.volume = FEVER_BGM_VOLUME;
+      }, stepMs);
     }
   }
-  onDestroy(() => { feverBgm?.pause(); });
+  onDestroy(() => { stopFeverBgmFade(); feverBgm?.pause(); });
 
   const PLAYERS = [0, 1, 2] as const satisfies readonly PlayerId[];
 
