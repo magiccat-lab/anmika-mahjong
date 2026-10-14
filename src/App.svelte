@@ -145,49 +145,64 @@
   $: fxPochiRevealShowing = !!pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat);
   $: fxPresentationBusy = fxCutinBusy || fxPochiRevealShowing;
 
-  // [2026-10-14 リョー「フィーバー中に流れるようにしたい、私用で権利大丈夫だからmp3で流してほしい」]
-  // 誰かのフィーバー中は、アン ミカさんの「アンミカーニバル」を繰り返し流す。オンラインでも各自の画面で鳴る。
-  // 曲は public/sounds/bgm/ (git には入れない)。ミュートの設定なら鳴らさない。
-  // フィーバーが終わったら 2.5 秒かけて音を下げてから止め、頭に戻す (同じ日「曲は最後フェードとかかけてあげてね」)。
-  // 下げている途中でまたフィーバーになれば、そのまま音量を戻して続ける
-  const FEVER_BGM = '/sounds/bgm/anmika_carnival.mp3';
-  // 音量は 0.3 (同じ日「BGMの音量ちょっと下げる」で 0.5 から)
-  const FEVER_BGM_VOLUME = 0.3;
-  const FEVER_BGM_FADE_MS = 2500;
-  let feverBgm: HTMLAudioElement | null = null;
-  let feverBgmFade: ReturnType<typeof setInterval> | null = null;
+  // [2026-10-14 リョー] 卓の BGM。どちらもアン ミカさんの「アンミカーニバル」で、曲のファイルは public/sounds/bgm/ (git には入れない)。
+  //  - フィーバー中: 原曲 (「フィーバー中に流れるようにしたい、私用で権利大丈夫だからmp3で流してほしい」)
+  //  - 通常時: 8bit 版を小さめに (「通常時に8bit風のアンミカーニバルのBGM裏で流すのどう」→「2で作って進めて」。
+  //    demucs で分けた歌 ・ ベース ・ ドラム ・ その他を、矩形波 ・ 三角波 ・ ノイズ ・ アルペジオに打ち直した物。作り方は tools/bgm_chiptune.py)
+  // 切り替わる時と止まる時は 2.5 秒かけて音を下げる (「曲は最後フェードとかかけてあげてね」)。
+  // 音量は控えめ (「BGMの音量ちょっと下げる」)。カットインと白ぽっちのめくりの間は消す (「演出カットイン入ったらBGMミュート忘れずにね」)。
+  // ミュートの設定 ・ 卓の右上の「BGM 切」・ 入口のメニューでは鳴らさない
+  const BGM_TRACKS = {
+    fever: { src: '/sounds/bgm/anmika_carnival.mp3', volume: 0.3 },
+    normal: { src: '/sounds/bgm/anmika_carnival_8bit.mp3', volume: 0.12 },
+  } as const;
+  type BgmKind = keyof typeof BGM_TRACKS;
+  const BGM_FADE_MS = 2500;
+  const bgmAudio: Partial<Record<BgmKind, HTMLAudioElement>> = {};
+  const bgmFade: Partial<Record<BgmKind, ReturnType<typeof setInterval>>> = {};
+  let bgmTick = 0; // 鳴らし始めた Audio を反応 ($:) に知らせる
   $: someoneFeverBgm = ([0, 1, 2] as const).some((p) => !!$game.game.feverActive?.[p]);
-  $: syncFeverBgm(someoneFeverBgm && !$prefs.muted && !$prefs.bgmOff && appMode !== 'menu');
-  function stopFeverBgmFade(): void {
-    if (feverBgmFade !== null) { clearInterval(feverBgmFade); feverBgmFade = null; }
+  $: bgmAllowed = !$prefs.muted && !$prefs.bgmOff && appMode !== 'menu' && viewMode === 'single';
+  $: syncBgm(!bgmAllowed ? null : someoneFeverBgm ? 'fever' : 'normal');
+  function stopBgmFade(kind: BgmKind): void {
+    const t = bgmFade[kind];
+    if (t !== undefined) { clearInterval(t); delete bgmFade[kind]; }
   }
-  function syncFeverBgm(on: boolean): void {
+  function fadeOutBgm(kind: BgmKind): void {
+    const audio = bgmAudio[kind];
+    if (!audio || audio.paused || bgmFade[kind] !== undefined) return;
+    const stepMs = 100;
+    const step = BGM_TRACKS[kind].volume / (BGM_FADE_MS / stepMs);
+    bgmFade[kind] = setInterval(() => {
+      const v = audio.volume - step;
+      if (v > 0.001) { audio.volume = v; return; }
+      stopBgmFade(kind);
+      audio.pause();
+      // フィーバーの曲は次のフィーバーで頭から。通常の 8bit は続きから
+      if (kind === 'fever') audio.currentTime = 0;
+      audio.volume = BGM_TRACKS[kind].volume;
+    }, stepMs);
+  }
+  function syncBgm(want: BgmKind | null): void {
     if (typeof window === 'undefined') return;
-    if (on) {
-      stopFeverBgmFade();
-      if (!feverBgm) {
-        feverBgm = new Audio(FEVER_BGM);
-        feverBgm.loop = true;
+    for (const kind of Object.keys(BGM_TRACKS) as BgmKind[]) {
+      if (kind !== want) { fadeOutBgm(kind); continue; }
+      stopBgmFade(kind);
+      let audio = bgmAudio[kind];
+      if (!audio) {
+        audio = new Audio(BGM_TRACKS[kind].src);
+        audio.loop = true;
+        bgmAudio[kind] = audio;
+        bgmTick += 1;
       }
-      feverBgm.volume = FEVER_BGM_VOLUME;
-      if (feverBgm.paused) feverBgm.play().catch(() => { /* まだ画面を触っていない時は鳴らせない。次の変化で鳴らす */ });
-    } else if (feverBgm && !feverBgm.paused && feverBgmFade === null) {
-      const audio = feverBgm;
-      const stepMs = 100;
-      const step = FEVER_BGM_VOLUME / (FEVER_BGM_FADE_MS / stepMs);
-      feverBgmFade = setInterval(() => {
-        const v = audio.volume - step;
-        if (v > 0.001) { audio.volume = v; return; }
-        stopFeverBgmFade();
-        audio.pause();
-        audio.currentTime = 0;
-        audio.volume = FEVER_BGM_VOLUME;
-      }, stepMs);
+      audio.volume = BGM_TRACKS[kind].volume;
+      if (audio.paused) audio.play().catch(() => { /* まだ画面を触っていない時は鳴らせない。次の変化で鳴らす */ });
     }
   }
-  onDestroy(() => { stopFeverBgmFade(); feverBgm?.pause(); });
-  // カットインと白ぽっちのめくりの間は曲を消す (同じ日「演出カットイン入ったらBGMミュート忘れずにね」)。終われば戻る
-  $: if (feverBgm) feverBgm.muted = fxPresentationBusy;
+  onDestroy(() => {
+    for (const kind of Object.keys(BGM_TRACKS) as BgmKind[]) { stopBgmFade(kind); bgmAudio[kind]?.pause(); }
+  });
+  $: { void bgmTick; for (const audio of Object.values(bgmAudio)) if (audio) audio.muted = fxPresentationBusy; }
 
   const PLAYERS = [0, 1, 2] as const satisfies readonly PlayerId[];
 
@@ -3068,9 +3083,9 @@
         {/if}
       </div>
       <div class="table-menu-wrap">
-        <!-- [2026-10-14 リョー「BGM音量操作トグルは付けて良いな、見える位置に」] フィーバー中の曲を流すか。⋯ の隣に常に出す
+        <!-- [2026-10-14 リョー「BGM音量操作トグルは付けて良いな、見える位置に」] 卓の BGM (通常の 8bit 版 ・ フィーバーの原曲) を流すか。⋯ の隣に常に出す
              (手牌の上の帯に置くとスマホで自分の札が詰まった) -->
-        <button type="button" class="bgm-btn" class:off={$prefs.bgmOff} aria-pressed={!$prefs.bgmOff} title="フィーバー中の曲 (アンミカーニバル) を流す" on:click={() => prefs.toggle('bgmOff')}>BGM {$prefs.bgmOff ? '切' : '入'}</button>
+        <button type="button" class="bgm-btn" class:off={$prefs.bgmOff} aria-pressed={!$prefs.bgmOff} title="BGM (アンミカーニバル) を流す" on:click={() => prefs.toggle('bgmOff')}>BGM {$prefs.bgmOff ? '切' : '入'}</button>
         <button type="button" class="table-menu-btn" class:open={tableMenuOpen} aria-label="設定と退出" aria-expanded={tableMenuOpen} title="設定と退出" on:click={() => { tableMenuOpen = !tableMenuOpen; }}>⋯</button>
         {#if tableMenuOpen}
           <div class="table-menu" role="menu">
