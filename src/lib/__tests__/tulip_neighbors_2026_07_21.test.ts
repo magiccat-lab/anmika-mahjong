@@ -22,10 +22,13 @@ describe('tulipNeighbors [チューリップ隣接、リョー裁定 2026-07-20]
     expect(new Set(tulipNeighbors('z3'))).toEqual(new Set(['z1', 'z4']));
   });
 
-  it('發 z6・中 z7 など他の字牌は隣接なし', () => {
-    expect(tulipNeighbors('z6')).toEqual([]);
-    expect(tulipNeighbors('z7')).toEqual([]);
-    expect(tulipNeighbors('z1')).toEqual([]);
+  it('三元牌は両方向 [2026-10-14 リョー「世の中のルールと同じ」]: 發・中 めくりも残りの 2 つに当たる', () => {
+    expect(new Set(tulipNeighbors('z6'))).toEqual(new Set(['z5', 'z7']));
+    expect(new Set(tulipNeighbors('z7'))).toEqual(new Set(['z5', 'z6']));
+  });
+
+  it('風は 東・西・北 が両方向、南は隣接なし', () => {
+    expect(new Set(tulipNeighbors('z1'))).toEqual(new Set(['z3', 'z4']));
     expect(tulipNeighbors('z2')).toEqual([]);
   });
 
