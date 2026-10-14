@@ -310,12 +310,13 @@
   // cpuStepImpl が複数ターンを1 update で回すため shan.lastZimoPochi は上書きされる。
   // events 配列から z5 の色を直接取り、キューで複数回分を順番に表示する
   // [2026-10-14] でかぽっち (リーチ一発で引いた 1筒 ・ 2筒) も同じ絞りに。kakutei は見えている牌で正 ・ 逆が決まっている時
-  type PochiRevealItem = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean; deka?: 'p1' | 'p2' | null; kakutei?: 'good' | 'bad' | null; step?: number; premium?: boolean };
+  type PochiRevealItem = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean; deka?: 'p1' | 'p2' | null; kakutei?: 'good' | 'bad' | null; step?: number; premium?: boolean; teaser?: 'bolt' | 'line' };
   // 期待度 (光りが何段まで上がるか) とプレミアはここで決めて PochiSqueeze に渡す (オンラインは同じ物を他の席へ流す)。
   // [2026-10-14 リョー 4 版の答え: ステップアップ ・ 溜め ・ プレミアを入れる]
-  function pochiStep(color: PochiColor, kakutei: 'good' | 'bad' | null): { step: number; premium: boolean } {
+  // 予告は稲妻と決め台詞「白って 200 色あんねん」のカットインを半々 (4 版の 2 ・ 3 の答え)
+  function pochiStep(color: PochiColor, kakutei: 'good' | 'bad' | null): { step: number; premium: boolean; teaser: 'bolt' | 'line' } {
     const step = pochiTopStep(POCHI_GOOD[color], kakutei, Math.random());
-    return { step, premium: premiumRoll(step, Math.random()) };
+    return { step, premium: premiumRoll(step, Math.random()), teaser: Math.random() < 0.5 ? 'line' : 'bolt' };
   }
   let pochiReveal: PochiRevealItem | null = null;
   let pochiRevealQueue: PochiRevealItem[] = [];
@@ -372,7 +373,7 @@
   // [2026-10-14 リョー、演出のラフ 2 版「他の人の画面」] オンラインでは引いた人の絞りの進みを server が他の席へ中継する。
   // 引いた人: 開いた ・ 進み (70ms ごと) ・ めくれた ・ 閉じたを送る。色は点がのぞく 0.4 から
   // 他の席: remotePochi に受けて、同じ PochiSqueeze を readOnly で出す
-  type RemotePochi = { seat: number; deka: 'p1' | 'p2' | null; kakutei: 'good' | 'bad' | null; glow: [Glow, Glow]; step: number | null; premium: boolean; peel: number; color: PochiColor | null; key: number };
+  type RemotePochi = { seat: number; deka: 'p1' | 'p2' | null; kakutei: 'good' | 'bad' | null; glow: [Glow, Glow]; step: number | null; premium: boolean; teaser: 'bolt' | 'line'; peel: number; color: PochiColor | null; key: number };
   let remotePochi: RemotePochi | null = null;
   let pochiFxLast = 0;
   let pochiFxTimer: ReturnType<typeof setTimeout> | null = null;
@@ -391,7 +392,7 @@
     pochiFxQueued = null;
     if (pochiFxTimer) { clearTimeout(pochiFxTimer); pochiFxTimer = null; }
     const step = pochiReveal.step ?? 0;
-    sendPochiFx({ phase: 'open', deka: pochiReveal.deka ?? null, kakutei: pochiReveal.kakutei ?? null, glow: legacyGlowOfStep(step), step, premium: !!pochiReveal.premium });
+    sendPochiFx({ phase: 'open', deka: pochiReveal.deka ?? null, kakutei: pochiReveal.kakutei ?? null, glow: legacyGlowOfStep(step), step, premium: !!pochiReveal.premium, teaser: pochiReveal.teaser ?? 'bolt' });
   }
   function onPochiProgress(p: number): void {
     if (!pochiFxMine() || !pochiReveal || pochiFxRevealSent) return;
@@ -424,6 +425,7 @@
         kakutei: msg.kakutei === 'good' || msg.kakutei === 'bad' ? msg.kakutei : null,
         glow: Array.isArray(msg.glow) && msg.glow.length === 2 ? msg.glow : ['white', 'white'],
         step: Number.isInteger(msg.step) && msg.step >= 0 && msg.step <= 4 ? msg.step : null, premium: msg.premium === true,
+        teaser: msg.teaser === 'line' ? 'line' : 'bolt',
         peel: 0, color: null, key: Date.now(),
       };
       return;
@@ -434,7 +436,7 @@
     }
     // 開いたのを取り逃がしていたら (再接続など) ここで作る
     const cur: RemotePochi = remotePochi?.seat === gameSeat ? remotePochi
-      : { seat: gameSeat, deka: null, kakutei: null, glow: ['white', 'white'], step: null, premium: false, peel: 0, color: null, key: Date.now() };
+      : { seat: gameSeat, deka: null, kakutei: null, glow: ['white', 'white'], step: null, premium: false, teaser: 'bolt', peel: 0, color: null, key: Date.now() };
     const peel = msg.phase === 'reveal' ? 1 : Math.max(cur.peel, Number(msg.peel) || 0);
     remotePochi = { ...cur, color: color ?? cur.color, peel };
   }
@@ -2176,13 +2178,14 @@
   }
 
   // [2026-07-22 リョー要望] オンライン用トグル: 鳴きなし / 自動アガリ
-  let onlineNoCall = false;
+  // [2026-10-14 リョー「なきなしボタンをデカい所に出してほしい」] 鳴きなしは ⋯ の中から手牌の上の帯 (ツモ切りの隣) へ出し、CPU 戦でも効く
+  let noCall = false;
   let onlineAutoWin = false;
   // [2026-07-23 総点検 P2] $: 副作用は ack 反映前の store 更新 [cutin 等] で何度も走る。
   // 判定窓ごとに1回だけ送るキーで連射を止める [server 側 reject で壊れはしないがノイズ源]
   let _noCallSentKey = '';
   let _autoWinSentKey = '';
-  $: if (onlineGameStarted && onlineNoCall && $game.awaitingFulou) {
+  $: if ((onlineGameStarted || viewMode === 'single') && !onlineSpectator && noCall && $game.awaitingFulou) {
     const canCallSelf = [...($game.ponCandidates ?? []), ...($game.kanCandidates ?? [])]
       .some((c: any) => c.player === actorSeat && (c.mianzi?.length ?? 0) > 0);
     const k = `pass-${$game.game.events?.length ?? 0}-${$game.lastDapai?.player ?? 'x'}-${$game.lastDapai?.pai ?? 'x'}`;
@@ -3001,14 +3004,14 @@
            持ち越されて 2 枚目が「開いたまま timer なし」で永久に残る。{#key} で毎回作り直す -->
       {#key pochiReveal}
         <PochiSqueeze color={pochiReveal.color} deka={pochiReveal.deka ?? null} kakutei={pochiReveal.kakutei ?? null}
-          step={pochiReveal.step ?? null} premium={!!pochiReveal.premium} who={onlineGameStarted ? seatName(pochiReveal.player) : ''}
+          step={pochiReveal.step ?? null} premium={!!pochiReveal.premium} teaser={pochiReveal.teaser ?? 'bolt'} who={onlineGameStarted ? seatName(pochiReveal.player) : ''}
           onOpen={onPochiOpen} onProgress={onPochiProgress} onClose={closePochiReveal} />
       {/key}
     {:else if onlineGameStarted && remotePochi && !fxCutinBusy}
       <!-- [2026-10-14] 他の人の絞り。引いた人の指の進みをそのまま流す (観戦も同じ) -->
       {#key remotePochi.key}
         <PochiSqueeze readOnly color={remotePochi.color ?? 'blue'} colorKnown={!!remotePochi.color}
-          deka={remotePochi.deka} kakutei={remotePochi.kakutei} glow={remotePochi.glow} step={remotePochi.step} premium={remotePochi.premium} progress={remotePochi.peel}
+          deka={remotePochi.deka} kakutei={remotePochi.kakutei} glow={remotePochi.glow} step={remotePochi.step} premium={remotePochi.premium} teaser={remotePochi.teaser} progress={remotePochi.peel}
           who={seatName(remotePochi.seat)} onClose={() => { remotePochi = null; }} />
       {/key}
     {/if}
@@ -3236,8 +3239,7 @@
               <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; exportDiagnostics(); }} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ"><span class="settings-label">状態ダンプ</span></button>
               <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; reportBug(); }} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報"><span class="settings-label">バグ通報</span></button>
             {:else}
-              <!-- [2026-07-22 リョー要望] オンラインにも 鳴きなし/自動アガリ [ツモ切りは手牌の上] -->
-              <label class="tm-toggle" title="ポン/カン機会を自動で見送る"><input type="checkbox" bind:checked={onlineNoCall}><span>鳴きなし</span></label>
+              <!-- [2026-07-22 リョー要望] オンラインにも 自動アガリ [ツモ切り ・ 鳴きなしは手牌の上] -->
               <label class="tm-toggle" title="ツモ/ロンできる時に自動で和了"><input type="checkbox" bind:checked={onlineAutoWin}><span>自動アガリ</span></label>
               <!-- [2026-10-09 遊真 C5] オンライン中もバグ通報を押せる [🔧 局頭に戻すは出さない] -->
               <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; reportBug(); }} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報"><span class="settings-label">バグ通報</span></button>
@@ -3383,7 +3385,12 @@
       <div class="me-strip">
         {@render seatCard(srv0, 'me')}
         {#if !onlineSpectator}
-          <label class="tm-toggle tsumokiri-toggle" title="自分の手番を自動でツモ切り"><input type="checkbox" bind:checked={autoTsumoKiri}><span>ツモ切り</span></label>
+          <!-- [2026-10-14 リョー「なきなしボタンをデカい所に出してほしい」] 鳴きなしを ⋯ の中 (オンラインだけ) から、ツモ切りの隣へ。CPU 戦でも効く。
+               縦持ちは帯が狭いので 2 つを縦に積む (横に並べると自分の札が潰れた) -->
+          <div class="me-toggles">
+            <label class="tm-toggle tsumokiri-toggle" title="自分の手番を自動でツモ切り"><input type="checkbox" bind:checked={autoTsumoKiri}><span>ツモ切り</span></label>
+            <label class="tm-toggle tsumokiri-toggle nocall-toggle" title="ポン/カンできる時に自動で見送る"><input type="checkbox" bind:checked={noCall}><span>鳴きなし</span></label>
+          </div>
           <!-- スタンプ button [自家のみ表示、 cosmetic、 game state 副作用なし]。帯の右端に固定 -->
           <button class="stamp-open-btn" on:click={openStampPallet} title="スタンプ" aria-label="スタンプ">スタンプ</button>
         {/if}
@@ -6717,6 +6724,16 @@
   .seat-card.sc-me .sc-head { flex-wrap: nowrap; }
   .seat-card.sc-me .sc-pt .sval { font-size: 20px; }
   .tsumokiri-toggle { min-height: 40px; }
+  .me-toggles { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+  /* 狭い横持ち (iPhone SE ・ Galaxy の横): 帯の右の操作 [北抜き ・ ポン ・ リーチ] がツモ切り ・ 鳴きなしに重なるので、縦持ちと同じく帯の上に出す */
+  @media (max-height: 500px) and (max-width: 800px) and (orientation: landscape) {
+    main.mode-single.ui-board-v2 .me-strip .toolbar-red,
+    main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 0; bottom: calc(100% + 6px); max-width: calc(100vw - 16px); }
+    /* 帯に 2 つ並べた分、自分の札が潰れない様に詰める */
+    .me-toggles { gap: 6px; }
+    .me-toggles .tm-toggle { gap: 6px; padding: 0 6px; }
+    main.mode-single.ui-board-v2 .me-strip button.stamp-open-btn { width: auto; padding: 0 8px; font-size: 12px; }
+  }
   main.mode-single.ui-board-v2 .me-strip .toolbar-red {
     position: absolute;
     right: 0;
@@ -6901,6 +6918,8 @@
     .seat-card.sc-me .sc-sub { display: none; }
     .seat-card.sc-me .sc-pt .sval { font-size: 16px; }
     .tm-toggle { min-height: 40px; font-size: 13px; padding: 0 8px; }
+    .me-toggles { flex-direction: column; align-items: stretch; gap: 4px; }
+    .me-toggles .tm-toggle { min-height: 34px; justify-content: space-between; }
     /* 縦持ちは帯が狭いので、操作は帯の上 [卓の下端] に出す */
     main.mode-single.ui-board-v2 .me-strip .toolbar-red,
     main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 0; bottom: calc(100% + 6px); max-width: calc(100vw - 16px); }

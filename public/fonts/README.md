@@ -43,3 +43,8 @@
 - リョー「iでいい」(カットインをダンガンロンパ風の帯にした時、字体 9 つを同じ帯で比べた中から)。
   比べたのは Dela Gothic One ・ Noto Serif JP 900 ・ Zen Old Mincho 900 ・ Potta One ・ Chokokutai ・ Darumadrop One ・ RocknRoll One ・ Rampart One ・ Mochiy Pop One
 - 取り方は同じ (`css2?family=Mochiy+Pop+One&text=<必要な字>`)。演出の語に加えて「あなた」と P0〜3 も入れた (帯の右下の名前は本文の字なので要らないが、残しても数 KB)
+
+# ci-delagothicone-line.woff2 (2026-10-14)
+
+白ぽっちの予告の決め台詞「白って 200 色あんねん」専用。Dela Gothic One (SIL OFL 1.1) を `css2?family=Dela+Gothic+One&text=白って 200 色あんねん` で取った物 (2KB)。
+先輩が 4 案 (Dela Gothic One ・ Yusei Magic ・ Rampart One ・ Mochiy Pop One) から a を選んだ。台詞を変える時は text= を変えて取り直す。使う所は `src/app.css` の 'CI Line' だけ

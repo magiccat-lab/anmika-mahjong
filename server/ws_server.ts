@@ -1294,6 +1294,8 @@ export type PochiFxRelay = {
   /** [2026-10-14 4 版] 光りが何段まで上がるか (0〜4、ステップアップ) と、プレミアか */
   step?: number;
   premium?: boolean;
+  /** 予告の種類 (稲妻 ・ 決め台詞のカットイン) */
+  teaser?: 'bolt' | 'line';
 };
 const POCHI_FX_COLORS = new Set(['blue', 'red', 'green', 'yellow']);
 const POCHI_FX_GLOWS = new Set(['white', 'gold', 'rainbow']);
@@ -1319,6 +1321,7 @@ export function sanitizePochiFx(value: Record<string, unknown>): PochiFxRelay | 
       : ['white', 'white'];
     if (Number.isInteger(value.step) && (value.step as number) >= 0 && (value.step as number) <= 4) out.step = value.step as number;
     if (value.premium === true) out.premium = true;
+    if (value.teaser === 'bolt' || value.teaser === 'line') out.teaser = value.teaser;
   }
   return out;
 }

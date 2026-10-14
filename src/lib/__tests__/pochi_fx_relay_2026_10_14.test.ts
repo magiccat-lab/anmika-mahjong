@@ -122,6 +122,9 @@ describe('白ぽっちの絞りの中継 [2026-10-14]', () => {
     expect(sanitizePochiFx({ phase: 'open', step: 4, premium: true })).toMatchObject({ step: 4, premium: true });
     expect(sanitizePochiFx({ phase: 'open', step: 7, premium: 'yes' })).not.toHaveProperty('step');
     expect(sanitizePochiFx({ phase: 'open', step: 2.5, premium: 'yes' })).not.toHaveProperty('premium');
+    // 予告の種類 (稲妻 ・ 決め台詞) も通す。知らない値は落とす
+    expect(sanitizePochiFx({ phase: 'open', teaser: 'line' })).toMatchObject({ teaser: 'line' });
+    expect(sanitizePochiFx({ phase: 'open', teaser: '<script>' })).not.toHaveProperty('teaser');
   });
 
   it('1 秒 30 通まで、open は 2 秒に 1 回', () => {

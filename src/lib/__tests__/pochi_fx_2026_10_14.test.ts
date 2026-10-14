@@ -43,6 +43,13 @@ describe('PochiSqueeze', () => {
     expect(body).toContain('sq-bolt glow-rainbow');
     expect(body).toContain('/tiles/Pin1.svg');
   });
+  it('決め台詞の予告はカットインと「ぽっちチャンス」で、稲妻は出さない', () => {
+    const { body } = render(PochiSqueeze, { props: { color: 'blue', step: 4, teaser: 'line' } });
+    expect(body).toContain('白って 200 色あんねん');
+    expect(body).toContain('sq-ci glow-rainbow');
+    expect(body).toContain('ぽっちチャンス');
+    expect(body).not.toContain('sq-bolt');
+  });
   it('プレミアの時は予告の代わりにプレミア', () => {
     const { body } = render(PochiSqueeze, { props: { color: 'blue', step: 4, premium: true } });
     expect(body).toContain('アンミカーニバル');

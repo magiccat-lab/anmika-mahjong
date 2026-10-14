@@ -25,6 +25,8 @@
   export let step: number | null = null;
   /** プレミア (虹の確定のまれな演出)。引いた人が決めて他の席へ流す */
   export let premium = false;
+  /** 予告の種類: 稲妻か、決め台詞「白って 200 色あんねん」のカットイン (4 版の 3 の答え)。引いた人が決めて他の席へ流す */
+  export let teaser: 'bolt' | 'line' = 'bolt';
   /** 前の型の光り 2 段 (古い端末から届いた時だけ使う) */
   export let glow: [Glow, Glow] | null = null;
   export let readOnly = false;
@@ -139,9 +141,9 @@
       playSound('/sounds/bgm/premium_sabi.mp3', 0.55);
       premiumTimer = setTimeout(() => { premiumShowing = false; startKakutei(); }, 2800);
     } else {
-      // 予告: 稲妻と「ぽっちチャンス」の帯 (1.6 秒) の後に、確定の帯と絞り
-      se('gashan', 0.6); se('gyuiin', 0.5);
-      teaserTimer = setTimeout(() => { teaserShowing = false; startKakutei(); }, 1600);
+      // 予告: 稲妻と「ぽっちチャンス」の帯 (1.6 秒)、または決め台詞のカットインの後に帯 (2.4 秒)。その後に確定の帯と絞り
+      if (teaser === 'line') { se('kira', 0.6); se('gyuiin', 0.5); } else { se('gashan', 0.6); se('gyuiin', 0.5); }
+      teaserTimer = setTimeout(() => { teaserShowing = false; startKakutei(); }, teaser === 'line' ? 2400 : 1600);
     }
     // 触られないまま 30 秒たったら一気にめくる (他の人を待たせ続けない)。他の人の画面は引いた人に合わせるので 60 秒
     idleTimer = setInterval(() => {
@@ -160,12 +162,15 @@
     <div class="sq-rays" aria-hidden="true"></div>
     <div class="sq-premium" aria-hidden="true">アンミカーニバル</div>
   {/if}
-  {#if teaserShowing}
+  {#if teaserShowing && teaser === 'line'}
+    <div class="sq-ci glow-{teaserGlow}" aria-hidden="true"><div class="sq-ci-speed"></div><div class="sq-ci-line">白って 200 色あんねん</div><div class="sq-ci-sig">アン ミカ</div></div>
+    <div class="sq-band teaser line" aria-hidden="true"><span class="sq-word">ぽっちチャンス</span></div>
+  {:else if teaserShowing}
     <svg class="sq-bolt glow-{teaserGlow}" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M98 -2 L84 12 L89 15 L74 26 L79 29 L62 38 L66 40 L52 46" /></svg>
     <div class="sq-flash" aria-hidden="true"></div>
     <div class="sq-band teaser" aria-hidden="true"><span class="sq-word">ぽっちチャンス</span></div>
   {/if}
-  {#key shakeKey}<div class="sq-shake" class:go={shakeKey > 0 || teaserShowing}>
+  {#key shakeKey}<div class="sq-shake" class:go={shakeKey > 0 || (teaserShowing && teaser !== 'line')}>
   <div class="sq-tile glow-{glowNow}" class:zoom={tame} bind:this={tileEl}>
     {#if deka}
       <img class="sq-pin" src={`/tiles/${deka === 'p1' ? 'Pin1' : 'Pin2'}.svg`} alt="" draggable="false" />
@@ -245,6 +250,21 @@
   .sq-flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 5; pointer-events: none; animation: sqFlash 0.35s ease-out 0.15s; }
   .sq-band.teaser { top: 70%; --h: clamp(60px, 13vh, 110px); --fs: calc(min(8vw, 76px, var(--h) * 0.6)); z-index: 6; animation-delay: 0.35s; }
   .sq-band.teaser .sq-word { animation-delay: 0.35s; }
+  /* 決め台詞のカットイン: ピンクの斜めの帯が右から入り、1.2 秒で左へ抜ける。字は Dela Gothic One (CI Line)。帯の縁の光りが期待度 */
+  .sq-ci { position: absolute; left: -10%; right: -10%; top: 42%; height: clamp(90px, 24vh, 200px); margin-top: calc(clamp(90px, 24vh, 200px) / -2); z-index: 6; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; transform: rotate(-6deg); pointer-events: none;
+    background: repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.07) 0 3px, transparent 3px 42px), linear-gradient(180deg, #120612 0 6%, #c2185b 6% 50%, #7b0e3c 50% 94%, #120612 94%);
+    box-shadow: 0 0 0 4px #fff inset, 0 12px 34px rgba(0, 0, 0, 0.6); animation: sqCiIn 0.22s cubic-bezier(0.2, 0.9, 0.2, 1) both, sqCiOut 0.2s ease-in 1.2s forwards; }
+  .sq-ci.glow-gold { box-shadow: 0 0 0 4px #f2d27a inset, 0 0 40px 10px rgba(255, 200, 70, 0.8); }
+  .sq-ci.glow-rainbow { box-shadow: 0 0 0 4px #fff inset, 0 0 46px 12px rgba(120, 220, 255, 0.85); }
+  .sq-ci-speed { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, transparent 0 18px, rgba(255, 255, 255, 0.16) 18px 20px); }
+  .sq-ci-line { position: relative; font-family: 'CI Line', 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: clamp(30px, 8.4vw, 96px); color: #fff; white-space: nowrap;
+    -webkit-text-stroke: clamp(4px, 0.6vw, 7px) #120612; paint-order: stroke fill; text-shadow: 5px 5px 0 #3a0820; transform: skewX(-8deg); animation: sqCiWord 0.3s cubic-bezier(0.2, 1.6, 0.4, 1) 0.12s both; }
+  .sq-ci-sig { position: absolute; right: 16%; bottom: 8%; font: 700 clamp(12px, 2.2vw, 24px) 'Zen Kaku Gothic New', sans-serif; color: #ffd1e6; letter-spacing: 0.2em; }
+  .sq-band.teaser.line, .sq-band.teaser.line .sq-word { animation-delay: 1.3s; }
+  @keyframes sqCiIn { from { transform: rotate(-6deg) translateX(110%); } to { transform: rotate(-6deg) translateX(0); } }
+  @keyframes sqCiOut { to { transform: rotate(-6deg) translateX(-110%); } }
+  @keyframes sqCiWord { 0% { opacity: 0; transform: skewX(-8deg) scale(2.2); } 100% { opacity: 1; transform: skewX(-8deg) scale(1); } }
   @keyframes sqBoltDraw { to { stroke-dashoffset: 0; } }
   @keyframes sqBoltFade { to { opacity: 0; } }
   @keyframes sqFlash { 0% { opacity: 0.9; } 100% { opacity: 0; } }
@@ -270,5 +290,5 @@
   @keyframes sqBandIn { from { transform: rotate(-7deg) translateX(-120%); } to { transform: rotate(-7deg) translateX(0); } }
   @keyframes sqWord { 0% { opacity: 0; transform: skewX(-12deg) scale(2.4); } 60% { opacity: 1; transform: skewX(-12deg) scale(0.94); } 100% { opacity: 1; transform: skewX(-12deg) scale(1); } }
   @keyframes sqDraw { to { stroke-dashoffset: 0; } }
-  @media (prefers-reduced-motion: reduce) { .sq-band, .sq-word, .sq-crack path, .sq-shake.go, .sq-rays, .sq-slow { animation: none; } .sq-crack path { stroke-dashoffset: 0; } .sq-tile.glow-rainbow { animation: none; box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #ff5ad1, 0 0 80px 30px rgba(120, 220, 255, 0.9); } }
+  @media (prefers-reduced-motion: reduce) { .sq-band, .sq-word, .sq-crack path, .sq-shake.go, .sq-rays, .sq-slow, .sq-ci-line { animation: none; } .sq-crack path { stroke-dashoffset: 0; } .sq-tile.glow-rainbow { animation: none; box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #ff5ad1, 0 0 80px 30px rgba(120, 220, 255, 0.9); } }
 </style>
