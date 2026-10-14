@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import { createRoomAuthority, type RoomAuthority } from '../server/authority';
 import { toCorePai } from '../src/lib/helpers';
 import Majiang from '@kobalab/majiang-core';
+import { canFeverLizhi } from '../src/lib/game3/feverLizhi';
 import { parseCanonicalRoomSnapshot, type AcceptedRoomCommand } from '../server/protocol';
 
 const roomId = process.argv[2];
@@ -74,6 +75,12 @@ type DiscardReview = {
   tags: DiscardTag[]; note: string;
   // 10-14 先輩「具体的な川の状況とかを見たい」「5sは何目的で切ったのか分からん」: 局面と CPU の決め手
   turn: number; rivers: Record<string, string[]>; dora: string[]; lizhi: number[]; cpu_reason: string;
+  cpu_ukeire: number;
+  // 10-14 先輩「フィーバー打つために確定暗刻にできるように8pきったんだと思う…フィーバー効率とかも加味して」:
+  // 1 シャンテンで 7 が 2 枚以上ある時だけ、候補ごとに「引いてテンパイ + フィーバー立直できる」枚数と、そのうち 2 段以上
+  fever: Record<string, { uke: number; fever: number; fever2: number }> | null;
+  // 10-14 先輩「危険牌切るのはどう評価すればいいんだろうね」: 切った牌と CPU の牌の安全度を言葉で
+  safety_note: string;
 };
 // 東風ごと → 人ごと (まとめは前にまとめた東風の続きから作るので、数は東風で分けておく)
 const discardStats: Record<string, Record<string, { evaluated: number; cpu_match: number; tags: Record<string, number> }>> = {};
@@ -111,6 +118,45 @@ function heading_flush(sp: any, chosenBase: string): boolean {
   const main = (['m', 'p', 's'] as const).reduce((a, b) => (counts[b] > counts[a] ? b : a), 'p');
   return total > 0 && (counts[main] + counts.z) / total >= 0.75 && chosenBase[0] !== main && chosenBase[0] !== 'z';
 }
+const DRAW_KINDS: string[] = [];
+for (const s of ['m', 'p', 's']) for (let n = 1; n <= 9; n++) if (s !== 'm' || n === 7 || n === 9) DRAW_KINDS.push(s + n);
+for (let n = 1; n <= 7; n++) DRAW_KINDS.push('z' + n);
+// 1 シャンテンの手で pai を切った後、引いてテンパイ (どれかを切って 0 シャンテン) になる牌の枚数と、
+// そのテンパイでフィーバー立直できる (7 の確定暗刻) 枚数、うち 2 段以上の枚数
+function feverUkeire(game: any, sp: any, pai: string): { uke: number; fever: number; fever2: number } | null {
+  const a = sp.clone();
+  try { a.dapai(pai); } catch { return null; }
+  const xt = Majiang.Util.xiangting(a);
+  if (xt !== 1) return null;
+  const seen = (t: string) => {
+    let v = 0;
+    for (const p of [0, 1, 2]) for (const d of (game.he.get(p)?._pai ?? []) as string[]) if (baseOf(d) === t) v++;
+    for (const b of (game.shan?.baopai ?? []) as string[]) if (baseOf(b) === t) v++;
+    return v;
+  };
+  let uke = 0, fever = 0, fever2 = 0;
+  for (const t of DRAW_KINDS) {
+    const rem = Math.max(0, 4 - Number(a._bingpai?.[t[0]]?.[Number(t[1])] ?? 0) - seen(t));
+    if (!rem) continue;
+    const b = a.clone();
+    b._bingpai[t[0]][Number(t[1])] += 1;
+    b._zimo = t;
+    if (Majiang.Util.xiangting(b) >= xt) continue;
+    uke += rem;
+    let best = 0;
+    for (const c of b.get_dapai(false) as string[]) {
+      const e = b.clone();
+      try { e.dapai(c); } catch { continue; }
+      if (Majiang.Util.xiangting(e) !== 0) continue;
+      const f = canFeverLizhi(e);
+      if (f.ok) best = Math.max(best, f.tier);
+    }
+    if (best >= 1) fever += rem;
+    if (best >= 2) fever2 += rem;
+  }
+  return { uke, fever, fever2 };
+}
+const SAFETY_WORD = (v: number) => (v >= 10 ? '現物' : v >= 4 ? 'スジ' : v >= 2 ? 'カベ' : '危険 (現物でもスジでもない)');
 function reviewDiscard(game: any, action: Record<string, any>, match: number, hand: number, revision: number, seat: number): void {
   const player = game.lunbanToPlayerId(game.state.lunban);
   const rows: any[] = game.adviseDiscard(player, 99) ?? [];
@@ -124,7 +170,11 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
   const st = ((discardStats[String(match)] ??= {})[user] ??= { evaluated: 0, cpu_match: 0, tags: {} });
   st.evaluated += 1;
   const cpu = rows.find((r) => r.recommended) ?? rows[0];
-  if (cpu.base === chosen.base) st.cpu_match += 1;
+  if (cpu.base === chosen.base) {
+    // CPU と同じ牌は拾わない (10-14 先輩「切った 南 → CPU なら 南 …こういうのは通知してもしゃーないやろ」)
+    st.cpu_match += 1;
+    return;
+  }
   const minXt = Math.min(...rows.map((r) => r.xiangting));
   const bestUk = Math.max(...rows.filter((r) => r.xiangting === minXt).map((r) => r.ukeire));
   // 祝儀温存の減点だけ: prio から字牌 ・ 端牌の加点 (字 3 / 1・9 は 2 / 2・8 は 1)、リーチ者がいる時の安全度、
@@ -137,26 +187,49 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
     return basePrio - (r.prio - (r.hasLizhiOpponent ? r.safety : 0)) - m9;
   };
   const flush = heading_flush(sp, chosen.base);
+  // フィーバーの受け入れ: 1 シャンテンで 7 が 2 枚以上 (手の中) ある時だけ、切った牌 ・ CPU の牌 ・ 受け入れの多い 1 シャンテンの候補を見る
+  const sevens = ['m', 'p', 's'].some((x) => Number(sp?._bingpai?.[x]?.[7] ?? 0) >= 2);
+  let fever: Record<string, { uke: number; fever: number; fever2: number }> | null = null;
+  if (sevens && minXt <= 1 && chosen.xiangting === 1) {
+    fever = {};
+    const opts = [chosen, cpu, ...rows.filter((r) => r.xiangting === 1).sort((a, b) => b.ukeire - a.ukeire).slice(0, 4)];
+    for (const r of opts) {
+      if (fever[r.base]) continue;
+      const f = feverUkeire(game, sp, r.pai);
+      if (f) fever[r.base] = f;
+    }
+  }
+  const fvChosen = fever?.[chosen.base];
+  const fvCpu = fever?.[cpu.base];
+  // 切った方が 2 段以上のフィーバーを多く残すなら、受け入れが少なくてもフィーバーを見た打牌として拾わない
+  const feverJustified = !!(fvChosen && fvCpu && fvChosen.fever2 > fvCpu.fever2);
+  const feverBetter = fever ? Object.entries(fever).find(([b, f]) => b !== chosen.base && fvChosen && f.fever2 >= fvChosen.fever2 + 3 && f.fever >= fvChosen.fever) : undefined;
   const defending = chosen.hasLizhiOpponent && chosen.safety >= 4;
   const tags: DiscardTag[] = [];
   const notes: string[] = [];
   if (!defending && chosen.xiangting > minXt) {
     tags.push('牌効率');
     notes.push(`シャンテンが ${minXt} → ${chosen.xiangting} に戻った`);
-  } else if (!defending && !flush && chosen.xiangting === minXt && bestUk - chosen.ukeire >= 4 && chosen.ukeire <= bestUk * 0.85) {
+  } else if (!defending && !flush && !feverJustified && chosen.xiangting === minXt && bestUk - chosen.ukeire >= 4 && chosen.ukeire <= bestUk * 0.85) {
     tags.push('受け入れ');
     notes.push(`受け入れ ${chosen.ukeire} 枚 (一番多い切り方は ${bestUk} 枚)`);
   }
   const keepChip = chipPenalty(chosen) >= 2 ? rows.find((r) => r.base !== chosen.base && r.xiangting <= chosen.xiangting
     && r.ukeire >= chosen.ukeire && chipPenalty(r) < chipPenalty(chosen)) : undefined;
-  if (keepChip) {
+  if (feverBetter && !tags.includes('祝儀・フィーバー')) {
     tags.push('祝儀・フィーバー');
-    notes.push(chosen.dropsNiji ? `虹を崩した (${keepChip.pai} なら崩さず同じ形)` : `祝儀 ・ フィーバーの種を切った (${keepChip.pai} でも形は同じ)`);
+    notes.push(`${tileName(feverBetter[0])} を切ると 2 段フィーバーのテンパイが ${feverBetter[1].fever2} 枚 (切った牌は ${fvChosen!.fever2} 枚)`);
   }
-  // テンパイ (切った後 0 シャンテン) の押しは判断なので外す
-  if (chosen.hasLizhiOpponent && chosen.xiangting > 0 && chosen.safety < 0 && rows.some((r) => r.safety >= 4)) {
+  if (keepChip && !tags.includes('祝儀・フィーバー')) {
+    tags.push('祝儀・フィーバー');
+    notes.push(chosen.dropsNiji ? `虹を崩した (${tileName(keepChip.base)} なら崩さず同じ形)` : `祝儀 ・ フィーバーの種を切った (${tileName(keepChip.base)} でも形は同じ)`);
+  }
+  // 危険牌は CPU と同じ物差し: リーチを受けて 2 シャンテン以上 (CPU なら降りる) なのに無スジを切り、現物かスジがあった時だけ
+  // (10-14 先輩「危険牌切るのはどう評価すればいいんだろうね。今のだと分かりづらい」)
+  const safest = rows.reduce((a, b) => (b.safety > a.safety ? b : a), rows[0]);
+  if (chosen.hasLizhiOpponent && minXt >= 2 && chosen.safety < 0 && safest.safety >= 4) {
     tags.push('危険牌');
-    notes.push('リーチ者がいる時に危険牌 (現物かスジがあった)');
+    notes.push(`${minXt} シャンテンでリーチを受けたら CPU は降りる。切った ${tileName(chosen.base)} は${SAFETY_WORD(chosen.safety)}、${tileName(safest.base)} なら${SAFETY_WORD(safest.safety)}`);
   }
   if (flush && tags.includes('牌効率')) notes.push('染め手に向かう打牌かも (CPU は役を見ない)');
   for (const t of tags) st.tags[t] = (st.tags[t] ?? 0) + 1;
@@ -179,7 +252,7 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
   if (chosen.base[0] === 'z' || cpu.base[0] === 'z') {
     if (cpu.base[0] === 'z' && chosen.base[0] !== 'z') why.push(`${tileName(cpu.base)} は字牌なので先に切る順`);
   }
-  if (cpu.hasLizhiOpponent) why.push(`安全度は CPU の牌 ${cpu.safety} ・ 切った牌 ${chosen.safety} (現物 10 ・ スジ 4 ・ カベ 2 ・ 危険 -5)`);
+  const safetyNote = cpu.hasLizhiOpponent ? `リーチ者がいる。切った ${tileName(chosen.base)} は${SAFETY_WORD(chosen.safety)}、CPU の ${tileName(cpu.base)} は${SAFETY_WORD(cpu.safety)}` : '';
   const rivers: Record<string, string[]> = {};
   for (const p of [0, 1, 2]) rivers[String(p)] = [...((game.he.get(p)?._pai ?? []) as string[])];
   const turn = (game.he.get(player)?._pai ?? []).length + 1;
@@ -189,6 +262,7 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
     best: rows.slice(0, 3).map((r) => ({ pai: r.pai, xiangting: r.xiangting, ukeire: r.ukeire, safety: r.safety })),
     tags, note: notes.join(' / '),
     turn, rivers, dora: [...((game.shan?.baopai ?? []) as string[])], lizhi: [...(game.lizhi ?? [])] as number[], cpu_reason: why.join('。'),
+    cpu_ukeire: cpu.ukeire, fever, safety_note: safetyNote,
   });
 }
 const hands: Hand[] = [];
