@@ -145,6 +145,29 @@
   $: fxPochiRevealShowing = !!pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat);
   $: fxPresentationBusy = fxCutinBusy || fxPochiRevealShowing;
 
+  // [2026-10-14 リョー「フィーバー中に流れるようにしたい、私用で権利大丈夫だからmp3で流してほしい」]
+  // 誰かのフィーバー中は、アン ミカさんの「アンミカーニバル」を繰り返し流す。オンラインでも各自の画面で鳴る。
+  // 曲は public/sounds/bgm/ (git には入れない)。ミュートの設定なら鳴らさず、フィーバーが終われば頭に戻して止める
+  const FEVER_BGM = '/sounds/bgm/anmika_carnival.mp3';
+  let feverBgm: HTMLAudioElement | null = null;
+  $: someoneFeverBgm = ([0, 1, 2] as const).some((p) => !!$game.game.feverActive?.[p]);
+  $: syncFeverBgm(someoneFeverBgm && !$prefs.muted && appMode !== 'menu');
+  function syncFeverBgm(on: boolean): void {
+    if (typeof window === 'undefined') return;
+    if (on) {
+      if (!feverBgm) {
+        feverBgm = new Audio(FEVER_BGM);
+        feverBgm.loop = true;
+        feverBgm.volume = 0.5;
+      }
+      if (feverBgm.paused) feverBgm.play().catch(() => { /* まだ画面を触っていない時は鳴らせない。次の変化で鳴らす */ });
+    } else if (feverBgm && !feverBgm.paused) {
+      feverBgm.pause();
+      feverBgm.currentTime = 0;
+    }
+  }
+  onDestroy(() => { feverBgm?.pause(); });
+
   const PLAYERS = [0, 1, 2] as const satisfies readonly PlayerId[];
 
   // 開発モード: 他家手牌を見えるか
