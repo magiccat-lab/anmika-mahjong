@@ -674,3 +674,12 @@ def test_summaries_list_and_image(env, monkeypatch, tmp_path):
     r = c.get(got["data"])
     assert r.status_code == 200 and r.headers["content-type"].startswith("application/json") and r.json() == {"room": "GFIO"}
     assert 'filename="GFIO-20261013-2310.json"' in r.headers["content-disposition"]
+    # 打牌の分析のページ (10-14 先輩「トップから分析ページに飛べるようにしたい」): ある時だけ一覧に出し、その場で開く html で返す
+    assert got["analysis"] is None
+    (root / "GFIO-20261013-2310" / "analysis.html").write_text("<!doctype html><title>分析</title>", encoding="utf-8")
+    got = c.get("/api/summaries?room=GFIO").json()["summaries"][0]
+    assert got["analysis"] == "/api/summaries/GFIO-20261013-2310/analysis.html"
+    r = c.get(got["analysis"])
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html") and "分析" in r.text
+    assert "content-disposition" not in r.headers
+    assert c.get("/api/summaries/GFIO-20261013-2310/analysis.json").status_code == 404

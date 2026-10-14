@@ -23,6 +23,7 @@
   import RoomPanel from './lib/RoomPanel.svelte';
   import EntryMenu from './lib/EntryMenu.svelte';
   import StatsPanel from './lib/StatsPanel.svelte';
+  import AnalysisPanel from './lib/AnalysisPanel.svelte';
   import ReplayPanel from './lib/ReplayPanel.svelte';
   import RulesPanel from './lib/RulesPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
@@ -1223,6 +1224,7 @@
   let appMode: 'menu' | 'started' = 'menu';
   // [2026-07-23 リョー要望] 戦績パネル [エントリ画面から開く]
   let statsPanelOpen = false;
+  let analysisPanelOpen = false;
   // [2026-07-23 リョー要望] 名牌譜パネル
   let replayPanelOpen = false;
   // [2026-09-14] 説明書と画面設定
@@ -2522,6 +2524,7 @@
     onSelectOnline={() => { appMode = 'started'; viewMode = 'online'; }}
     onSelectStats={() => { statsPanelOpen = true; }}
     onSelectReplay={() => { replayPanelOpen = true; }}
+    onSelectAnalysis={() => { analysisPanelOpen = true; }}
     onSelectRules={() => { rulesPanelOpen = true; }}
     onSelectSettings={() => { settingsPanelOpen = true; }}
   />
@@ -2530,6 +2533,9 @@
   {/if}
   {#if replayPanelOpen}
     <ReplayPanel onClose={() => { replayPanelOpen = false; }} />
+  {/if}
+  {#if analysisPanelOpen}
+    <AnalysisPanel onClose={() => { analysisPanelOpen = false; }} />
   {/if}
   {#if rulesPanelOpen}
     <RulesPanel onClose={() => { rulesPanelOpen = false; }} />

@@ -6,6 +6,8 @@
   export let onSelectOnline: () => void = () => {};
   export let onSelectStats: () => void = () => {};
   export let onSelectReplay: () => void = () => {};
+  // [2026-10-14] 部屋ごとの打牌の分析
+  export let onSelectAnalysis: () => void = () => {};
   // [2026-09-14] 説明書と画面設定を入口に出す
   export let onSelectRules: () => void = () => {};
   export let onSelectSettings: () => void = () => {};
@@ -28,6 +30,10 @@
   <!-- [2026-07-23 リョー要望] 名牌譜 [試合記録の再生と名局保存] -->
   <button class="entry-btn replay" on:click={onSelectReplay}>
     <span class="btn-main">牌譜</span>
+  </button>
+  <!-- [2026-10-14 リョー「まあトップから分析ページに飛べるようにしたい」] 部屋ごとの打牌の分析 -->
+  <button class="entry-btn analysis" on:click={onSelectAnalysis}>
+    <span class="btn-main">分析</span>
   </button>
   <!-- [2026-09-14] ルールが特殊なので初見の入口を出す -->
   <button class="entry-btn rules" on:click={onSelectRules}>

@@ -170,16 +170,20 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
   const hasLizhi = !!rowsAll[0].hasLizhiOpponent;
   const vOpp = oppValues.length ? oppValues.reduce((a, b) => a + b, 0) / oppValues.length : 8000;
   const minXt = Math.min(...rowsAll.map((r) => r.xiangting));
-  // 見る候補: 一番少ないシャンテンの物と、切った牌 (多くても 8 つ。受け入れの多い順)
-  const cand = [chosenRow, ...rowsAll.filter((r) => r.xiangting === minXt).sort((a, b) => b.ukeire - a.ukeire).slice(0, 8)]
+  const comboDanger0 = comboDanger(game, player);
+  // 見る候補: 一番少ないシャンテンの物と、切った牌 (多くても 8 つ。受け入れの多い順)。リーチを受けていれば一番安い牌 (降りの候補) も
+  const safest = hasLizhi ? [...rowsAll].sort((a, b) => (comboDanger0.get(a.base) ?? 0) - (comboDanger0.get(b.base) ?? 0))[0] : null;
+  const cand = [chosenRow, ...(safest ? [safest] : []), ...rowsAll.filter((r) => r.xiangting === minXt).sort((a, b) => b.ukeire - a.ukeire).slice(0, 8)]
     .filter((r, i, arr) => arr.findIndex((x) => x.base === r.base) === i);
   // 放銃率はコンボ理論 (tools/lib/combo_danger.mts)
-  const combo = comboDanger(game, player);
+  const combo = comboDanger0;
   const options = cand.map((r) => {
     const e = optionEv(ctx, sp, r.pai);
     const danger = combo.get(r.base) ?? 0;
-    const ev = e.ev === null ? null : e.ev - (hasLizhi ? (danger / 100) * vOpp : 0);
-    return { pai: r.pai, base: r.base, ev, xt: e.xt === 99 ? r.xiangting : e.xt, ukeire: r.ukeire, danger, detail: e.detail };
+    // リーチを受けている時、2 シャンテン以上に下がる切り方は降り (アガリを見ない) として −放銃率 × 相手の打点で比べる
+    const fold = e.ev === null && hasLizhi;
+    const ev = fold ? -(danger / 100) * vOpp : e.ev === null ? null : e.ev - (hasLizhi ? (danger / 100) * vOpp : 0);
+    return { pai: r.pai, base: r.base, ev, xt: e.xt === 99 ? r.xiangting : e.xt, ukeire: r.ukeire, danger, detail: fold ? '降り (アガリを見ない)' : e.detail };
   });
   const chosen = options.find((o) => o.base === chosenRow.base)!;
   let best = options[0];

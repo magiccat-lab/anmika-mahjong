@@ -115,7 +115,7 @@
   // [2026-10-13 リョー「部屋を閉じるときに…まとめるようにしてほしい」] 閉じた部屋と 30 分打たれていない部屋のまとめ
   // [チップの推移 ・ 個人成績の画像 2 枚] をサーバーが作るので、新しい物から並べて開けるようにする
   // data は数字の json (10-14 リョー「画像とセットでjsonダウンロードリンク」)。作る前の古いまとめには無い
-  type Summary = { id: string; room: string; n: number; first: string; last: string; ranking: { name: string; total: number }[]; images: string[]; data?: string | null };
+  type Summary = { id: string; room: string; n: number; first: string; last: string; ranking: { name: string; total: number }[]; images: string[]; data?: string | null; analysis?: string | null };
   let summaries: Summary[] = [];
   let openSummary: Summary | null = null;
   async function refreshSummaries() {
@@ -228,6 +228,7 @@
             <div class="room-btns">
               <button class="summary-btn" on:click={() => (openSummary = sm)}>見る</button>
               {#if sm.data}<a class="summary-btn summary-json" href={`${API_BASE}${sm.data}`} download={`${sm.id}.json`}>JSON</a>{/if}
+              {#if sm.analysis}<a class="summary-btn summary-json" href={`${API_BASE}${sm.analysis}`} target="_blank" rel="noopener">分析</a>{/if}
             </div>
           </li>
         {/each}
