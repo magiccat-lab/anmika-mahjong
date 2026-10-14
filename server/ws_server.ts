@@ -2216,7 +2216,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         ? (postWinAction.type === 'advanceSaiKoro' ? CPU_SAI_FAST_ADVANCE_MS : CPU_SAI_FAST_STEP_MS)
         : postWinAction.type === 'selectSaiKoroCombo' ? 1500
         : postWinAction.type === 'rollSaiKoroDice' ? 2500
-        : postWinAction.type === 'advanceSaiKoro' ? 2000
+        // [2026-10-14] サイコロのリーチの演出 (最長 2 秒) の後も結果の欄を読めるよう 3 秒 [solo の App と同じ]
+        : postWinAction.type === 'advanceSaiKoro' ? 3000
         : 1500;
       const humanPostWinTimeoutMs = Number(process.env.ANMIKA_POST_WIN_TIMEOUT_MS || 180_000);
       // [2026-10-09 遊真 A2] CPU 代行中の人間 owner も CPU の刻みで進める [180 秒待たない]

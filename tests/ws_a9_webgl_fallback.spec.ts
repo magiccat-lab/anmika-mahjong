@@ -56,7 +56,8 @@ function yakumanTsumoWall(): string[] {
 }
 
 test('WSA-A9: WebGL無効でもサイコロチャンスを完走できる', async ({ page }) => {
-  test.setTimeout(30_000);
+  // [2026-10-14] 出目 (1,4) は宣言 (1,2) に対して毎回リーチの演出 (約 2 秒) になる。3 件 × 4 振りで 30 秒を超える
+  test.setTimeout(60_000);
   // WebGL 無効に加え、3D theme 読込も失敗させて init 失敗経路を確実に通す。
   await page.route('**/assets/dice-box/**', (route) => route.abort());
   await page.route('**/assets/dice-box.es-*.js', (route) => route.abort());

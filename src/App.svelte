@@ -2393,7 +2393,8 @@
         // [dicebox 物理アニメ + 結果視認 + 次 chance 移行 を 確実に見せる]
         const stepDelay = cpuSaiFast
           ? (!ps0.finalized ? 0 : CPU_SAI_FAST_ADVANCE_MS)
-          : (!ps0.selectedCombo ? 1500 : (!ps0.finalized ? 2500 : 2000));
+          : (!ps0.selectedCombo ? 1500 : (!ps0.finalized ? 2500 : 3000));
+        // [2026-10-14] リーチの演出 (最長 2 秒) の後も結果の欄を読めるよう、次のチャンスへは 3 秒待つ
         __cpuSaiKoroTimer = setTimeout(() => {
           __cpuSaiKoroTimer = null;
           __cpuSaiKoroLatch = false;

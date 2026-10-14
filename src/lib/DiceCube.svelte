@@ -5,6 +5,8 @@
   export let value: number = 1;
   export let rolling: boolean = false;
   export let size: number = 56;
+  /** [2026-10-14] リーチの時、残りの 1 個をゆっくり回す */
+  export let slow: boolean = false;
 
   // 各面を正面に向けるための cube 回転 [X, Y deg]
   // 面配置: 1=前 6=後 3=右 4=左 2=上 5=下 [和サイコロ: 1赤・天面2]
@@ -39,6 +41,7 @@
   <div
     class="cube"
     class:rolling
+    class:slow
     style="--sx:{settleX}deg; --sy:{settleY}deg"
   >
     {#each FACES as face}
@@ -73,6 +76,7 @@
     transition: none;
     animation: tumble 0.5s linear infinite;
   }
+  .cube.rolling.slow { animation-duration: 1.4s; }
   @keyframes tumble {
     0%   { transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg); }
     25%  { transform: rotateX(120deg) rotateY(80deg) rotateZ(30deg); }
