@@ -151,7 +151,8 @@
   // フィーバーが終わったら 2.5 秒かけて音を下げてから止め、頭に戻す (同じ日「曲は最後フェードとかかけてあげてね」)。
   // 下げている途中でまたフィーバーになれば、そのまま音量を戻して続ける
   const FEVER_BGM = '/sounds/bgm/anmika_carnival.mp3';
-  const FEVER_BGM_VOLUME = 0.5;
+  // 音量は 0.3 (同じ日「BGMの音量ちょっと下げる」で 0.5 から)
+  const FEVER_BGM_VOLUME = 0.3;
   const FEVER_BGM_FADE_MS = 2500;
   let feverBgm: HTMLAudioElement | null = null;
   let feverBgmFade: ReturnType<typeof setInterval> | null = null;
@@ -185,6 +186,8 @@
     }
   }
   onDestroy(() => { stopFeverBgmFade(); feverBgm?.pause(); });
+  // カットインと白ぽっちのめくりの間は曲を消す (同じ日「演出カットイン入ったらBGMミュート忘れずにね」)。終われば戻る
+  $: if (feverBgm) feverBgm.muted = fxPresentationBusy;
 
   const PLAYERS = [0, 1, 2] as const satisfies readonly PlayerId[];
 
