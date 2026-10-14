@@ -150,11 +150,11 @@
   //  - 通常時: 8bit 版を小さめに (「通常時に8bit風のアンミカーニバルのBGM裏で流すのどう」→「2で作って進めて」。
   //    demucs で分けた歌 ・ ベース ・ ドラム ・ その他を、矩形波 ・ 三角波 ・ ノイズ ・ アルペジオに打ち直した物。作り方は tools/bgm_chiptune.py)
   // 切り替わる時と止まる時は 2.5 秒かけて音を下げる (「曲は最後フェードとかかけてあげてね」)。
-  // 音量は控えめ (「BGMの音量ちょっと下げる」)。カットインと白ぽっちのめくりの間は消す (「演出カットイン入ったらBGMミュート忘れずにね」)。
+  // 音量は控えめ (「BGMの音量ちょっと下げる」)。白ぽっちの演出の間は消す (「演出カットイン入ったらBGMミュート」→「ポッチ演出だけ」)。
   // ミュートの設定 ・ 卓の右上の「BGM 切」・ 入口のメニューでは鳴らさない
   const BGM_TRACKS = {
     fever: { src: '/sounds/bgm/anmika_carnival.mp3', volume: 0.3 },
-    normal: { src: '/sounds/bgm/anmika_carnival_8bit.mp3', volume: 0.12 },
+    normal: { src: '/sounds/bgm/anmika_carnival_8bit.mp3?v=bass14', volume: 0.12 },
   } as const;
   type BgmKind = keyof typeof BGM_TRACKS;
   const BGM_FADE_MS = 2500;
@@ -202,7 +202,8 @@
   onDestroy(() => {
     for (const kind of Object.keys(BGM_TRACKS) as BgmKind[]) { stopBgmFade(kind); bgmAudio[kind]?.pause(); }
   });
-  $: { void bgmTick; for (const audio of Object.values(bgmAudio)) if (audio) audio.muted = fxPresentationBusy; }
+  // 消すのは白ぽっちの演出の間だけ (同じ日「演出の時にって言うのはポッチ演出だけね、他は別に音量弄らなくていいよ」)
+  $: { void bgmTick; for (const audio of Object.values(bgmAudio)) if (audio) audio.muted = fxPochiRevealShowing; }
 
   const PLAYERS = [0, 1, 2] as const satisfies readonly PlayerId[];
 

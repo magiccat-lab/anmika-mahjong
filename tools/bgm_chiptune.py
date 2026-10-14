@@ -112,7 +112,7 @@ for i, ln, m in bline:
     m2 = m
     while m2 < 33: m2 += 12
     while m2 > 52: m2 -= 12
-    put(s, tri(hz(m2), max(1, e - s), 0.30))
+    put(s, tri(hz(m2), max(1, e - s), 0.14))  # ベースは控えめ (10-14 先輩「ベースの音量もっと下げよう」、0.30 から)
 for gi, kind in drum_ev:
     s = at(gi)
     if kind == 'k':
