@@ -131,7 +131,9 @@ function optionEv(ctx: Ctx, sp: any, pai: string): { ev: number | null; xt: numb
 type Review = {
   match: number; hand: number; turn: number; seat: number; user: string; hand14: string; chosen: string; best: string;
   loss: number | null; xiangting: number; best_xiangting: number; options: Array<{ pai: string; ev: number | null; xt: number; ukeire: number; danger: number; detail: string; combo: string }>;
-  kind: 'ev' | 'ukeire'; lizhi: boolean;
+  kind: 'ev' | 'ukeire'; lizhi: boolean; bad: boolean;
+  // 悪手の時だけ局面を残す (河は席番号 → 打った牌、ドラ表示、リーチ者の席)
+  rivers?: Record<string, string[]>; dora?: string[]; lizhi_seats?: number[];
 };
 const reviews: Review[] = [];
 const oppValues: number[] = [];
@@ -195,9 +197,15 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
   const loss = kind === 'ev'
     ? Math.max(0, Math.round((best.ev as number) - (chosen.ev as number)))
     : (chosen.xt > best.xt ? null : best.ukeire > 0 ? Math.round((1 - chosen.ukeire / best.ukeire) * 100) / 100 : 0);
+  const bad = loss === null || (kind === 'ev' ? (loss as number) >= 1000 : (loss as number) >= 0.4);
+  const context = bad ? {
+    rivers: Object.fromEntries([0, 1, 2].map((p) => [String(p), [...((game.he.get(p)?._pai ?? []) as string[])]])),
+    dora: [...((game.shan?.baopai ?? []) as string[])],
+    lizhi_seats: [...(game.lizhi ?? [])] as number[],
+  } : {};
   reviews.push({
     match, hand, turn: (game.he.get(player)?._pai ?? []).length + 1, seat, user: roomSeatUser[seat] ?? '', hand14: String(sp?.toString?.() ?? ''),
-    chosen: chosenRaw, best: best.pai, loss, xiangting: chosen.xt, best_xiangting: best.xt, kind, lizhi: hasLizhi,
+    chosen: chosenRaw, best: best.pai, loss, xiangting: chosen.xt, best_xiangting: best.xt, kind, lizhi: hasLizhi, bad, ...context,
     options: options.map((o) => ({ pai: o.pai, ev: o.ev === null ? null : Math.round(o.ev), xt: o.xt, ukeire: o.ukeire, danger: o.danger, detail: o.detail,
       combo: hasLizhi ? comboBreakdown(game, player, o.base) : '' })),
   });
@@ -250,8 +258,7 @@ for (const r of reviews) {
   const u = (byUser[r.user] ??= { discards: 0, match: 0, bad: 0, ev_loss: 0, ev_count: 0 });
   u.discards += 1;
   if (baseOf(r.best) === baseOf(r.chosen) || r.loss === 0) u.match += 1;
-  const bad = r.loss === null || (r.kind === 'ev' ? (r.loss as number) >= 1000 : (r.loss as number) >= 0.4);
-  if (bad) u.bad += 1;
+  if (r.bad) u.bad += 1;
   if (r.kind === 'ev' && r.loss !== null) { u.ev_loss += r.loss; u.ev_count += 1; }
 }
 console.log(JSON.stringify({
