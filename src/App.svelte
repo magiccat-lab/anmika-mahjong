@@ -40,6 +40,7 @@
   import StampPallet from './lib/StampPallet.svelte';
   import StampPopup from './lib/StampPopup.svelte';
   import { FX_LABELS } from './lib/fxArtwork';
+  import { NO_SET, setCutinFor, setFlags, type SetFlags } from './lib/setCutin';
   import LizhiControls from './lib/LizhiControls.svelte';
   import { CUTIN_DURATION_MS, CUTIN_TIER, cutinDurationMs, game, isFeverForcedTsumogiri, type StampId, type StoreState } from './lib/store';
   import type { PlayerId } from './lib/types';
@@ -139,6 +140,27 @@
   $: fxTier = fxNow ? CUTIN_TIER[fxNow.id] : null;
   $: fxDur = cutinDurationMs(fxNow?.id);
   $: fxWho = !fxNow || fxNow.seat === undefined ? '' : (onlineGameStarted ? seatName(fxNow.seat) : (fxNow.seat === selfPlayer ? 'あなた' : `P${fxNow.seat}`));
+  // [2026-10-14 リョー「四華とか四北がそろったらカットイン出るようにして」] 華と北が揃った瞬間に 1 回だけ出す [lib/setCutin.ts]。
+  // 最初に見た局面 [読み直し ・ 途中から入った] は覚えるだけ。局が変わったら空から数え直す [配牌で揃っても出る]。
+  // 局の後と和了の処理中 [秋のめくりで華が増える] も覚えるだけで出さない
+  let _setFlags: SetFlags[] | null = null;
+  let _setRoundKey = '';
+  function trackSetCutins(st: StoreState, rk: string): void {
+    const cur = ([0, 1, 2] as PlayerId[]).map((p) =>
+      setFlags(st.game.huapai?.[p], (st.game.nukidora?.[p] ?? 0) + (st.game.nukidoraGold?.[p] ?? 0)));
+    const quiet = st.roundEnded || st.pendingPingju || !!st.pendingFeverContinue || !!st.pendingFuyu
+      || !!st.pendingKinpei || !!st.pendingSaiKoro;
+    const prev = _setFlags === null ? cur : (rk !== _setRoundKey ? cur.map(() => NO_SET) : _setFlags);
+    _setFlags = cur;
+    _setRoundKey = rk;
+    if (quiet) return;
+    cur.forEach((f, p) => {
+      const id = setCutinFor(prev[p], f);
+      // $: の途中で store を書くと、先に走った fxNow が古いまま残って出ない。今の更新が終わってから積む
+      if (id) queueMicrotask(() => game.enqueueCutin(id, p as PlayerId));
+    });
+  }
+  $: if (viewMode === 'single') trackSetCutins($game, `${state.changbang}-${state.jushu}-${state.benbang}`);
   // [2026-07-23 Sol調査: ポッチ演出割り込み] 演出は排他で直列に出す
   // [cutin → 白ぽっち開示 → 選択モーダル → サイコロ]。
   // 主因は PochiReveal が独立キュー + z-index 9999 で他演出を覆っていた事
@@ -2180,7 +2202,8 @@
   // [2026-07-22 リョー要望] オンライン用トグル: 鳴きなし / 自動アガリ
   // [2026-10-14 リョー「なきなしボタンをデカい所に出してほしい」] 鳴きなしは ⋯ の中から手牌の上の帯 (ツモ切りの隣) へ出し、CPU 戦でも効く
   let noCall = false;
-  let onlineAutoWin = false;
+  // [2026-10-14 リョー「じどうほうらぼたんもつけて」] 自動和了も ⋯ の中 (オンラインだけ) から鳴きなしの隣へ。CPU 戦でも効く
+  let autoWin = false;
   // [2026-07-23 総点検 P2] $: 副作用は ack 反映前の store 更新 [cutin 等] で何度も走る。
   // 判定窓ごとに1回だけ送るキーで連射を止める [server 側 reject で壊れはしないがノイズ源]
   let _noCallSentKey = '';
@@ -2194,13 +2217,15 @@
       game.pass();
     }
   }
-  $: if (onlineGameStarted && onlineAutoWin && !$game.roundEnded) {
+  // 押すのはロン ・ ツモのボタンが出ている時だけ [フィーバーの続行 ・ 冬 ・ 金北 ・ サイコロの選択中は押さない]
+  $: if ((onlineGameStarted || viewMode === 'single') && !onlineSpectator && autoWin && !$game.roundEnded) {
     const k = `win-${$game.game.events?.length ?? 0}`;
-    if ($game.awaitingRonDecision && ronCandidates.includes(actorSeat)
+    const choosing = !!($game.pendingFeverContinue || $game.pendingFuyu || $game.pendingKinpei);
+    if ($game.awaitingRonDecision && !choosing && ronCandidates.includes(actorSeat)
         && !(($game.ronDeclaredPlayers ?? []) as number[]).includes(actorSeat)) {
       if (k !== _autoWinSentKey) { _autoWinSentKey = k; game.ron(actorSeat); }
-    } else if (!progressControlsBlocked && currentPlayer === actorSeat && canTsumo
-        && !$game.awaitingRonDecision && !$game.lastDapai) {
+    } else if (!progressControlsBlocked && currentPlayer === actorSeat && canTsumo && !choosing
+        && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.lastDapai && !$game.pendingSaiKoro) {
       if (k !== _autoWinSentKey) { _autoWinSentKey = k; game.tsumo(); }
     }
   }
@@ -3239,8 +3264,6 @@
               <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; exportDiagnostics(); }} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ"><span class="settings-label">状態ダンプ</span></button>
               <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; reportBug(); }} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報"><span class="settings-label">バグ通報</span></button>
             {:else}
-              <!-- [2026-07-22 リョー要望] オンラインにも 自動アガリ [ツモ切り ・ 鳴きなしは手牌の上] -->
-              <label class="tm-toggle" title="ツモ/ロンできる時に自動で和了"><input type="checkbox" bind:checked={onlineAutoWin}><span>自動アガリ</span></label>
               <!-- [2026-10-09 遊真 C5] オンライン中もバグ通報を押せる [🔧 局頭に戻すは出さない] -->
               <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; reportBug(); }} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報"><span class="settings-label">バグ通報</span></button>
               <!-- [2026-10-09 遊真 C3] 抜ける前に 1 回だけページ内で確認する -->
@@ -3386,10 +3409,11 @@
         {@render seatCard(srv0, 'me')}
         {#if !onlineSpectator}
           <!-- [2026-10-14 リョー「なきなしボタンをデカい所に出してほしい」] 鳴きなしを ⋯ の中 (オンラインだけ) から、ツモ切りの隣へ。CPU 戦でも効く。
-               縦持ちは帯が狭いので 2 つを縦に積む (横に並べると自分の札が潰れた) -->
+               [2026-10-14 リョー「じどうほうらぼたんもつけて」] 自動和了も ⋯ の中から隣へ。縦持ちは 3 つを帯の上の 1 行に、狭い横持ちは札型に詰める -->
           <div class="me-toggles">
             <label class="tm-toggle tsumokiri-toggle" title="自分の手番を自動でツモ切り"><input type="checkbox" bind:checked={autoTsumoKiri}><span>ツモ切り</span></label>
             <label class="tm-toggle tsumokiri-toggle nocall-toggle" title="ポン/カンできる時に自動で見送る"><input type="checkbox" bind:checked={noCall}><span>鳴きなし</span></label>
+            <label class="tm-toggle tsumokiri-toggle autowin-toggle" title="ツモ/ロンできる時に自動で和了"><input type="checkbox" bind:checked={autoWin}><span>自動和了</span></label>
           </div>
           <!-- スタンプ button [自家のみ表示、 cosmetic、 game state 副作用なし]。帯の右端に固定 -->
           <button class="stamp-open-btn" on:click={openStampPallet} title="スタンプ" aria-label="スタンプ">スタンプ</button>
@@ -6724,20 +6748,29 @@
   .seat-card.sc-me .sc-head { flex-wrap: nowrap; }
   .seat-card.sc-me .sc-pt .sval { font-size: 20px; }
   .tsumokiri-toggle { min-height: 40px; }
-  .me-toggles { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+  .me-toggles { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+  /* 3 つ並べても自分の名前が切れない幅に詰める [スイッチは横持ちと同じ小さい方] */
+  .me-toggles .tm-toggle { gap: 6px; padding: 0 8px; font-size: 13px; }
+  .me-toggles .tm-toggle input { width: 30px; height: 18px; }
+  .me-toggles .tm-toggle input::after { width: 14px; height: 14px; }
+  .me-toggles .tm-toggle input:checked::after { transform: translateX(12px); }
   /* 狭い横持ち (iPhone SE ・ Galaxy の横): 帯の右の操作 [北抜き ・ ポン ・ リーチ] がツモ切り ・ 鳴きなしに重なるので、縦持ちと同じく帯の上に出す */
   @media (max-height: 500px) and (max-width: 800px) and (orientation: landscape) {
     main.mode-single.ui-board-v2 .me-strip .toolbar-red,
     main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 0; bottom: calc(100% + 6px); max-width: calc(100vw - 16px); }
-    /* 帯に 2 つ並べた分、自分の札が潰れない様に詰める */
+    /* 帯に 3 つ並べた分、自分の札が潰れない様に詰める */
     .me-toggles { gap: 6px; }
     .me-toggles .tm-toggle { gap: 6px; padding: 0 6px; }
     main.mode-single.ui-board-v2 .me-strip button.stamp-open-btn { width: auto; padding: 0 8px; font-size: 12px; }
+    /* 自分の札は風と点だけ [名前は 1 字しか残らなかった] */
+    .seat-card.sc-me .sc-name { display: none; }
   }
+  /* [2026-10-14 自動和了を足して 3 つ] 帯がトグルで埋まり、右に置いた操作 [北抜き ・ リーチ] が自動和了に被った。
+     どの幅でも操作は帯の上 [卓の下端] の右に出す [手牌は動かない] */
   main.mode-single.ui-board-v2 .me-strip .toolbar-red {
     position: absolute;
     right: 0;
-    bottom: 0;
+    bottom: calc(100% + 6px);
     left: auto;
     top: auto;
     max-width: min(62vw, 640px);
@@ -6772,7 +6805,7 @@
   }
   /* 操作はスタンプの左 */
   /* [2026-10-09 shun] リョー「ポン見送るとスタンプが被ってる」: 54px だとスタンプ [約 78px] の上に操作が乗っていた。幅を 80px に決めて、その左に置く */
-  main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 88px; }
+  main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 0; }
   /* 手牌の下地は帯と同じ暗い札 */
   main.mode-single.ui-board-v2 .seat-bottom > :global(section.player) {
     background: rgba(12, 30, 23, 0.55) !important;
@@ -6848,6 +6881,11 @@
     .tm-toggle input { width: 30px; height: 18px; }
     .tm-toggle input::after { width: 14px; height: 14px; }
     .tm-toggle input:checked::after { transform: translateX(12px); }
+    /* [2026-10-14] 横持ちの帯にトグル 3 つ [ツモ切り ・ 鳴きなし ・ 自動和了] はスイッチ込みだと自分の札が潰れる。
+       札型にして、入っている時は札ごと金に塗る [スイッチは見えないだけで押せば切り替わる] */
+    .me-toggles .tm-toggle { position: relative; padding: 0 8px; justify-content: center; }
+    .me-toggles .tm-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border-radius: inherit; }
+    .me-toggles .tm-toggle:has(input:checked) { background: var(--jz-accent-flat); color: var(--jz-on-accent); }
     main.mode-single.ui-board-v2 .toolbar-red .tb-row button { min-height: 40px; padding: 0 16px !important; font-size: 15px !important; }
     main.mode-single.online-game header .msg-band { font-size: 12px; padding: 3px 10px; }
     /* 華: 名前は札の左に寄せて 1 段 [上の行を低く保つ]。効果の字は自分の札にも出す */
@@ -6918,8 +6956,10 @@
     .seat-card.sc-me .sc-sub { display: none; }
     .seat-card.sc-me .sc-pt .sval { font-size: 16px; }
     .tm-toggle { min-height: 40px; font-size: 13px; padding: 0 8px; }
-    .me-toggles { flex-direction: column; align-items: stretch; gap: 4px; }
-    .me-toggles .tm-toggle { min-height: 34px; justify-content: space-between; }
+    /* [2026-10-14] トグル 3 つは帯の上の 1 行に横並び [縦に積むと帯が 3 段の高さになる]。下の行が自分の札とスタンプ */
+    .me-strip { flex-wrap: wrap; row-gap: 6px; }
+    .me-toggles { order: -1; flex: 1 0 100%; flex-direction: row; gap: 6px; }
+    .me-toggles .tm-toggle { flex: 1 1 0; min-height: 34px; justify-content: center; gap: 6px; padding: 0 6px; }
     /* 縦持ちは帯が狭いので、操作は帯の上 [卓の下端] に出す */
     main.mode-single.ui-board-v2 .me-strip .toolbar-red,
     main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 0; bottom: calc(100% + 6px); max-width: calc(100vw - 16px); }

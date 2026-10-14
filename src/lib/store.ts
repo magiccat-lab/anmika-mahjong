@@ -70,7 +70,9 @@ const _STAMP_ID_SET: Set<string> = new Set(STAMP_IDS);
 /** スタンプ表示の自動 fade-out [ms] */
 export const STAMP_DURATION_MS = 1500;
 export const CUTIN_DURATION_MS = 1800;
-export type CutinId = 'reach' | 'ron' | 'tsumo' | 'fever' | 'kan' | 'pon';
+export type CutinId = 'reach' | 'ron' | 'tsumo' | 'fever' | 'kan' | 'pon'
+  // [2026-10-14 リョー] 華と北が揃った時 [lib/setCutin.ts]
+  | 'shika' | 'shipei' | 'hachika' | 'shikashipei' | 'hachikashipei';
 
 /** 演出の重さ 3 段 [2026-09-20 演出ゼロベース再検討 原則 3、リョー選択 E+F]。
  *  軽: 宣言と鳴き。その場で消える / 中: 和了 / 重: フィーバー。
@@ -82,6 +84,11 @@ export const CUTIN_TIER: Record<CutinId, 'light' | 'mid' | 'heavy'> = {
   ron: 'mid',
   tsumo: 'mid',
   fever: 'heavy',
+  shika: 'mid',
+  shipei: 'mid',
+  hachika: 'mid',
+  shikashipei: 'mid',
+  hachikashipei: 'heavy',
 };
 
 export const CUTIN_TIER_DURATION_MS: Record<'light' | 'mid' | 'heavy', number> = {
