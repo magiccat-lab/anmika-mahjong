@@ -4,7 +4,8 @@
 //  - P2 押し引き: リーチを受けている時は、今の打牌の目安の放銃率 × 相手の打点 (部屋のアガリの平均) を引く (akochan ・ 爆打の型の簡易版)
 //  - Q1 全打牌: 候補の中で一番期待値の高い切り方との差 (点) を「損」として全打牌に付ける。NAGA の一致率の様に、損 0 の割合も出す
 // 和了率は「残りのツモで待ちを引く」だけの目安 (1 − (1 − 待ち/見えていない牌)^残りツモ)。相手のロン ・ 流局 ・ 次の巡の放銃は数えない。
-// P3 (モンテカルロ) はこの後に別に足す。使い方: node_modules/.bin/tsx tools/room_analysis.mts GFIO [db]
+// P3 (モンテカルロ): --mc <回数> を付けると、1 シャンテン以下の候補の和了率と打点を tools/lib/mc_eval.mts で試して数える (夜に回す)。
+// 使い方: node_modules/.bin/tsx tools/room_analysis.mts GFIO [db] [--mc 200]
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 
@@ -15,9 +16,15 @@ import { parseCanonicalRoomSnapshot, type AcceptedRoomCommand } from '../server/
 import { toCorePai, normalizeBaopaiForMajiang, isPositiveZ5 } from '../src/lib/helpers';
 import { canFeverLizhi } from '../src/lib/game3/feverLizhi';
 import { comboDanger, comboBreakdown } from './lib/combo_danger.mts';
+import { mcOption } from './lib/mc_eval.mts';
 
-const roomId = process.argv[2];
-const dbPath = process.argv[3] ?? resolve('data', 'anmika.sqlite3');
+const argv = process.argv.slice(2);
+const mcAt = argv.indexOf('--mc');
+const MC_SIMS = mcAt >= 0 ? Math.max(1, Number(argv[mcAt + 1]) || 200) : 0;
+if (mcAt >= 0) argv.splice(mcAt, 2);
+const roomId = argv[0];
+const dbPath = argv[1] ?? resolve('data', 'anmika.sqlite3');
+const mcCache = new Map<string, any>();
 if (!roomId) {
   console.error('usage: room_analysis.mts <room_id> [db]');
   process.exit(2);
@@ -97,6 +104,15 @@ function optionEv(ctx: Ctx, sp: any, pai: string): { ev: number | null; xt: numb
   const a = sp.clone();
   try { a.dapai(pai); } catch { return { ev: null, xt: 99, detail: '' }; }
   const xt = Majiang.Util.xiangting(a);
+  if (MC_SIMS && xt <= 1) {
+    const river = new Set<string>([...((ctx.game.he.get(ctx.player)?._pai ?? []) as string[]).map(baseOf), baseOf(pai)]);
+    let seed = 0;
+    // 同じ打牌の候補は同じ山の並びで比べる (差の揺れを小さくする)
+    for (const ch of `${sp.toString()}|${ctx.unseenTotal}|${ctx.draws}`) seed = (Math.imul(seed, 31) + ch.charCodeAt(0)) | 0;
+    const endRate = turnsAll >= 60 ? oppValues.length / turnsAll : 0.04;
+    const r = mcOption(a, { kinds: DRAW_KINDS, unseen: ctx.unseen, draws: ctx.draws, param: ctx.param, river, seed, endRate }, MC_SIMS, mcCache);
+    return { ev: r.ev, xt, detail: `${MC_SIMS} 回試して 和了率 ${Math.round(r.win * 100)}% ・ アガった時の打点 ${Math.round(r.value)}${r.win ? ` ・ ツモ ${Math.round(r.tsumo * 100)}%` : ''}` };
+  }
   if (xt === 0) {
     const t = tenpaiValue(ctx, a);
     const p = winProb(t.wait, ctx.unseenTotal, ctx.draws);
@@ -137,6 +153,8 @@ type Review = {
 };
 const reviews: Review[] = [];
 const oppValues: number[] = [];
+// 局が誰かのアガリで終わる割合 (1 打あたり)。モンテカルロの局の長さに使う
+let turnsAll = 0;
 const diverged: Array<{ match: number; revision: number; reason: string }> = [];
 
 function review(game: any, action: Record<string, any>, match: number, hand: number, seat: number): void {
@@ -234,6 +252,7 @@ segments.forEach((segment, index) => {
     if (type === 'stamp') continue;
     if (type === 'nextRound') handNo += 1;
     const before: any = authority.canonicalState();
+    if (type === 'discard' || type === 'tsumokiri') turnsAll += 1;
     if ((type === 'discard' || type === 'tsumokiri') && members.find((m: any) => m.seat === command.actorSeat && !m.is_cpu)) {
       try {
         review(before.game, command.action as Record<string, any>, match, handNo, command.actorSeat);
@@ -266,6 +285,6 @@ for (const r of reviews) {
   if (r.kind === 'ev' && r.loss !== null) { u.ev_loss += r.loss; u.ev_count += 1; }
 }
 console.log(JSON.stringify({
-  room: roomId, room_seat_user: roomSeatUser, diverged, opp_value: oppValues.length ? Math.round(oppValues.reduce((a, b) => a + b, 0) / oppValues.length) : 8000,
+  room: roomId, mc: MC_SIMS, room_seat_user: roomSeatUser, diverged, opp_value: oppValues.length ? Math.round(oppValues.reduce((a, b) => a + b, 0) / oppValues.length) : 8000,
   by_user: byUser, reviews, names: Object.fromEntries(Object.entries(HONOR)), tile_name_example: tileName('p5'),
 }));
