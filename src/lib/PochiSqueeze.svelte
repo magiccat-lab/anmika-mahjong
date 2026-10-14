@@ -21,12 +21,17 @@
   export let readOnly = false;
   /** readOnly の時の進み (0〜1) */
   export let progress = 0;
+  /** 他の人の画面で、色がまだ届いていない間は点を描かない */
+  export let colorKnown = true;
   export let onProgress: (p: number, glow: [Glow, Glow]) => void = () => {};
+  /** 引いた人の画面が開いた時 (他の席へ「絞り始めた」を流す) */
+  export let onOpen: () => void = () => {};
   export let onClose: () => void = () => {};
 
-  const good = POCHI_GOOD[color];
-  const stages: [Glow, Glow] = glow ?? (kakutei === 'good' ? ['rainbow', 'rainbow'] : expectationGlow(good, Math.random()));
-  const text = pochiRevealText(color, !!deka);
+  // 他の人の画面は色が後から届くので、色から出す物は全部 $: にする
+  $: good = POCHI_GOOD[color];
+  $: text = pochiRevealText(color, !!deka);
+  const stages: [Glow, Glow] = glow ?? (kakutei === 'good' ? ['rainbow', 'rainbow'] : expectationGlow(POCHI_GOOD[color], Math.random()));
   const REVEAL_AT = 0.9;
 
   let peel = 0;          // 0〜1。下からめくれた割合
@@ -92,6 +97,7 @@
   let idleTimer: ReturnType<typeof setInterval> | undefined;
   let kakuteiTimer: ReturnType<typeof setTimeout> | undefined;
   onMount(() => {
+    if (!readOnly) onOpen();
     se('pikiin', 0.4);
     if (kakutei) { se('kyuin', 0.5); kakuteiTimer = setTimeout(() => { kakuteiShowing = false; }, 1100); }
     // 触られないまま 30 秒たったら一気にめくる (他の人を待たせ続けない)。他の人の画面は引いた人に合わせるので 60 秒
@@ -111,7 +117,7 @@
     {#if deka}
       <img class="sq-pin" src={`/tiles/${deka === 'p1' ? 'Pin1' : 'Pin2'}.svg`} alt="" draggable="false" />
     {:else}
-      <svg class="sq-face" viewBox="0 0 300 400" aria-hidden="true"><circle cx="150" cy="200" r="24" fill={POCHI_DOT[color]} /></svg>
+      <svg class="sq-face" viewBox="0 0 300 400" aria-hidden="true">{#if colorKnown}<circle cx="150" cy="200" r="24" fill={POCHI_DOT[color]} />{/if}</svg>
     {/if}
     <div class="sq-cover" style:clip-path={`inset(0 0 ${peel * 100}% 0)`}></div>
   </div>
@@ -128,7 +134,8 @@
 <style>
   .sq { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.55); touch-action: none; user-select: none; outline: none; cursor: grab; overflow: hidden; }
   .sq.bad { background: rgba(0, 0, 0, 0.8); }
-  .sq-who { position: absolute; left: 50%; top: max(12px, 6vh); transform: translateX(-50%); padding: 3px 14px; background: #111; color: #fff; font: 700 clamp(13px, 2vw, 18px) 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.08em; white-space: nowrap; }
+  /* 横持ちでは牌が上まで来るので、名前は牌の左に出す (上に置くと牌に隠れる) */
+  .sq-who { position: absolute; z-index: 2; left: max(16px, 3vw); top: 42%; transform: translateY(-50%); max-width: calc(50% - min(23vw, 105px) - 24px); overflow: hidden; text-overflow: ellipsis; padding: 3px 14px; background: #111; color: #fff; font: 700 clamp(13px, 2vw, 18px) 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.08em; white-space: nowrap; }
   .sq-tile { position: absolute; left: 50%; top: 42%; width: min(46vw, 210px); aspect-ratio: 3 / 4; transform: translate(-50%, -50%); border-radius: 14px;
     background: linear-gradient(#fffdf6, #efe8d2); border: 2px solid #d9cfae; box-shadow: 0 10px 0 #c9bf9f, 0 16px 34px rgba(0, 0, 0, 0.6); transition: box-shadow 0.3s; }
   .sq-tile.glow-white { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 6px #fff, 0 0 50px 14px rgba(255, 255, 255, 0.75); }

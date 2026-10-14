@@ -1281,6 +1281,59 @@ export function allowStamp(room: Pick<Room, 'stampLastAt'>, roomSeat: number, no
   return true;
 }
 
+/** [2026-10-14 リョー、演出のラフ 2 版「他の人の画面」] 白ぽっちの絞りの進みを他の席へ流す。
+ *  引いた人の画面の指の進み (peel 0〜1) をそのまま中継する。見せ方だけで、点と牌には触らない。
+ *  色は点がのぞく所 (peel 0.4 から) と めくれた時だけ送ってくる [それより前に色を流さない] */
+export type PochiFxRelay = {
+  phase: 'open' | 'peel' | 'reveal' | 'close';
+  peel?: number;
+  color?: 'blue' | 'red' | 'green' | 'yellow';
+  deka?: 'p1' | 'p2' | null;
+  kakutei?: 'good' | 'bad' | null;
+  glow?: ['white' | 'gold' | 'rainbow', 'white' | 'gold' | 'rainbow'];
+};
+const POCHI_FX_COLORS = new Set(['blue', 'red', 'green', 'yellow']);
+const POCHI_FX_GLOWS = new Set(['white', 'gold', 'rainbow']);
+export function sanitizePochiFx(value: Record<string, unknown>): PochiFxRelay | null {
+  const phase = value.phase;
+  if (phase !== 'open' && phase !== 'peel' && phase !== 'reveal' && phase !== 'close') return null;
+  const out: PochiFxRelay = { phase };
+  if (phase === 'peel' || phase === 'reveal') {
+    const peel = phase === 'reveal' ? 1 : Number(value.peel);
+    if (!Number.isFinite(peel) || peel < 0 || peel > 1) return null;
+    out.peel = Math.round(peel * 1000) / 1000;
+    if (typeof value.color === 'string' && POCHI_FX_COLORS.has(value.color) && (phase === 'reveal' || out.peel >= 0.4)) {
+      out.color = value.color as PochiFxRelay['color'];
+    }
+    if (phase === 'reveal' && !out.color) return null;
+  }
+  if (phase === 'open') {
+    out.deka = value.deka === 'p1' || value.deka === 'p2' ? value.deka : null;
+    out.kakutei = value.kakutei === 'good' || value.kakutei === 'bad' ? value.kakutei : null;
+    const g = value.glow;
+    out.glow = Array.isArray(g) && g.length === 2 && g.every((x) => typeof x === 'string' && POCHI_FX_GLOWS.has(x))
+      ? [g[0], g[1]] as PochiFxRelay['glow']
+      : ['white', 'white'];
+  }
+  return out;
+}
+/** 絞りの中継の間引き: 1 席 1 秒に 30 通まで、open は 2 秒に 1 回 */
+const pochiFxRate = new WeakMap<object, Map<number, { openAt: number; winAt: number; n: number }>>();
+export function allowPochiFx(room: object, roomSeat: number, phase: PochiFxRelay['phase'], now = performance.now()): boolean {
+  let bySeat = pochiFxRate.get(room);
+  if (!bySeat) { bySeat = new Map(); pochiFxRate.set(room, bySeat); }
+  const r = bySeat.get(roomSeat) ?? { openAt: -Infinity, winAt: now, n: 0 };
+  if (now - r.winAt >= 1000) { r.winAt = now; r.n = 0; }
+  if (r.n >= 30) { bySeat.set(roomSeat, r); return false; }
+  if (phase === 'open') {
+    if (now - r.openAt < 2000) { bySeat.set(roomSeat, r); return false; }
+    r.openAt = now;
+  }
+  r.n += 1;
+  bySeat.set(roomSeat, r);
+  return true;
+}
+
 function broadcastAction(room: Room, command: AcceptedRoomCommand): void {
   for (const member of room.members.values()) {
     sendJson(member.ws, actionRelay(command, room.snapshot, member.seat, room.authority));
@@ -2744,6 +2797,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           room.cpuSaiFast = true;
           broadcast(room, { type: 'cpuSaiFast' });
           scheduleRoomDeadline(room);
+          return;
+        }
+        if ((msg as Record<string, unknown>)?.type === 'pochiFx') {
+          // [2026-10-14] 白ぽっちの絞りの進みを他の席 ・ 観戦へ流す [revision は進めない、送った席の画面は自前]
+          if (!room.snapshot.started || typeof payload.seat !== 'number' || payload.seat < 0) return;
+          const relay = sanitizePochiFx(msg as Record<string, unknown>);
+          if (!relay || !allowPochiFx(room, payload.seat, relay.phase)) return;
+          broadcast(room, { type: 'pochiFx', seat: payload.seat, ...relay });
           return;
         }
         if ((msg as Record<string, unknown>)?.type === 'stamp') {
