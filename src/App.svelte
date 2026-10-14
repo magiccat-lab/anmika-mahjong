@@ -2165,12 +2165,14 @@
   // ツモ切り auto モード [リョー指示 2026-05-12 checkbox 化]
   let autoTsumoKiri = false;
   // [2026-07-22 リョー要望] 局が変わったらツモ切りチェックを自動で外す
+  // [2026-10-14 リョー「まい局の冒頭では泣きなしをオフがデフォるｔとになるようにして」] 鳴きなしも局ごとに外す [自動和了はそのまま]
   let _tsumoKiriRoundKey = '';
   $: {
     const rk = `${state.changbang}-${state.jushu}-${state.benbang}`;
     if (rk !== _tsumoKiriRoundKey) {
       _tsumoKiriRoundKey = rk;
       autoTsumoKiri = false;
+      noCall = false;
     }
   }
   // [2026-07-22 リョー報告: 試合開始直後にツモを進めてくださいで停止]
