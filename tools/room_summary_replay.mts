@@ -83,7 +83,7 @@ type DiscardReview = {
   safety_note: string;
 };
 // 東風ごと → 人ごと (まとめは前にまとめた東風の続きから作るので、数は東風で分けておく)
-const discardStats: Record<string, Record<string, { evaluated: number; cpu_match: number; tags: Record<string, number> }>> = {};
+const discardStats: Record<string, Record<string, { evaluated: number; cpu_match: number; tags: Record<string, number>; fold_spots: number; folded: number }>> = {};
 const discardReviews: DiscardReview[] = [];
 const baseOf = (p: string) => {
   const core = toCorePai(String(p).replace(/[\+\=\-_*]/g, ''));
@@ -156,6 +156,43 @@ function feverUkeire(game: any, sp: any, pai: string): { uke: number; fever: num
   }
   return { uke, fever, fever2 };
 }
+// 目安の放銃率 (%)。10-14 先輩「松倉の西とかは危険度みて降りたんだと思うけどね、危険度の差が優位化とかオリ率とか」。
+// CPU の安全度は 現物 / スジ / カベ / それ以外 の 4 段で、字牌も無スジの真ん中も同じ「危険」になる。見返しはこの目安で差を見る。
+// 数は四麻の統計でよく言われる目安を丸めた物で、厳密ではない。リーチ者が複数なら一番高い方
+//  - 現物 0。字牌と萬子 (アンミカの萬子は 7 ・ 9 だけで順子にならない) は見えている枚数で 3 枚 0.5 / 2 枚 1.5 / 1 枚 3 / 0 枚 6
+//  - 数牌: 1 ・ 9 は スジ 3 / 無スジ 6、2 ・ 8 は 4 / 8、3 ・ 7 は 5 / 10、4 ・ 5 ・ 6 は 両スジ 3 / 片スジ 7 / 無スジ 12
+function dangerPct(game: any, player: number, b: string, sp: any): number {
+  const opps = [...(game.lizhi ?? [])].filter((p: number) => p !== player) as number[];
+  if (!opps.length) return 0;
+  const seenOf = (t: string) => {
+    let v = Number(sp?._bingpai?.[t[0]]?.[Number(t[1])] ?? 0);
+    for (const p of [0, 1, 2]) for (const d of (game.he.get(p)?._pai ?? []) as string[]) if (baseOf(d) === t) v++;
+    for (const x of (game.shan?.baopai ?? []) as string[]) if (baseOf(x) === t) v++;
+    return v;
+  };
+  let worst = 0;
+  for (const lp of opps) {
+    const he = ((game.he.get(lp)?._pai ?? []) as string[]).map(baseOf);
+    if (he.includes(b)) continue;
+    let d: number;
+    if (b[0] === 'z' || b[0] === 'm') {
+      const seen = seenOf(b);
+      d = seen >= 3 ? 0.5 : seen === 2 ? 1.5 : seen === 1 ? 3 : 6;
+    } else {
+      const n = Number(b[1]);
+      const has = (k: number) => he.includes(`${b[0]}${k}`);
+      if (n === 1) d = has(4) ? 3 : 6;
+      else if (n === 9) d = has(6) ? 3 : 6;
+      else if (n === 2) d = has(5) ? 4 : 8;
+      else if (n === 8) d = has(5) ? 4 : 8;
+      else if (n === 3) d = has(6) ? 5 : 10;
+      else if (n === 7) d = has(4) ? 5 : 10;
+      else { const a = has(n - 3), c = has(n + 3); d = a && c ? 3 : a || c ? 7 : 12; }
+    }
+    worst = Math.max(worst, d);
+  }
+  return worst;
+}
 const SAFETY_WORD = (v: number) => (v >= 10 ? '現物' : v >= 4 ? 'スジ' : v >= 2 ? 'カベ' : '危険 (現物でもスジでもない)');
 function reviewDiscard(game: any, action: Record<string, any>, match: number, hand: number, revision: number, seat: number): void {
   const player = game.lunbanToPlayerId(game.state.lunban);
@@ -167,9 +204,18 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
   const chosen = rows.find((r) => r.pai === chosenRaw) ?? rows.find((r) => r.base === baseOf(chosenRaw));
   if (!chosen) return;
   const user = roomSeatUser[seat] ?? '';
-  const st = ((discardStats[String(match)] ??= {})[user] ??= { evaluated: 0, cpu_match: 0, tags: {} });
+  const st = ((discardStats[String(match)] ??= {})[user] ??= { evaluated: 0, cpu_match: 0, tags: {}, fold_spots: 0, folded: 0 });
   st.evaluated += 1;
   const cpu = rows.find((r) => r.recommended) ?? rows[0];
+  // 降り率: リーチを受けて 2 シャンテン以上 (CPU なら降りる) の打牌のうち、目安の放銃率が一番安全な牌から 1.5% 以内だった割合
+  const minXtAll = Math.min(...rows.map((r) => r.xiangting));
+  const danger = new Map<string, number>(rows.map((r) => [r.base, dangerPct(game, player, r.base, sp)]));
+  const minDanger = Math.min(...danger.values());
+  const foldSpot = rows[0].hasLizhiOpponent && minXtAll >= 2;
+  if (foldSpot) {
+    st.fold_spots += 1;
+    if ((danger.get(chosen.base) ?? 0) <= minDanger + 1.5) st.folded += 1;
+  }
   if (cpu.base === chosen.base) {
     // CPU と同じ牌は拾わない (10-14 先輩「切った 南 → CPU なら 南 …こういうのは通知してもしゃーないやろ」)
     st.cpu_match += 1;
@@ -226,10 +272,12 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
   }
   // 危険牌は CPU と同じ物差し: リーチを受けて 2 シャンテン以上 (CPU なら降りる) なのに無スジを切り、現物かスジがあった時だけ
   // (10-14 先輩「危険牌切るのはどう評価すればいいんだろうね。今のだと分かりづらい」)
-  const safest = rows.reduce((a, b) => (b.safety > a.safety ? b : a), rows[0]);
-  if (chosen.hasLizhiOpponent && minXt >= 2 && chosen.safety < 0 && safest.safety >= 4) {
+  const safest = rows.reduce((a, b) => ((danger.get(b.base) ?? 99) < (danger.get(a.base) ?? 99) ? b : a), rows[0]);
+  const dChosen = danger.get(chosen.base) ?? 0;
+  const dSafe = danger.get(safest.base) ?? 0;
+  if (foldSpot && dChosen - dSafe >= 5) {
     tags.push('危険牌');
-    notes.push(`${minXt} シャンテンでリーチを受けたら CPU は降りる。切った ${tileName(chosen.base)} は${SAFETY_WORD(chosen.safety)}、${tileName(safest.base)} なら${SAFETY_WORD(safest.safety)}`);
+    notes.push(`${minXt} シャンテンでリーチを受けたら CPU は降りる。目安の放銃率は、切った ${tileName(chosen.base)} 約 ${dChosen}%、${tileName(safest.base)} なら 約 ${dSafe}%`);
   }
   if (flush && tags.includes('牌効率')) notes.push('染め手に向かう打牌かも (CPU は役を見ない)');
   for (const t of tags) st.tags[t] = (st.tags[t] ?? 0) + 1;
@@ -252,7 +300,9 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
   if (chosen.base[0] === 'z' || cpu.base[0] === 'z') {
     if (cpu.base[0] === 'z' && chosen.base[0] !== 'z') why.push(`${tileName(cpu.base)} は字牌なので先に切る順`);
   }
-  const safetyNote = cpu.hasLizhiOpponent ? `リーチ者がいる。切った ${tileName(chosen.base)} は${SAFETY_WORD(chosen.safety)}、CPU の ${tileName(cpu.base)} は${SAFETY_WORD(cpu.safety)}` : '';
+  const safetyNote = cpu.hasLizhiOpponent
+    ? `リーチ者がいる。目安の放銃率は 切った ${tileName(chosen.base)} 約 ${dChosen}%、CPU の ${tileName(cpu.base)} 約 ${danger.get(cpu.base) ?? 0}%、一番安全な ${tileName(safest.base)} 約 ${dSafe}%`
+    : '';
   const rivers: Record<string, string[]> = {};
   for (const p of [0, 1, 2]) rivers[String(p)] = [...((game.he.get(p)?._pai ?? []) as string[])];
   const turn = (game.he.get(player)?._pai ?? []).length + 1;
