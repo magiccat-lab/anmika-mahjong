@@ -157,7 +157,7 @@
   let feverBgm: HTMLAudioElement | null = null;
   let feverBgmFade: ReturnType<typeof setInterval> | null = null;
   $: someoneFeverBgm = ([0, 1, 2] as const).some((p) => !!$game.game.feverActive?.[p]);
-  $: syncFeverBgm(someoneFeverBgm && !$prefs.muted && appMode !== 'menu');
+  $: syncFeverBgm(someoneFeverBgm && !$prefs.muted && !$prefs.bgmOff && appMode !== 'menu');
   function stopFeverBgmFade(): void {
     if (feverBgmFade !== null) { clearInterval(feverBgmFade); feverBgmFade = null; }
   }
@@ -3068,6 +3068,9 @@
         {/if}
       </div>
       <div class="table-menu-wrap">
+        <!-- [2026-10-14 リョー「BGM音量操作トグルは付けて良いな、見える位置に」] フィーバー中の曲を流すか。⋯ の隣に常に出す
+             (手牌の上の帯に置くとスマホで自分の札が詰まった) -->
+        <button type="button" class="bgm-btn" class:off={$prefs.bgmOff} aria-pressed={!$prefs.bgmOff} title="フィーバー中の曲 (アンミカーニバル) を流す" on:click={() => prefs.toggle('bgmOff')}>BGM {$prefs.bgmOff ? '切' : '入'}</button>
         <button type="button" class="table-menu-btn" class:open={tableMenuOpen} aria-label="設定と退出" aria-expanded={tableMenuOpen} title="設定と退出" on:click={() => { tableMenuOpen = !tableMenuOpen; }}>⋯</button>
         {#if tableMenuOpen}
           <div class="table-menu" role="menu">
@@ -6023,7 +6026,21 @@
   }
   main.mode-single.ui-board-v2 .turn-status.status-action .status-dot { background: #8a2b1d; }
   main.mode-single.ui-board-v2 .dora-row .fever-inline-remain { font-size: 11px; }
-  .table-menu-wrap { position: relative; justify-self: end; }
+  .table-menu-wrap { position: relative; justify-self: end; display: flex; gap: 6px; align-items: center; }
+  .bgm-btn {
+    height: 40px;
+    padding: 0 10px;
+    border: 1px solid var(--jz-gold, #e5c26a);
+    border-radius: var(--jz-rad);
+    background: var(--jz-panel);
+    color: var(--jz-ink);
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .bgm-btn.off { border-color: var(--jz-panel-bd); opacity: 0.7; }
+  .bgm-btn:focus-visible { outline: 3px solid var(--jz-gold, #e5c26a); outline-offset: 2px; }
   .table-menu-btn {
     width: 44px;
     height: 40px;
@@ -6625,6 +6642,7 @@
     main.mode-single.ui-board-v2 .dora-row { min-height: 32px; }
     main.mode-single.ui-board-v2 .turn-status { padding: 4px 10px; font-size: 12px; }
     .table-menu-btn { width: 44px; height: 32px; font-size: 18px; }
+    .bgm-btn { height: 32px; padding: 0 8px; font-size: 12px; }
     .seat-card { padding: 5px 7px 7px; gap: 2px; }
     .sc-wind { width: 22px; height: 22px; font-size: 13px; }
     .sc-name { font-size: 12px; }

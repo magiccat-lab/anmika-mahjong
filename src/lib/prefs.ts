@@ -15,6 +15,8 @@ export interface Prefs {
   colorAssist: boolean;
   /** 自分の手番で抜ける華牌 / 北があれば自動で抜く。 */
   autoNuki: boolean;
+  /** BGM (フィーバー中のアンミカーニバル) を流さない。卓の「BGM」で切り替える [2026-10-14 リョー「BGM音量操作トグルは付けて良いな、見える位置に」]。 */
+  bgmOff: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -22,6 +24,7 @@ export const DEFAULT_PREFS: Prefs = {
   showWall: false,
   colorAssist: false,
   autoNuki: false,
+  bgmOff: false,
 };
 
 const KEY = 'anmika.prefs.v1';
