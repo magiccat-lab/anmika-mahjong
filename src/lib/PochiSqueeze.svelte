@@ -8,6 +8,8 @@
   //  - readOnly は他の人の画面: 引いた人の進み (progress) を外から受けて同じ様にめくる
   //  - 4 版の答え (同じ日「ポッチの演出もうちょっと強化したい」): 光りは 5 段のステップアップ (目盛りと字、3 段目から揺れる)、
   //    点がのぞく手前の溜め (暗くして寄り、半分の速さでしかめくれない、心臓の音が速く)、虹の確定のまれなプレミア (虹の光線とサビ 3 秒)
+  //  - 予告 (4 版の 2 の答え): 引いた瞬間に画面の上から牌へ稲妻が落ち、「ぽっちチャンス」の帯。稲妻の光りが期待度 (白 ・ 金 ・ 虹)。
+  //    プレミアの時はプレミアが予告を兼ねる
   // 閉じ方は前と同じ 3 重 (めくれて 1.6 秒 ・ めくれた後のタップ ・ 触られないまま 30 秒で自動でめくる)
   import { onMount, onDestroy } from 'svelte';
   import { playSound } from './prefs';
@@ -52,13 +54,15 @@
   let lastY = 0;
   const beats = new Set<number>();
   let premiumShowing = premium;
-  let kakuteiShowing = !!kakutei && !premium;
+  let teaserShowing = !premium;
+  let kakuteiShowing = false;
+  const teaserGlow = topStep >= 4 ? 'rainbow' : topStep >= 3 ? 'gold' : 'white';
   let stepNow = -1;
   let shakeKey = 0;
 
   $: tame = !revealed && peel >= TAME_FROM && peel < TAME_TO;
   $: glowNow = revealed ? (good ? (topStep >= 4 ? 'rainbow' : 'gold') : 'none')
-    : stepNow >= 0 ? STEP_GLOW[stepNow] : kakutei === 'good' ? 'rainbow' : 'none';
+    : stepNow >= 0 ? STEP_GLOW[stepNow] : teaserShowing ? teaserGlow : kakutei === 'good' ? 'rainbow' : 'none';
   $: if (readOnly) setPeel(progress);
 
   function se(name: string, vol = 0.6): void { playSound(`/sounds/fx/${name}.mp3`, vol); }
@@ -94,7 +98,7 @@
   function onDown(e: PointerEvent): void {
     lastTouch = Date.now();
     if (revealed) { close(); return; }
-    if (readOnly || kakuteiShowing || premiumShowing) return;
+    if (readOnly || kakuteiShowing || premiumShowing || teaserShowing) return;
     startY = e.clientY;
     lastY = e.clientY;
     startPeel = peel;
@@ -120,6 +124,7 @@
   let idleTimer: ReturnType<typeof setInterval> | undefined;
   let kakuteiTimer: ReturnType<typeof setTimeout> | undefined;
   let premiumTimer: ReturnType<typeof setTimeout> | undefined;
+  let teaserTimer: ReturnType<typeof setTimeout> | undefined;
   function startKakutei(): void {
     if (!kakutei) return;
     kakuteiShowing = true;
@@ -134,7 +139,9 @@
       playSound('/sounds/bgm/premium_sabi.mp3', 0.55);
       premiumTimer = setTimeout(() => { premiumShowing = false; startKakutei(); }, 2800);
     } else {
-      startKakutei();
+      // 予告: 稲妻と「ぽっちチャンス」の帯 (1.6 秒) の後に、確定の帯と絞り
+      se('gashan', 0.6); se('gyuiin', 0.5);
+      teaserTimer = setTimeout(() => { teaserShowing = false; startKakutei(); }, 1600);
     }
     // 触られないまま 30 秒たったら一気にめくる (他の人を待たせ続けない)。他の人の画面は引いた人に合わせるので 60 秒
     idleTimer = setInterval(() => {
@@ -142,7 +149,7 @@
       if (Date.now() - lastTouch > (readOnly ? 60000 : 30000)) { if (readOnly) close(); else setPeel(1); }
     }, 1000);
   });
-  onDestroy(() => { clearTimeout(closeTimer); clearInterval(idleTimer); clearTimeout(kakuteiTimer); clearTimeout(premiumTimer); });
+  onDestroy(() => { clearTimeout(closeTimer); clearInterval(idleTimer); clearTimeout(kakuteiTimer); clearTimeout(premiumTimer); clearTimeout(teaserTimer); });
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -153,7 +160,12 @@
     <div class="sq-rays" aria-hidden="true"></div>
     <div class="sq-premium" aria-hidden="true">アンミカーニバル</div>
   {/if}
-  {#key shakeKey}<div class="sq-shake" class:go={shakeKey > 0}>
+  {#if teaserShowing}
+    <svg class="sq-bolt glow-{teaserGlow}" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M98 -2 L84 12 L89 15 L74 26 L79 29 L62 38 L66 40 L52 46" /></svg>
+    <div class="sq-flash" aria-hidden="true"></div>
+    <div class="sq-band teaser" aria-hidden="true"><span class="sq-word">ぽっちチャンス</span></div>
+  {/if}
+  {#key shakeKey}<div class="sq-shake" class:go={shakeKey > 0 || teaserShowing}>
   <div class="sq-tile glow-{glowNow}" class:zoom={tame} bind:this={tileEl}>
     {#if deka}
       <img class="sq-pin" src={`/tiles/${deka === 'p1' ? 'Pin1' : 'Pin2'}.svg`} alt="" draggable="false" />
@@ -163,14 +175,14 @@
     <div class="sq-cover" style:clip-path={`inset(0 0 ${peel * 100}% 0)`}></div>
   </div>
   </div>{/key}
-  {#if !revealed && !premiumShowing && !kakuteiShowing}
+  {#if !revealed && !premiumShowing && !kakuteiShowing && !teaserShowing}
     <div class="sq-meter" aria-hidden="true">
       {#each STEP_GLOW as g, i}<span class="sq-pip" class:on={i <= stepNow} data-glow={g}></span>{/each}
     </div>
     {#if stepNow >= 0}{#key stepNow}<div class="sq-step" class:hot={stepNow >= 2}>{STEP_WORD[stepNow]}</div>{/key}{/if}
   {/if}
   {#if tame}<div class="sq-slow" aria-hidden="true">SLOW</div>{/if}
-  {#if !revealed && !readOnly && !kakuteiShowing && !premiumShowing && peel < 0.05}<div class="sq-hint">下から上へ指で絞る</div>{/if}
+  {#if !revealed && !readOnly && !kakuteiShowing && !premiumShowing && !teaserShowing && peel < 0.05}<div class="sq-hint">下から上へ指で絞る</div>{/if}
   {#if kakuteiShowing}
     <div class="sq-band" class:grey={kakutei === 'bad'}><span class="sq-word">確定</span><span class="sq-tag">{kakutei === 'good' ? '正のぽっち' : '逆のぽっち'}</span></div>
   {/if}
@@ -222,6 +234,21 @@
   @keyframes sqPop { 0% { opacity: 0; transform: translate(var(--px, 0), -50%) scale(2); } 100% { opacity: 1; transform: translate(var(--px, 0), -50%) scale(1); } }
   .sq-premium { --px: -50%; }
   @keyframes sqSpin { to { transform: rotate(360deg); } }
+  /* 予告の稲妻 (上から牌の真ん中 = 42% へ)。光りの色が期待度 */
+  /* 牌の後ろに描く (上から牌に落ちて見える) */
+  .sq-bolt { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .sq-bolt path { fill: none; stroke: #fff; stroke-width: 0.9; vector-effect: non-scaling-stroke; stroke-width: 7px; stroke-linejoin: round;
+    stroke-dasharray: 2000; stroke-dashoffset: 2000; animation: sqBoltDraw 0.18s linear forwards, sqBoltFade 0.4s ease-out 1.1s forwards;
+    filter: drop-shadow(0 0 8px #8fd0ff) drop-shadow(0 0 20px #4a8cff); }
+  .sq-bolt.glow-gold path { filter: drop-shadow(0 0 8px #ffe27a) drop-shadow(0 0 22px #f2a43a); }
+  .sq-bolt.glow-rainbow path { filter: drop-shadow(0 0 8px #ff5ad1) drop-shadow(0 0 22px #5ad1ff); animation: sqBoltDraw 0.18s linear forwards, sqHue 0.6s linear infinite, sqBoltFade 0.4s ease-out 1.1s forwards; }
+  .sq-flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 5; pointer-events: none; animation: sqFlash 0.35s ease-out 0.15s; }
+  .sq-band.teaser { top: 70%; --h: clamp(60px, 13vh, 110px); --fs: calc(min(8vw, 76px, var(--h) * 0.6)); z-index: 6; animation-delay: 0.35s; }
+  .sq-band.teaser .sq-word { animation-delay: 0.35s; }
+  @keyframes sqBoltDraw { to { stroke-dashoffset: 0; } }
+  @keyframes sqBoltFade { to { opacity: 0; } }
+  @keyframes sqFlash { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+  @keyframes sqHue { to { filter: hue-rotate(360deg) drop-shadow(0 0 8px #ff5ad1); } }
   @keyframes sqBlink { 50% { opacity: 0.3; } }
   .sq-face, .sq-pin { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .sq-pin { transform: scale(0.68); }

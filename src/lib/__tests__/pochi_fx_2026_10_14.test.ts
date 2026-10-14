@@ -29,16 +29,24 @@ describe('pochiFx', () => {
 });
 
 describe('PochiSqueeze', () => {
-  it('裏向きの牌と、指で絞る案内を出す (めくる前は色の名前を出さない)', () => {
-    const { body } = render(PochiSqueeze, { props: { color: 'blue' } });
+  // [4 版の 2] 開いた直後は予告 (稲妻と「ぽっちチャンス」)。指で絞る案内と確定の帯は予告の 1.6 秒の後
+  it('裏向きの牌と予告を出す (めくる前は色の名前を出さない)', () => {
+    const { body } = render(PochiSqueeze, { props: { color: 'blue', step: 3 } });
     expect(body).toContain('sq-cover');
-    expect(body).toContain('下から上へ指で絞る');
+    expect(body).toContain('ぽっちチャンス');
+    expect(body).toContain('sq-bolt glow-gold');
+    expect(body).not.toContain('下から上へ指で絞る');
     expect(body).not.toContain('青ぽっち');
   });
-  it('確定の時は絞りの前に確定の帯、でかぽっちは筒子の絵', () => {
+  it('確定 (正) なら予告の稲妻は虹、でかぽっちは筒子の絵', () => {
     const { body } = render(PochiSqueeze, { props: { color: 'green', deka: 'p1', kakutei: 'good' } });
-    expect(body).toContain('確定');
+    expect(body).toContain('sq-bolt glow-rainbow');
     expect(body).toContain('/tiles/Pin1.svg');
+  });
+  it('プレミアの時は予告の代わりにプレミア', () => {
+    const { body } = render(PochiSqueeze, { props: { color: 'blue', step: 4, premium: true } });
+    expect(body).toContain('アンミカーニバル');
+    expect(body).not.toContain('sq-bolt');
   });
 });
 
