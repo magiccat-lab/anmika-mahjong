@@ -165,8 +165,9 @@
   let bgmTick = 0; // 鳴らし始めた Audio を反応 ($:) に知らせる
   $: someoneFeverBgm = ([0, 1, 2] as const).some((p) => !!$game.game.feverActive?.[p]);
   $: bgmAllowed = !$prefs.muted && !$prefs.bgmOff && appMode !== 'menu' && viewMode === 'single';
-  // 通常時の 8bit 版 (同じ日「BGM論外だった」で一度止め、GAME で作り直したサビに「音はあってる」で戻した)
-  const NORMAL_BGM_ENABLED = true;
+  // 通常時の 8bit 版は止めてある。同じ日「BGM論外だった」で一度止め、GAME のサビ 3 版目に「音はあってる」。
+  // 全曲にアレンジを足して入れた版は「前からめっちゃ悪化してるやん、だめだね」で止めた (先輩が聞いて OK を出すまで戻さない)
+  const NORMAL_BGM_ENABLED = false;
   $: syncBgm(!bgmAllowed ? null : someoneFeverBgm ? 'fever' : NORMAL_BGM_ENABLED ? 'normal' : null);
   function stopBgmFade(kind: BgmKind): void {
     const t = bgmFade[kind];
