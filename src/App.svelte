@@ -154,7 +154,7 @@
   // ミュートの設定 ・ 卓の右上の「BGM 切」・ 入口のメニューでは鳴らさない
   const BGM_TRACKS = {
     fever: { src: '/sounds/bgm/anmika_carnival.mp3', volume: 0.3 },
-    normal: { src: '/sounds/bgm/anmika_carnival_8bit.mp3?v=bass14', volume: 0.12 },
+    normal: { src: '/sounds/bgm/anmika_carnival_8bit.mp3?v=crepe2', volume: 0.12 },
   } as const;
   type BgmKind = keyof typeof BGM_TRACKS;
   const BGM_FADE_MS = 2500;
