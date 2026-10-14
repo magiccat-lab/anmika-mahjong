@@ -174,6 +174,32 @@
   // 絞りの途中で牌を河へ捨てていた。絞りの間はどれも出さず、自動ツモ切り ・ 自動和了も絞りが閉じるまで待つ
   $: mySqueezeShowing = !!pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat);
   // オンラインのお知らせの帯 [北抜き ・ リーチなど]。「あなたの華」の欄の下に重ねて出す (huaPanel)
+  // [2026-10-15 fx5 V6] 良い牌 (赤 5 ・ 金 ・ 虹) を引いたら手牌のツモ牌を、華を引いたら「あなたの華」のその華を一度だけ光らせる。卓は止めない
+  let _glowZimoKey = '';
+  let _glowHuaLen = -1;
+  let _glowRoundKey = '';
+  function glowOnce(sel: string): void {
+    if (typeof document === 'undefined') return;
+    requestAnimationFrame(() => {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      if (!el) return;
+      el.classList.remove('good-glow'); void el.offsetWidth; el.classList.add('good-glow');
+      setTimeout(() => el.classList.remove('good-glow'), 1500);
+    });
+  }
+  $: if (viewMode === 'single' && actorSeat >= 0) {
+    const sp: any = $game.game.shoupai.get(actorSeat as PlayerId);
+    const z = String(sp?._zimo ?? '');
+    const rk = `${state.changbang}-${state.jushu}-${state.benbang}`;
+    const key = `${rk}-${$game.game.events?.length ?? 0}-${z}`;
+    const core = z.replace(/[^a-zA-Z0-9]/g, '');
+    const good = /^[mps]0/.test(core) || /^(gp|gs|gN|np3|ns3|nz3)/.test(core);
+    if (z && key !== _glowZimoKey) { _glowZimoKey = key; if (good) glowOnce('.seat-bottom .tile-btn.tsumo-tile'); }
+    const hua: string[] = $game.game.huapai?.[actorSeat as PlayerId] ?? [];
+    if (rk !== _glowRoundKey) { _glowRoundKey = rk; _glowHuaLen = hua.length; }
+    else if (hua.length > _glowHuaLen) { const f = hua[hua.length - 1]; _glowHuaLen = hua.length; glowOnce(`.hua-panel.hp-me .hp-group[data-key="${f}"]`); }
+    else _glowHuaLen = hua.length;
+  }
   $: showMsgBand = onlineGameStarted && !!$game.message && !($game.lastHuleResult || state.finished || $game.pendingPingju);
 
   // [2026-10-14 リョー] 卓の BGM。どちらもアン ミカさんの「アンミカーニバル」で、曲のファイルは public/sounds/bgm/ (git には入れない)。
@@ -340,13 +366,18 @@
   // cpuStepImpl が複数ターンを1 update で回すため shan.lastZimoPochi は上書きされる。
   // events 配列から z5 の色を直接取り、キューで複数回分を順番に表示する
   // [2026-10-14] でかぽっち (リーチ一発で引いた 1筒 ・ 2筒) も同じ絞りに。kakutei は見えている牌で正 ・ 逆が決まっている時
-  type PochiRevealItem = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean; deka?: 'p1' | 'p2' | null; kakutei?: 'good' | 'bad' | null; step?: number; premium?: boolean; teaser?: 'bolt' | 'line' };
+  type PochiRevealItem = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean; deka?: 'p1' | 'p2' | null; kakutei?: 'good' | 'bad' | null; step?: number; premium?: boolean; teaser?: 'bolt' | 'line' | 'mono' };
   // 期待度 (光りが何段まで上がるか) とプレミアはここで決めて PochiSqueeze に渡す (オンラインは同じ物を他の席へ流す)。
   // [2026-10-14 リョー 4 版の答え: ステップアップ ・ 溜め ・ プレミアを入れる]
   // 予告は稲妻と決め台詞「白って 200 色あんねん」のカットインを半々 (4 版の 2 ・ 3 の答え)
-  function pochiStep(color: PochiColor, kakutei: 'good' | 'bad' | null): { step: number; premium: boolean; teaser: 'bolt' | 'line' } {
+  // [2026-10-15 fx5 V3] 3 つ目の予告「白黒」は強めの予告。当たりで 25%、外れでも 6% 出る (ガセ予告)
+  function pochiStep(color: PochiColor, kakutei: 'good' | 'bad' | null): { step: number; premium: boolean; teaser: 'bolt' | 'line' | 'mono' } {
     const step = pochiTopStep(POCHI_GOOD[color], kakutei, Math.random());
-    return { step, premium: premiumRoll(step, Math.random()), teaser: Math.random() < 0.5 ? 'line' : 'bolt' };
+    const good = kakutei === 'good' || (kakutei !== 'bad' && POCHI_GOOD[color]);
+    // 試験 (Playwright) だけ予告の種類を決め打ちできる
+    const forced = (typeof navigator !== 'undefined' && (navigator as any).webdriver && (window as any).__forceTeaser) || null;
+    const teaser = forced ?? (Math.random() < (good ? 0.25 : 0.06) ? 'mono' : (Math.random() < 0.5 ? 'line' : 'bolt'));
+    return { step, premium: premiumRoll(step, Math.random()), teaser };
   }
   let pochiReveal: PochiRevealItem | null = null;
   let pochiRevealQueue: PochiRevealItem[] = [];
@@ -405,7 +436,7 @@
   // [2026-10-14 リョー、演出のラフ 2 版「他の人の画面」] オンラインでは引いた人の絞りの進みを server が他の席へ中継する。
   // 引いた人: 開いた ・ 進み (70ms ごと) ・ めくれた ・ 閉じたを送る。色は点がのぞく 0.4 から
   // 他の席: remotePochi に受けて、同じ PochiSqueeze を readOnly で出す
-  type RemotePochi = { seat: number; deka: 'p1' | 'p2' | null; kakutei: 'good' | 'bad' | null; glow: [Glow, Glow]; step: number | null; premium: boolean; teaser: 'bolt' | 'line'; peel: number; color: PochiColor | null; key: number };
+  type RemotePochi = { seat: number; deka: 'p1' | 'p2' | null; kakutei: 'good' | 'bad' | null; glow: [Glow, Glow]; step: number | null; premium: boolean; teaser: 'bolt' | 'line' | 'mono'; peel: number; color: PochiColor | null; key: number };
   let remotePochi: RemotePochi | null = null;
   let pochiFxLast = 0;
   let pochiFxTimer: ReturnType<typeof setTimeout> | null = null;
@@ -464,7 +495,7 @@
         kakutei: msg.kakutei === 'good' || msg.kakutei === 'bad' ? msg.kakutei : null,
         glow: Array.isArray(msg.glow) && msg.glow.length === 2 ? msg.glow : ['white', 'white'],
         step: Number.isInteger(msg.step) && msg.step >= 0 && msg.step <= 4 ? msg.step : null, premium: msg.premium === true,
-        teaser: msg.teaser === 'line' ? 'line' : 'bolt',
+        teaser: msg.teaser === 'line' || msg.teaser === 'mono' ? msg.teaser : 'bolt',
         peel: 0, color: null, key: Date.now(),
       };
       return;
@@ -2729,7 +2760,7 @@
       <div class="hp-groups">
         {#each groups as g (g.key)}
           <!-- [2026-10-09 リョー 2 版目「華のテキストはいらん」] 効果の字は出さず、読み上げとマウスを乗せた時だけ -->
-          <div class="hp-group" class:hp-nuki={g.key === 'nuki'} title={g.label} aria-label={g.label}>
+          <div class="hp-group" class:hp-nuki={g.key === 'nuki'} data-key={g.key} title={g.label} aria-label={g.label}>
             <div class="hp-tiles">{#each g.tiles as t}<Tile pai={t} size="md" />{/each}</div>
           </div>
         {/each}
@@ -3451,10 +3482,10 @@
   {#if viewMode === 'single' && fxNow && fxTier}
     {#key fxNow.ts}
       <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-      <div class="fx fx-{fxNow.id} fx-{fxTier} dr" class:fx-skippable={fxTier === 'heavy'}
-        style="--fx-dur: {fxDur}ms; --fit: {Math.min(1, 3.2 / FX_LABELS[fxNow.id].length)}" aria-hidden="true"
+      <div class="fx fx-{fxNow.id} fx-{fxTier} dr {fxNow.style ? 'yk-' + fxNow.style : ''} {fxNow.combo && fxNow.combo >= 2 ? 'combo-' + Math.min(fxNow.combo, 4) : ''}" class:fx-skippable={fxTier === 'heavy'}
+        style="--fx-dur: {fxDur}ms; --fit: {Math.min(1, 3.2 / (fxNow.label ?? FX_LABELS[fxNow.id]).length)}" aria-hidden="true"
         on:click={() => { if (fxTier === 'heavy' && fxNow) skipCutin(fxNow.ts); }}>
-        <div class="dr-band"><span class="fx-word dr-word">{FX_LABELS[fxNow.id]}</span><span class="fx-who dr-who">{fxWho}</span></div>
+        <div class="dr-band"><span class="fx-word dr-word">{fxNow.label ?? FX_LABELS[fxNow.id]}</span><span class="fx-who dr-who">{fxWho}</span>{#if fxNow.combo && fxNow.combo >= 2}<span class="dr-combo">{fxNow.combo} 連続</span>{/if}</div>
       </div>
     {/key}
   {/if}
@@ -6531,6 +6562,40 @@
     30% { transform: skewX(-12deg) scale(1) translate(-3px, 2px); }
     34%, 82% { opacity: 1; transform: skewX(-12deg) scale(1); }
     100% { opacity: 0; transform: skewX(-12deg) translateX(30px); }
+  }
+  /* ---- [2026-10-15 fx5] 役の名前の帯 (V2) ・ 連続和了 (V5) ・ 良い牌の光 (V6) のラフ ---- */
+  .dr-combo {
+    position: absolute; left: 12%; top: -18%; padding: 4px 16px; background: #111; color: #fff !important;
+    font: 400 clamp(18px, 3.2vw, 34px) 'FX Kana', 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.06em;
+    z-index: 3; opacity: 1; transform: skewX(-12deg) scale(0); animation: drCombo var(--fx-dur) cubic-bezier(0.2, 1.6, 0.3, 1) both;
+  }
+  @keyframes drCombo { 0%, 18% { opacity: 0; transform: skewX(-12deg) scale(0); } 30%, 84% { opacity: 1; transform: skewX(-12deg) scale(1); } 100% { opacity: 0; transform: skewX(-12deg) scale(0.9); } }
+  .dr.combo-2 .dr-combo { background: #b8862b; }
+  .dr.combo-3 .dr-combo { background: #c0392b; }
+  .dr.combo-4 .dr-combo { background: linear-gradient(90deg, #e53935, #fb8c00, #fdd835, #43a047, #1e88e5, #8e24aa); }
+  .dr.combo-3 .dr-band, .dr.combo-4 .dr-band { box-shadow: 0 0 0 4px #fff inset, 0 0 40px rgba(255, 200, 80, 0.9), 0 10px 30px rgba(0, 0, 0, 0.5); }
+  .dr.combo-4 .dr-band { animation: drBand var(--fx-dur) cubic-bezier(0.2, 0.9, 0.2, 1) both, drShake 0.12s linear 0.3s 6; }
+  @keyframes drShake { 0%, 100% { translate: 0 0; } 25% { translate: 6px -4px; } 75% { translate: -6px 4px; } }
+  /* 役の名前: 一発 = 黄と黒の電撃 (速い) ・ 嶺上開花 = 若葉と桜 ・ 海底 ・ 河底 = 夜の青 (ゆっくり) ・ 天和 ・ 地和 = 虹 */
+  .dr.yk-ippatsu { --dr-pink: #ffe14d; --dr-pink2: #f2b705; --dr-shadow: #3b2a00; }
+  .dr.yk-ippatsu .dr-band { background: repeating-linear-gradient(135deg, #111 0 26px, #ffd400 26px 52px); }
+  .dr.yk-ippatsu .dr-word { animation-duration: calc(var(--fx-dur) * 0.8); }
+  .dr.yk-rinshan .dr-band { background: linear-gradient(180deg, #111 0 7%, #a8e063 7% 50%, #56ab2f 50% 93%, #111 93%); }
+  .dr.yk-rinshan { --dr-shadow: #1e4d12; }
+  .dr.yk-rinshan .dr-band::after { content: '✿ ✿ ✿'; position: absolute; right: 16%; top: 8%; color: #ffc0cb; font-size: calc(var(--dr-fs) * 0.35); letter-spacing: 0.4em; }
+  .dr.yk-haitei .dr-band { background: linear-gradient(180deg, #111 0 7%, #2c3e70 7% 50%, #0b1a3a 50% 93%, #111 93%); }
+  .dr.yk-haitei { --dr-shadow: #000; }
+  .dr.yk-haitei .dr-band::after { content: '☾'; position: absolute; right: 14%; top: 4%; color: #fff6c8; font-size: calc(var(--dr-fs) * 0.6); }
+  .dr.yk-haitei .dr-word { animation-timing-function: ease-out; }
+  .dr.yk-tenhou .dr-band { background: linear-gradient(90deg, #e53935, #fb8c00, #fdd835, #43a047, #1e88e5, #8e24aa); }
+  .dr.yk-tenhou::before { background: rgba(0, 0, 0, 0.7); }
+  /* 良い牌を引いた時の光 (1 回だけ、1.4 秒) */
+  :global(.good-glow) { animation: goodGlow 1.4s ease-out 1; position: relative; z-index: 2; }
+  @keyframes goodGlow {
+    0% { box-shadow: 0 0 0 0 rgba(255, 215, 90, 0); filter: brightness(1); }
+    20% { box-shadow: 0 0 0 3px #ffd75a, 0 0 22px 6px rgba(255, 215, 90, 0.9); filter: brightness(1.25); }
+    60% { box-shadow: 0 0 0 2px #ffd75a, 0 0 14px 3px rgba(255, 215, 90, 0.6); filter: brightness(1.1); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 215, 90, 0); filter: brightness(1); }
   }
   .seat-card.fx-hit { box-shadow: inset 0 0 0 2px var(--jz-gold), 0 0 0 2px var(--jz-gold), var(--jz-shadow); }
   @media (prefers-reduced-motion: reduce) {

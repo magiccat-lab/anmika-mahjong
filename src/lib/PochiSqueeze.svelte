@@ -26,7 +26,7 @@
   /** プレミア (虹の確定のまれな演出)。引いた人が決めて他の席へ流す */
   export let premium = false;
   /** 予告の種類: 稲妻か、決め台詞「白って 200 色あんねん」のカットイン (4 版の 3 の答え)。引いた人が決めて他の席へ流す */
-  export let teaser: 'bolt' | 'line' = 'bolt';
+  export let teaser: 'bolt' | 'line' | 'mono' = 'bolt';
   /** 前の型の光り 2 段 (古い端末から届いた時だけ使う) */
   export let glow: [Glow, Glow] | null = null;
   export let readOnly = false;
@@ -142,8 +142,9 @@
       premiumTimer = setTimeout(() => { premiumShowing = false; startKakutei(); }, 2800);
     } else {
       // 予告: 稲妻と「ぽっちチャンス」の帯 (1.6 秒)、または決め台詞のカットインの後に帯 (2.4 秒)。その後に確定の帯と絞り
-      if (teaser === 'line') { se('kira', 0.6); se('gyuiin', 0.5); } else { se('gashan', 0.6); se('gyuiin', 0.5); }
-      teaserTimer = setTimeout(() => { teaserShowing = false; startKakutei(); }, teaser === 'line' ? 2400 : 1600);
+      // [2026-10-15 fx5 V3] 3 つ目の予告「白黒」: 卓の色が抜けて牌の光だけ残り、2.2 秒後に色が戻る
+      if (teaser === 'line') { se('kira', 0.6); se('gyuiin', 0.5); } else if (teaser === 'mono') { se('gashan', 0.4); se('kira', 0.7); } else { se('gashan', 0.6); se('gyuiin', 0.5); }
+      teaserTimer = setTimeout(() => { teaserShowing = false; startKakutei(); }, teaser === 'line' ? 2400 : teaser === 'mono' ? 2200 : 1600);
     }
     // 触られないまま 30 秒たったら一気にめくる (他の人を待たせ続けない)。他の人の画面は引いた人に合わせるので 60 秒
     idleTimer = setInterval(() => {
@@ -155,14 +156,17 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="sq" class:revealed class:bad={revealed && !good} class:tame role="dialog" aria-label={revealed ? `${text.word} ${text.tag}` : `${who} ${deka ? 'でかぽっち' : '白ぽっち'} 絞り中`}
+<div class="sq" class:revealed class:bad={revealed && !good} class:tame class:mono={teaserShowing && teaser === 'mono'} role="dialog" aria-label={revealed ? `${text.word} ${text.tag}` : `${who} ${deka ? 'でかぽっち' : '白ぽっち'} 絞り中`}
   tabindex="-1" on:pointerdown={onDown} on:pointermove={onMove} on:pointerup={onUp} on:pointercancel={onUp} on:keydown={onKey}>
   {#if who}<div class="sq-who">{who}{readOnly ? ' が絞っています' : ''}</div>{/if}
   {#if premiumShowing}
     <div class="sq-rays" aria-hidden="true"></div>
     <div class="sq-premium" aria-hidden="true">アンミカーニバル</div>
   {/if}
-  {#if teaserShowing && teaser === 'line'}
+  {#if teaserShowing && teaser === 'mono'}
+    <div class="sq-mono" aria-hidden="true"><div class="sq-mono-scan"></div></div>
+    <div class="sq-band teaser mono" aria-hidden="true"><span class="sq-word">ぽっちチャンス</span></div>
+  {:else if teaserShowing && teaser === 'line'}
     <div class="sq-ci glow-{teaserGlow}" aria-hidden="true"><div class="sq-ci-speed"></div><div class="sq-ci-line">白って 200 色あんねん</div><div class="sq-ci-sig">アン ミカ</div></div>
     <div class="sq-band teaser line" aria-hidden="true"><span class="sq-word">ぽっちチャンス</span></div>
   {:else if teaserShowing}
@@ -170,7 +174,7 @@
     <div class="sq-flash" aria-hidden="true"></div>
     <div class="sq-band teaser" aria-hidden="true"><span class="sq-word">ぽっちチャンス</span></div>
   {/if}
-  {#key shakeKey}<div class="sq-shake" class:go={shakeKey > 0 || (teaserShowing && teaser !== 'line')}>
+  {#key shakeKey}<div class="sq-shake" class:go={shakeKey > 0 || (teaserShowing && teaser === 'bolt')}>
   <div class="sq-tile glow-{glowNow}" class:zoom={tame} bind:this={tileEl}>
     {#if deka}
       <img class="sq-pin" src={`/tiles/${deka === 'p1' ? 'Pin1' : 'Pin2'}.svg`} alt="" draggable="false" />
@@ -291,4 +295,11 @@
   @keyframes sqWord { 0% { opacity: 0; transform: skewX(-12deg) scale(2.4); } 60% { opacity: 1; transform: skewX(-12deg) scale(0.94); } 100% { opacity: 1; transform: skewX(-12deg) scale(1); } }
   @keyframes sqDraw { to { stroke-dashoffset: 0; } }
   @media (prefers-reduced-motion: reduce) { .sq-band, .sq-word, .sq-crack path, .sq-shake.go, .sq-rays, .sq-slow, .sq-ci-line { animation: none; } .sq-crack path { stroke-dashoffset: 0; } .sq-tile.glow-rainbow { animation: none; box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #ff5ad1, 0 0 80px 30px rgba(120, 220, 255, 0.9); } }
+  /* [2026-10-15 fx5 V3] 白黒の予告: 幕を薄くして卓を見せ、卓の色を抜く。牌 (上の層) は色のまま光る */
+  .sq.mono { background: rgba(4, 8, 6, 0.3); transition: background 0.2s; }
+  .sq-mono { position: absolute; inset: 0; z-index: 1; backdrop-filter: grayscale(1) contrast(1.35) brightness(0.75); animation: sqMono 2.2s ease-out both; pointer-events: none; }
+  .sq-mono-scan { position: absolute; left: 0; right: 0; height: 18%; top: -20%; background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.35), transparent); animation: sqScan 1.1s linear 0.2s 2; }
+  @keyframes sqMono { 0% { opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { opacity: 0; } }
+  @keyframes sqScan { 0% { top: -20%; } 100% { top: 105%; } }
+  .sq-band.teaser.mono { filter: grayscale(1) contrast(1.4); }
 </style>

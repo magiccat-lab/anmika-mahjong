@@ -72,7 +72,9 @@ export const STAMP_DURATION_MS = 1500;
 export const CUTIN_DURATION_MS = 1800;
 export type CutinId = 'reach' | 'ron' | 'tsumo' | 'fever' | 'kan' | 'pon'
   // [2026-10-14 リョー] 華と北が揃った時 [lib/setCutin.ts]
-  | 'shika' | 'shipei' | 'hachika' | 'shikashipei' | 'hachikashipei';
+  | 'shika' | 'shipei' | 'hachika' | 'shikashipei' | 'hachikashipei'
+  // [2026-10-15 fx5 V2] 一発 ・ 嶺上開花などの役の名前の帯 (label に役名、style に見た目)
+  | 'yaku';
 
 /** 演出の重さ 3 段 [2026-09-20 演出ゼロベース再検討 原則 3、リョー選択 E+F]。
  *  軽: 宣言と鳴き。その場で消える / 中: 和了 / 重: フィーバー。
@@ -89,6 +91,7 @@ export const CUTIN_TIER: Record<CutinId, 'light' | 'mid' | 'heavy'> = {
   hachika: 'mid',
   shikashipei: 'mid',
   hachikashipei: 'heavy',
+  yaku: 'mid',
 };
 
 // [2026-10-15 リョー「演出の速度もうちょい落として楽しめるようにして」] 3 段とも約 1.4 倍 [旧 700 / 1200 / 1800]
@@ -104,7 +107,8 @@ export function cutinDurationMs(id: CutinId | null | undefined): number {
   return CUTIN_TIER_DURATION_MS[CUTIN_TIER[id] ?? 'heavy'] ?? CUTIN_DURATION_MS;
 }
 
-export type CutinPayload = { id: CutinId; ts: number; seat?: PlayerId };
+// label: 帯の字を差し替える (役の名前)。style: 見た目の種類。combo: フィーバー中の連続和了の数 [fx5 V5]
+export type CutinPayload = { id: CutinId; ts: number; seat?: PlayerId; label?: string; style?: string; combo?: number };
 
 export interface StoreState {
   game: Game3;
@@ -162,6 +166,8 @@ export interface StoreState {
   /** カットイン演出 [全画面 1 枚、 queue で順次再生] */
   cutin: CutinPayload | null;
   cutinQueue: CutinPayload[];
+  // [2026-10-15 fx5 V5] フィーバー中に同じ人が続けて和了った数 (局が変わる ・ 他の人が和了る ・ フィーバーでない和了で戻る)
+  winStreak?: { player: number; count: number; rk: string } | null;
   /** WSA: online replay mode — canonical store uses this instead of window.__anmikaOnline */
   _onlineMode?: boolean;
 }
@@ -485,8 +491,34 @@ function isLiveTurnActionBlocked(s: StoreState, allowLizhiDiscard = false): bool
     || (!allowLizhiDiscard && s.lizhiPending !== null);
 }
 
-export function enqueueCutinState(s: StoreState, id: CutinId, seat?: PlayerId): StoreState {
-  const payload: CutinPayload = { id, ts: Date.now() + Math.random(), seat };
+// [2026-10-15 fx5 V2] ツモ ・ ロンの帯の前に出す役の名前の帯。1 回の和了で 1 枚だけ (上から順に強い物)
+const SPECIAL_YAKU: Array<[string, string, string]> = [
+  ['天和', '天和', 'tenhou'], ['地和', '地和', 'tenhou'], ['嶺上開花', '嶺上開花', 'rinshan'], ['海底摸月', '海底摸月', 'haitei'],
+  ['河底撈魚', '河底撈魚', 'haitei'], ['槍槓', '槍槓', 'ippatsu'], ['一発', '一発', 'ippatsu'],
+];
+function winResultFor(s: StoreState, seat: PlayerId): any {
+  const rr = (s.ronResults ?? []).find((r: any) => r && r.player === seat);
+  if (rr) return rr.result;
+  return s.lastWinner === seat ? s.lastHuleResult : null;
+}
+export function specialYakuOf(result: any): { label: string; style: string } | null {
+  const names = new Set(((result?.hupai ?? []) as any[]).map((h) => String(h?.name ?? '')));
+  for (const [name, label, style] of SPECIAL_YAKU) if (names.has(name)) return { label, style };
+  return null;
+}
+export function enqueueCutinState(s: StoreState, id: CutinId, seat?: PlayerId, extra?: Pick<CutinPayload, 'label' | 'style' | 'combo'>): StoreState {
+  if ((id === 'tsumo' || id === 'ron') && seat !== undefined && !extra) {
+    const st: any = s.game?.state ?? {};
+    const rk = `${st.changbang}-${st.jushu}-${st.benbang}`;
+    const fever = !!s.game?.feverActive?.[seat];
+    const prev = s.winStreak;
+    const count = fever && prev && prev.player === seat && prev.rk === rk ? prev.count + 1 : 1;
+    s.winStreak = fever ? { player: seat, count, rk } : null;
+    const sp = specialYakuOf(winResultFor(s, seat));
+    if (sp) s = enqueueCutinState(s, 'yaku', seat, sp);
+    if (count >= 2) extra = { combo: count };
+  }
+  const payload: CutinPayload = { id, ts: Date.now() + Math.random(), seat, ...(extra ?? {}) };
   s.cutinQueue = [...(s.cutinQueue ?? []), payload];
   // 2026-05-16 fix: 旧 codex 2 周目で 「enqueue だけで cutin が表示されない」 状態だった
   // [App.svelte に playNextCutin 呼出 wire なし]、 enqueue 時に cutin 空なら即 pop
@@ -1229,8 +1261,8 @@ export function createGameStore() {
     },
     /** オンライン flag 確認 */
     isOnline(): boolean { return onlineMode; },
-    enqueueCutin(id: CutinId, seat?: PlayerId) {
-      update((st) => enqueueCutinState(st, id, seat));
+    enqueueCutin(id: CutinId, seat?: PlayerId, extra?: Pick<CutinPayload, 'label' | 'style' | 'combo'>) {
+      update((st) => enqueueCutinState(st, id, seat, extra));
     },
     playNextCutin() {
       update((st) => {

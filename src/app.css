@@ -3,6 +3,15 @@
    取り方と増やし方は public/fonts/README.md。
    font-display: block = 読み込み前は出さない。演出は 0.7 秒なので、
    違う字で出てから入れ替わるより、少し遅れて正しい字が出る方がいい */
+/* [2026-10-15 fx5 V2 ・ V5] 役の名前と「連続」の字だけのサブセット。同じ 'FX Kana' に重ね、この字だけここから引く */
+@font-face {
+  font-family: 'FX Kana';
+  src: url('/fonts/fx-mochiypopone-extra.woff2?v=20261015b') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+  unicode-range: U+4E00, U+4E0A, U+548C, U+5730, U+5929, U+5DBA, U+5E95, U+6478, U+6488, U+6708, U+69CD, U+69D3, U+6CB3, U+6D77, U+767A, U+7D9A, U+82B1, U+9023, U+958B, U+9B5A;
+}
 @font-face {
   font-family: 'FX Kana';
   src: url('/fonts/fx-mochiypopone-subset.woff2?v=20261014c') format('woff2');
