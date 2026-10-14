@@ -6,24 +6,31 @@
   //  - 見えている牌で正 ・ 逆が決まっている時は、絞りの前に「確定」の帯 (pochiFx.kakuteiOf)
   //  - めくれたら、ツモ ・ ロンと同じ金と黒の帯に色の名前と効果 (3 版 T1 a)。逆は灰色の帯とヒビ
   //  - readOnly は他の人の画面: 引いた人の進み (progress) を外から受けて同じ様にめくる
+  //  - 4 版の答え (同じ日「ポッチの演出もうちょっと強化したい」): 光りは 5 段のステップアップ (目盛りと字、3 段目から揺れる)、
+  //    点がのぞく手前の溜め (暗くして寄り、半分の速さでしかめくれない、心臓の音が速く)、虹の確定のまれなプレミア (虹の光線とサビ 3 秒)
   // 閉じ方は前と同じ 3 重 (めくれて 1.6 秒 ・ めくれた後のタップ ・ 触られないまま 30 秒で自動でめくる)
   import { onMount, onDestroy } from 'svelte';
   import { playSound } from './prefs';
-  import { POCHI_DOT, POCHI_GOOD, expectationGlow, pochiRevealText, type Glow, type PochiColor } from './pochiFx';
+  import { POCHI_DOT, POCHI_GOOD, STEP_GLOW, STEP_WORD, TAME_BEATS, TAME_FROM, TAME_TO, pochiRevealText, pochiTopStep, stepAt,
+    type Glow, type PochiColor } from './pochiFx';
 
   export let color: PochiColor;
   /** でかぽっちなら 'p1' / 'p2' */
   export let deka: 'p1' | 'p2' | null = null;
   export let who = '';
   export let kakutei: 'good' | 'bad' | null = null;
-  /** 期待度の光り (他の人の画面は引いた人の物を受け取る)。無ければここで決める */
+  /** 期待度: 光りが何段まで上がるか (0〜4)。他の人の画面は引いた人の物を受け取る。無ければここで決める */
+  export let step: number | null = null;
+  /** プレミア (虹の確定のまれな演出)。引いた人が決めて他の席へ流す */
+  export let premium = false;
+  /** 前の型の光り 2 段 (古い端末から届いた時だけ使う) */
   export let glow: [Glow, Glow] | null = null;
   export let readOnly = false;
   /** readOnly の時の進み (0〜1) */
   export let progress = 0;
   /** 他の人の画面で、色がまだ届いていない間は点を描かない */
   export let colorKnown = true;
-  export let onProgress: (p: number, glow: [Glow, Glow]) => void = () => {};
+  export let onProgress: (p: number) => void = () => {};
   /** 引いた人の画面が開いた時 (他の席へ「絞り始めた」を流す) */
   export let onOpen: () => void = () => {};
   export let onClose: () => void = () => {};
@@ -31,7 +38,8 @@
   // 他の人の画面は色が後から届くので、色から出す物は全部 $: にする
   $: good = POCHI_GOOD[color];
   $: text = pochiRevealText(color, !!deka);
-  const stages: [Glow, Glow] = glow ?? (kakutei === 'good' ? ['rainbow', 'rainbow'] : expectationGlow(POCHI_GOOD[color], Math.random()));
+  const topStep: number = step ?? (glow ? (glow[1] === 'rainbow' ? 4 : glow[1] === 'gold' ? 3 : 0)
+    : pochiTopStep(POCHI_GOOD[color], kakutei, Math.random()));
   const REVEAL_AT = 0.9;
 
   let peel = 0;          // 0〜1。下からめくれた割合
@@ -41,29 +49,40 @@
   let startY: number | null = null;
   let startPeel = 0;
   let lastTouch = Date.now();
+  let lastY = 0;
   const beats = new Set<number>();
-  let kakuteiShowing = !!kakutei;
+  let premiumShowing = premium;
+  let kakuteiShowing = !!kakutei && !premium;
+  let stepNow = -1;
+  let shakeKey = 0;
 
-  $: glowNow = revealed ? (good ? (stages[1] === 'rainbow' ? 'rainbow' : 'gold') : 'none')
-    : peel >= 0.42 ? stages[1] : peel >= 0.3 ? stages[0] : kakutei === 'good' ? 'rainbow' : 'none';
+  $: tame = !revealed && peel >= TAME_FROM && peel < TAME_TO;
+  $: glowNow = revealed ? (good ? (topStep >= 4 ? 'rainbow' : 'gold') : 'none')
+    : stepNow >= 0 ? STEP_GLOW[stepNow] : kakutei === 'good' ? 'rainbow' : 'none';
   $: if (readOnly) setPeel(progress);
 
   function se(name: string, vol = 0.6): void { playSound(`/sounds/fx/${name}.mp3`, vol); }
   function setPeel(p: number): void {
     if (revealed || closing) return;
     const v = Math.max(0, Math.min(1, p));
-    for (const [t, name] of [[0.18, 'heart'], [0.33, 'heart'], [0.42, 'heart']] as Array<[number, string]>) {
-      if (v >= t && !beats.has(t)) { beats.add(t); se(name, 0.5); if (t >= 0.33 && stages[t === 0.33 ? 0 : 1] !== 'white') se('pikiin', 0.45); }
+    for (const t of [0.18, 0.3, ...TAME_BEATS]) {
+      if (v >= t && !beats.has(t)) { beats.add(t); se('heart', t >= TAME_FROM ? 0.65 : 0.5); }
+    }
+    const k = stepAt(v, topStep);
+    if (k > stepNow) {
+      stepNow = k;
+      se(k >= 3 ? 'kyuin' : 'pikiin', k >= 3 ? 0.6 : 0.5);
+      if (k >= 2) shakeKey += 1;
     }
     peel = v;
-    if (!readOnly) onProgress(v, stages);
+    if (!readOnly) onProgress(v);
     if (v >= REVEAL_AT) reveal();
   }
   function reveal(): void {
     if (revealed || closing) return;
     revealed = true;
     peel = 1;
-    if (!readOnly) onProgress(1, stages);
+    if (!readOnly) onProgress(1);
     if (good) { se('kyuin', 0.6); playSound('/sounds/se_a.mp3', 0.6); } else { se('hazure', 0.6); playSound('/sounds/se_b.mp3', 0.6); }
     closeTimer = setTimeout(close, 1600);
   }
@@ -75,8 +94,9 @@
   function onDown(e: PointerEvent): void {
     lastTouch = Date.now();
     if (revealed) { close(); return; }
-    if (readOnly || kakuteiShowing) return;
+    if (readOnly || kakuteiShowing || premiumShowing) return;
     startY = e.clientY;
+    lastY = e.clientY;
     startPeel = peel;
     (e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId);
   }
@@ -84,7 +104,10 @@
     if (startY === null || readOnly) return;
     lastTouch = Date.now();
     const h = tileEl?.offsetHeight ?? 260;
-    setPeel(startPeel + (startY - e.clientY) / (h * 1.1));
+    // 溜めの間は指の半分しかめくれない (スロー)。指の動いた分を足していく形にした
+    const d = (lastY - e.clientY) / (h * 1.1);
+    lastY = e.clientY;
+    setPeel(peel + (tame && d > 0 ? d * 0.5 : d));
   }
   function onUp(): void { startY = null; }
   function onKey(e: KeyboardEvent): void {
@@ -96,24 +119,42 @@
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
   let idleTimer: ReturnType<typeof setInterval> | undefined;
   let kakuteiTimer: ReturnType<typeof setTimeout> | undefined;
+  let premiumTimer: ReturnType<typeof setTimeout> | undefined;
+  function startKakutei(): void {
+    if (!kakutei) return;
+    kakuteiShowing = true;
+    se('kyuin', 0.5);
+    kakuteiTimer = setTimeout(() => { kakuteiShowing = false; }, 1100);
+  }
   onMount(() => {
     if (!readOnly) onOpen();
     se('pikiin', 0.4);
-    if (kakutei) { se('kyuin', 0.5); kakuteiTimer = setTimeout(() => { kakuteiShowing = false; }, 1100); }
+    if (premium) {
+      // プレミア: 虹の光線とアンミカーニバルのサビ 3 秒 (曲のファイルは git に入れない public/sounds/bgm/)。終わってから確定の帯と絞り
+      playSound('/sounds/bgm/premium_sabi.mp3', 0.55);
+      premiumTimer = setTimeout(() => { premiumShowing = false; startKakutei(); }, 2800);
+    } else {
+      startKakutei();
+    }
     // 触られないまま 30 秒たったら一気にめくる (他の人を待たせ続けない)。他の人の画面は引いた人に合わせるので 60 秒
     idleTimer = setInterval(() => {
       if (revealed || closing) return;
       if (Date.now() - lastTouch > (readOnly ? 60000 : 30000)) { if (readOnly) close(); else setPeel(1); }
     }, 1000);
   });
-  onDestroy(() => { clearTimeout(closeTimer); clearInterval(idleTimer); clearTimeout(kakuteiTimer); });
+  onDestroy(() => { clearTimeout(closeTimer); clearInterval(idleTimer); clearTimeout(kakuteiTimer); clearTimeout(premiumTimer); });
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="sq" class:revealed class:bad={revealed && !good} role="dialog" aria-label={revealed ? `${text.word} ${text.tag}` : `${who} ${deka ? 'でかぽっち' : '白ぽっち'} 絞り中`}
+<div class="sq" class:revealed class:bad={revealed && !good} class:tame role="dialog" aria-label={revealed ? `${text.word} ${text.tag}` : `${who} ${deka ? 'でかぽっち' : '白ぽっち'} 絞り中`}
   tabindex="-1" on:pointerdown={onDown} on:pointermove={onMove} on:pointerup={onUp} on:pointercancel={onUp} on:keydown={onKey}>
   {#if who}<div class="sq-who">{who}{readOnly ? ' が絞っています' : ''}</div>{/if}
-  <div class="sq-tile glow-{glowNow}" bind:this={tileEl}>
+  {#if premiumShowing}
+    <div class="sq-rays" aria-hidden="true"></div>
+    <div class="sq-premium" aria-hidden="true">アンミカーニバル</div>
+  {/if}
+  {#key shakeKey}<div class="sq-shake" class:go={shakeKey > 0}>
+  <div class="sq-tile glow-{glowNow}" class:zoom={tame} bind:this={tileEl}>
     {#if deka}
       <img class="sq-pin" src={`/tiles/${deka === 'p1' ? 'Pin1' : 'Pin2'}.svg`} alt="" draggable="false" />
     {:else}
@@ -121,7 +162,15 @@
     {/if}
     <div class="sq-cover" style:clip-path={`inset(0 0 ${peel * 100}% 0)`}></div>
   </div>
-  {#if !revealed && !readOnly && !kakuteiShowing && peel < 0.05}<div class="sq-hint">下から上へ指で絞る</div>{/if}
+  </div>{/key}
+  {#if !revealed && !premiumShowing && !kakuteiShowing}
+    <div class="sq-meter" aria-hidden="true">
+      {#each STEP_GLOW as g, i}<span class="sq-pip" class:on={i <= stepNow} data-glow={g}></span>{/each}
+    </div>
+    {#if stepNow >= 0}{#key stepNow}<div class="sq-step" class:hot={stepNow >= 2}>{STEP_WORD[stepNow]}</div>{/key}{/if}
+  {/if}
+  {#if tame}<div class="sq-slow" aria-hidden="true">SLOW</div>{/if}
+  {#if !revealed && !readOnly && !kakuteiShowing && !premiumShowing && peel < 0.05}<div class="sq-hint">下から上へ指で絞る</div>{/if}
   {#if kakuteiShowing}
     <div class="sq-band" class:grey={kakutei === 'bad'}><span class="sq-word">確定</span><span class="sq-tag">{kakutei === 'good' ? '正のぽっち' : '逆のぽっち'}</span></div>
   {/if}
@@ -147,6 +196,33 @@
     50% { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #3bff8a, 0 0 80px 30px rgba(80, 255, 140, 0.9); }
     75% { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #3bb8ff, 0 0 80px 30px rgba(80, 180, 255, 0.9); }
   }
+  .sq-tile.glow-blue { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #4a8cff, 0 0 70px 24px rgba(70, 140, 255, 0.9); }
+  .sq-tile.glow-green { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #3bd17a, 0 0 70px 24px rgba(60, 220, 120, 0.9); }
+  .sq-tile.zoom { transform: translate(-50%, -50%) scale(1.18); transition: transform 0.5s ease-out, box-shadow 0.3s; }
+  .sq.tame { background: rgba(0, 0, 0, 0.93); }
+  .sq-shake { position: absolute; inset: 0; pointer-events: none; }
+  .sq-shake .sq-tile { pointer-events: auto; }
+  .sq-shake.go { animation: sqShake 0.4s; }
+  @keyframes sqShake { 0%, 100% { transform: none; } 20% { transform: translate(-10px, 6px); } 40% { transform: translate(9px, -7px); } 60% { transform: translate(-6px, -4px); } 80% { transform: translate(4px, 3px); } }
+  /* 溜めで牌が 1.18 倍になっても重ならない様に、牌の半分の幅の 1.2 倍の外に置く */
+  .sq-meter { position: absolute; left: calc(50% + min(23vw, 105px) * 1.2 + 18px); top: 42%; transform: translateY(-50%); display: flex; flex-direction: column-reverse; gap: 8px; }
+  .sq-pip { width: clamp(18px, 3.6vw, 30px); height: clamp(18px, 3.6vw, 30px); border-radius: 7px; border: 2px solid rgba(255, 255, 255, 0.5); background: rgba(0, 0, 0, 0.4); }
+  .sq-pip.on[data-glow='white'] { background: #fff; } .sq-pip.on[data-glow='blue'] { background: #4a8cff; } .sq-pip.on[data-glow='green'] { background: #3bd17a; }
+  .sq-pip.on[data-glow='gold'] { background: #f2c23a; } .sq-pip.on[data-glow='rainbow'] { background: conic-gradient(#ff3b3b, #ffd23b, #3bff8a, #3bb8ff, #c63bff, #ff3b3b); }
+  .sq-step { position: absolute; left: calc(50% + min(23vw, 105px) * 1.2 + 18px + clamp(18px, 3.6vw, 30px) + 12px); top: 42%; transform: translateY(-50%); white-space: nowrap;
+    font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: clamp(26px, 6vw, 56px); color: #fff; -webkit-text-stroke: 4px #111; paint-order: stroke fill; animation: sqPop 0.3s cubic-bezier(0.2, 1.7, 0.4, 1) both; }
+  .sq-step.hot { color: #ffe27a; }
+  .sq-slow { position: absolute; left: max(16px, 3vw); top: max(16px, 4vh); font: 800 clamp(22px, 4vw, 40px) 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.2em; color: #fff; -webkit-text-stroke: 3px #000; paint-order: stroke fill; animation: sqBlink 0.5s steps(2) infinite; }
+  .sq-rays { position: absolute; left: 50%; top: 42%; width: 220vmax; height: 220vmax; margin: -110vmax 0 0 -110vmax; border-radius: 50%; pointer-events: none;
+    background: repeating-conic-gradient(#ff3b3b 0 6deg, transparent 6deg 12deg, #ffd23b 12deg 18deg, transparent 18deg 24deg, #3bff8a 24deg 30deg, transparent 30deg 36deg, #3bb8ff 36deg 42deg, transparent 42deg 48deg, #c63bff 48deg 54deg, transparent 54deg 60deg);
+    -webkit-mask: radial-gradient(circle, #000 6%, transparent 50%); mask: radial-gradient(circle, #000 6%, transparent 50%); animation: sqSpin 5s linear infinite; opacity: 0.9; }
+  .sq-premium { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); white-space: nowrap; z-index: 3; font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: clamp(34px, 10vw, 120px);
+    background: linear-gradient(90deg, #ff3b3b, #ffd23b, #3bff8a, #3bb8ff, #c63bff); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-stroke: 2px #fff;
+    filter: drop-shadow(0 0 16px rgba(255, 255, 255, 0.8)); animation: sqPop 0.4s cubic-bezier(0.2, 1.7, 0.4, 1) both; }
+  @keyframes sqPop { 0% { opacity: 0; transform: translate(var(--px, 0), -50%) scale(2); } 100% { opacity: 1; transform: translate(var(--px, 0), -50%) scale(1); } }
+  .sq-premium { --px: -50%; }
+  @keyframes sqSpin { to { transform: rotate(360deg); } }
+  @keyframes sqBlink { 50% { opacity: 0.3; } }
   .sq-face, .sq-pin { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .sq-pin { transform: scale(0.68); }
   .sq-cover { position: absolute; inset: -2px; border-radius: 14px; background: url('/tiles/Back.svg') center / 100% 100%; pointer-events: none; }
@@ -167,5 +243,5 @@
   @keyframes sqBandIn { from { transform: rotate(-7deg) translateX(-120%); } to { transform: rotate(-7deg) translateX(0); } }
   @keyframes sqWord { 0% { opacity: 0; transform: skewX(-12deg) scale(2.4); } 60% { opacity: 1; transform: skewX(-12deg) scale(0.94); } 100% { opacity: 1; transform: skewX(-12deg) scale(1); } }
   @keyframes sqDraw { to { stroke-dashoffset: 0; } }
-  @media (prefers-reduced-motion: reduce) { .sq-band, .sq-word, .sq-crack path { animation: none; } .sq-crack path { stroke-dashoffset: 0; } .sq-tile.glow-rainbow { animation: none; box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #ff5ad1, 0 0 80px 30px rgba(120, 220, 255, 0.9); } }
+  @media (prefers-reduced-motion: reduce) { .sq-band, .sq-word, .sq-crack path, .sq-shake.go, .sq-rays, .sq-slow { animation: none; } .sq-crack path { stroke-dashoffset: 0; } .sq-tile.glow-rainbow { animation: none; box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #ff5ad1, 0 0 80px 30px rgba(120, 220, 255, 0.9); } }
 </style>

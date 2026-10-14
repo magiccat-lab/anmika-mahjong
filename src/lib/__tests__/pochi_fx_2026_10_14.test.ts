@@ -61,3 +61,36 @@ describe('フィーバー中のぽっちの残り', () => {
     expect([pochiColorOfKey('bu'), pochiColorOfKey('z5r'), pochiColorOfKey('bg'), pochiColorOfKey('p5')]).toEqual(['blue', 'red', 'green', null]);
   });
 });
+
+// [2026-10-14 4 版の答え] ステップアップ ・ 溜め ・ プレミア
+import { expectationStep, pochiTopStep, premiumRoll, stepAt, STEP_AT, TAME_FROM, TAME_TO, legacyGlowOfStep } from '../pochiFx';
+describe('白ぽっちの強化 (4 版)', () => {
+  it('逆は虹 (5 段目) まで上がらない、正は虹 3 割', () => {
+    for (let i = 0; i < 1000; i++) expect(expectationStep(false, i / 1000)).toBeLessThan(4);
+    const rainbow = Array.from({ length: 1000 }, (_, i) => expectationStep(true, i / 1000)).filter((k) => k === 4).length;
+    expect(rainbow).toBe(300);
+  });
+  it('見えている牌で決まっていれば、正は虹まで ・ 逆は白で止める', () => {
+    expect(pochiTopStep(true, 'good', 0.99)).toBe(4);
+    expect(pochiTopStep(false, 'bad', 0.0)).toBe(0);
+  });
+  it('段は点がのぞく (0.44) より前に上がり切り、上限を越えない', () => {
+    expect(STEP_AT[4]).toBeLessThan(0.44);
+    expect(stepAt(0.05, 4)).toBe(-1);
+    expect(stepAt(0.5, 4)).toBe(4);
+    expect(stepAt(0.5, 2)).toBe(2);
+  });
+  it('溜めは点がのぞく所を挟む', () => {
+    expect(TAME_FROM).toBeLessThan(0.44);
+    expect(TAME_TO).toBeGreaterThan(0.44);
+  });
+  it('プレミアは虹の時の 1 割だけ', () => {
+    expect(premiumRoll(4, 0.05)).toBe(true);
+    expect(premiumRoll(4, 0.2)).toBe(false);
+    expect(premiumRoll(3, 0.0)).toBe(false);
+  });
+  it('前の型の端末へは光り 2 段に直して渡す', () => {
+    expect(legacyGlowOfStep(4)).toEqual(['gold', 'rainbow']);
+    expect(legacyGlowOfStep(1)).toEqual(['white', 'white']);
+  });
+});

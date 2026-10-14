@@ -118,6 +118,10 @@ describe('白ぽっちの絞りの中継 [2026-10-14]', () => {
     expect(sanitizePochiFx({ phase: 'open', deka: 'p1', kakutei: 'good', glow: ['gold', 'rainbow'] }))
       .toEqual({ phase: 'open', deka: 'p1', kakutei: 'good', glow: ['gold', 'rainbow'] });
     expect(sanitizePochiFx({ phase: 'open', deka: 'x', glow: ['<b>', 1] })).toEqual({ phase: 'open', deka: null, kakutei: null, glow: ['white', 'white'] });
+    // 4 版: 段 (0〜4) とプレミアも通す。範囲の外 ・ 型違いは落とす
+    expect(sanitizePochiFx({ phase: 'open', step: 4, premium: true })).toMatchObject({ step: 4, premium: true });
+    expect(sanitizePochiFx({ phase: 'open', step: 7, premium: 'yes' })).not.toHaveProperty('step');
+    expect(sanitizePochiFx({ phase: 'open', step: 2.5, premium: 'yes' })).not.toHaveProperty('premium');
   });
 
   it('1 秒 30 通まで、open は 2 秒に 1 回', () => {

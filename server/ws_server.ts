@@ -1291,6 +1291,9 @@ export type PochiFxRelay = {
   deka?: 'p1' | 'p2' | null;
   kakutei?: 'good' | 'bad' | null;
   glow?: ['white' | 'gold' | 'rainbow', 'white' | 'gold' | 'rainbow'];
+  /** [2026-10-14 4 版] 光りが何段まで上がるか (0〜4、ステップアップ) と、プレミアか */
+  step?: number;
+  premium?: boolean;
 };
 const POCHI_FX_COLORS = new Set(['blue', 'red', 'green', 'yellow']);
 const POCHI_FX_GLOWS = new Set(['white', 'gold', 'rainbow']);
@@ -1314,6 +1317,8 @@ export function sanitizePochiFx(value: Record<string, unknown>): PochiFxRelay | 
     out.glow = Array.isArray(g) && g.length === 2 && g.every((x) => typeof x === 'string' && POCHI_FX_GLOWS.has(x))
       ? [g[0], g[1]] as PochiFxRelay['glow']
       : ['white', 'white'];
+    if (Number.isInteger(value.step) && (value.step as number) >= 0 && (value.step as number) <= 4) out.step = value.step as number;
+    if (value.premium === true) out.premium = true;
   }
   return out;
 }

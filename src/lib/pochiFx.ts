@@ -78,3 +78,40 @@ export function pochiLeftForViewer(game: any, ownTiles: string[]): PochiColor[] 
   const own = new Set(ownTiles.map(pochiColorOfKey).filter((c): c is PochiColor => !!c));
   return publicPochiCandidates(game).filter((c) => !own.has(c));
 }
+
+// ---- 4 版の答え (2026-10-14 リョー「ポッチの演出もうちょっと強化したい」→ ステップアップ ・ 溜め ・ プレミアを入れる) ----
+/** ステップアップの 5 段 (白 → 青 → 緑 → 金 → 虹)。絞った割合が STEP_AT を越えるたびに 1 段上がる (点がのぞく 0.44 より前に終わる) */
+export type StepGlow = 'white' | 'blue' | 'green' | 'gold' | 'rainbow';
+export const STEP_GLOW: readonly StepGlow[] = ['white', 'blue', 'green', 'gold', 'rainbow'];
+export const STEP_WORD: readonly string[] = ['チャンス', '熱', '激熱', '超激熱', '確定'];
+export const STEP_AT: readonly number[] = [0.1, 0.2, 0.29, 0.36, 0.43];
+/** 溜め: この間は暗くして牌に寄り、指を動かしても半分しかめくれない (スロー)。心臓の音も速くなる */
+export const TAME_FROM = 0.37;
+export const TAME_TO = 0.465;
+export const TAME_BEATS: readonly number[] = [0.385, 0.405, 0.42, 0.435, 0.447, 0.456, 0.462];
+
+/** どこまで上がるか (0〜4)。rnd は 0〜1。正: 虹 3 割 ・ 金 4 割 ・ 緑 2 割 ・ 青 1 割。逆: 金 1 割 ・ 緑 4 割 ・ 青 3 割半 ・ 白 1 割半 (逆で虹は出さない) */
+export function expectationStep(good: boolean, rnd: number): number {
+  if (good) return rnd < 0.3 ? 4 : rnd < 0.7 ? 3 : rnd < 0.9 ? 2 : 1;
+  return rnd < 0.1 ? 3 : rnd < 0.5 ? 2 : rnd < 0.85 ? 1 : 0;
+}
+/** 見えている牌で正が決まっていれば虹まで、逆が決まっていれば白で止める。決まっていなければ expectationStep */
+export function pochiTopStep(good: boolean, kakutei: 'good' | 'bad' | null, rnd: number): number {
+  if (kakutei === 'good') return 4;
+  if (kakutei === 'bad') return 0;
+  return expectationStep(good, rnd);
+}
+/** プレミア: 虹まで上がる (= 正の確定) 時の 1 割。引いた瞬間に虹の光線とアンミカーニバルのサビ 3 秒 */
+export function premiumRoll(topStep: number, rnd: number): boolean {
+  return topStep >= 4 && rnd < 0.1;
+}
+/** 今の段 (-1 はまだ光っていない) */
+export function stepAt(peel: number, topStep: number): number {
+  let k = -1;
+  for (let i = 0; i <= Math.min(4, topStep); i++) if (peel >= STEP_AT[i]) k = i;
+  return k;
+}
+/** 他の席へ流す時、前の型 (光り 2 段) の端末にも近い物を渡す */
+export function legacyGlowOfStep(topStep: number): [Glow, Glow] {
+  return topStep >= 4 ? ['gold', 'rainbow'] : topStep >= 3 ? ['white', 'gold'] : ['white', 'white'];
+}
