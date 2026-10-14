@@ -59,6 +59,36 @@ for i in range(len(lead) - 1):
     if lead[i]['k1'] > lead[i + 1]['k0']: lead[i]['k1'] = lead[i + 1]['k0']
 lead = [n for n in lead if n['k1'] > n['k0']]
 log(f'[lead] scoops removed {n_scoop}; choruses set to the approved 19 notes at bars {SABI}')
+# 語り (75〜91 小節、「白って200色あんねん」など) は声の高さに意味が無いので旋律を鳴らさない
+SPEECH = set(range(75, 92))
+lead = [n for n in lead if n['k0'] // 16 not in SPEECH]
+# くり返し歌われる所は、くり返しどうしで高さを多数決する (サビ 3 版目と同じ考え)。4 小節の前後が 6 割以上そろう小節をくり返しと見る
+CHORUS_BARS = {b for sb in SABI for b in range(sb, sb + 8)}
+def rel(b0, b1): return [(n['k0'] - b0 * 16, n['pitch']) for n in lead if b0 * 16 <= n['k0'] < b1 * 16]
+def sim(a, b):
+    A, B = rel(a - 1, a + 3), rel(b - 1, b + 3)
+    if len(A) < 4 or len(B) < 4: return 0.0
+    return sum(1 for k, p in A if any(abs(k - k2) <= 1 and p == p2 for k2, p2 in B)) / max(len(A), len(B))
+changed = 0
+new_pitch = {}
+for b in range(NBARS):
+    if b in CHORUS_BARS or b in SPEECH: continue
+    reps = [b2 for b2 in range(NBARS) if abs(b2 - b) >= 4 and b2 not in SPEECH and sim(b, b2) >= 0.6]
+    if not reps: continue
+    for i, n in enumerate(lead):
+        if n['k0'] // 16 != b: continue
+        votes = [n['pitch']]
+        for b2 in reps:
+            off = (b2 - b) * 16
+            m = [x['pitch'] for x in lead if abs(x['k0'] - (n['k0'] + off)) <= 1]
+            if m: votes.append(m[0])
+        vals, cnt = np.unique(votes, return_counts=True)
+        best = int(vals[np.argmax(cnt)])
+        if cnt.max() > votes.count(n['pitch']) and best != n['pitch']:
+            new_pitch[i] = best
+for i, p in new_pitch.items():
+    lead[i]['pitch'] = p; changed += 1
+log(f'[lead] speech bars muted {min(SPEECH)}-{max(SPEECH)}; repeat vote changed {changed} notes')
 voc44 = librosa.load(f'{STEM}/vocals.wav', sr=44100, mono=True)[0]
 
 def octave_margin(n):
@@ -126,11 +156,11 @@ for k0, k1, root, q, sc in chords:
 log(f'[arp] half-bars: triad {n_triad}, power {n_power}, none {len(chords) - n_triad - n_power}')
 
 # ---- MIDI と音 ----
-mc.write_midi(f'{OUT}/full_lead.mid', lead, k_lo, SL, BPM, 80, 'lead (vocal register)')
+mc.write_midi(f'{OUT}/full_lead_v5.mid', lead, k_lo, SL, BPM, 80, 'lead (vocal register)')
 mc.write_midi(f'{OUT}/full_bass.mid', bass, k_lo, SL, BPM, 38, 'bass')
 mc.write_midi(f'{OUT}/full_arp.mid', arp_notes, k_lo, SL, BPM, 81, 'arp')
 echo = [dict(n, k0=n['k0'] + 3, k1=min(n['k1'] + 3, k_hi)) for n in lead if n['k0'] + 3 < k_hi]
-x_lead = mc.render_notes(lead, k_lo, SL, total_s, 'pulse', shift=12, duty=0.25, vibrato=0.18)
+x_lead = mc.render_notes(lead, k_lo, SL, total_s, 'pulse', shift=12, duty=0.25)
 x_echo = mc.render_notes(echo, k_lo, SL, total_s, 'pulse', shift=12, duty=0.125, gate_gap=0.03)
 x_bass = mc.render_notes(bass, k_lo, SL, total_s, 'tri', shift=0, bits=4, attack=0.002, release=0.015, gate_gap=0.025)
 x_drum = mc.render_drums(hits, k_lo, SL, total_s)
@@ -138,9 +168,12 @@ x_arp = mc.render_notes(arp_notes, k_lo, SL, total_s, 'pulse', shift=0, duty=0.5
 n_out = int(round(total_s * mc.SR_OUT))
 pad = lambda x: x[:n_out] if len(x) >= n_out else np.pad(x, (0, n_out - len(x)))
 x_lead, x_echo, x_bass, x_drum, x_arp = map(pad, (x_lead, x_echo, x_bass, x_drum, x_arp))
-mix = 0.55 * x_lead + 0.17 * x_echo + 0.50 * x_bass + 0.60 * x_drum + 0.10 * x_arp
+mix = 0.55 * x_lead + 0.50 * x_bass + 0.62 * x_drum   # サビ 3 版目と同じ 3 つと同じ割合 (こだま ・ アルペジオは外した)
 y, l0, l1, pk, lim = mc.normalise(mix)
-mc.write_mp3(f'{OUT}/anmika_carnival_8bit.mp3', y, kbps=160)
+mc.write_mp3(f'{OUT}/anmika_carnival_8bit_v5.mp3', y, kbps=160)
+# 先輩に聞いてもらう所: 1 番の歌い出し (2 小節目) からサビの終わり (18 小節目) まで
+a2 = int(2 * BAR * mc.SR_OUT); b2 = int(19 * BAR * mc.SR_OUT)
+mc.write_mp3(f'{OUT}/check_verse_sabi_v5.mp3', y[a2:b2], kbps=160)
 # 確かめ用にサビ 8 小節を切り出し (サビ 3 版目と同じ所)
 a = int((22.045844930980664 - BEAT - T0) * mc.SR_OUT); b = int((37.045844930980664 - T0) * mc.SR_OUT)
 mc.write_mp3(f'{OUT}/check_sabi.mp3', y[a:b], kbps=160)
