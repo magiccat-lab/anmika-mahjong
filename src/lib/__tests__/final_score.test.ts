@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Game3 } from '../game3';
 
 // getFinalScore の uma / 8万点 bonus / トントンブー 規則 を unit 固定。
-// [feedback_anmika_uma_rule] 2着 40000+ 到達 → +30/0/-30、 未達 → +45/-15/-30。
+// [feedback_anmika_uma_rule] 2着 40000+ 到達 → +50/0/-50、 未達 → +75/-25/-50 (2026-10-14 リョー、それまでは +30/0/-30 と +45/-15/-30)。
 function makeEndGame(defen: { 0: number; 1: number; 2: number }, opts?: { qijia?: 0|1|2; jushu?: number; changbang?: number; tobiHule?: boolean }): Game3 {
   const g = new Game3({ qijia: opts?.qijia ?? 0 });
   g.qipai();
@@ -18,37 +18,37 @@ function makeEndGame(defen: { 0: number; 1: number; 2: number }, opts?: { qijia?
 }
 
 describe('getFinalScore [ウマ規則]', () => {
-  it('2着が 40000 到達 → +30 / 0 / -30', () => {
+  it('2着が 40000 到達 → +50 / 0 / -50', () => {
     const g = makeEndGame({ 0: 50000, 1: 40000, 2: 15000 });
     const score = g.getFinalScore();
     // ranking[0] = 1位、 ranking[2] = 3位
-    expect(score[0].uma).toBe(30);
+    expect(score[0].uma).toBe(50);
     expect(score[1].uma).toBe(0);
-    expect(score[2].uma).toBe(-30);
+    expect(score[2].uma).toBe(-50);
   });
 
-  it('2着が 40000 未達 → +45 / -15 / -30', () => {
+  it('2着が 40000 未達 → +75 / -25 / -50', () => {
     const g = makeEndGame({ 0: 60000, 1: 35000, 2: 10000 });
     const score = g.getFinalScore();
-    expect(score[0].uma).toBe(45);
-    expect(score[1].uma).toBe(-15);
-    expect(score[2].uma).toBe(-30);
+    expect(score[0].uma).toBe(75);
+    expect(score[1].uma).toBe(-25);
+    expect(score[2].uma).toBe(-50);
   });
 
   it('2着 ちょうど 40000 で 到達扱い [境界]', () => {
     const g = makeEndGame({ 0: 45000, 1: 40000, 2: 20000 });
     const score = g.getFinalScore();
-    expect(score[0].uma).toBe(30);
+    expect(score[0].uma).toBe(50);
     expect(score[1].uma).toBe(0);
-    expect(score[2].uma).toBe(-30);
+    expect(score[2].uma).toBe(-50);
   });
 
   it('2着 39999 で 未達扱い [境界-1]', () => {
     const g = makeEndGame({ 0: 50001, 1: 39999, 2: 15000 });
     const score = g.getFinalScore();
-    expect(score[0].uma).toBe(45);
-    expect(score[1].uma).toBe(-15);
-    expect(score[2].uma).toBe(-30);
+    expect(score[0].uma).toBe(75);
+    expect(score[1].uma).toBe(-25);
+    expect(score[2].uma).toBe(-50);
   });
 });
 

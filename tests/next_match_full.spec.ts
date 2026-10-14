@@ -51,10 +51,10 @@ test('次の試合へ button click で finalScore が chip 表示に反映', asy
     return { 0: g.game.chipLedger[0], 1: g.game.chipLedger[1], 2: g.game.chipLedger[2] };
   });
   console.log('[after click chipLedger]', JSON.stringify(chip));
-  // 30+45=75, -10-15=-25, -20-30=-50
-  expect((chip as any)[0]).toBe(75);
-  expect((chip as any)[1]).toBe(-25);
-  expect((chip as any)[2]).toBe(-50);
+  // 2着 35000 < 40000 → uma 75/-25/-50: 30+75=105, -10-25=-35, -20-50=-70
+  expect((chip as any)[0]).toBe(105);
+  expect((chip as any)[1]).toBe(-35);
+  expect((chip as any)[2]).toBe(-70);
 
   // UI 上の表示 [score-box 内に chip xxx 表示] 確認
   await page.screenshot({ path: 'test-results/next_match_after.png', fullPage: false });

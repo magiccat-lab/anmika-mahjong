@@ -22,18 +22,18 @@ test.describe('integrity_check: live-play 系 bug 回帰', () => {
       const g = (window as any).__game;
       return { 0: g.game.chipLedger[0], 1: g.game.chipLedger[1], 2: g.game.chipLedger[2], finished: g.game.state.finished };
     });
-    // 2着 30000 < 40000 → uma 45/-15/-30
-    expect((after1 as any)[0]).toBe(95); // 50+45
-    expect((after1 as any)[1]).toBe(-35); // -20-15
-    expect((after1 as any)[2]).toBe(-60); // -30-30
+    // 2着 30000 < 40000 → uma 75/-25/-50
+    expect((after1 as any)[0]).toBe(125); // 50+75
+    expect((after1 as any)[1]).toBe(-45); // -20-25
+    expect((after1 as any)[2]).toBe(-80); // -30-50
     expect((after1 as any).finished).toBe(false);
 
     // 2 試合目: 再度 半荘終了 → 持越し
     await page.evaluate(() => {
       const g = (window as any).__game;
-      g.game.chipLedger[0] += 10; // 105
-      g.game.chipLedger[1] += -5; // -40
-      g.game.chipLedger[2] += -5; // -65
+      g.game.chipLedger[0] += 10; // 135
+      g.game.chipLedger[1] += -5; // -50
+      g.game.chipLedger[2] += -5; // -85
       g.game.state.finished = true;
       g.game.state.defen = [55000, 40000, 5000]; // 2着 40000+
     });
@@ -42,10 +42,10 @@ test.describe('integrity_check: live-play 系 bug 回帰', () => {
       const g = (window as any).__game;
       return { 0: g.game.chipLedger[0], 1: g.game.chipLedger[1], 2: g.game.chipLedger[2] };
     });
-    // 2着 40000+ → uma 30/0/-30
-    expect((after2 as any)[0]).toBe(135); // 105+30
-    expect((after2 as any)[1]).toBe(-40); // -40+0
-    expect((after2 as any)[2]).toBe(-95); // -65-30
+    // 2着 40000+ → uma 50/0/-50
+    expect((after2 as any)[0]).toBe(185); // 135+50
+    expect((after2 as any)[1]).toBe(-50); // -50+0
+    expect((after2 as any)[2]).toBe(-135); // -85-50
 
     // 自家手牌 face=up
     const tileCls = await page.locator('section.player .hand .tile-btn .tile').first().getAttribute('class');
@@ -92,8 +92,8 @@ test.describe('integrity_check: live-play 系 bug 回帰', () => {
       const g = (window as any).__game;
       return { 0: g.game.chipLedger[0], 1: g.game.chipLedger[1], 2: g.game.chipLedger[2] };
     });
-    // 2着 35000 < 40000 → uma 45/-15/-30
-    expect(after[0]).toBe(65); expect(after[1]).toBe(-25); expect(after[2]).toBe(-40);
+    // 2着 35000 < 40000 → uma 75/-25/-50: 20+75, -10-25, -10-50
+    expect(after[0]).toBe(95); expect(after[1]).toBe(-35); expect(after[2]).toBe(-60);
   });
 
   test('chip reset option [チップリセット checkbox]: chipLedger 0 開始', async ({ page }) => {
