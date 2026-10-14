@@ -10,6 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 
 import { createRoomAuthority, type RoomAuthority } from '../server/authority';
+import { toCorePai } from '../src/lib/helpers';
 import { parseCanonicalRoomSnapshot, type AcceptedRoomCommand } from '../server/protocol';
 
 const roomId = process.argv[2];
@@ -62,6 +63,75 @@ type Hand = { match: number; ordinal: number; delta: Record<string, number>; hul
 const dice: Dice[] = [];
 const hules: Hule[] = [];
 const diverged: Array<{ match: number; revision: number; reason: string }> = [];
+// 打牌の見返し (10-14 先輩「打牌のミスとかjsonで見返せるようにしたいな。牌効率の問題とか祝儀/フィーバー効率の問題とか」)。
+// 人が切る直前に Game3.adviseDiscard (CPU と同じ物差し: シャンテン → 受け入れ → 祝儀温存の減点込みの優先度、リーチ者がいれば安全度) を当てる。
+// 「ミス」ではなく「CPU の物差しと違う打牌」として出す。リーチ後とフィーバーの強制ツモ切りは見ない
+type DiscardTag = '牌効率' | '受け入れ' | '祝儀・フィーバー' | '危険牌';
+type DiscardReview = {
+  match: number; hand: number; revision: number; seat: number; user: string; hand14: string; chosen: string;
+  xiangting: number; ukeire: number; cpu: string; best: Array<{ pai: string; xiangting: number; ukeire: number; safety: number }>;
+  tags: DiscardTag[]; note: string;
+};
+// 東風ごと → 人ごと (まとめは前にまとめた東風の続きから作るので、数は東風で分けておく)
+const discardStats: Record<string, Record<string, { evaluated: number; cpu_match: number; tags: Record<string, number> }>> = {};
+const discardReviews: DiscardReview[] = [];
+const baseOf = (p: string) => {
+  const core = toCorePai(String(p).replace(/[\+\=\-_*]/g, ''));
+  return core.length < 2 ? core : core[0] + (core[1] === '0' ? '5' : core[1]);
+};
+function reviewDiscard(game: any, action: Record<string, any>, match: number, hand: number, revision: number, seat: number): void {
+  const player = game.lunbanToPlayerId(game.state.lunban);
+  const rows: any[] = game.adviseDiscard(player, 99) ?? [];
+  if (!rows.length || rows[0].forced) return;
+  const sp = game.shoupai.get(player);
+  const chosenRaw = action.type === 'tsumokiri' ? String(sp?._zimo ?? '') : String(action.pai ?? '');
+  if (!chosenRaw) return;
+  const chosen = rows.find((r) => r.pai === chosenRaw) ?? rows.find((r) => r.base === baseOf(chosenRaw));
+  if (!chosen) return;
+  const user = roomSeatUser[seat] ?? '';
+  const st = ((discardStats[String(match)] ??= {})[user] ??= { evaluated: 0, cpu_match: 0, tags: {} });
+  st.evaluated += 1;
+  const cpu = rows.find((r) => r.recommended) ?? rows[0];
+  if (cpu.base === chosen.base) st.cpu_match += 1;
+  const minXt = Math.min(...rows.map((r) => r.xiangting));
+  const bestUk = Math.max(...rows.filter((r) => r.xiangting === minXt).map((r) => r.ukeire));
+  // 祝儀温存の減点だけ: prio から字牌 ・ 端牌の加点 (字 3 / 1・9 は 2 / 2・8 は 1) とリーチ者がいる時の安全度を抜く
+  const chipPenalty = (r: any) => {
+    const b = String(r.base ?? '');
+    const n = Number(b[1]);
+    const basePrio = b[0] === 'z' ? 3 : (n === 1 || n === 9) ? 2 : (n === 2 || n === 8) ? 1 : 0;
+    return basePrio - (r.prio - (r.hasLizhiOpponent ? r.safety : 0));
+  };
+  const defending = chosen.hasLizhiOpponent && chosen.safety >= 4;
+  const tags: DiscardTag[] = [];
+  const notes: string[] = [];
+  if (!defending && chosen.xiangting > minXt) {
+    tags.push('牌効率');
+    notes.push(`シャンテンが ${minXt} → ${chosen.xiangting} に戻った`);
+  } else if (!defending && chosen.xiangting === minXt && bestUk - chosen.ukeire >= 4 && chosen.ukeire <= bestUk * 0.85) {
+    tags.push('受け入れ');
+    notes.push(`受け入れ ${chosen.ukeire} 枚 (一番多い切り方は ${bestUk} 枚)`);
+  }
+  const keepChip = chipPenalty(chosen) >= 2 ? rows.find((r) => r.base !== chosen.base && r.xiangting <= chosen.xiangting
+    && r.ukeire >= chosen.ukeire && chipPenalty(r) < chipPenalty(chosen)) : undefined;
+  if (keepChip) {
+    tags.push('祝儀・フィーバー');
+    notes.push(chosen.dropsNiji ? `虹を崩した (${keepChip.pai} なら崩さず同じ形)` : `祝儀 ・ フィーバーの種を切った (${keepChip.pai} でも形は同じ)`);
+  }
+  // テンパイ (切った後 0 シャンテン) の押しは判断なので外す
+  if (chosen.hasLizhiOpponent && chosen.xiangting > 0 && chosen.safety < 0 && rows.some((r) => r.safety >= 4)) {
+    tags.push('危険牌');
+    notes.push('リーチ者がいる時に危険牌 (現物かスジがあった)');
+  }
+  for (const t of tags) st.tags[t] = (st.tags[t] ?? 0) + 1;
+  if (!tags.length) return;
+  discardReviews.push({
+    match, hand, revision, seat, user, hand14: String(sp?.toString?.() ?? ''), chosen: chosenRaw,
+    xiangting: chosen.xiangting, ukeire: chosen.ukeire, cpu: cpu.pai,
+    best: rows.slice(0, 3).map((r) => ({ pai: r.pai, xiangting: r.xiangting, ukeire: r.ukeire, safety: r.safety })),
+    tags, note: notes.join(' / '),
+  });
+}
 const hands: Hand[] = [];
 
 // 1. 記録だけで数えるサイコロと、局ごとの祝儀の動き
@@ -135,10 +205,19 @@ segments.forEach((segment, index) => {
     body = segment.slice(1);
   }
   const mine = dice.filter((d) => d.match === match);
+  let handNo = 1;
   for (const command of body) {
     const type = String(command.action.type);
     if (type === 'stamp') continue;
+    if (type === 'nextRound') handNo += 1;
     const before: any = authority.canonicalState();
+    if ((type === 'discard' || type === 'tsumokiri') && members.find((m) => m.seat === command.actorSeat && !m.is_cpu)) {
+      try {
+        reviewDiscard(before.game, command.action as Record<string, any>, match, handNo, command.revision, command.actorSeat);
+      } catch {
+        // 見返しは付けるだけ。読み直しは止めない
+      }
+    }
     if (type === 'selectSaiKoroCombo' && before.pendingSaiKoro) {
       const ps = before.pendingSaiKoro;
       const chance = ps.chances[ps.currentIdx] ?? {};
@@ -172,4 +251,7 @@ segments.forEach((segment, index) => {
   }
 });
 
-console.log(JSON.stringify({ room: roomId, matches_started: segments.length, room_seat_user: roomSeatUser, dice, hules, hands, diverged }));
+console.log(JSON.stringify({
+  room: roomId, matches_started: segments.length, room_seat_user: roomSeatUser, dice, hules, hands, diverged,
+  discard_review: discardReviews, discard_stats: discardStats,
+}));
