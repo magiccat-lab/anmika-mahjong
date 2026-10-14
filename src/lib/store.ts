@@ -1616,10 +1616,17 @@ export function createGameStore() {
           s.game.snapshotLocked = false;
           return { ...s };
         }
+        // 金北 modal を開く時のサイコロは selectKinpei の再 hule が積む [ツモの経路と同じ順]。
+        // ここでも積むと、先に振り切ってから金北を選んだ時に同じ和了の本役満サイコロを
+        // 2 回振っていた [2026-10-14 リョー通報 20261014_3、 room 90PJ]
+        const opensKinpeiModal = hasGoldKita(s.game, player as PlayerId)
+          && (!s.cpu[player as 0|1|2] || reverseRonHasHumanOwner)
+          && !isFeverPayAuto_ron
+          && s.game.kinpeiTarget[player as 0|1|2] === null;
         for (const rr of allRonResults) {
           if (rr.result?._anmikaRonEffectsQueued) continue;
           s = enqueueCutinState(s, 'ron', rr.player as PlayerId);
-          s = triggerSaiKoroIfAny(s, rr.result, rr.player);
+          if (!opensKinpeiModal) s = triggerSaiKoroIfAny(s, rr.result, rr.player);
           rr.result._anmikaRonEffectsQueued = true;
         }
         s.game.snapshotLocked = false;
