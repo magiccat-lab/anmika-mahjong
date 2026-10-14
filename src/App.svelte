@@ -18,7 +18,8 @@
   import FuyuModal from './lib/FuyuModal.svelte';
   import KinpeiModal from './lib/KinpeiModal.svelte';
   import SaiKoroModal from './lib/SaiKoroModal.svelte';
-  import PochiRevealModal from './lib/PochiRevealModal.svelte';
+  import PochiSqueeze from './lib/PochiSqueeze.svelte';
+  import { publicPochiCandidates, kakuteiOf } from './lib/pochiFx';
   import LobbyPanel from './lib/LobbyPanel.svelte';
   import RoomPanel from './lib/RoomPanel.svelte';
   import EntryMenu from './lib/EntryMenu.svelte';
@@ -163,7 +164,9 @@
   let bgmTick = 0; // 鳴らし始めた Audio を反応 ($:) に知らせる
   $: someoneFeverBgm = ([0, 1, 2] as const).some((p) => !!$game.game.feverActive?.[p]);
   $: bgmAllowed = !$prefs.muted && !$prefs.bgmOff && appMode !== 'menu' && viewMode === 'single';
-  $: syncBgm(!bgmAllowed ? null : someoneFeverBgm ? 'fever' : 'normal');
+  // 通常時の 8bit 版は止めてある (同じ日「BGM論外だった」。作り直すまでフィーバー中の原曲だけ)
+  const NORMAL_BGM_ENABLED = false;
+  $: syncBgm(!bgmAllowed ? null : someoneFeverBgm ? 'fever' : NORMAL_BGM_ENABLED ? 'normal' : null);
   function stopBgmFade(kind: BgmKind): void {
     const t = bgmFade[kind];
     if (t !== undefined) { clearInterval(t); delete bgmFade[kind]; }
@@ -299,8 +302,10 @@
   // 白ぽっち ツモ演出 [リョー指示 2026-05-13]
   // cpuStepImpl が複数ターンを1 update で回すため shan.lastZimoPochi は上書きされる。
   // events 配列から z5 の色を直接取り、キューで複数回分を順番に表示する
-  let pochiReveal: { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean } | null = null;
-  let pochiRevealQueue: Array<{ player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean }> = [];
+  // [2026-10-14] でかぽっち (リーチ一発で引いた 1筒 ・ 2筒) も同じ絞りに。kakutei は見えている牌で正 ・ 逆が決まっている時
+  type PochiRevealItem = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean; deka?: 'p1' | 'p2' | null; kakutei?: 'good' | 'bad' | null };
+  let pochiReveal: PochiRevealItem | null = null;
+  let pochiRevealQueue: PochiRevealItem[] = [];
   let lastSeenZimoEventCount = 0;
   let pochiScanBootstrapped = false;
   const POCHI_COLOR_MAP: Record<string, 'blue'|'red'|'green'|'yellow'> = { z5b: 'blue', z5r: 'red', z5g: 'green', z5y: 'yellow' };
@@ -333,7 +338,15 @@
         if (color && $game.game.lizhi.has(ev.player)
             && $game.cpu[ev.player] !== true
             && !(someoneFeverNow && !$game.game.feverActive[ev.player])) {
-          pochiRevealQueue.push({ player: ev.player, color, isCpu: false });
+          pochiRevealQueue.push({ player: ev.player, color, isCpu: false, kakutei: kakuteiOf(publicPochiCandidates($game.game)) });
+        }
+        // でかぽっち: リーチ一発で引いた本待ちでない 1筒 ・ 2筒。game が lastZimoInfo.pochi に色 (緑 ・ 黄) を入れている
+        const zi = $game.game.lastZimoInfo as { player?: number; pai?: string; pochi?: string | null } | null;
+        const corePai = String(ev?.pai ?? '').replace(/[^a-z0-9]/g, '').slice(0, 2);
+        if (!color && (corePai === 'p1' || corePai === 'p2') && i === zimoEvents.length - 1
+            && zi && zi.player === ev.player && (zi.pochi === 'green' || zi.pochi === 'yellow')
+            && $game.cpu[ev.player] !== true) {
+          pochiRevealQueue.push({ player: ev.player, color: zi.pochi, isCpu: false, deka: corePai });
         }
       }
       lastSeenZimoEventCount = zimoEvents.length;
@@ -2881,7 +2894,8 @@
            {#if} は component を再生成せず props 差替えだけになり、前回の revealed/closing が
            持ち越されて 2 枚目が「開いたまま timer なし」で永久に残る。{#key} で毎回作り直す -->
       {#key pochiReveal}
-        <PochiRevealModal player={pochiReveal.player} color={pochiReveal.color} isCpu={pochiReveal.isCpu} onClose={closePochiReveal} />
+        <PochiSqueeze color={pochiReveal.color} deka={pochiReveal.deka ?? null} kakutei={pochiReveal.kakutei ?? null}
+          who={onlineGameStarted ? seatName(pochiReveal.player) : ''} onClose={closePochiReveal} />
       {/key}
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: FuyuModal も winner client のみ表示、

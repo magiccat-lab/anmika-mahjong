@@ -19,7 +19,14 @@ async function pochi(page: Page, color = 'blue') {
     s.game.events.push({ type: 'zimo', player: 0, pai });
     (window as any).__gameStore.setCpuSeats([]);
   }, color);
-  await expect(page.locator('.pochi-tile')).toBeVisible();
+  await expect(page.locator('.sq-tile')).toBeVisible();
+}
+// [2026-10-14] 白ぽっちは指で下から絞る (PochiSqueeze)。牌の下から上へ引いて一気にめくる
+async function squeezeOpen(page: Page) {
+  const box = (await page.locator('.sq-tile').boundingBox())!;
+  const x = box.x + box.width / 2, y = box.y + box.height - 4;
+  await page.mouse.move(x, y); await page.mouse.down();
+  await page.mouse.move(x, y - box.height * 1.2, { steps: 10 }); await page.mouse.up();
 }
 async function shot(page: Page, name: string) {
   if (!output) return;
@@ -57,32 +64,29 @@ test('FX02: all six words, three seats, three DOM, queue and heavy skip', async 
   await expect(page.locator('.fx')).toHaveCount(0);
 });
 
-test('FX02: unopened privacy, four colors, click close and auto close', async ({ page }) => {
+test('FX02: unopened privacy, four colors, squeeze open and close', async ({ page }) => {
   await solo(page);
-  await page.clock.install();
   for (const color of ['blue', 'red', 'green', 'yellow']) {
     await pochi(page, color);
-    const dialog = page.locator('[role=dialog]').filter({ has: page.locator('.pochi-tile') });
-    expect(await dialog.locator('*').count()).toBe(2);
-    await expect(dialog).not.toHaveAttribute('aria-label', /青|赤|緑|黄|正|逆/);
-    await expect(page.locator('.pochi-tile')).toHaveCSS('--pochi', 'transparent');
+    const dialog = page.locator('.sq[role=dialog]');
+    // めくる前は色の名前を出さない
+    await expect(dialog).not.toHaveAttribute('aria-label', /青|赤|緑|黄/);
+    await expect(page.locator('.sq-word')).toHaveCount(0);
     await shot(page, `fx02-${color}-unopened`);
-    await page.locator('.pochi-tile').click();
-    await expect(page.locator('.pochi-tile')).toHaveClass(/revealed/);
-    await page.clock.runFor(300);
+    await squeezeOpen(page);
+    await expect(page.locator('.sq-word')).toHaveText(({ blue: '青ぽっち', red: '赤ぽっち', green: '緑ぽっち', yellow: '黄ぽっち' } as any)[color]);
     await shot(page, `fx02-${color}-revealed`);
-    if (color === 'blue') await page.locator('.pochi-tile').click();
-    else await page.clock.runFor(1500);
-    await expect(dialog).toHaveCount(0);
+    if (color === 'blue') await page.locator('.sq').click();
+    await expect(dialog).toHaveCount(0, { timeout: 3000 });
   }
 });
 
-test('FX02: unattended reveal deadline still opens and closes', async ({ page }) => {
+test('FX02: unattended squeeze opens by itself and closes', async ({ page }) => {
   await solo(page);
   await page.clock.install();
   await pochi(page);
-  await page.clock.runFor(10050);
-  await expect(page.locator('.pochi-tile')).toHaveClass(/revealed/);
-  await page.clock.runFor(3100);
-  await expect(page.locator('.pochi-tile')).toHaveCount(0);
+  await page.clock.runFor(31050);
+  await expect(page.locator('.sq.revealed')).toHaveCount(1);
+  await page.clock.runFor(1700);
+  await expect(page.locator('.sq')).toHaveCount(0);
 });
