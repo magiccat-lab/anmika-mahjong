@@ -2845,10 +2845,19 @@ export class Game3 {
       const fuyuExpected = this.estimateFuyuChipForSwap(player, null, null, from, target);
       expected += fuyuExpected * Math.abs(this.computeChipMultiplier(player, { mode: 'tsumo' }));
 
-      const immediateWhite = kind === 'white' && !ronpai && this.yifaActive[player]
-        && this.lastZimoInfo.player === player && !!this.lastZimoInfo.pochi;
-      // 祝儀0の即ツモサイコロは裏祝儀1枚より期待値が高い裁定。比較用の保守値。
-      if (immediateWhite && expected === 0) expected = 2;
+      // 祝儀 0 枚のぽっちツモには救済サイコロ [base 70、applyHule の「白ぽっちツモ祝儀0」] が付く。
+      // 1 投 2/30 の当たり × 4 投 × 70 枚 × 2 人の期待値を、祝儀と同じ倍率 [逆ぽっちは大きさ] で数える。
+      // 数えないと、裏ドラ 1 の候補を祝儀 0 + サイコロの候補より高めと見ていた
+      // [2026-10-14 リョー通報 20261014_4「ぽっち0があるから6s取りでやるのが正しい」]。
+      // 本待ちで赤 / 黄を避けたツモはサイコロも振らない [10-13 裁定、applyHule と同じ条件]
+      const zeroChipDice = kind === 'white' && !ronpai
+        && this.lastZimoInfo.player === player && !!this.lastZimoInfo.pochi
+        && !(this.lizhi.has(player) && this.getTingpaiListBeforeZimo(player).includes('z5')
+          && (this.lastZimoInfo.pochi === 'red' || this.lastZimoInfo.pochi === 'yellow'));
+      if (zeroChipDice && expected === 0) {
+        const pochiMult = Math.abs(this.computeChipMultiplier(player, { mode: 'tsumo', bypassShuvari: true }));
+        expected = 70 * (4 * 2 / 30) * 2 * pochiMult;
+      }
       const diceCount = (dryResult.saiKoroChances ?? [])
         .reduce((sum: number, chance: any) => sum + Math.max(1, Number(chance?.count) || 1), 0);
       if (diceCount > 0) expected += diceCount * 2;
