@@ -1001,6 +1001,31 @@ async def leave_room(room_id: str, request: Request):
     return {"ok": True, "deleted": False}
 
 
+@app.post("/api/rooms/{room_id}/finish")
+async def finish_room(room_id: str, request: Request):
+    """[2026-10-15 リョー「勝負終了ボタンをハンチャン終了時に用意しないと終えられない」]
+    試合の終わりの「勝負終了」。席の人なら誰でも押せて、ホストが抜けた時と同じく部屋を閉じる
+    (記録があれば archived、全員の接続を閉じてロビーへ)。閉じた部屋は secretary のまとめの見回り
+    (anmika_room_summary、3 分ごと) が拾って麻雀 ch に結果を送る"""
+    u = current_user(request)
+    if not u:
+        raise HTTPException(status_code=401, detail="login required")
+    with db_conn() as c:
+        room = c.execute("SELECT * FROM rooms WHERE room_id=?", (room_id,)).fetchone()
+        if not room:
+            return {"ok": True, "deleted": False}
+        seated = c.execute(
+            "SELECT 1 FROM room_members WHERE room_id=? AND user_id=?", (room_id, u["user_id"])
+        ).fetchone()
+        if room["host_user_id"] != u["user_id"] and seated is None:
+            raise HTTPException(status_code=403, detail="only seated members can finish")
+        deleted = _archive_or_delete_room(c, room_id)
+        c.commit()
+    await _hub_purge_room(room_id)
+    await _notify_ws_purge(room_id)
+    return {"ok": True, "deleted": deleted, "archived": not deleted}
+
+
 @app.post("/api/rooms/{room_id}/start")
 async def start_room(room_id: str, request: Request):
     u = current_user(request)

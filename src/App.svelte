@@ -1487,6 +1487,27 @@
     if (t && typeof t.closest === 'function' && t.closest('.table-menu-wrap')) return;
     tableMenuOpen = false;
   }
+  // [2026-10-15 リョー「勝負終了ボタンをハンチャン終了時に用意しないと終えられない」] 試合の終わりに部屋ごと閉じる。
+  // 全員の接続が閉じてロビーへ戻り、結果は secretary のまとめの見回りが麻雀 ch に送る
+  let finishConfirmOpen = false;
+  let finishBusy = false;
+  async function confirmFinishRoom(): Promise<void> {
+    if (finishBusy || !currentRoomId) return;
+    finishBusy = true;
+    try {
+      const res = await fetch(`${(import.meta as any).env?.VITE_ANMIKA_SERVER ?? ''}/api/rooms/${currentRoomId}/finish`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) throw new Error(String(res.status));
+      finishConfirmOpen = false;
+      disconnectOnline();
+      currentRoomId = null;
+      viewMode = 'online';
+    } catch (e) {
+      console.warn('[online] finish failed', e);
+      showDeadlineToast('閉じられなかった。もう一回押してくれ');
+    } finally {
+      finishBusy = false;
+    }
+  }
   function confirmLeaveGame(): void {
     leaveConfirmOpen = false;
     // 席は残す [/leave は呼ばない]。ロビーの「戻る」から同じ部屋に戻れる
@@ -1941,6 +1962,13 @@
         onlineShouldReconnect = false;
         onlineTerminalClose = { code: event.code, reason: event.reason || '' };
         console.warn('[online] terminal close, not reconnecting', { code: event.code, reason: event.reason });
+        // [2026-10-15] 部屋が閉じられた (勝負終了 ・ ホストが抜けた) 時は卓に止まらずロビーへ戻る
+        if (event.code === 4404) {
+          disconnectOnline();
+          currentRoomId = null;
+          viewMode = 'online';
+          showDeadlineToast('部屋が閉じられた (勝負終了)');
+        }
         return;
       }
       scheduleOnlineReconnect();
@@ -3178,6 +3206,9 @@
                観戦だけ押せない -->
           {#if !onlineGameStarted || !onlineSpectator}
             <button class="next-btn" on:click={handleNextMatch}>▶ 次の試合へ</button>
+            {#if onlineGameStarted}
+              <button class="next-btn finish-room-btn" on:click={() => { finishConfirmOpen = true; }}>勝負終了</button>
+            {/if}
             {#if !onlineGameStarted}
               <label style="display:inline-flex; align-items:center; gap:4px; font-size:13px;">
                 <input type="checkbox" bind:checked={resetChipOnNextMatch}>チップリセット
@@ -3821,6 +3852,9 @@
                  観戦だけ押せない -->
             {#if !onlineGameStarted || !onlineSpectator}
               <button on:click={handleNextMatch}>▶ 次の試合へ</button>
+              {#if onlineGameStarted}
+                <button class="finish-room-btn" on:click={() => { finishConfirmOpen = true; }}>勝負終了</button>
+              {/if}
             {:else}
               <span class="muted-hint">観戦中 [対局者が「次の試合へ」を押すと次が始まる]</span>
             {/if}
@@ -3884,6 +3918,18 @@
         <div class="leave-confirm-actions">
           <button type="button" class="leave-confirm-yes" on:click={confirmLeaveGame}>抜ける</button>
           <button type="button" class="leave-confirm-no" on:click={() => { leaveConfirmOpen = false; }}>戻る</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  {#if finishConfirmOpen}
+    <div class="leave-confirm" role="dialog" aria-modal="true" aria-labelledby="finish-confirm-title">
+      <div class="leave-confirm-box">
+        <p id="finish-confirm-title">勝負を終える？</p>
+        <p class="leave-confirm-sub">部屋を閉じて全員ロビーに戻る。結果は数分で麻雀 ch に出る</p>
+        <div class="leave-confirm-actions">
+          <button type="button" class="leave-confirm-yes" disabled={finishBusy} on:click={confirmFinishRoom}>終える</button>
+          <button type="button" class="leave-confirm-no" on:click={() => { finishConfirmOpen = false; }}>戻る</button>
         </div>
       </div>
     </div>
