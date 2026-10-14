@@ -90,3 +90,43 @@ test('FX02: unattended squeeze opens by itself and closes', async ({ page }) => 
   await page.clock.runFor(1700);
   await expect(page.locator('.sq')).toHaveCount(0);
 });
+
+// [2026-10-14 リョー「手牌のところにツモが見えてネタバレしてる」] 絞っている間は引いた牌 (でかぽっちの 2筒) を伏せる
+test('FX02: drawn tile stays face-down while squeezing', async ({ page }) => {
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.goto('/');
+  await page.locator('button.entry-btn.solo').click();
+  await expect(page.locator('section.player').first()).toBeVisible();
+  await page.waitForTimeout(1200);
+  const before = await page.evaluate(() => {
+    const g = (window as any).__game; const sp = g.game.shoupai.get(0);
+    return { zimo: sp._zimo, cur: g.game.lunbanToPlayerId(g.game.state.lunban) };
+  });
+  expect(before.zimo).toBeTruthy();
+  const lastAlt = () => page.evaluate(() => {
+    const btns = Array.from(document.querySelectorAll('.seat-bottom button.tile-btn')) as HTMLElement[];
+    const last = btns[btns.length - 1];
+    return { n: btns.length, alt: last?.querySelector('img')?.getAttribute('alt'), src: last?.querySelector('img')?.getAttribute('src') };
+  });
+  // 引いた牌をでかぽっち (2筒、一発) にした事にする: 手の zimo を p2 にし、lastZimoInfo に黄
+  await page.evaluate(() => {
+    const g = (window as any).__game; const sp = g.game.shoupai.get(0);
+    const z = sp._zimo; const s = z[0], n = Number(z[1]);
+    sp._bingpai[s][n]--; sp._bingpai.p[2]++; sp._zimo = 'p2';
+    g.game.lizhi.add(0); g.game.feverActive = [false, false, false];
+    g.game.lastZimoInfo = { player: 0, pai: 'p2', pochi: 'yellow' };
+    g.game.events.push({ type: 'zimo', player: 0, pai: 'p2' });
+    (window as any).__gameStore.setCpuSeats([1, 2]);
+  });
+  await expect(page.locator('.sq-tile')).toBeVisible({ timeout: 4000 });
+  const during = await lastAlt();
+  await shot(page, 'fx02-deka-during');
+  expect(during.src).toContain('Back.svg');
+  const box = (await page.locator('.sq-tile').boundingBox())!;
+  const x = box.x + box.width / 2, y = box.y + box.height - 4;
+  await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x, y - box.height * 1.2, { steps: 10 }); await page.mouse.up();
+  await expect(page.locator('.sq-word')).toHaveText('でかぽっち');
+  await expect(page.locator('.sq')).toHaveCount(0, { timeout: 4000 });
+  const after = await lastAlt();
+  expect(after.src).toContain('Pin2');
+});

@@ -26,6 +26,9 @@
   export let onTileClick: (p: number, t: string, fromZimo?: boolean) => void = () => {};
   export let disabled: boolean = false;
   export let shuvariActive: boolean = false;
+  // [2026-10-14] 手牌の行に並ぶ牌の数 (横持ちで 1 枚の幅を枠に収めるのに使う)。鳴きは区切りの隙間で 0.7 枚、横向きは 0.4 枚、
+  // ツモの隙間と余りで 0.6 枚を足す (横持ちの隙間は App.svelte の @media (orientation: landscape) で詰めてある)
+  $: handSlots = shoupai.length + fulou.reduce((n, m) => n + m.tiles.length + (m.rotateIdx != null && m.rotateIdx >= 0 ? 0.4 : 0) + 0.7, 0) + 0.6;
 </script>
 
 <section class="player" class:active={isCurrent}>
@@ -33,7 +36,7 @@
     {label} {isCurrent ? '←' : ''}
     {#if shuvariActive}<span class="shuvari-badge">シュバ</span>{/if}
   </h2>
-  <div class="hand">
+  <div class="hand" style:--hand-slots={handSlots}>
     {#each shoupai as t, i}
       {@const isPendingCandidate = isCurrent && lizhiPending && isLizhiCand(t)}
       <button

@@ -132,7 +132,7 @@
 </div>
 
 <style>
-  .sq { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.55); touch-action: none; user-select: none; outline: none; cursor: grab; overflow: hidden; }
+  .sq { position: fixed; inset: 0; z-index: 9999; background: rgba(4, 8, 6, 0.78); touch-action: none; user-select: none; outline: none; cursor: grab; overflow: hidden; }
   .sq.bad { background: rgba(0, 0, 0, 0.8); }
   /* 横持ちでは牌が上まで来るので、名前は牌の左に出す (上に置くと牌に隠れる) */
   .sq-who { position: absolute; z-index: 2; left: max(16px, 3vw); top: 42%; transform: translateY(-50%); max-width: calc(50% - min(23vw, 105px) - 24px); overflow: hidden; text-overflow: ellipsis; padding: 3px 14px; background: #111; color: #fff; font: 700 clamp(13px, 2vw, 18px) 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.08em; white-space: nowrap; }

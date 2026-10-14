@@ -111,14 +111,15 @@
 </script>
 
 <span class="tile {face} size-{size} {hua ? `hua hua-${hua}` : ''}" class:red={isRed} class:rainbow={isRainbow}>
-  {#if face === 'down'}
+  <!-- [2026-10-14] 'back' は表向きの手牌でも裏で描く (白ぽっち ・ でかぽっちを絞っている間の引いた牌) -->
+  {#if face === 'down' || pai === 'back'}
     <img class="tile-img" src="/tiles/Back.svg" alt="伏せ" />
   {:else if svg}
     <img class="tile-img" src={`/tiles/${svg}`} alt={paiLabel(pai)} title={paiLabel(pai)} />
   {:else}
     <span class="tile-text">{paiLabel(pai)}</span>
   {/if}
-  {#if face === 'up' && assistMark}
+  {#if face === 'up' && pai !== 'back' && assistMark}
     <span class="assist-mark" aria-hidden="true">{assistMark}</span>
   {/if}
 </span>

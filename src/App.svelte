@@ -284,8 +284,8 @@
   // オンライン CPU と期限切れ操作は Node authority が一度だけ発火する。
   // client timer は再接続 replay と競合するため、オンラインでは持たない。
   $: shoupai0 = handTiles($game.game.shoupai.get(srv0), srv0, pochiReveal?.player === srv0);
-  $: shoupai1 = handTiles($game.game.shoupai.get(srv1), srv1, pochiReveal?.player === srv1);
-  $: shoupai2 = handTiles($game.game.shoupai.get(srv2), srv2, pochiReveal?.player === srv2);
+  $: shoupai1 = handTiles($game.game.shoupai.get(srv1), srv1, pochiReveal?.player === srv1 || remotePochi?.seat === srv1);
+  $: shoupai2 = handTiles($game.game.shoupai.get(srv2), srv2, pochiReveal?.player === srv2 || remotePochi?.seat === srv2);
   // 2026-05-14 ゆーま 自走 bug fix: fulou0/1/2 が hardcoded 0/1/2 で、 オンライン
   // selfPlayer != 0 だと shoupai0 [srv0=自家] と player ID がズレて 他人の副露が表示される
   $: fulou0 = fulouMianzi($game.game.shoupai.get(srv0), srv0);
@@ -786,12 +786,16 @@
   // ポッチ開封演出中は自家手牌のツモ牌 [末尾] の色を伏せる [2026-07-16 リョー報告:
   // 「ポッチ何かな」演出中に手牌側で色が即バレしてた]
   const POCHI_COLORED_KEYS = new Set(['z5b', 'z5r', 'z5g', 'z5y', 'bu', 'br', 'bg', 'by']);
-  function maskZimoPochi(tiles: string[]): string[] {
+  // [2026-10-14 リョー「手牌のところにツモが見えてネタバレしてる」] 絞りの間は、引いた牌 (手牌の右端) を裏で出す。
+  // 前は色付きの白ぽっちを素の白にしていただけで、でかぽっちの 1筒 ・ 2筒は表のまま見えていた
+  function maskZimoPochi(tiles: string[], sp?: any): string[] {
     if (tiles.length === 0) return tiles;
     const last = tiles[tiles.length - 1];
-    if (!POCHI_COLORED_KEYS.has(last)) return tiles;
+    const zimo = String(sp?._anmikaZimo ?? sp?._zimo ?? '');
+    const hasZimo = zimo.length > 0 && zimo.length <= 3;
+    if (!hasZimo && !POCHI_COLORED_KEYS.has(last)) return tiles;
     const out = [...tiles];
-    out[out.length - 1] = 'z5';
+    out[out.length - 1] = 'back';
     return out;
   }
 
@@ -845,7 +849,7 @@
           out.push(rawZimo);
         }
       }
-      return maskPochiZimo ? maskZimoPochi(out) : out;
+      return maskPochiZimo ? maskZimoPochi(out, sp) : out;
     }
     const bingpaiStr: string = sp.toString().split(',')[0] ?? '';
     let tiles: string[] = parseTilesFromStr(bingpaiStr);
@@ -881,7 +885,7 @@
       tiles = remapGoldTiles(tiles, gh);
       tiles = remapPochiTiles(tiles, ph);
     }
-    return maskPochiZimo ? maskZimoPochi(tiles) : tiles;
+    return maskPochiZimo ? maskZimoPochi(tiles, sp) : tiles;
   }
 
   function remapGoldTiles(tiles: string[], gh: { p: number; s: number; z: number }): string[] {
@@ -5584,6 +5588,23 @@
      手牌行の華/抜き表示は上部の抜き box [P0 抜[自]] と完全二重なので v2 では出さない */
   main.mode-single.ui-board-v2 .seat-bottom :global(.hand .hua-group) {
     display: none;
+  }
+  /* [2026-10-14 リョー「スマホの横持ちだと端の牌に判定が無くて切れない (枠から出てる)」]
+     横持ちの手牌は 1 枚の幅を「真ん中の枠の幅 ÷ 枚数 (鳴きも数える、PlayerHandPanel の --hand-slots)」で頭打ちにする。
+     667px 幅では 14 枚が枠より 64px はみ出し、両端の牌の上に左右の席の札が重なって押せなかった */
+  @media (orientation: landscape) {
+    main.mode-single.ui-board-v2 .seat-bottom > :global(section.player) { container-type: inline-size; }
+    main.mode-single.ui-board-v2 .seat-bottom :global(.hand) {
+      --hand-tile-w: min(var(--tile-w), calc((100cqw - 24px) / var(--hand-slots, 15) - 5px));
+      --tap-min-w: calc(var(--hand-tile-w) + 3px);
+    }
+    main.mode-single.ui-board-v2 .seat-bottom :global(.hand .tile.size-md) {
+      width: var(--hand-tile-w);
+      height: calc(var(--hand-tile-w) * 1.375);
+    }
+    /* 鳴きの区切りの隙間を詰める (16px → 8px、横向きの牌の脇 6px → 4px) */
+    main.mode-single.ui-board-v2 .seat-bottom :global(.hand .fulou-group) { margin-left: 8px; padding: 0 2px; }
+    main.mode-single.ui-board-v2 .seat-bottom :global(.hand .fulou-group .rot-tile) { margin: 0 calc(var(--hand-tile-w) * 0.19 + 1px); }
   }
   /* 手順D-2: 操作 dock [リーチ/カン/次局へ] を v2 の側柱幅 + safe-area 基準に
      アンカーし、リーチ選択帯は右寄せで折り返して盤面中央を塞がない */
