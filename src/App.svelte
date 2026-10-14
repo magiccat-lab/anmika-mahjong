@@ -149,13 +149,14 @@
   // [2026-10-14 リョー] 卓の BGM。どちらもアン ミカさんの「アンミカーニバル」で、曲のファイルは public/sounds/bgm/ (git には入れない)。
   //  - フィーバー中: 原曲 (「フィーバー中に流れるようにしたい、私用で権利大丈夫だからmp3で流してほしい」)
   //  - 通常時: 8bit 版を小さめに (「通常時に8bit風のアンミカーニバルのBGM裏で流すのどう」→「2で作って進めて」。
-  //    demucs で分けた歌 ・ ベース ・ ドラム ・ その他を、矩形波 ・ 三角波 ・ ノイズ ・ アルペジオに打ち直した物。作り方は tools/bgm_chiptune.py)
+  //    旋律は歌専用の採譜 AI GAME で取り、3 回のサビは先輩が「音はあってる」と言ったサビ 3 版目にそろえた。
+  //    低音 ・ ドラムは分けた stem から、こだまと和音のアルペジオを足した全曲 117 小節。作り方は tools/bgm_full_8bit.py)
   // 切り替わる時と止まる時は 2.5 秒かけて音を下げる (「曲は最後フェードとかかけてあげてね」)。
   // 音量は控えめ (「BGMの音量ちょっと下げる」)。白ぽっちの演出の間は消す (「演出カットイン入ったらBGMミュート」→「ポッチ演出だけ」)。
   // ミュートの設定 ・ 卓の右上の「BGM 切」・ 入口のメニューでは鳴らさない
   const BGM_TRACKS = {
     fever: { src: '/sounds/bgm/anmika_carnival.mp3', volume: 0.3 },
-    normal: { src: '/sounds/bgm/anmika_carnival_8bit.mp3?v=crepe2', volume: 0.12 },
+    normal: { src: '/sounds/bgm/anmika_carnival_8bit.mp3?v=game3', volume: 0.12 },
   } as const;
   type BgmKind = keyof typeof BGM_TRACKS;
   const BGM_FADE_MS = 2500;
@@ -164,8 +165,8 @@
   let bgmTick = 0; // 鳴らし始めた Audio を反応 ($:) に知らせる
   $: someoneFeverBgm = ([0, 1, 2] as const).some((p) => !!$game.game.feverActive?.[p]);
   $: bgmAllowed = !$prefs.muted && !$prefs.bgmOff && appMode !== 'menu' && viewMode === 'single';
-  // 通常時の 8bit 版は止めてある (同じ日「BGM論外だった」。作り直すまでフィーバー中の原曲だけ)
-  const NORMAL_BGM_ENABLED = false;
+  // 通常時の 8bit 版 (同じ日「BGM論外だった」で一度止め、GAME で作り直したサビに「音はあってる」で戻した)
+  const NORMAL_BGM_ENABLED = true;
   $: syncBgm(!bgmAllowed ? null : someoneFeverBgm ? 'fever' : NORMAL_BGM_ENABLED ? 'normal' : null);
   function stopBgmFade(kind: BgmKind): void {
     const t = bgmFade[kind];
