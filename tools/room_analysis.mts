@@ -17,6 +17,7 @@ import { toCorePai, normalizeBaopaiForMajiang, isPositiveZ5 } from '../src/lib/h
 import { canFeverLizhi } from '../src/lib/game3/feverLizhi';
 import { comboDanger, comboBreakdown } from './lib/combo_danger.mts';
 import { mcOption, END_SCALE } from './lib/mc_eval.mts';
+import { chipEnvOf, winValue, CHIP_PER_POINT, type ChipEnv } from './lib/chip_value.mts';
 
 const argv = process.argv.slice(2);
 const mcAt = argv.indexOf('--mc');
@@ -24,7 +25,6 @@ const MC_SIMS = mcAt >= 0 ? Math.max(1, Number(argv[mcAt + 1]) || 200) : 0;
 if (mcAt >= 0) argv.splice(mcAt, 2);
 const roomId = argv[0];
 const dbPath = argv[1] ?? resolve('data', 'anmika.sqlite3');
-const mcCache = new Map<string, any>();
 if (!roomId) {
   console.error('usage: room_analysis.mts <room_id> [db]');
   process.exit(2);
@@ -73,50 +73,53 @@ const DRAW_KINDS: string[] = [];
 for (const s of ['m', 'p', 's']) for (let n = 1; n <= 9; n++) if (s !== 'm' || n === 7 || n === 9) DRAW_KINDS.push(s + n);
 for (let n = 1; n <= 7; n++) DRAW_KINDS.push('z' + n);
 
-type Ctx = { game: any; player: number; unseen: (t: string) => number; unseenTotal: number; draws: number; param: any };
+type Ctx = { game: any; player: number; unseen: (t: string) => number; unseenTotal: number; draws: number; paishu: number; param: any; env: ChipEnv; cache: Map<string, any> };
 
-// 13 枚のテンパイの手: 待ちの見えていない枚数と、待ちごとの打点 (ロン、リーチ付き) の重み付き平均 × フィーバーの段
-function tenpaiValue(ctx: Ctx, e: any): { wait: number; value: number; fever: number } {
+// 13 枚のテンパイの手: 待ちの見えていない枚数と、待ちごとの値 (ロン、リーチ付き。点とチップを chip_value で枚に) の重み付き平均。
+// フィーバーになる形は、残りの山に出る待ち牌を全部アガるので、値を「待ち × 山 ÷ 見えていない牌」回分にする (feverWins)
+function tenpaiValue(ctx: Ctx, e: any): { wait: number; value: number; fever: number; feverWins: number } {
   let waits: string[] = [];
   try { waits = Majiang.Util.tingpai(e) ?? []; } catch { waits = []; }
+  let fever = 0;
+  try { const f = canFeverLizhi(e); if (f.ok) fever = f.tier; } catch { fever = 0; }
   let wait = 0, sum = 0;
   for (const w of waits) {
     const rem = ctx.unseen(baseOf(w));
     if (!rem) continue;
-    let defen = 0;
-    try {
-      const r = Majiang.Util.hule(e.clone(), `${w}-`, ctx.param);
-      defen = Number(r?.defen ?? 0);
-    } catch { defen = 0; }
     wait += rem;
-    sum += rem * defen;
+    sum += rem * winValue(e, baseOf(w), false, ctx.param, ctx.env, DRAW_KINDS, ctx.unseen, fever);
   }
-  let fever = 0;
-  try { const f = canFeverLizhi(e); if (f.ok) fever = f.tier; } catch { fever = 0; }
-  // フィーバーは和了が続くので打点を (1 + 段) 倍で見る (目安。P3 で試して入れ替える)
-  return { wait, value: wait ? (sum / wait) * (1 + fever) : 0, fever };
+  const feverWins = fever && ctx.unseenTotal ? wait * Math.min(1, ctx.paishu / ctx.unseenTotal) : 0;
+  return { wait, value: wait ? sum / wait : 0, fever, feverWins };
 }
+// 悪手の線 (チップの損)。点 1,000 ≒ 1.65 枚なので、前の 1,000 点の線より少し上
+const BAD_CHIPS = 2;
 const winProb = (wait: number, unseenTotal: number, draws: number) =>
   unseenTotal > 0 && draws > 0 ? 1 - Math.pow(Math.max(0, 1 - wait / unseenTotal), draws) : 0;
 
-// 切った後の手の期待値 (点)。2 シャンテン以上は null (受け入れの枚数で比べる)
-function optionEv(ctx: Ctx, sp: any, pai: string): { ev: number | null; xt: number; detail: string } {
+const fmt = (v: number) => (Math.round(v * 10) / 10).toLocaleString();
+
+// 切った後の手の期待値 (チップの枚数)。式の版は 2 シャンテン以上が null (受け入れの枚数で比べる)、モンテカルロの版は 2 シャンテンまで試す
+function optionEv(ctx: Ctx, sp: any, pai: string): { ev: number | null; xt: number; detail: string; samples?: Float64Array } {
   const a = sp.clone();
   try { a.dapai(pai); } catch { return { ev: null, xt: 99, detail: '' }; }
   const xt = Majiang.Util.xiangting(a);
-  if (MC_SIMS && xt <= 1) {
+  if (MC_SIMS && xt <= 2) {
     const river = new Set<string>([...((ctx.game.he.get(ctx.player)?._pai ?? []) as string[]).map(baseOf), baseOf(pai)]);
     let seed = 0;
     // 同じ打牌の候補は同じ山の並びで比べる (差の揺れを小さくする)
     for (const ch of `${sp.toString()}|${ctx.unseenTotal}|${ctx.draws}`) seed = (Math.imul(seed, 31) + ch.charCodeAt(0)) | 0;
     const endRate = (turnsAll >= 60 ? oppValues.length / turnsAll : 0.04) * END_SCALE;
-    const r = mcOption(a, { kinds: DRAW_KINDS, unseen: ctx.unseen, draws: ctx.draws, param: ctx.param, river, seed, endRate, pochiWild: true }, MC_SIMS, mcCache);
-    return { ev: r.ev, xt, detail: `${MC_SIMS} 回試して 和了率 ${Math.round(r.win * 100)}% ・ アガった時の打点 ${Math.round(r.value)}${r.win ? ` ・ ツモ ${Math.round(r.tsumo * 100)}%` : ''}` };
+    const r = mcOption(a, { kinds: DRAW_KINDS, unseen: ctx.unseen, draws: ctx.draws, param: ctx.param, river, seed, endRate, pochiWild: true, env: ctx.env }, MC_SIMS, ctx.cache);
+    return { ev: r.ev, xt, samples: r.samples, detail: `${MC_SIMS} 回試して 和了率 ${Math.round(r.win * 100)}% ・ アガった時 ${fmt(r.value)} 枚${r.fever ? ` ・ フィーバー ${Math.round(r.fever * 100)}%` : ''}` };
   }
   if (xt === 0) {
     const t = tenpaiValue(ctx, a);
+    if (t.fever) {
+      return { ev: t.feverWins * t.value, xt, detail: `フィーバー ${t.fever} 段 ・ 待ち ${t.wait} 枚 ・ 山に出る見込み ${fmt(t.feverWins)} 回 ・ 1 回 ${fmt(t.value)} 枚` };
+    }
     const p = winProb(t.wait, ctx.unseenTotal, ctx.draws);
-    return { ev: p * t.value, xt, detail: `テンパイ 待ち ${t.wait} 枚 ・ 打点 ${Math.round(t.value)}${t.fever ? ` (フィーバー ${t.fever} 段)` : ''} ・ 和了率 ${Math.round(p * 100)}%` };
+    return { ev: p * t.value, xt, detail: `テンパイ 待ち ${t.wait} 枚 ・ アガった時 ${fmt(t.value)} 枚 ・ 和了率 ${Math.round(p * 100)}%` };
   }
   if (xt !== 1) return { ev: null, xt, detail: '' };
   let reach = 0, acc = 0;
@@ -133,26 +136,28 @@ function optionEv(ctx: Ctx, sp: any, pai: string): { ev: number | null; xt: numb
       try { e.dapai(c); } catch { continue; }
       if (Majiang.Util.xiangting(e) !== 0) continue;
       const t = tenpaiValue(ctx, e);
-      // テンパイになった後のツモは残りの半分くらい
-      best = Math.max(best, winProb(t.wait, ctx.unseenTotal, Math.max(1, Math.floor(ctx.draws / 2))) * t.value);
+      // テンパイになった後のツモは残りの半分くらい。フィーバーは山の半分に出る待ちを全部アガる
+      best = Math.max(best, t.fever ? (t.feverWins / 2) * t.value : winProb(t.wait, ctx.unseenTotal, Math.max(1, Math.floor(ctx.draws / 2))) * t.value);
     }
     reach += rem;
     acc += rem * best;
   }
   const pReach = winProb(reach, ctx.unseenTotal, ctx.draws);
   const avg = reach ? acc / reach : 0;
-  return { ev: pReach * avg, xt, detail: `テンパイへの受け入れ ${reach} 枚 ・ テンパイした時の期待値 ${Math.round(avg)}` };
+  return { ev: pReach * avg, xt, detail: `テンパイへの受け入れ ${reach} 枚 ・ テンパイした時の期待値 ${fmt(avg)} 枚` };
 }
 
 type Review = {
   match: number; hand: number; turn: number; seat: number; user: string; hand14: string; chosen: string; best: string;
-  loss: number | null; xiangting: number; best_xiangting: number; options: Array<{ pai: string; ev: number | null; xt: number; ukeire: number; danger: number; detail: string; combo: string }>;
+  loss: number | null; loss_se: number; xiangting: number; best_xiangting: number; options: Array<{ pai: string; ev: number | null; xt: number; ukeire: number; danger: number; detail: string; combo: string }>;
   kind: 'ev' | 'ukeire'; lizhi: boolean; bad: boolean;
   // 悪手の時だけ局面を残す (河は席番号 → 打った牌、ドラ表示、リーチ者の席)
   rivers?: Record<string, string[]>; dora?: string[]; lizhi_seats?: number[];
 };
 const reviews: Review[] = [];
 const oppValues: number[] = [];
+// 放銃した人が払ったチップ (ロンのアガリごと)。押し引きの相手の値をチップに直す
+const oppChipLoss: number[] = [];
 // 局が誰かのアガリで終わる割合 (1 打あたり)。モンテカルロの局の長さに使う
 let turnsAll = 0;
 const diverged: Array<{ match: number; revision: number; reason: string }> = [];
@@ -178,7 +183,7 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
   const unseenTotal = DRAW_KINDS.reduce((a, t) => a + unseen(t), 0);
   const paishu = Number(game.shan?.paishu ?? 0);
   const ctx: Ctx = {
-    game, player, unseen, unseenTotal, draws: Math.max(1, Math.floor(paishu / 3)),
+    game, player, unseen, unseenTotal, draws: Math.max(1, Math.floor(paishu / 3)), paishu, env: chipEnvOf(game, player), cache: new Map(),
     param: Majiang.Util.hule_param({
       rule: anmikaRule, zhuangfeng: game.changfengZ - 1, menfeng: game.zifengZ(player) - 1, lizhi: 1,
       baopai: (game.shan?.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f') && !isPositiveZ5(p)).map(normalizeBaopaiForMajiang),
@@ -186,7 +191,9 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
     }),
   };
   const hasLizhi = !!rowsAll[0].hasLizhiOpponent;
-  const vOpp = oppValues.length ? oppValues.reduce((a, b) => a + b, 0) / oppValues.length : 8000;
+  // 相手の値 (放銃した時に失う枚数): 部屋のアガリの平均の点 × CHIP_PER_POINT + ロンで放銃者が払ったチップの平均
+  const avg = (xs: number[], d: number) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : d);
+  const vOpp = avg(oppValues, 8000) * CHIP_PER_POINT + avg(oppChipLoss, 10);
   const minXt = Math.min(...rowsAll.map((r) => r.xiangting));
   const comboDanger0 = comboDanger(game, player);
   // 見る候補: 一番少ないシャンテンの物と、切った牌 (多くても 8 つ。受け入れの多い順)。リーチを受けていれば一番安い牌 (降りの候補) も
@@ -201,7 +208,7 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
     // リーチを受けている時、2 シャンテン以上に下がる切り方は降り (アガリを見ない) として −放銃率 × 相手の打点で比べる
     const fold = e.ev === null && hasLizhi;
     const ev = fold ? -(danger / 100) * vOpp : e.ev === null ? null : e.ev - (hasLizhi ? (danger / 100) * vOpp : 0);
-    return { pai: r.pai, base: r.base, ev, xt: e.xt === 99 ? r.xiangting : e.xt, ukeire: r.ukeire, danger, detail: fold ? '降り (アガリを見ない)' : e.detail };
+    return { pai: r.pai, base: r.base, ev, xt: e.xt === 99 ? r.xiangting : e.xt, ukeire: r.ukeire, danger, detail: fold ? '降り (アガリを見ない)' : e.detail, samples: e.samples };
   });
   const chosen = options.find((o) => o.base === chosenRow.base)!;
   let best = options[0];
@@ -217,9 +224,19 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
     }
   }
   const loss = kind === 'ev'
-    ? Math.max(0, Math.round((best.ev as number) - (chosen.ev as number)))
+    ? Math.max(0, Math.round(((best.ev as number) - (chosen.ev as number)) * 10) / 10)
     : (chosen.xt > best.xt ? null : best.ukeire > 0 ? Math.round((1 - chosen.ukeire / best.ukeire) * 100) / 100 : 0);
-  const bad = loss === null || (kind === 'ev' ? (loss as number) >= 1000 : (loss as number) >= 0.4);
+  // モンテカルロの差の揺れ: 同じ山の並びで比べた 1 回ずつの差の標準誤差。誤差の内 (2 倍未満) の差は一致に数え、悪手にしない
+  let lossSe = 0;
+  if (kind === 'ev' && best.samples && chosen.samples && best !== chosen) {
+    const n = best.samples.length;
+    let m = 0, m2 = 0;
+    for (let i = 0; i < n; i++) { const d = best.samples[i] - chosen.samples[i]; m += d; m2 += d * d; }
+    m /= n;
+    lossSe = n > 1 ? Math.sqrt(Math.max(0, m2 / n - m * m) / (n - 1)) : 0;
+  }
+  lossSe = Math.round(lossSe * 10) / 10;
+  const bad = loss === null || (kind === 'ev' ? (loss as number) >= BAD_CHIPS && (loss as number) >= 2 * lossSe : (loss as number) >= 0.4);
   const context = bad ? {
     rivers: Object.fromEntries([0, 1, 2].map((p) => [String(p), [...((game.he.get(p)?._pai ?? []) as string[])]])),
     dora: [...((game.shan?.baopai ?? []) as string[])],
@@ -227,8 +244,8 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
   } : {};
   reviews.push({
     match, hand, turn: (game.he.get(player)?._pai ?? []).length + 1, seat, user: roomSeatUser[seat] ?? '', hand14: String(sp?.toString?.() ?? ''),
-    chosen: chosenRaw, best: best.pai, loss, xiangting: chosen.xt, best_xiangting: best.xt, kind, lizhi: hasLizhi, bad, ...context,
-    options: options.map((o) => ({ pai: o.pai, ev: o.ev === null ? null : Math.round(o.ev), xt: o.xt, ukeire: o.ukeire, danger: o.danger, detail: o.detail,
+    chosen: chosenRaw, best: best.pai, loss, loss_se: lossSe, xiangting: chosen.xt, best_xiangting: best.xt, kind, lizhi: hasLizhi, bad, ...context,
+    options: options.map((o) => ({ pai: o.pai, ev: o.ev === null ? null : Math.round(o.ev * 10) / 10, xt: o.xt, ukeire: o.ukeire, danger: o.danger, detail: o.detail,
       combo: hasLizhi ? comboBreakdown(game, player, o.base) : '' })),
   });
 }
@@ -271,6 +288,10 @@ segments.forEach((segment, index) => {
     const after: any = authority.canonicalState();
     for (const event of (after.game.events ?? []).slice(eventsBefore)) {
       if (event?.type === 'hule' && Number(event.defen) > 0) oppValues.push(Number(event.defen));
+      if (event?.type === 'hule' && event.isRon && event.loser != null) {
+        const lost = -Number(event.chipTransfer?.delta?.[event.loser] ?? event.chipTransfer?.delta?.[String(event.loser)] ?? 0);
+        if (Number.isFinite(lost) && lost > 0) oppChipLoss.push(lost);
+      }
     }
   }
 });
@@ -280,11 +301,13 @@ const byUser: Record<string, { discards: number; match: number; bad: number; ev_
 for (const r of reviews) {
   const u = (byUser[r.user] ??= { discards: 0, match: 0, bad: 0, ev_loss: 0, ev_count: 0 });
   u.discards += 1;
-  if (baseOf(r.best) === baseOf(r.chosen) || r.loss === 0) u.match += 1;
+  if (baseOf(r.best) === baseOf(r.chosen) || r.loss === 0 || (r.loss !== null && r.loss_se > 0 && r.loss < 2 * r.loss_se)) u.match += 1;
   if (r.bad) u.bad += 1;
   if (r.kind === 'ev' && r.loss !== null) { u.ev_loss += r.loss; u.ev_count += 1; }
 }
 console.log(JSON.stringify({
-  room: roomId, mc: MC_SIMS, room_seat_user: roomSeatUser, diverged, opp_value: oppValues.length ? Math.round(oppValues.reduce((a, b) => a + b, 0) / oppValues.length) : 8000,
+  room: roomId, mc: MC_SIMS, unit: 'chips', bad_chips: BAD_CHIPS, chip_per_1000: Math.round(CHIP_PER_POINT * 1000 * 100) / 100,
+  opp_chip_loss: oppChipLoss.length ? Math.round(oppChipLoss.reduce((a, b) => a + b, 0) / oppChipLoss.length * 10) / 10 : 10,
+  room_seat_user: roomSeatUser, diverged, opp_value: oppValues.length ? Math.round(oppValues.reduce((a, b) => a + b, 0) / oppValues.length) : 8000,
   by_user: byUser, reviews, names: Object.fromEntries(Object.entries(HONOR)), tile_name_example: tileName('p5'),
 }));

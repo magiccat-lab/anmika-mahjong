@@ -1,18 +1,24 @@
-// モンテカルロで切った後の手の和了率と打点を数える [2026-10-14 リョー、麻雀 AI の考え方のページの答え P3「a やる」]
-// 打牌の分析 (tools/room_analysis.mts --mc <回数>) が、1 シャンテン以下の候補ごとに呼ぶ。
+// モンテカルロで切った後の手の和了率と、アガった時の値を数える [2026-10-14 リョー、麻雀 AI の考え方のページの答え P3「a やる」]
+// 打牌の分析 (tools/room_analysis.mts --mc <回数>) が、2 シャンテン以下の候補ごとに呼ぶ。
 // 1 回の試し: 打つ人から見えていない牌を山に並べ直し、残りの自分のツモの回数だけ回す。
-//  - 自分のツモ: アガれば打点 (ツモ)。テンパイならツモ切り (リーチの形)、テンパイ前はシャンテン → 受け入れの多い牌を切る
+//  - 自分のツモ: アガれば値 (ツモ)。テンパイならツモ切り (リーチの形)、テンパイ前はシャンテン → 受け入れの多い牌を切る。
+//    受け入れが近い時は、赤 ・ 金 (0 の牌) と、2 枚以上ある 7 (フィーバーの種) を残す
 //  - 1 巡に相手 2 人の打牌: 山から 1 枚ずつ引いた牌を打ったと見て、テンパイで待ちに当たれば RON_TAKE の割合でロン (相手は危ない牌を止める)
 //  - リーチ中に白 (ぽっち) を引けばツモで局が終わる (pochiWild)。色は正 2 ・ 逆 2 で、点もチップも見込みは 0
+//  - フィーバー立直になる形 (7 の確定暗刻) でテンパイしたら、他家は強制ツモ切りで誰もアガれないので、
+//    残りの山に出る待ち牌を全部アガる (自分の番はツモ、他家の番はロン)。値は段の倍と段の祝儀を chip_value で
 // RON_TAKE と局の終わり方は、実際のリーチ 164 回の結末に合わせた [2026-10-14、tools/calib_assumptions.mts]:
 //   ロン 0.5 ・ 局の終わり = 部屋のアガリ ÷ 打牌 × END_SCALE 1.75 ・ ぽっちあり で、和了率 53.6% (実際 53.7%)、
 //   リーチ 1 回あたりツモ 33.8% (30.5%) ・ ロン 19.8% (23.2%)。和了の当てっぽさ (Brier) 0.242 は、全員に同じ率を当てた 0.249 より良い
 //  - 自分の河の牌で待つ形はフリテンなのでロンしない
 //  - 相手の番ごとに endRate の割合で局が終わる (誰かのアガリ。部屋のアガリの回数 ÷ 打牌の回数で、room_analysis が渡す)
-// 打点は room_analysis と同じ majiang-core の点数 (リーチ付き) × (1 + フィーバーの段)。華 ・ 金 ・ 虹 ・ 白ぽっちの引きは数えない (山は普通の牌の種類だけ)
+// 値: env (chip_value の ChipEnv) があればチップ (点 × CHIP_PER_POINT + 祝儀)、無ければ点だけ (calib_assumptions 用)。
+// 山は普通の牌の種類だけで、後から引く赤 ・ 金 ・ 虹 ・ 華は数えない
+// cache は 1 つの打牌の判断ごとに新しく渡す (ドラ ・ 見えていない枚数が同じ間だけ使い回せる)
 // @ts-ignore - majiang-core 型定義なし
 import Majiang from '@kobalab/majiang-core';
 import { canFeverLizhi } from '../../src/lib/game3/feverLizhi';
+import { winValue, type ChipEnv } from './chip_value.mts';
 
 export const RON_TAKE = 0.5;
 export const END_SCALE = 1.75;
@@ -22,6 +28,7 @@ export type McCtx = {
   ronTake?: number;
   // リーチ中に白 (ぽっち) を引いたらツモで局が終わる。色は正 2 ・ 逆 2 で、点 ・ チップとも見込みは 0 として数える
   pochiWild?: boolean;
+  env?: ChipEnv;
 };
 
 // 決まった並べ方で毎回同じ答えにする (mulberry32)
@@ -41,8 +48,8 @@ function addTile(sp: any, t: string): void {
   sp._zimo = t;
 }
 
-// テンパイの手 (13 枚) の待ちと、待ちごとの打点 (ロン ・ ツモ)。同じ手は覚えておく
-type Waits = { waits: string[]; ron: Map<string, number>; tsumo: Map<string, number>; furiten: boolean };
+// テンパイの手 (13 枚) の待ちと、待ちごとの値 (ロン ・ ツモ)、フィーバーの段。同じ手は覚えておく
+export type Waits = { waits: string[]; ron: Map<string, number>; tsumo: Map<string, number>; furiten: boolean; fever: number };
 function waitsOf(sp13: any, ctx: McCtx, cache: Map<string, Waits>): Waits {
   const key = sp13.toString();
   const hit = cache.get(key);
@@ -54,6 +61,11 @@ function waitsOf(sp13: any, ctx: McCtx, cache: Map<string, Waits>): Waits {
   const ron = new Map<string, number>();
   const tsumo = new Map<string, number>();
   for (const w of waits) {
+    if (ctx.env) {
+      ron.set(w, winValue(sp13, w, false, ctx.param, ctx.env, ctx.kinds, ctx.unseen, fever));
+      tsumo.set(w, winValue(sp13, w, true, ctx.param, ctx.env, ctx.kinds, ctx.unseen, fever));
+      continue;
+    }
     let r = 0;
     let z = 0;
     try { r = Number(Majiang.Util.hule(sp13.clone(), `${w}-`, ctx.param)?.defen ?? 0); } catch { r = 0; }
@@ -62,15 +74,23 @@ function waitsOf(sp13: any, ctx: McCtx, cache: Map<string, Waits>): Waits {
       addTile(t14, w);
       z = Number(Majiang.Util.hule(t14, null, ctx.param)?.defen ?? 0);
     } catch { z = 0; }
-    ron.set(w, r * (1 + fever));
-    tsumo.set(w, z * (1 + fever));
+    ron.set(w, r);
+    tsumo.set(w, z);
   }
-  const out = { waits, ron, tsumo, furiten: waits.some((w) => ctx.river.has(w)) };
+  const out = { waits, ron, tsumo, furiten: waits.some((w) => ctx.river.has(w)), fever: ctx.env ? fever : 0 };
   cache.set(key, out);
   return out;
 }
 
-// テンパイ前の打牌: シャンテンが一番少なく、その中で受け入れ (見えていない枚数) が一番多い牌
+// 残したい牌: 赤 ・ 金 (0)、2 枚以上ある 7 (フィーバーの種)。受け入れの枚数に直した重み
+function keepWeight(sp14: any, c: string): number {
+  if (/0/.test(c)) return 4;
+  const s = c[0];
+  if (c[1] === '7' && s !== 'z' && Number(sp14._bingpai?.[s]?.[7] ?? 0) >= 2) return 3;
+  return 0;
+}
+
+// テンパイ前の打牌: シャンテンが一番少なく、その中で受け入れ (見えていない枚数) − 残したい重み が一番多い牌
 function greedyDiscard(sp14: any, ctx: McCtx): string {
   const cands: string[] = [...new Set((sp14.get_dapai(false) ?? []) as string[])];
   let best: string[] = [];
@@ -83,7 +103,7 @@ function greedyDiscard(sp14: any, ctx: McCtx): string {
   }
   if (best.length <= 1) return best[0] ?? cands[0];
   let pick = best[0];
-  let pickU = -1;
+  let pickU = -1e9;
   for (const c of best) {
     const a = sp14.clone();
     a.dapai(c);
@@ -95,19 +115,24 @@ function greedyDiscard(sp14: any, ctx: McCtx): string {
       if (Majiang.Util.xiangting(a) < bestXt) u += rem;
       a._bingpai[k[0]][Number(k[1])] -= 1;
     }
-    if (u > pickU) { pickU = u; pick = c; }
+    const score = u - (ctx.env ? keepWeight(sp14, c) : 0);
+    if (score > pickU) { pickU = score; pick = c; }
   }
   return pick;
 }
 
-/** 切った後の手 (13 枚) を sims 回試して、和了率と、アガった時の平均打点と、期待値 (和了率 × 平均打点) を返す */
-export function mcOption(sp13: any, ctx: McCtx, sims: number, cache: Map<string, Waits>): { win: number; value: number; ev: number; tsumo: number } {
+/** 切った後の手 (13 枚) を sims 回試して、和了率と、アガった時の平均の値と、期待値 (1 回あたりの値の平均) を返す。
+ *  fever はフィーバーになった割合。フィーバーの局は何度もアガるので、値はその局の合計。
+ *  samples は 1 回ずつの値。同じ seed の候補どうしは同じ山の並びなので、差の揺れ (標準誤差) を出すのに使う */
+export function mcOption(sp13: any, ctx: McCtx, sims: number, cache: Map<string, Waits>): { win: number; value: number; ev: number; tsumo: number; fever: number; samples: Float64Array } {
   const rand = rng(ctx.seed);
   const base: string[] = [];
   for (const k of ctx.kinds) for (let i = 0; i < ctx.unseen(k); i++) base.push(k);
   let wins = 0;
   let tsumoWins = 0;
+  let fevers = 0;
   let sum = 0;
+  const samples = new Float64Array(sims);
   for (let s = 0; s < sims; s++) {
     const pool = base.slice();
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
@@ -117,7 +142,21 @@ export function mcOption(sp13: any, ctx: McCtx, sims: number, cache: Map<string,
     let got = 0;
     let byTsumo = false;
     let pochiWin = false;
+    let feverRun = false;
     for (let d = 0; d < ctx.draws && pool.length; d++) {
+      if (tenpai?.fever) {
+        // フィーバー: 残りの山 (自分の番から数えて) に出る待ち牌を全部アガる
+        feverRun = true;
+        let slot = 0;
+        for (let left = (ctx.draws - d) * 3; left > 0 && pool.length; left--, slot++) {
+          const x = pool.pop() as string;
+          if (!tenpai.tsumo.has(x)) continue;
+          const own = slot % 3 === 0;
+          got += own ? (tenpai.tsumo.get(x) ?? 0) : (tenpai.ron.get(x) ?? 0);
+          if (own) byTsumo = true;
+        }
+        break;
+      }
       const t = pool.pop() as string;
       if (tenpai) {
         if (tenpai.tsumo.has(t)) { got = tenpai.tsumo.get(t) ?? 0; byTsumo = true; break; }
@@ -127,6 +166,7 @@ export function mcOption(sp13: any, ctx: McCtx, sims: number, cache: Map<string,
         const c = greedyDiscard(hand, ctx);
         hand.dapai(c);
         if (Majiang.Util.xiangting(hand) === 0) tenpai = waitsOf(hand, ctx, cache);
+        if (tenpai?.fever) continue;
       }
       // 相手 2 人の番: 局が終わるか、打牌でロン
       let ron = 0;
@@ -139,9 +179,11 @@ export function mcOption(sp13: any, ctx: McCtx, sims: number, cache: Map<string,
       if (ron) { got = ron; break; }
       if (ended) break;
     }
+    if (feverRun) fevers += 1;
+    samples[s] = got;
     if (got > 0 || pochiWin) { wins += 1; sum += got; if (byTsumo) tsumoWins += 1; }
   }
   const win = wins / sims;
   const value = wins ? sum / wins : 0;
-  return { win, value, ev: win * value, tsumo: wins ? tsumoWins / wins : 0 };
+  return { win, value, ev: sum / sims, tsumo: wins ? tsumoWins / wins : 0, fever: fevers / sims, samples };
 }
