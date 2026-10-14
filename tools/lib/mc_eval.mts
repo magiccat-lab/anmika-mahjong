@@ -2,7 +2,11 @@
 // 打牌の分析 (tools/room_analysis.mts --mc <回数>) が、1 シャンテン以下の候補ごとに呼ぶ。
 // 1 回の試し: 打つ人から見えていない牌を山に並べ直し、残りの自分のツモの回数だけ回す。
 //  - 自分のツモ: アガれば打点 (ツモ)。テンパイならツモ切り (リーチの形)、テンパイ前はシャンテン → 受け入れの多い牌を切る
-//  - 1 巡に相手 2 人の打牌: 山から 1 枚ずつ引いた牌を打ったと見て、テンパイで待ちに当たれば RON_TAKE の割合でロン (相手は危ない牌を止めるので半分の仮置き)
+//  - 1 巡に相手 2 人の打牌: 山から 1 枚ずつ引いた牌を打ったと見て、テンパイで待ちに当たれば RON_TAKE の割合でロン (相手は危ない牌を止める)
+//  - リーチ中に白 (ぽっち) を引けばツモで局が終わる (pochiWild)。色は正 2 ・ 逆 2 で、点もチップも見込みは 0
+// RON_TAKE と局の終わり方は、実際のリーチ 164 回の結末に合わせた [2026-10-14、tools/calib_assumptions.mts]:
+//   ロン 0.5 ・ 局の終わり = 部屋のアガリ ÷ 打牌 × END_SCALE 1.75 ・ ぽっちあり で、和了率 53.6% (実際 53.7%)、
+//   リーチ 1 回あたりツモ 33.8% (30.5%) ・ ロン 19.8% (23.2%)。和了の当てっぽさ (Brier) 0.242 は、全員に同じ率を当てた 0.249 より良い
 //  - 自分の河の牌で待つ形はフリテンなのでロンしない
 //  - 相手の番ごとに endRate の割合で局が終わる (誰かのアガリ。部屋のアガリの回数 ÷ 打牌の回数で、room_analysis が渡す)
 // 打点は room_analysis と同じ majiang-core の点数 (リーチ付き) × (1 + フィーバーの段)。華 ・ 金 ・ 虹 ・ 白ぽっちの引きは数えない (山は普通の牌の種類だけ)
@@ -11,9 +15,13 @@ import Majiang from '@kobalab/majiang-core';
 import { canFeverLizhi } from '../../src/lib/game3/feverLizhi';
 
 export const RON_TAKE = 0.5;
+export const END_SCALE = 1.75;
 
 export type McCtx = {
   kinds: string[]; unseen: (t: string) => number; draws: number; param: any; river: Set<string>; seed: number; endRate: number;
+  ronTake?: number;
+  // リーチ中に白 (ぽっち) を引いたらツモで局が終わる。色は正 2 ・ 逆 2 で、点 ・ チップとも見込みは 0 として数える
+  pochiWild?: boolean;
 };
 
 // 決まった並べ方で毎回同じ答えにする (mulberry32)
@@ -108,10 +116,12 @@ export function mcOption(sp13: any, ctx: McCtx, sims: number, cache: Map<string,
     let tenpai: Waits | null = Majiang.Util.xiangting(hand) === 0 ? waitsOf(hand, ctx, cache) : null;
     let got = 0;
     let byTsumo = false;
+    let pochiWin = false;
     for (let d = 0; d < ctx.draws && pool.length; d++) {
       const t = pool.pop() as string;
       if (tenpai) {
         if (tenpai.tsumo.has(t)) { got = tenpai.tsumo.get(t) ?? 0; byTsumo = true; break; }
+        if (ctx.pochiWild && t === 'z5') { pochiWin = true; byTsumo = true; break; }
       } else {
         addTile(hand, t);
         const c = greedyDiscard(hand, ctx);
@@ -124,12 +134,12 @@ export function mcOption(sp13: any, ctx: McCtx, sims: number, cache: Map<string,
       for (let o = 0; o < 2 && pool.length; o++) {
         if (rand() < ctx.endRate) { ended = true; break; }
         const x = pool.pop() as string;
-        if (tenpai && !tenpai.furiten && tenpai.ron.has(x) && rand() < RON_TAKE) { ron = tenpai.ron.get(x) ?? 0; break; }
+        if (tenpai && !tenpai.furiten && tenpai.ron.has(x) && rand() < (ctx.ronTake ?? RON_TAKE)) { ron = tenpai.ron.get(x) ?? 0; break; }
       }
       if (ron) { got = ron; break; }
       if (ended) break;
     }
-    if (got > 0) { wins += 1; sum += got; if (byTsumo) tsumoWins += 1; }
+    if (got > 0 || pochiWin) { wins += 1; sum += got; if (byTsumo) tsumoWins += 1; }
   }
   const win = wins / sims;
   const value = wins ? sum / wins : 0;

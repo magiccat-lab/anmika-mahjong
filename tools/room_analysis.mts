@@ -16,7 +16,7 @@ import { parseCanonicalRoomSnapshot, type AcceptedRoomCommand } from '../server/
 import { toCorePai, normalizeBaopaiForMajiang, isPositiveZ5 } from '../src/lib/helpers';
 import { canFeverLizhi } from '../src/lib/game3/feverLizhi';
 import { comboDanger, comboBreakdown } from './lib/combo_danger.mts';
-import { mcOption } from './lib/mc_eval.mts';
+import { mcOption, END_SCALE } from './lib/mc_eval.mts';
 
 const argv = process.argv.slice(2);
 const mcAt = argv.indexOf('--mc');
@@ -109,8 +109,8 @@ function optionEv(ctx: Ctx, sp: any, pai: string): { ev: number | null; xt: numb
     let seed = 0;
     // 同じ打牌の候補は同じ山の並びで比べる (差の揺れを小さくする)
     for (const ch of `${sp.toString()}|${ctx.unseenTotal}|${ctx.draws}`) seed = (Math.imul(seed, 31) + ch.charCodeAt(0)) | 0;
-    const endRate = turnsAll >= 60 ? oppValues.length / turnsAll : 0.04;
-    const r = mcOption(a, { kinds: DRAW_KINDS, unseen: ctx.unseen, draws: ctx.draws, param: ctx.param, river, seed, endRate }, MC_SIMS, mcCache);
+    const endRate = (turnsAll >= 60 ? oppValues.length / turnsAll : 0.04) * END_SCALE;
+    const r = mcOption(a, { kinds: DRAW_KINDS, unseen: ctx.unseen, draws: ctx.draws, param: ctx.param, river, seed, endRate, pochiWild: true }, MC_SIMS, mcCache);
     return { ev: r.ev, xt, detail: `${MC_SIMS} 回試して 和了率 ${Math.round(r.win * 100)}% ・ アガった時の打点 ${Math.round(r.value)}${r.win ? ` ・ ツモ ${Math.round(r.tsumo * 100)}%` : ''}` };
   }
   if (xt === 0) {

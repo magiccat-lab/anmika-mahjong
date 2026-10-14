@@ -2,7 +2,9 @@
 // 木村尚嵩『麻雀コンボ理論 放銃率の見積もりと押し引き戦術』(竹書房 2026-07) の考え方: リーチ者の待ちを
 // 「両面 ・ 嵌張 ・ 辺張 ・ 双碰 ・ 単騎」の形 (コンボ) に分け、見えていない枚数から形ごとの組み合わせの数を数える。
 // ある牌の放銃率 = その牌を待ちに含む形の組み合わせの数 ÷ ありうる形の組み合わせの数の合計。
-// 本の細かい重みは読めていないので、ここでは 単騎だけ 0.5 倍、ほかは 1 倍 (仮置き)。
+// 形ごとの重み (SHAPE_WEIGHT) は、アンミカの実際のリーチ 164 回の待ちの形を、重み 1 のコンボの見込みと比べて決めた
+// [2026-10-14、tools/calib_assumptions.mts]。両面を 1 として 嵌張 0.68 ・ 辺張 0.70 ・ 双碰 0.76 ・ 単騎 0.54。
+// 愚形でもリーチする三麻の打ち方でも、両面の方が多く出る。数が増えたら同じ道具で測り直す。
 // フリテン: リーチ者の河にある牌を待ちに含む形は数えない (スジ ・ 現物の効き目はここから出る)。
 // アンミカの萬子は 7 ・ 9 だけで順子にならないので、字牌と同じく双碰と単騎だけ。
 import { toCorePai } from '../../src/lib/helpers';
@@ -12,7 +14,7 @@ const baseOf = (p: string) => {
   return core.length < 2 ? core : core[0] + (core[1] === '0' ? '5' : core[1]);
 };
 
-export const TANKI_WEIGHT = 0.5;
+export const SHAPE_WEIGHT: Record<string, number> = { 両面: 1, 嵌張: 0.7, 辺張: 0.7, 双碰: 0.75, 単騎: 0.55 };
 
 /** 打つ人 (player) から見て、手 ・ 全員の河 ・ 鳴き ・ ドラ表示に見えていない枚数 */
 export function unseenCounter(game: any, player: number): (t: string) => number {
@@ -33,7 +35,7 @@ export function unseenCounter(game: any, player: number): (t: string) => number 
 
 type Shape = { waits: string[]; combos: number; kind: '両面' | '辺張' | '嵌張' | '双碰' | '単騎' };
 
-/** リーチ者 1 人の待ちの形と組み合わせの数 (フリテンの形は除く) */
+/** リーチ者 1 人の待ちの形と組み合わせの数 (フリテンの形は除く)。combos は重みを掛ける前の数 */
 export function waitShapes(river: Set<string>, unseen: (t: string) => number): Shape[] {
   const out: Shape[] = [];
   const ok = (waits: string[]) => waits.every((w) => !river.has(w));
@@ -60,7 +62,7 @@ export function waitShapes(river: Set<string>, unseen: (t: string) => number): S
     if (river.has(t)) continue;
     const k = unseen(t);
     if (k >= 2) out.push({ waits: [t], combos: (k * (k - 1)) / 2, kind: '双碰' });
-    if (k >= 1) out.push({ waits: [t], combos: k * TANKI_WEIGHT, kind: '単騎' });
+    if (k >= 1) out.push({ waits: [t], combos: k, kind: '単騎' });
   }
   return out;
 }
@@ -75,9 +77,9 @@ export function comboDanger(game: any, player: number): Map<string, number> {
   for (const lp of opps) {
     const river = new Set(((game.he.get(lp)?._pai ?? []) as string[]).map(baseOf));
     const shapes = waitShapes(river, unseen);
-    const total = shapes.reduce((a, s) => a + s.combos, 0);
+    const total = shapes.reduce((a, s) => a + s.combos * SHAPE_WEIGHT[s.kind], 0);
     const hit = new Map<string, number>();
-    for (const sh of shapes) for (const w of sh.waits) hit.set(w, (hit.get(w) ?? 0) + sh.combos);
+    for (const sh of shapes) for (const w of sh.waits) hit.set(w, (hit.get(w) ?? 0) + sh.combos * SHAPE_WEIGHT[sh.kind]);
     const tiles = new Set([...hit.keys(), ...river]);
     for (const t of tiles) {
       const p = total > 0 ? (hit.get(t) ?? 0) / total : 0;
@@ -98,7 +100,7 @@ export function comboBreakdown(game: any, player: number, base: string): string 
     const river = new Set(((game.he.get(lp)?._pai ?? []) as string[]).map(baseOf));
     if (river.has(base)) { parts.push('現物'); continue; }
     const byKind: Record<string, number> = {};
-    for (const sh of waitShapes(river, unseen)) if (sh.waits.includes(base)) byKind[sh.kind] = (byKind[sh.kind] ?? 0) + sh.combos;
+    for (const sh of waitShapes(river, unseen)) if (sh.waits.includes(base)) byKind[sh.kind] = (byKind[sh.kind] ?? 0) + sh.combos * SHAPE_WEIGHT[sh.kind];
     const s = Object.entries(byKind).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${Math.round(v * 10) / 10}`).join(' ・ ');
     parts.push(s || '当たる形なし');
   }
