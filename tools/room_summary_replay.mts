@@ -89,6 +89,22 @@ const baseOf = (p: string) => {
   const core = toCorePai(String(p).replace(/[\+\=\-_*]/g, ''));
   return core.length < 2 ? core : core[0] + (core[1] === '0' ? '5' : core[1]);
 };
+// 河とドラ表示に見えている枚数 (自分の手は数えない)
+function visibleElsewhere(game: any, t: string): number {
+  let v = 0;
+  for (const p of [0, 1, 2]) for (const d of (game.he.get(p)?._pai ?? []) as string[]) if (baseOf(d) === t) v++;
+  for (const x of (game.shan?.baopai ?? []) as string[]) if (baseOf(x) === t) v++;
+  return v;
+}
+// 7 がもう暗刻にならない (手の枚数 + まだ見えていない枚数 < 3)。CPU の「7 はフィーバーの種」の決まりは残り枚数を見ていない
+// (10-14 先輩「isgのやつも7m2キレとかじゃなかったか、そういうのもみてね」)
+function deadSeven(game: any, sp: any, b: string): boolean {
+  if (b[1] !== '7' || !'mps'.includes(b[0])) return false;
+  const held = Number(sp?._bingpai?.[b[0]]?.[7] ?? 0);
+  if (held >= 3) return false;
+  const unseen = Math.max(0, 4 - held - visibleElsewhere(game, b));
+  return held + unseen < 3;
+}
 // CPU (game3 evaluateDiscardRows_) が牌を残したがる理由。prio の減点の言葉の版
 function keepReasons(game: any, player: number, sp: any, base: string, dropsNiji: boolean): string[] {
   const out: string[] = [];
@@ -96,7 +112,8 @@ function keepReasons(game: any, player: number, sp: any, base: string, dropsNiji
   const n = Number(base[1]);
   if (n === 7 && 'mps'.includes(s)) {
     const held = Number(sp?._bingpai?.[s]?.[7] ?? 0);
-    out.push(held >= 2 ? `7 は ${held} 枚あるのでフィーバーの種として強く残す` : '7 はフィーバーの種として軽く残す');
+    if (deadSeven(game, sp, base)) out.push(`${tileName(base)} は ${visibleElsewhere(game, base)} 枚見えていて、もう暗刻にならない (CPU は残り枚数を見ずに残す)`);
+    else out.push(held >= 2 ? `7 は ${held} 枚あるのでフィーバーの種として強く残す` : '7 はフィーバーの種として軽く残す');
   }
   const seeds = ['m', 'p', 's'].filter((x) => Number(sp?._bingpai?.[x]?.[7] ?? 0) >= 3).length;
   if (seeds >= 1 && (n === 6 || n === 8) && 'mps'.includes(s)) out.push('7 の暗刻の周りなので残す');
@@ -230,7 +247,10 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
     const n = Number(b[1]);
     const basePrio = b[0] === 'z' ? 3 : (n === 1 || n === 9) ? 2 : (n === 2 || n === 8) ? 1 : 0;
     const m9 = b === 'm9' ? (Number(sp?._bingpai?.m?.[9] ?? 0) >= 2 ? 2 : 1) : 0;
-    return basePrio - (r.prio - (r.hasLizhiOpponent ? r.safety : 0)) - m9;
+    // 暗刻にならない 7 は種ではないので、CPU の 7 の減点 (3 枚 5 / 2 枚 3 / 1 枚 1) を数えない
+    const held7 = Number(sp?._bingpai?.[b[0]]?.[7] ?? 0);
+    const dead7 = deadSeven(game, sp, b) ? (held7 >= 2 ? 3 : 1) : 0;
+    return basePrio - (r.prio - (r.hasLizhiOpponent ? r.safety : 0)) - m9 - dead7;
   };
   const flush = heading_flush(sp, chosen.base);
   // フィーバーの受け入れ: 1 シャンテンで 7 が 2 枚以上 (手の中) ある時だけ、切った牌 ・ CPU の牌 ・ 受け入れの多い 1 シャンテンの候補を見る
