@@ -15,10 +15,29 @@
   export let matchLabel = '半荘';
   const signed = (v: number) => `${v > 0 ? '+' : ''}${v}`;
   $: carried = !!matchStart && matchStart.some((v) => v !== 0);
+
+  // [2026-10-14 リョー「勝利演出の時はアンミカーニバルの曲流したいなw」] 終わりにトップの人の勝利で、アン ミカさんの
+  // 「アンミカーニバル」を流す。音のファイルは置かず (権利)、講談社 mimollet の公式の短い動画 (43 秒、埋め込み可) を
+  // YouTube の埋め込みで画面に出して鳴らす。YouTube の決まりで、プレーヤーは隠さず 200px 以上で見せる。
+  // ミュートの設定なら音なしで始める。閉じれば止まる
+  import { prefs } from './prefs';
+  const CARNIVAL_VIDEO = 'pIfOv74wBCE';
+  let carnivalOpen = true;
+  $: winner = (finalScore ?? ranking).find((r) => r.rank === 1);
+  $: carnivalSrc = `https://www.youtube-nocookie.com/embed/${CARNIVAL_VIDEO}?autoplay=1&playsinline=1&rel=0&modestbranding=1${$prefs.muted ? '&mute=1' : ''}`;
 </script>
 
 <section class="game-end-panel">
   <h2>{matchLabel}終了</h2>
+  {#if winner && carnivalOpen}
+    <div class="carnival">
+      <div class="carnival-head">
+        <strong class="carnival-win">{names[winner.player] ?? `P${winner.player}`} の勝利！</strong>
+        <button class="carnival-close" type="button" on:click={() => (carnivalOpen = false)}>曲を止める</button>
+      </div>
+      <iframe class="carnival-video" src={carnivalSrc} title="アンミカーニバル" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+    </div>
+  {/if}
   {#if finalScore}
     <div class="rule-note">
       ウマ: 2着 40,000+ → +50 / 0 / -50 [2着クビ]、 未達 → +75 / -25 / -50 [2着クビなし]<br>
@@ -59,6 +78,11 @@
     margin: 12px 0;
   }
   h2 { font-size: 14px; margin: 0 0 8px; color: #2080d0; }
+  .carnival { display: grid; gap: 6px; margin: 0 0 10px; }
+  .carnival-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .carnival-win { font-size: 20px; color: #c08000; }
+  .carnival-close { margin-left: auto; border: 1px solid rgba(0,0,0,0.2); background: #fff; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
+  .carnival-video { width: min(100%, 480px); min-width: 200px; aspect-ratio: 16 / 9; min-height: 200px; border: 0; border-radius: 4px; background: #000; }
   .rule-note { font-size: 12px; color: #555; margin: 8px 0; line-height: 1.5; }
   .ranking { width: 100%; border-collapse: collapse; font-family: var(--sans); font-variant-numeric: tabular-nums; font-size: 18px; }
   .ranking th, .ranking td { padding: 10px 14px; text-align: right; border-bottom: 1px solid rgba(0,0,0,0.1); }
