@@ -173,8 +173,8 @@
   // ツモのボタン ・ 上の帯の「ツモ和了」・ シャンテンが透けて、めくる前に和了が分かっていた。外れの時はリーチの自動ツモ切りが
   // 絞りの途中で牌を河へ捨てていた。絞りの間はどれも出さず、自動ツモ切り ・ 自動和了も絞りが閉じるまで待つ
   $: mySqueezeShowing = !!pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat);
-  $: showNukiBtn = currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision
-    && $game.game.canNukiBei(currentPlayer) && !mySqueezeShowing;
+  // オンラインのお知らせの帯 [北抜き ・ リーチなど]。「あなたの華」の欄の下に重ねて出す (huaPanel)
+  $: showMsgBand = onlineGameStarted && !!$game.message && !($game.lastHuleResult || state.finished || $game.pendingPingju);
 
   // [2026-10-14 リョー] 卓の BGM。どちらもアン ミカさんの「アンミカーニバル」で、曲のファイルは public/sounds/bgm/ (git には入れない)。
   //  - フィーバー中: 原曲 (「フィーバー中に流れるようにしたい、私用で権利大丈夫だからmp3で流してほしい」)
@@ -2707,10 +2707,11 @@
         {/each}
       </div>
     {/if}
-    {#if pos === 'me' && showNukiBtn}
-      <!-- [2026-10-15 リョー「北抜きとかのUI、華の下に出すようにすれば画面上下しなくていい」] 抜いた北が入る欄のすぐ下に出す
-           [旧: 手牌の上の操作の帯。押してから上の欄を見に行っていた]。リーチ ・ ポン ・ カンは手牌を見て押すので帯のまま -->
-      <button class="nuki-btn hp-nuki-btn" on:click={() => game.nukiBei()}>北抜き</button>
+    {#if pos === 'me' && showMsgBand}
+      <!-- [2026-10-15 リョー「北抜きとかのUI、華の下に出すようにすれば画面上下しなくていい」→「北抜きボタンは同じでいい。
+           上のログの北抜きを華の下に置けって」] お知らせの帯 [旧: 卓の上の header。出る ・ 消えるたびに卓が上下していた] を
+           「あなたの華」の欄の下に重ねて出す。卓の上に重ねるので手牌も欄も動かない。北抜きのボタンは手牌の上の帯のまま -->
+      <div class="msg-band" role="status">{prettyOnlineMessage($game.message, seatDisplayNames)}</div>
     {/if}
   </section>
 {/snippet}
@@ -2948,10 +2949,8 @@
       {/each}
     </div>
     <!-- [2026-10-09 shun2 V2] オンラインのお知らせは 1 本の帯に。薄い金の地に濃い字 [旧: 薄い黄色に白い字でコントラスト 1.2]。
-         席番号 [player 2 / p1] は名前に直す。下の操作の行は卓の操作 [中央 ・ 手牌の上] と二重なので卓では出さない -->
-    {#if onlineGameStarted && $game.message && !($game.lastHuleResult || state.finished || $game.pendingPingju)}
-      <div class="msg-band" role="status">{prettyOnlineMessage($game.message, seatDisplayNames)}</div>
-    {/if}
+         席番号 [player 2 / p1] は名前に直す。下の操作の行は卓の操作 [中央 ・ 手牌の上] と二重なので卓では出さない。
+         [2026-10-15] 帯は「あなたの華」の欄の下へ移した (huaPanel の showMsgBand) -->
     <!-- 2026-05-14 ゆーま 自走 bug fix: 進行 row は debug 寄り、 オンライン中は
          ツモ切り / 自動 / CPU button が 他人手番でも代理 action になるので非表示。
          CPU toggle は local 状態 [single mode 用]、 単独表示にする -->
@@ -3470,7 +3469,11 @@
               />
             </div>
           {/if}
-          <!-- [2026-10-15] 北抜きは「あなたの華」の欄の下へ移した (huaPanel)。牌を押しても抜ける -->
+          <!-- [2026-10-09 shun2] 北抜きも操作の帯に [旧: 上の帯にだけあった。牌を押しても抜ける]。
+               [2026-10-15 リョー「北抜きボタンは同じでいい」] 一度「あなたの華」の欄の下へ移したのを戻した -->
+          {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && $game.game.canNukiBei(currentPlayer)}
+            <div class="tb-row"><button class="nuki-btn" on:click={() => game.nukiBei()}>北抜き</button></div>
+          {/if}
           {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou}
             {#each $game.game.getKanCandidates(currentPlayer) as km}
               <div class="tb-row"><button class="kan-btn" on:click={() => game.declareKan(km)}>{km === whiteKanCandidate ? '白暗カン' : 'カン'}</button></div>
@@ -6740,25 +6743,6 @@
   }
   .hp-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; color: var(--jz-sub); }
   .hp-me .hp-title { color: var(--jz-gold); font-size: 14px; }
-  /* 北抜きは欄の下の右端。卓の上に重ねて出すので手牌も欄も動かない */
-  .hp-nuki-btn {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: 60;
-    min-height: 44px;
-    padding: 0 22px;
-    font-size: 16px;
-    font-weight: 700;
-    border: none;
-    border-radius: var(--jz-rad);
-    background: var(--jz-accent);
-    color: var(--jz-on-accent);
-    box-shadow: var(--jz-shadow);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .hp-nuki-btn:hover { filter: brightness(1.06); }
   .hp-none { align-self: center; font-size: 12px; color: var(--jz-sub); }
   .hp-groups { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 14px; min-width: 0; }
   .hp-group { display: grid; justify-items: center; gap: 3px; }
@@ -6870,11 +6854,21 @@
   main.mode-single.ui-board-v2 header { border-bottom: 0; padding: 0; margin: 0; }
   /* ---- オンラインのお知らせの帯 [V2] ---- */
   .msg-band { display: none; }
-  main.mode-single.online-game header .msg-band {
+  /* [2026-10-15] 「あなたの華」の欄のすぐ下の真ん中に重ねる。卓の上に重ねるので、出ても消えても卓は上下しない。押せる物は無いので指は下へ通す */
+  main.mode-single.online-game .hua-panel.hp-me .msg-band {
     display: block;
-    justify-self: center;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    pointer-events: none;
+    width: max-content;
     max-width: min(92vw, 720px);
-    margin: 0 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    box-shadow: var(--jz-shadow);
     padding: 6px 14px;
     border-radius: var(--jz-rad);
     background: #f4e3b0;
@@ -6937,7 +6931,7 @@
     .me-toggles .tm-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border-radius: inherit; }
     .me-toggles .tm-toggle:has(input:checked) { background: var(--jz-accent-flat); color: var(--jz-on-accent); }
     main.mode-single.ui-board-v2 .toolbar-red .tb-row button { min-height: 40px; padding: 0 16px !important; font-size: 15px !important; }
-    main.mode-single.online-game header .msg-band { font-size: 12px; padding: 3px 10px; }
+    main.mode-single.online-game .hua-panel.hp-me .msg-band { font-size: 12px; padding: 3px 10px; }
     /* 華: 名前は札の左に寄せて 1 段 [上の行を低く保つ]。効果の字は自分の札にも出す */
     main.mode-single.ui-board-v2 { --hua-me-h: 28px; --hua-op-h: 24px; }
     main.mode-single.ui-board-v2 .dora-row { grid-template-columns: max-content minmax(0, 1fr) max-content; column-gap: 6px; }
@@ -6947,7 +6941,6 @@
     .hp-left .hp-title, .hp-right .hp-title { display: none; }
     .hua-panel.hp-left, .hua-panel.hp-right { grid-template-columns: minmax(0, 1fr); }
     .hp-me .hp-title { font-size: 12px; }
-    .hp-nuki-btn { min-height: 36px; padding: 0 14px; font-size: 14px; }
     .hp-none { font-size: 11px; }
     .hp-groups { gap: 2px 8px; }
     .hp-group { gap: 1px; }
@@ -7015,7 +7008,7 @@
     main.mode-single.ui-board-v2 .me-strip .toolbar-red,
     main.mode-single.ui-board-v2 .me-strip .stamp-open-btn ~ .toolbar-red { right: 0; bottom: calc(100% + 6px); max-width: calc(100vw - 16px); }
     main.mode-single.ui-board-v2 .turn-status { font-size: 13px; padding: 5px 10px; }
-    main.mode-single.online-game header .msg-band { font-size: 13px; }
+    main.mode-single.online-game .hua-panel.hp-me .msg-band { font-size: 13px; padding: 4px 12px; }
     /* 華 [codex: 390px で 3 人横並びは無理]: 自分の札は上の行の 2 段目に幅いっぱい、相手の華は各自の席の札の真上に付ける。
        上の行と華の帯は display:contents で外し、中身を卓の grid に直接置く [同じ DOM のまま置き場だけ変える] */
     main.mode-single.ui-board-v2 { --hua-me-h: 34px; --hua-op-h: 26px; }
@@ -7047,8 +7040,6 @@
     .hua-panel { padding: 4px 8px 6px; gap: 3px; }
     .hp-none { font-size: 11px; }
     .hp-me .hp-title { font-size: 12px; }
-    /* 縦持ちの「あなたの華」は幅いっぱいで真下に相手の札があるので、北抜きは欄の中の右端に重ねる */
-    .hp-nuki-btn { top: 50%; right: 6px; transform: translateY(-50%); min-height: 34px; padding: 0 14px; font-size: 14px; }
     .hp-groups { gap: 3px 8px; }
     main.mode-single.ui-board-v2 .agari-unified-panel { top: 8px; bottom: 8px; left: 8px; right: 8px; }
   }

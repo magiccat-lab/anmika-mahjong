@@ -2,7 +2,8 @@
 // 1「フィーバーの時にツモギリの速度をちょっと遅くしたい」→ 強制ツモ切りは 1 秒 (旧 0.6 秒)
 // 2「演出の速度もうちょい落として楽しめるようにして」→ カットインは 軽 1.0 / 中 1.7 / 重 2.4 秒
 // 3「フィーバー中で他の人が一発でぽっちとかつもると関係ないのに演出は言ってるよ」→ フィーバーでない人のでかぽっちは絞りを出さない
-// 4「北抜きとかのUI、華の下に出すようにすれば画面上下しなくていい」→ 北抜きは「あなたの華」の欄の下
+// 4「北抜きとかのUI、華の下に出すようにすれば画面上下しなくていい」→ 同じ日に「北抜きボタンは同じでいい。上のログの北抜きを華の下に置けって」
+//   → 北抜きのボタンは手牌の上の帯のまま。華の下へ動かすのはお知らせの帯 (オンライン、tests/online_msg_band.spec.ts)
 import { test, expect, type Page } from '@playwright/test';
 
 async function solo(page: Page, w = 1280, h = 800) {
@@ -64,25 +65,22 @@ test('3b. フィーバーでない時は、でかぽっちの絞りが出る (�
 });
 
 for (const [w, h, name] of [[1280, 800, 'pc'], [844, 390, 'land'], [390, 844, 'port']] as Array<[number, number, string]>) {
-  test(`4. 北抜きは「あなたの華」の欄の下 (手牌の上の帯には無い): ${name}`, async ({ page }) => {
+  test(`4. 北抜きのボタンは手牌の上の帯のまま (「あなたの華」の欄には出さない): ${name}`, async ({ page }) => {
     await solo(page, w, h);
     await page.evaluate(() => {
       const g = (window as any).__game; const sp = g.game.shoupai.get(0);
       for (const s of ['m', 'p', 's']) for (let n = 1; n < sp._bingpai[s].length; n++) if (sp._bingpai[s][n] > 0) { sp._bingpai[s][n]--; sp._bingpai.z[4]++; return; }
     });
     await nudge(page);
-    const btn = page.locator('.hua-panel.hp-me .hp-nuki-btn');
+    const btn = page.locator('.toolbar-red .nuki-btn');
     await expect(btn).toBeVisible();
-    expect(await page.locator('.toolbar-red .nuki-btn').count()).toBe(0);
+    expect(await page.locator('.hua-panel .nuki-btn').count()).toBe(0);
     const r = await page.evaluate(() => {
-      const b = (document.querySelector('.hp-nuki-btn') as HTMLElement).getBoundingClientRect();
-      const p = (document.querySelector('.hua-panel.hp-me') as HTMLElement).getBoundingClientRect();
+      const b = (document.querySelector('.toolbar-red .nuki-btn') as HTMLElement).getBoundingClientRect();
       const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
-      return { bTop: b.top, bBottom: b.bottom, pTop: p.top, pBottom: p.bottom, hit: !!e && e.classList.contains('hp-nuki-btn'), vw: innerWidth, sw: document.documentElement.scrollWidth, sh: document.documentElement.scrollHeight, vh: innerHeight };
+      return { hit: !!e && !!e.closest('.nuki-btn'), vw: innerWidth, sw: document.documentElement.scrollWidth, sh: document.documentElement.scrollHeight, vh: innerHeight };
     });
     expect(r.hit, JSON.stringify(r)).toBe(true);
-    expect(r.bTop, JSON.stringify(r)).toBeGreaterThanOrEqual(r.pTop);
-    expect(r.bTop, JSON.stringify(r)).toBeLessThan(r.pBottom + 60);
     expect(r.sw).toBeLessThanOrEqual(r.vw + 1);
     expect(r.sh).toBeLessThanOrEqual(r.vh + 1);
     if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/nuki_${name}.png` });
