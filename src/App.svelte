@@ -44,6 +44,8 @@
   import LizhiControls from './lib/LizhiControls.svelte';
   import { CUTIN_DURATION_MS, CUTIN_TIER, cutinDurationMs, game, isFeverForcedTsumogiri, type StampId, type StoreState } from './lib/store';
   import type { PlayerId } from './lib/types';
+  // フィーバー中の 1 巡の刻み [人の強制ツモ切り ・ CPU]。オンラインは ws_server の FEVER_STEP_MS と合わせる
+  const FEVER_TSUMOGIRI_MS = 1000;
   import type { FeverCheck } from './lib/game3/feverLizhi';
   import { parseFulouList, fulouPhysicalFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
@@ -171,6 +173,8 @@
   // ツモのボタン ・ 上の帯の「ツモ和了」・ シャンテンが透けて、めくる前に和了が分かっていた。外れの時はリーチの自動ツモ切りが
   // 絞りの途中で牌を河へ捨てていた。絞りの間はどれも出さず、自動ツモ切り ・ 自動和了も絞りが閉じるまで待つ
   $: mySqueezeShowing = !!pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat);
+  $: showNukiBtn = currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision
+    && $game.game.canNukiBei(currentPlayer) && !mySqueezeShowing;
 
   // [2026-10-14 リョー] 卓の BGM。どちらもアン ミカさんの「アンミカーニバル」で、曲のファイルは public/sounds/bgm/ (git には入れない)。
   //  - フィーバー中: 原曲 (「フィーバー中に流れるようにしたい、私用で権利大丈夫だからmp3で流してほしい」)
@@ -384,9 +388,11 @@
         // でかぽっち: リーチ一発で引いた本待ちでない 1筒 ・ 2筒。game が lastZimoInfo.pochi に色 (緑 ・ 黄) を入れている
         const zi = $game.game.lastZimoInfo as { player?: number; pai?: string; pochi?: string | null } | null;
         const corePai = String(ev?.pai ?? '').replace(/[^a-z0-9]/g, '').slice(0, 2);
+        // [2026-10-15] フィーバー中のフィーバーでない人は強制ツモ切りなので、白ぽっちと同じく絞りを出さない
         if (!color && (corePai === 'p1' || corePai === 'p2') && i === zimoEvents.length - 1
             && zi && zi.player === ev.player && (zi.pochi === 'green' || zi.pochi === 'yellow')
-            && $game.cpu[ev.player] !== true) {
+            && $game.cpu[ev.player] !== true
+            && !(someoneFeverNow && !$game.game.feverActive[ev.player])) {
           pochiRevealQueue.push({ player: ev.player, color: zi.pochi, isCpu: false, deka: corePai, ...pochiStep(zi.pochi, null) });
         }
       }
@@ -444,6 +450,13 @@
     }
   }
   function onRemotePochiFx(gameSeat: number, msg: any): void {
+    // [2026-10-15 リョー「フィーバー中で他の人が一発でぽっちとかつもると関係ないのに演出は言ってるよ」]
+    // 他の人のフィーバー中は、フィーバーでない人の絞り (でかぽっち ・ 白ぽっち) を出さない。引いた側が古い画面でも受け側で止める
+    const feverNow = ([0, 1, 2] as const).some((p) => $game.game.feverActive[p]);
+    if (feverNow && !$game.game.feverActive[gameSeat as PlayerId]) {
+      if (remotePochi?.seat === gameSeat) remotePochi = null;
+      return;
+    }
     const color = typeof msg.color === 'string' && ['blue', 'red', 'green', 'yellow'].includes(msg.color) ? msg.color as PochiColor : null;
     if (msg.phase === 'open') {
       remotePochi = {
@@ -2318,7 +2331,8 @@
     // リーチ強制ツモ切りだけ 1.5s に伸ばし、自分の引き牌を視認できる間を作る。
     // ツモ切り checkbox [user が速度を選んだ] とフィーバー強制は従来の 600ms
     const riichiForced = snap.game.lizhi.has(player) && !autoTsumoKiri && !feverForced;
-    return { player, revision, delayMs: riichiForced ? 1500 : 600 };
+    // [2026-10-15 リョー「フィーバーの時にツモギリの速度をちょっと遅くしたい」] フィーバーの強制ツモ切りは 0.6 → 1 秒
+    return { player, revision, delayMs: feverForced ? FEVER_TSUMOGIRI_MS : riichiForced ? 1500 : 600 };
   }
   const autoTsumokiriScheduler = createAutoTsumokiriScheduler({
     delayMs: 600,
@@ -2473,8 +2487,8 @@
     }
   }
   $: feverInProgress = ([0, 1, 2] as const).some((p) => $game.game.feverActive[p]);
-  // フィーバー中は最低800msの間を空けて1巡ずつ見せる
-  $: cpuDelayMs = cpuSlowMode ? 2500 : feverInProgress ? 800 : 0;
+  // フィーバー中は間を空けて1巡ずつ見せる [2026-10-15 リョー「ちょっと遅く」で 0.8 → 1 秒、人の強制ツモ切りと同じ]
+  $: cpuDelayMs = cpuSlowMode ? 2500 : feverInProgress ? FEVER_TSUMOGIRI_MS : 0;
 
   // R15 P1 #30 + R16 P0 #8 fix: CPU が saiKoro chance owner なら 駆動側 [single mode 誰でも、
   // online は host のみ] が 自動 advance、 chain 詰まりで online 卓停止を防ぐ。
@@ -2685,6 +2699,11 @@
           </div>
         {/each}
       </div>
+    {/if}
+    {#if pos === 'me' && showNukiBtn}
+      <!-- [2026-10-15 リョー「北抜きとかのUI、華の下に出すようにすれば画面上下しなくていい」] 抜いた北が入る欄のすぐ下に出す
+           [旧: 手牌の上の操作の帯。押してから上の欄を見に行っていた]。リーチ ・ ポン ・ カンは手牌を見て押すので帯のまま -->
+      <button class="nuki-btn hp-nuki-btn" on:click={() => game.nukiBei()}>北抜き</button>
     {/if}
   </section>
 {/snippet}
@@ -3444,10 +3463,7 @@
               />
             </div>
           {/if}
-          <!-- [2026-10-09 shun2] 北抜きも操作の帯に [旧: 上の帯にだけあった。牌を押しても抜ける] -->
-          {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && $game.game.canNukiBei(currentPlayer)}
-            <div class="tb-row"><button class="nuki-btn" on:click={() => game.nukiBei()}>北抜き</button></div>
-          {/if}
+          <!-- [2026-10-15] 北抜きは「あなたの華」の欄の下へ移した (huaPanel)。牌を押しても抜ける -->
           {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou}
             {#each $game.game.getKanCandidates(currentPlayer) as km}
               <div class="tb-row"><button class="kan-btn" on:click={() => game.declareKan(km)}>{km === whiteKanCandidate ? '白暗カン' : 'カン'}</button></div>
@@ -6710,12 +6726,32 @@
     text-align: left;
   }
   .hua-panel.hp-me {
+    position: relative;
     --hp-h: var(--hua-me-h);
     border-color: var(--jz-gold);
     box-shadow: inset 0 0 0 1px var(--jz-gold), var(--jz-shadow);
   }
   .hp-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; color: var(--jz-sub); }
   .hp-me .hp-title { color: var(--jz-gold); font-size: 14px; }
+  /* 北抜きは欄の下の右端。卓の上に重ねて出すので手牌も欄も動かない */
+  .hp-nuki-btn {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 60;
+    min-height: 44px;
+    padding: 0 22px;
+    font-size: 16px;
+    font-weight: 700;
+    border: none;
+    border-radius: var(--jz-rad);
+    background: var(--jz-accent);
+    color: var(--jz-on-accent);
+    box-shadow: var(--jz-shadow);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .hp-nuki-btn:hover { filter: brightness(1.06); }
   .hp-none { align-self: center; font-size: 12px; color: var(--jz-sub); }
   .hp-groups { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 14px; min-width: 0; }
   .hp-group { display: grid; justify-items: center; gap: 3px; }
@@ -6904,6 +6940,7 @@
     .hp-left .hp-title, .hp-right .hp-title { display: none; }
     .hua-panel.hp-left, .hua-panel.hp-right { grid-template-columns: minmax(0, 1fr); }
     .hp-me .hp-title { font-size: 12px; }
+    .hp-nuki-btn { min-height: 36px; padding: 0 14px; font-size: 14px; }
     .hp-none { font-size: 11px; }
     .hp-groups { gap: 2px 8px; }
     .hp-group { gap: 1px; }
@@ -7003,6 +7040,8 @@
     .hua-panel { padding: 4px 8px 6px; gap: 3px; }
     .hp-none { font-size: 11px; }
     .hp-me .hp-title { font-size: 12px; }
+    /* 縦持ちの「あなたの華」は幅いっぱいで真下に相手の札があるので、北抜きは欄の中の右端に重ねる */
+    .hp-nuki-btn { top: 50%; right: 6px; transform: translateY(-50%); min-height: 34px; padding: 0 14px; font-size: 14px; }
     .hp-groups { gap: 3px 8px; }
     main.mode-single.ui-board-v2 .agari-unified-panel { top: 8px; bottom: 8px; left: 8px; right: 8px; }
   }

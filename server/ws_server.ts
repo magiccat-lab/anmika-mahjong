@@ -37,6 +37,9 @@ const DEFAULT_DISCONNECT_GRACE_MS = 30_000;
 const DEFAULT_CPU_PROXY_GRACE_MS = 15_000;
 // CPU 代行席の 1 手 / 反応窓の待ち [CPU 席と同じ 750ms]
 const CPU_PROXY_STEP_MS = 750;
+// [2026-10-15 リョー「フィーバーの時にツモギリの速度をちょっと遅くしたい」] フィーバー中の 1 巡の刻み
+// [CPU と人の強制ツモ切り]。client の FEVER_TSUMOGIRI_MS と同じ。人の分は client が先に送り、権威はその 0.2 秒後の保険
+const FEVER_STEP_MS = 1000;
 // [2026-10-09 遊真 A3] 終わった試合の保存 POST の再試行間隔 [1 回目は即時]
 const DEFAULT_MATCH_RECORD_RETRY_DELAYS_MS = [0, 2_000, 5_000];
 // [2026-07-22 リョー要望: 全員ready制] 30s 自動進行は廃止。timeout は AFK/切断時の最終保険のみ
@@ -2398,17 +2401,17 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     // 期限なので無効化し、再接続時に張り直した新 timer に任せる
     // [A2: 代行席の世代は再接続まで変わらないので、代行中の切断席の timer が永久に捨てられる事は無い]
     const scheduledGeneration = member?.generation ?? 0;
-    let delay = armedCpu ? CPU_PROXY_STEP_MS : member?.connected ? turnTimeoutMs : disconnectGraceMs;
+    const feverOn = ([0, 1, 2] as const).some((p) => authority.game.feverActive[p]);
+    let delay = armedCpu ? (feverOn ? FEVER_STEP_MS : CPU_PROXY_STEP_MS) : member?.connected ? turnTimeoutMs : disconnectGraceMs;
     // [2026-07-21 監査 L-04 fix] 他家 FEVER 中の非 FEVER 者は強制ツモ切りしか選択肢が
     // 無いのに、online だけ通常手番 deadline [60s] まで手動待ちだった。single の
     // 800ms 自動進行と揃えて、強制ツモ切り確定時は権威が短い専用 deadline で発行する
     // [client は表示追従のみ]。tsumo/カン/北抜き/リーチが可能なら turnTimeoutAction が
     // tsumokiri 以外を返すので、この短縮は選択肢ゼロの局面だけに効く
     if (member && !armedCpu && member.connected) {
-      const someoneFever = ([0, 1, 2] as const).some((p) => authority.game.feverActive[p]);
-      if (someoneFever && !authority.game.feverActive[current] && authority.lastZimo
+      if (feverOn && !authority.game.feverActive[current] && authority.lastZimo
         && turnTimeoutAction(authority, false)?.type === 'tsumokiri') {
-        delay = 800;
+        delay = FEVER_STEP_MS + 200;
       }
     }
     announceDeadline(armedCpu ? 'none' : 'turn', [current], delay);

@@ -91,10 +91,11 @@ export const CUTIN_TIER: Record<CutinId, 'light' | 'mid' | 'heavy'> = {
   hachikashipei: 'heavy',
 };
 
+// [2026-10-15 リョー「演出の速度もうちょい落として楽しめるようにして」] 3 段とも約 1.4 倍 [旧 700 / 1200 / 1800]
 export const CUTIN_TIER_DURATION_MS: Record<'light' | 'mid' | 'heavy', number> = {
-  light: 700,
-  mid: 1200,
-  heavy: 1800,
+  light: 1000,
+  mid: 1700,
+  heavy: 2400,
 };
 
 /** この演出を何ミリ秒出すか。App の pump / watchdog と表示側で同じ値を使う。 */
