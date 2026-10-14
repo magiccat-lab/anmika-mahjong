@@ -114,7 +114,8 @@
 
   // [2026-10-13 リョー「部屋を閉じるときに…まとめるようにしてほしい」] 閉じた部屋と 30 分打たれていない部屋のまとめ
   // [チップの推移 ・ 個人成績の画像 2 枚] をサーバーが作るので、新しい物から並べて開けるようにする
-  type Summary = { id: string; room: string; n: number; first: string; last: string; ranking: { name: string; total: number }[]; images: string[] };
+  // data は数字の json (10-14 リョー「画像とセットでjsonダウンロードリンク」)。作る前の古いまとめには無い
+  type Summary = { id: string; room: string; n: number; first: string; last: string; ranking: { name: string; total: number }[]; images: string[]; data?: string | null };
   let summaries: Summary[] = [];
   let openSummary: Summary | null = null;
   async function refreshSummaries() {
@@ -224,7 +225,10 @@
               <strong>{sm.room}</strong> 東風 {sm.n} 戦 <span class="host">{sm.first}〜{sm.last}</span>
               {#if sm.ranking[0]}<span class="mine"> 1 位 {sm.ranking[0].name} {sm.ranking[0].total >= 0 ? '+' : ''}{sm.ranking[0].total}</span>{/if}
             </div>
-            <div class="room-btns"><button class="summary-btn" on:click={() => (openSummary = sm)}>見る</button></div>
+            <div class="room-btns">
+              <button class="summary-btn" on:click={() => (openSummary = sm)}>見る</button>
+              {#if sm.data}<a class="summary-btn summary-json" href={`${API_BASE}${sm.data}`} download={`${sm.id}.json`}>JSON</a>{/if}
+            </div>
           </li>
         {/each}
       </ul>
@@ -237,7 +241,9 @@
   <div class="summary-modal" role="dialog" aria-modal="true" tabindex="-1" aria-label="部屋 {openSummary.room} のまとめ"
     on:click|self={() => (openSummary = null)} on:keydown={(e) => { if (e.key === 'Escape') openSummary = null; }}>
     <div class="summary-body">
-      <div class="summary-head"><strong>部屋 {openSummary.room} のまとめ</strong><button on:click={() => (openSummary = null)}>閉じる</button></div>
+      <div class="summary-head"><strong>部屋 {openSummary.room} のまとめ</strong>
+        {#if openSummary.data}<a class="summary-json" href={`${API_BASE}${openSummary.data}`} download={`${openSummary.id}.json`}>JSON をダウンロード</a>{/if}
+        <button on:click={() => (openSummary = null)}>閉じる</button></div>
       {#each openSummary.images as src}
         <img src={`${API_BASE}${src}`} alt="部屋 {openSummary.room} のまとめ" />
       {/each}
@@ -276,7 +282,7 @@
   }
   h2 { margin: 0 0 12px; font-size: 22px; font-weight: 700; color: var(--jz-ink); }
   h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 20px 0 8px; font-size: 16px; font-weight: 700; color: var(--jz-ink); }
-  button, .login-btn {
+  button, .login-btn, .summary-json {
     box-sizing: border-box;
     min-height: 44px;
     padding: 0 16px;
@@ -298,6 +304,7 @@
     text-decoration: none;
   }
   .login-btn:hover { background: #4752c4; }
+  .summary-json { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
   button:hover:not([disabled]) { filter: brightness(1.08); }
   .user-info {
     display: flex;
@@ -375,6 +382,6 @@
     .cpu-select select { flex: 1 1 auto; max-width: 62%; }
     .create { width: 100%; }
     .room-btns { width: 100%; }
-    .room-btns button { flex: 1 1 0; }
+    .room-btns button, .room-btns .summary-json { flex: 1 1 0; }
   }
 </style>

@@ -2237,6 +2237,8 @@ _SUMMARY_ID_RE = re.compile(r"^[A-Za-z0-9]{1,16}-\d{8}-\d{4}$")
 _SUMMARY_FILES = ("overview.png", "stats.png")
 # 3 枚目からのハイライト (10-14 先輩「局で100枚以上動いた部分とかサイコロとかハイライトで3枚目以降の画像として」)
 _SUMMARY_FILE_RE = re.compile(r"^(overview|stats|highlight_\d{1,2})\.png$")
+# 数字の json (10-14 先輩「昨夜の部屋のjsonとかダウンロードできるように」「画像とセットでjsonダウンロードリンク」)
+_SUMMARY_DATA = "data.json"
 
 
 @app.get("/api/summaries")
@@ -2263,6 +2265,7 @@ async def list_summaries(request: Request):
                 "ranking": meta.get("ranking") or [],
                 "images": [f"/api/summaries/{d.name}/{f}" for f in (meta.get("images") or _SUMMARY_FILES)
                            if _SUMMARY_FILE_RE.match(str(f)) and (d / f).exists()],
+                "data": f"/api/summaries/{d.name}/{_SUMMARY_DATA}" if (d / _SUMMARY_DATA).is_file() else None,
             })
             if len(out) >= limit:
                 break
@@ -2273,11 +2276,14 @@ async def list_summaries(request: Request):
 async def get_summary_image(sid: str, name: str, request: Request):
     if not current_user(request):
         raise HTTPException(status_code=401, detail="login required")
-    if not _SUMMARY_ID_RE.match(sid) or not _SUMMARY_FILE_RE.match(name):
+    if not _SUMMARY_ID_RE.match(sid) or not (_SUMMARY_FILE_RE.match(name) or name == _SUMMARY_DATA):
         raise HTTPException(status_code=404, detail="not found")
     path = SUMMARY_DIR / sid / name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="not found")
+    if name == _SUMMARY_DATA:
+        return FileResponse(path, media_type="application/json", filename=f"{sid}.json",
+                            headers={"Cache-Control": "private, max-age=3600"})
     return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
 
 

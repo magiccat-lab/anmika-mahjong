@@ -666,3 +666,11 @@ def test_summaries_list_and_image(env, monkeypatch, tmp_path):
     assert got["images"] == ["/api/summaries/GFIO-20261013-2310/overview.png", "/api/summaries/GFIO-20261013-2310/highlight_1.png"]
     assert c.get("/api/summaries/GFIO-20261013-2310/highlight_1.png").status_code == 200
     assert c.get("/api/summaries/..%2Fescape/overview.png").status_code == 404
+    # 数字の json (10-14 先輩「画像とセットでjsonダウンロードリンク」): ある時だけ一覧に出し、ファイル名を付けて落とさせる
+    assert got["data"] is None
+    (root / "GFIO-20261013-2310" / "data.json").write_text(json.dumps({"room": "GFIO"}), encoding="utf-8")
+    got = c.get("/api/summaries?room=GFIO").json()["summaries"][0]
+    assert got["data"] == "/api/summaries/GFIO-20261013-2310/data.json"
+    r = c.get(got["data"])
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/json") and r.json() == {"room": "GFIO"}
+    assert 'filename="GFIO-20261013-2310.json"' in r.headers["content-disposition"]
