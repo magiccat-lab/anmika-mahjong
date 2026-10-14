@@ -11,6 +11,7 @@ import { resolve } from 'node:path';
 
 import { createRoomAuthority, type RoomAuthority } from '../server/authority';
 import { toCorePai } from '../src/lib/helpers';
+import Majiang from '@kobalab/majiang-core';
 import { parseCanonicalRoomSnapshot, type AcceptedRoomCommand } from '../server/protocol';
 
 const roomId = process.argv[2];
@@ -71,6 +72,8 @@ type DiscardReview = {
   match: number; hand: number; revision: number; seat: number; user: string; hand14: string; chosen: string;
   xiangting: number; ukeire: number; cpu: string; best: Array<{ pai: string; xiangting: number; ukeire: number; safety: number }>;
   tags: DiscardTag[]; note: string;
+  // 10-14 先輩「具体的な川の状況とかを見たい」「5sは何目的で切ったのか分からん」: 局面と CPU の決め手
+  turn: number; rivers: Record<string, string[]>; dora: string[]; lizhi: number[]; cpu_reason: string;
 };
 // 東風ごと → 人ごと (まとめは前にまとめた東風の続きから作るので、数は東風で分けておく)
 const discardStats: Record<string, Record<string, { evaluated: number; cpu_match: number; tags: Record<string, number> }>> = {};
@@ -79,6 +82,35 @@ const baseOf = (p: string) => {
   const core = toCorePai(String(p).replace(/[\+\=\-_*]/g, ''));
   return core.length < 2 ? core : core[0] + (core[1] === '0' ? '5' : core[1]);
 };
+// CPU (game3 evaluateDiscardRows_) が牌を残したがる理由。prio の減点の言葉の版
+function keepReasons(game: any, player: number, sp: any, base: string, dropsNiji: boolean): string[] {
+  const out: string[] = [];
+  const s = base[0];
+  const n = Number(base[1]);
+  if (n === 7 && 'mps'.includes(s)) {
+    const held = Number(sp?._bingpai?.[s]?.[7] ?? 0);
+    out.push(held >= 2 ? `7 は ${held} 枚あるのでフィーバーの種として強く残す` : '7 はフィーバーの種として軽く残す');
+  }
+  const seeds = ['m', 'p', 's'].filter((x) => Number(sp?._bingpai?.[x]?.[7] ?? 0) >= 3).length;
+  if (seeds >= 1 && (n === 6 || n === 8) && 'mps'.includes(s)) out.push('7 の暗刻の周りなので残す');
+  if (base === 'm9') out.push(Number(sp?._bingpai?.m?.[9] ?? 0) >= 2 ? '9 萬は 2 枚あるので国士 ・ 清老頭のために残す' : '9 萬は国士 ・ 清老頭のために残す');
+  if (base === 'z5') out.push('白 (ぽっち) は残す');
+  if (dropsNiji) out.push('切ると虹が河に出る');
+  return out;
+}
+const HONOR_NAME: Record<string, string> = { z1: '東', z2: '南', z3: '西', z4: '北', z5: '白', z6: '發', z7: '中' };
+const tileName = (b: string) => HONOR_NAME[b] ?? `${b[1]}${({ m: '萬', p: '筒', s: '索' } as Record<string, string>)[b[0]] ?? ''}`;
+// 染め手に向かっているか: 切った後の手 (鳴いた面子を含む) で 1 色 + 字牌が 75% 以上、かつ切った牌がその色でも字牌でもない
+function heading_flush(sp: any, chosenBase: string): boolean {
+  const c = sp.clone();
+  try { c.dapai(chosenBase); } catch { return false; }
+  const counts: Record<string, number> = { m: 0, p: 0, s: 0, z: 0 };
+  for (const x of ['m', 'p', 's', 'z']) for (let k = 1; k <= 9; k++) counts[x] += Number(c._bingpai?.[x]?.[k] ?? 0);
+  for (const m of (c._fulou ?? []) as string[]) counts[m[0]] = (counts[m[0]] ?? 0) + (m.replace(/[^0-9]/g, '').length);
+  const total = counts.m + counts.p + counts.s + counts.z;
+  const main = (['m', 'p', 's'] as const).reduce((a, b) => (counts[b] > counts[a] ? b : a), 'p');
+  return total > 0 && (counts[main] + counts.z) / total >= 0.75 && chosenBase[0] !== main && chosenBase[0] !== 'z';
+}
 function reviewDiscard(game: any, action: Record<string, any>, match: number, hand: number, revision: number, seat: number): void {
   const player = game.lunbanToPlayerId(game.state.lunban);
   const rows: any[] = game.adviseDiscard(player, 99) ?? [];
@@ -95,20 +127,23 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
   if (cpu.base === chosen.base) st.cpu_match += 1;
   const minXt = Math.min(...rows.map((r) => r.xiangting));
   const bestUk = Math.max(...rows.filter((r) => r.xiangting === minXt).map((r) => r.ukeire));
-  // 祝儀温存の減点だけ: prio から字牌 ・ 端牌の加点 (字 3 / 1・9 は 2 / 2・8 は 1) とリーチ者がいる時の安全度を抜く
+  // 祝儀温存の減点だけ: prio から字牌 ・ 端牌の加点 (字 3 / 1・9 は 2 / 2・8 は 1)、リーチ者がいる時の安全度、
+  // 9 萬の国士 ・ 清老頭のための減点 (祝儀ではない。10-14 先輩「9mじゃなくて白切る理由も良く分からん」で取り違えが分かった) を抜く
   const chipPenalty = (r: any) => {
     const b = String(r.base ?? '');
     const n = Number(b[1]);
     const basePrio = b[0] === 'z' ? 3 : (n === 1 || n === 9) ? 2 : (n === 2 || n === 8) ? 1 : 0;
-    return basePrio - (r.prio - (r.hasLizhiOpponent ? r.safety : 0));
+    const m9 = b === 'm9' ? (Number(sp?._bingpai?.m?.[9] ?? 0) >= 2 ? 2 : 1) : 0;
+    return basePrio - (r.prio - (r.hasLizhiOpponent ? r.safety : 0)) - m9;
   };
+  const flush = heading_flush(sp, chosen.base);
   const defending = chosen.hasLizhiOpponent && chosen.safety >= 4;
   const tags: DiscardTag[] = [];
   const notes: string[] = [];
   if (!defending && chosen.xiangting > minXt) {
     tags.push('牌効率');
     notes.push(`シャンテンが ${minXt} → ${chosen.xiangting} に戻った`);
-  } else if (!defending && chosen.xiangting === minXt && bestUk - chosen.ukeire >= 4 && chosen.ukeire <= bestUk * 0.85) {
+  } else if (!defending && !flush && chosen.xiangting === minXt && bestUk - chosen.ukeire >= 4 && chosen.ukeire <= bestUk * 0.85) {
     tags.push('受け入れ');
     notes.push(`受け入れ ${chosen.ukeire} 枚 (一番多い切り方は ${bestUk} 枚)`);
   }
@@ -123,13 +158,37 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
     tags.push('危険牌');
     notes.push('リーチ者がいる時に危険牌 (現物かスジがあった)');
   }
+  if (flush && tags.includes('牌効率')) notes.push('染め手に向かう打牌かも (CPU は役を見ない)');
   for (const t of tags) st.tags[t] = (st.tags[t] ?? 0) + 1;
   if (!tags.length) return;
+  // CPU の決め手を言葉で
+  const why: string[] = [];
+  if (cpu.xiangting < chosen.xiangting) why.push(`CPU の切り方だと ${cpu.xiangting} シャンテン、切った手は ${chosen.xiangting} シャンテン`);
+  else if (cpu.ukeire !== chosen.ukeire) why.push(`受け入れ (次に引いてシャンテンが進む牌) が ${cpu.ukeire} 枚 対 ${chosen.ukeire} 枚`);
+  else why.push('シャンテンも受け入れも同じで、残したい牌の決まりの差');
+  const after = (pai: string) => { const c = sp.clone(); try { c.dapai(pai); } catch { return null; } return c; };
+  const ca = after(cpu.pai);
+  if (ca && cpu.xiangting <= 5) {
+    const paths: string[] = [];
+    if (Majiang.Util.xiangting_qidui(ca) === cpu.xiangting) paths.push('七対子');
+    if (Majiang.Util.xiangting_guoshi(ca) === cpu.xiangting) paths.push('国士');
+    if (paths.length) why.push(`${paths.join(' ・ ')}の受け入れも数に入っている`);
+  }
+  const keep = keepReasons(game, player, sp, chosen.base, chosen.dropsNiji);
+  if (keep.length) why.push(`${tileName(chosen.base)}: ${keep.join('、')}`);
+  if (chosen.base[0] === 'z' || cpu.base[0] === 'z') {
+    if (cpu.base[0] === 'z' && chosen.base[0] !== 'z') why.push(`${tileName(cpu.base)} は字牌なので先に切る順`);
+  }
+  if (cpu.hasLizhiOpponent) why.push(`安全度は CPU の牌 ${cpu.safety} ・ 切った牌 ${chosen.safety} (現物 10 ・ スジ 4 ・ カベ 2 ・ 危険 -5)`);
+  const rivers: Record<string, string[]> = {};
+  for (const p of [0, 1, 2]) rivers[String(p)] = [...((game.he.get(p)?._pai ?? []) as string[])];
+  const turn = (game.he.get(player)?._pai ?? []).length + 1;
   discardReviews.push({
     match, hand, revision, seat, user, hand14: String(sp?.toString?.() ?? ''), chosen: chosenRaw,
     xiangting: chosen.xiangting, ukeire: chosen.ukeire, cpu: cpu.pai,
     best: rows.slice(0, 3).map((r) => ({ pai: r.pai, xiangting: r.xiangting, ukeire: r.ukeire, safety: r.safety })),
     tags, note: notes.join(' / '),
+    turn, rivers, dora: [...((game.shan?.baopai ?? []) as string[])], lizhi: [...(game.lizhi ?? [])] as number[], cpu_reason: why.join('。'),
   });
 }
 const hands: Hand[] = [];
