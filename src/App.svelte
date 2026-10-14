@@ -167,6 +167,10 @@
   $: fxCutinBusy = !!$game.cutin || (($game.cutinQueue?.length ?? 0) > 0);
   $: fxPochiRevealShowing = (!!pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat)) || (onlineGameStarted && !!remotePochi);
   $: fxPresentationBusy = fxCutinBusy || fxPochiRevealShowing;
+  // [2026-10-14 リョー「アンミカの演出、裏に上がりが出てばれてることあるよ」] 自分の白ぽっちの絞りの幕 (78%) の裏で
+  // ツモのボタン ・ 上の帯の「ツモ和了」・ シャンテンが透けて、めくる前に和了が分かっていた。外れの時はリーチの自動ツモ切りが
+  // 絞りの途中で牌を河へ捨てていた。絞りの間はどれも出さず、自動ツモ切り ・ 自動和了も絞りが閉じるまで待つ
+  $: mySqueezeShowing = !!pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat);
 
   // [2026-10-14 リョー] 卓の BGM。どちらもアン ミカさんの「アンミカーニバル」で、曲のファイルは public/sounds/bgm/ (git には入れない)。
   //  - フィーバー中: 原曲 (「フィーバー中に流れるようにしたい、私用で権利大丈夫だからmp3で流してほしい」)
@@ -605,7 +609,7 @@
   $: {
     // seatDisplayNames の変更 [ユーザー名到着] でも status 文言を再評価させる
     void seatDisplayNames;
-    actionStatus = describeActionStatus($game, currentPlayer, actorSeat, ronCandidates, needsZimo, canTsumo);
+    actionStatus = describeActionStatus($game, currentPlayer, actorSeat, ronCandidates, needsZimo, canTsumo && !mySqueezeShowing);
   }
 
   // 牌譜 [event log] 全件
@@ -2226,7 +2230,7 @@
     if ($game.awaitingRonDecision && !choosing && ronCandidates.includes(actorSeat)
         && !(($game.ronDeclaredPlayers ?? []) as number[]).includes(actorSeat)) {
       if (k !== _autoWinSentKey) { _autoWinSentKey = k; game.ron(actorSeat); }
-    } else if (!progressControlsBlocked && currentPlayer === actorSeat && canTsumo && !choosing
+    } else if (!progressControlsBlocked && currentPlayer === actorSeat && canTsumo && !choosing && !mySqueezeShowing
         && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.lastDapai && !$game.pendingSaiKoro) {
       if (k !== _autoWinSentKey) { _autoWinSentKey = k; game.tsumo(); }
     }
@@ -2279,7 +2283,8 @@
       // falsy 判定だと P0 の宣言牌選択中に無効な自動ツモ切り timer を張っていた
       && snap.lizhiPending === null
       && player === actorSeat
-      && !!snap.lastZimo;
+      && !!snap.lastZimo
+      && !mySqueezeShowing;
   }
 
   function readAutoTsumokiriToken(): AutoTsumokiriToken | null {
@@ -2621,7 +2626,7 @@
     void $game.pendingFuyu; void $game.pendingKinpei; void $game.pendingKamiPochi; void $game.pendingPochiSwap; void $game.pendingSaiKoro;
     void $game.pendingFeverContinue; void $game.lizhiPending; void $game.lastZimo;
     void $game.game.events.length; void canTsumo;
-    void autoNukiEnabled;
+    void autoNukiEnabled; void mySqueezeShowing;
     const token = readAutoTsumokiriToken();
     if (token) autoTsumokiriScheduler.schedule(token);
     else autoTsumokiriScheduler.cancel();
@@ -2652,7 +2657,7 @@
     <div class="sc-sub">
       <span>チップ {$game.game.chipLedger[p] ?? 0}</span>
       <span>{$game.game.shuvariUsed[p] ? 'シュバ済' : 'シュバ未'}</span>
-      {#if selfPlayer === p || (!onlineGameStarted && revealAll)}<span>シャンテン {$game.game.xiangting(p)}</span>{/if}
+      {#if (selfPlayer === p || (!onlineGameStarted && revealAll)) && !(mySqueezeShowing && pochiReveal?.player === p)}<span>シャンテン {$game.game.xiangting(p)}</span>{/if}
     </div>
     {#if onlineGameStarted}
       {#if pos !== 'me'}
@@ -2951,7 +2956,7 @@
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: online で他人の手番に 私の旧 toolbar ツモ button
          が出て 代理ツモ宣言 できてた、 currentPlayer === selfPlayer gate 追加 -->
-    {#if canTsumo && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingSaiKoro && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && !$game.lastDapai && (!onlineGameStarted || currentPlayer === actorSeat)}
+    {#if canTsumo && !mySqueezeShowing && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingSaiKoro && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && !$game.lastDapai && (!onlineGameStarted || currentPlayer === actorSeat)}
       <div class="action-row hot">
         <span class="row-label">アガリ:</span>
         <button class="tsumo-btn" on:click={() => game.tsumo()}>🎉 ツモ宣言</button>
@@ -3314,7 +3319,7 @@
       <!-- 2026-05-15 [bug C] fix: 他家打牌で ロン判定中 [awaitingRonDecision] や 直前打牌が残ってる
            [lastDapai !== null] 状態では 「ツモ」 button を出さない。 これが残ると ロン宣言時 UI に
            ツモ button が被って 「ロンなのにツモ表示」 と混同させる -->
-      {#if currentPlayer === actorSeat && canTsumo && !$game.roundEnded
+      {#if currentPlayer === actorSeat && canTsumo && !mySqueezeShowing && !$game.roundEnded
             && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.lastDapai
             && !$game.pendingSaiKoro && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei}
         <button class="agari-center-btn tsumo-center" on:click={() => game.tsumo()}>ツモ</button>
