@@ -17,6 +17,8 @@ export interface Prefs {
   autoNuki: boolean;
   /** BGM (通常の 8bit 版とフィーバー中の原曲のアンミカーニバル) を流さない。卓の「BGM」で切り替える [2026-10-14 リョー「BGM音量操作トグルは付けて良いな、見える位置に」]。 */
   bgmOff: boolean;
+  /** 通常時の 8bit 版だけ流さない (フィーバー中の原曲は流す)。卓の「BGM」は 入 → フィーバーだけ → 切 の順に替わる [2026-10-14 リョー「通常BGM切ってフィーバーだけONにする設定も用意したい」]。 */
+  normalBgmOff: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -25,6 +27,7 @@ export const DEFAULT_PREFS: Prefs = {
   colorAssist: false,
   autoNuki: false,
   bgmOff: false,
+  normalBgmOff: false,
 };
 
 const KEY = 'anmika.prefs.v1';
@@ -91,3 +94,16 @@ export function playSound(src: string, volume = 1): HTMLAudioElement | null {
  *   嵌八萬を超過ハンの母数で 8 翻 / 神ぽっちのドラを表裏で分ける、までを含む
  */
 export { ANMIKA_RULE_VERSION } from './ruleVersion';
+
+/** 卓の「BGM」ボタンの 3 段。入 (両方) → フィーバーだけ → 切 → 入 */
+export type BgmMode = 'on' | 'fever' | 'off';
+export function bgmMode(p: Pick<Prefs, 'bgmOff' | 'normalBgmOff'>): BgmMode {
+  if (p.bgmOff) return 'off';
+  return p.normalBgmOff ? 'fever' : 'on';
+}
+export function nextBgmPrefs(p: Prefs): Prefs {
+  const m = bgmMode(p);
+  if (m === 'on') return { ...p, bgmOff: false, normalBgmOff: true };
+  if (m === 'fever') return { ...p, bgmOff: true, normalBgmOff: true };
+  return { ...p, bgmOff: false, normalBgmOff: false };
+}

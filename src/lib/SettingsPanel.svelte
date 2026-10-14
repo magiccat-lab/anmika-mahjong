@@ -10,6 +10,8 @@
     { key: 'showWall', label: '🗻 山を見る', note: '対局中も山構成と王牌を開けるようにする' },
     { key: 'colorAssist', label: '🎨 色彩調整', note: 'ぽっちの色と赤金に記号を重ねる [色覚多様性向け]' },
     { key: 'autoNuki', label: '⚡ 自動抜き', note: '自分の手番で抜ける華牌・北があれば自動で抜く' },
+    { key: 'normalBgmOff', label: '🎵 通常時の BGM を切る', note: 'フィーバー中のアンミカーニバルだけ流す [卓の「BGM」でも替えられる]' },
+    { key: 'bgmOff', label: '🔕 BGM を全部切る', note: '通常時もフィーバー中も BGM を流さない' },
   ];
 </script>
 

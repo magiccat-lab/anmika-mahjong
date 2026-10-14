@@ -28,7 +28,7 @@
   import ReplayPanel from './lib/ReplayPanel.svelte';
   import RulesPanel from './lib/RulesPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
-  import { prefs } from './lib/prefs';
+  import { prefs, bgmMode, nextBgmPrefs } from './lib/prefs';
   import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
@@ -155,7 +155,9 @@
   // 音量は控えめ (「BGMの音量ちょっと下げる」)。白ぽっちの演出の間は消す (「演出カットイン入ったらBGMミュート」→「ポッチ演出だけ」)。
   // ミュートの設定 ・ 卓の右上の「BGM 切」・ 入口のメニューでは鳴らさない
   const BGM_TRACKS = {
-    fever: { src: '/sounds/bgm/anmika_carnival.mp3', volume: 0.3 },
+    // [同じ日「フィーバー時のBGMデカいからもっと音量下げて」] 原曲は -6.4 LUFS、8bit は -16 LUFS で、0.3 だと通常時より約 17 dB 大きかった。
+    // 0.08 で実効 -28 LUFS ほど (通常時の 0.12 = -34 LUFS より 6 dB 大きいだけ)
+    fever: { src: '/sounds/bgm/anmika_carnival.mp3', volume: 0.08 },
     normal: { src: '/sounds/bgm/anmika_carnival_8bit_sabi.wav?v=sabi3', volume: 0.12 },
   } as const;
   type BgmKind = keyof typeof BGM_TRACKS;
@@ -168,7 +170,10 @@
   // 通常時の 8bit 版。全曲にアレンジを足した版は「前からめっちゃ悪化してるやん、だめだね」で外し、
   // 「まえのいいじゃんっていったやつでいいからそれそのままいれといて」でサビ 3 版目の繰り返しにした
   const NORMAL_BGM_ENABLED = true;
-  $: syncBgm(!bgmAllowed ? null : someoneFeverBgm ? 'fever' : NORMAL_BGM_ENABLED ? 'normal' : null);
+  const BGM_MODE_LABEL = { on: '入', fever: 'フィーバーだけ', off: '切' } as const;
+  $: bgmModeNow = bgmMode($prefs);
+  // [2026-10-14 リョー「通常BGM切ってフィーバーだけONにする設定も用意したい」] normalBgmOff の時は通常時だけ鳴らさない
+  $: syncBgm(!bgmAllowed ? null : someoneFeverBgm ? 'fever' : (NORMAL_BGM_ENABLED && !$prefs.normalBgmOff) ? 'normal' : null);
   function stopBgmFade(kind: BgmKind): void {
     const t = bgmFade[kind];
     if (t !== undefined) { clearInterval(t); delete bgmFade[kind]; }
@@ -3199,7 +3204,10 @@
       <div class="table-menu-wrap">
         <!-- [2026-10-14 リョー「BGM音量操作トグルは付けて良いな、見える位置に」] 卓の BGM (通常の 8bit 版 ・ フィーバーの原曲) を流すか。⋯ の隣に常に出す
              (手牌の上の帯に置くとスマホで自分の札が詰まった) -->
-        <button type="button" class="bgm-btn" class:off={$prefs.bgmOff} aria-pressed={!$prefs.bgmOff} title="BGM (アンミカーニバル) を流す" on:click={() => prefs.toggle('bgmOff')}>BGM {$prefs.bgmOff ? '切' : '入'}</button>
+        <!-- 押すたびに 入 (通常時とフィーバー中) → フィーバーだけ → 切 → 入 [同じ日「通常BGM切ってフィーバーだけONにする設定も用意したい」] -->
+        <button type="button" class="bgm-btn" class:off={bgmModeNow === 'off'} class:fever-only={bgmModeNow === 'fever'}
+          aria-label={`BGM: ${BGM_MODE_LABEL[bgmModeNow]}。押すと ${BGM_MODE_LABEL[bgmMode(nextBgmPrefs($prefs))]} に替わる`}
+          title="BGM (アンミカーニバル): 入 → フィーバーだけ → 切" on:click={() => prefs.set(nextBgmPrefs($prefs))}>BGM {BGM_MODE_LABEL[bgmModeNow]}</button>
         <button type="button" class="table-menu-btn" class:open={tableMenuOpen} aria-label="設定と退出" aria-expanded={tableMenuOpen} title="設定と退出" on:click={() => { tableMenuOpen = !tableMenuOpen; }}>⋯</button>
         {#if tableMenuOpen}
           <div class="table-menu" role="menu">
@@ -6186,6 +6194,7 @@
     cursor: pointer;
   }
   .bgm-btn.off { border-color: var(--jz-panel-bd); opacity: 0.7; }
+  .bgm-btn.fever-only { border-color: var(--jz-gold, #e5c26a); border-style: dashed; }
   .bgm-btn:focus-visible { outline: 3px solid var(--jz-gold, #e5c26a); outline-offset: 2px; }
   .table-menu-btn {
     width: 44px;
