@@ -64,18 +64,23 @@ export function startVersionWatch(opts: VersionWatchOptions): VersionWatchHandle
   const checkNow = async (): Promise<boolean> => {
     if (stopped || !doFetch) return false;
     let version: string;
+    let commit = '';
     try {
       // cache: no-store + cache-buster query。 CDN / bfcache 越しの stale を踏まない
       const res = await doFetch(`${url}?ts=${Date.now()}`, { cache: 'no-store' });
       if (!res.ok) return false;
       const body = await res.json();
       version = String((body as { v?: unknown } | null)?.v ?? '');
+      commit = String((body as { commit?: unknown } | null)?.commit ?? '');
     } catch {
       return false; // オフライン等。黙って無視する
     }
     if (!version || stopped) return false;
     if (bootVersion === null) {
       bootVersion = version;
+      // [2026-10-15] バグ通報に開いた時の画面の版を載せる (App の reportBug が読む。それまで空で送っていて、
+      // 先輩の「ツモボタン押してもつもれなくて」が直す前の画面だったか分からなかった)
+      if (typeof window !== 'undefined') (window as any).__ANMIKA_BUILD_VERSION__ = commit || version;
       return false;
     }
     if (version === bootVersion) return false;

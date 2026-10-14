@@ -1706,7 +1706,10 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     return room;
   };
 
-  const reject = (ws: WebSocket | null, room: Room, commandId: string | null, reason: string) => {
+  const reject = (ws: WebSocket | null, room: Room, commandId: string | null, reason: string, actionType?: string) => {
+    // [2026-10-15] 断った手は 1 行だけ残す (ANMIKA_WS_LOG を切っていても)。それまで何も残らず、
+    // 先輩の「ツモボタン押してもつもれなくて」で、押した手が届いて断られたのかが分からなかった
+    console.warn(`[anmika-ws] reject room=${room.roomId} rev=${room.snapshot.revision} cmd=${commandId ?? '-'} action=${actionType ?? '-'} reason=${reason}`);
     sendJson(ws, {
       type: 'reject',
       commandId,
@@ -2847,7 +2850,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         if (envelope.expectedVersion !== room.snapshot.revision
           || envelope.matchId !== room.snapshot.matchId
           || envelope.roundId !== room.snapshot.roundId) {
-          reject(ws, room, envelope.commandId, 'version conflict');
+          reject(ws, room, envelope.commandId, 'version conflict', String(envelope.action?.type ?? "-"));
           sendMemberSync(); // [2026-09-02] 直送 sync も lastSyncSentAt を更新し、直後の resync 連打を間引く対象にする
           sendNextRoundReadyStateTo(ws, room);
           sendChipResetVoteStateTo(ws, room);
@@ -2855,7 +2858,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         }
         const validated = validateAction(room, payload.uid, payload.seat, envelope.action);
         if (validated.reason) {
-          reject(ws, room, envelope.commandId, validated.reason);
+          reject(ws, room, envelope.commandId, validated.reason, String(envelope.action?.type ?? "-"));
           return;
         }
         const accepted = acceptAction(
@@ -2867,7 +2870,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           (validated as { actorRoomSeat?: number }).actorRoomSeat ?? payload.seat,
         );
         if (!accepted.command || !accepted.ack) {
-          reject(ws, room, envelope.commandId, accepted.reason ?? 'action rejected');
+          reject(ws, room, envelope.commandId, accepted.reason ?? 'action rejected', String(envelope.action?.type ?? "-"));
           // [2026-07-23 総点検] 'zimo already drawn' で弾かれた client は投影が
           // 欠けて needsZimo 停止している張本人。reject だけ返すと ▶ツモ も
           // 400ms橋 も全部弾かれて詰むため、最新 projection を送って自己修復させる

@@ -816,7 +816,8 @@
         room_id: currentRoomId ?? '',
         revision,
         seat: onlineRoomMeta?.mySeat ?? null,
-        version: (window as any).__ANMIKA_BUILD_VERSION__ ?? '',
+        // 新しい版が出ているのに読み直していない時は印を付ける (古い画面の不具合かを見分ける)
+        version: `${(window as any).__ANMIKA_BUILD_VERSION__ ?? ''}${newVersionAvailable ? ' (新版あり)' : ''}`,
         ua: navigator.userAgent,
         dump: buildDiagnosticDump($game),
       };
@@ -1867,6 +1868,12 @@
         applyRevisionedAction(ws, msg);
       } else if (msg.type === 'reject') {
         console.warn('[online] command rejected', msg.reason, msg.commandId);
+        // [2026-10-15 リョー「何かツモボタン押してもつもれなくてリロードしたらつ漏れる感じだった」]
+        // 版のずれ以外で断られた時 (画面とサーバの局面がずれている) も、読み直さずに済むよう同期し直す。
+        // server は resync を間引くので連打にはならない
+        if (msg.reason !== 'version conflict') {
+          try { if (onlineWs && onlineWs.readyState === WebSocket.OPEN) onlineWs.send(JSON.stringify({ type: 'resync' })); } catch { /* 次の再接続で戻る */ }
+        }
         // [2026-07-23 総点検 P1] roll 送信が reject された時に awaitingRollAck が
         // 永久に残らないよう、SaiKoroModal へ復旧シグナルを送る
         saiKoroRecoveryNonce += 1;
