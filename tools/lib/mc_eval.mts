@@ -18,7 +18,7 @@
 // @ts-ignore - majiang-core 型定義なし
 import Majiang from '@kobalab/majiang-core';
 import { canFeverLizhi } from '../../src/lib/game3/feverLizhi';
-import { winValue, type ChipEnv } from './chip_value.mts';
+import { winValue, unswapM1, type ChipEnv } from './chip_value.mts';
 
 export const RON_TAKE = 0.5;
 export const END_SCALE = 1.75;
@@ -57,7 +57,7 @@ function waitsOf(sp13: any, ctx: McCtx, cache: Map<string, Waits>): Waits {
   let waits: string[] = [];
   try { waits = (Majiang.Util.tingpai(sp13) ?? []).filter((w: string) => ctx.kinds.includes(w)); } catch { waits = []; }
   let fever = 0;
-  try { const f = canFeverLizhi(sp13); if (f.ok) fever = f.tier; } catch { fever = 0; }
+  try { const f = canFeverLizhi(unswapM1(sp13.clone())); if (f.ok) fever = f.tier; } catch { fever = 0; }
   const ron = new Map<string, number>();
   const tsumo = new Map<string, number>();
   for (const w of waits) {
@@ -87,6 +87,7 @@ function keepWeight(sp14: any, c: string): number {
   if (/0/.test(c)) return 4;
   const s = c[0];
   if (c[1] === '7' && s !== 'z' && Number(sp14._bingpai?.[s]?.[7] ?? 0) >= 2) return 3;
+  if (c.startsWith('m1') && Number(sp14._bingpai?.m?.[1] ?? 0) >= 2) return 3; // 7萬 (1萬で持っている)
   return 0;
 }
 

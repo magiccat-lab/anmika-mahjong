@@ -13,6 +13,29 @@ import { tulipNeighbors } from '../../src/lib/game3/tulip';
 
 export const CHIP_PER_POINT = 1.65 / 1000;
 
+// アンミカの萬子は 7 と 9 だけで、7 は 1 として扱う (順子にならない)。majiang-core にそのまま渡すと 7萬 9萬 を嵌張と数えるので、
+// 分析では 7萬 を 1萬 に置き換えた手でシャンテン ・ 待ち ・ 点数を出す [2026-10-14、昨夜の「シャンテン戻し」の多くが 9萬切りだった]
+export function swapM7(sp: any): any {
+  const m7 = Number(sp?._bingpai?.m?.[7] ?? 0);
+  if (!m7) return sp;
+  sp._bingpai.m[1] = Number(sp._bingpai.m[1] ?? 0) + m7;
+  sp._bingpai.m[7] = 0;
+  if (sp._zimo === 'm7') sp._zimo = 'm1';
+  return sp;
+}
+/** swapM7 の逆 (フィーバーの 7萬 の暗刻を見る時) */
+export function unswapM1(sp: any): any {
+  const m1 = Number(sp?._bingpai?.m?.[1] ?? 0);
+  if (!m1) return sp;
+  sp._bingpai.m[7] = Number(sp._bingpai.m[7] ?? 0) + m1;
+  sp._bingpai.m[1] = 0;
+  if (sp._zimo === 'm1') sp._zimo = 'm7';
+  return sp;
+}
+/** 分析の牌の種類 (7萬 は 1萬 で持つ) と、その見えていない枚数 */
+export const swapKind = (t: string) => (t === 'm7' ? 'm1' : t);
+export const unswapKind = (t: string) => (t === 'm1' ? 'm7' : t);
+
 export type ChipEnv = { nuki: number; fuyu: number; hua: number; fulou: boolean; shuba: boolean; nInd: number };
 
 /** 打つ人の今の祝儀まわり (抜き北 ・ 冬 ・ 華 ・ 鳴き ・ シュバ ・ ドラ表示の枚数) */
@@ -47,11 +70,11 @@ export function handCounts(sp: any): Record<string, number> {
   for (const s of ['m', 'p', 's', 'z']) for (let n = 1; n <= 9; n++) {
     // 赤は majiang-core が _bingpai[s][5] の内数で持つので、5 を数えれば足りる
     const k = Number(sp._bingpai?.[s]?.[n] ?? 0);
-    if (k) c[s + n] = (c[s + n] ?? 0) + k;
+    if (k) c[unswapKind(s + n)] = (c[unswapKind(s + n)] ?? 0) + k;
   }
   for (const m of (sp._fulou ?? []) as string[]) {
     const s = m[0];
-    for (const ch of m.replace(/[^0-9]/g, '')) { const n = ch === '0' ? 5 : Number(ch); c[s + n] = (c[s + n] ?? 0) + 1; }
+    for (const ch of m.replace(/[^0-9]/g, '')) { const n = ch === '0' ? 5 : Number(ch); const k = unswapKind(s + n); c[k] = (c[k] ?? 0) + 1; }
   }
   return c;
 }
@@ -64,7 +87,7 @@ export function uraExpect(counts: Record<string, number>, env: ChipEnv, kinds: s
   for (const i of kinds) {
     const p = unseen(i) / U;
     if (!p) continue;
-    const d = doraOf(i);
+    const d = doraOf(unswapKind(i));
     e += p * ((counts[d] ?? 0) + (d === 'z4' ? env.nuki : 0));
   }
   return e * env.nInd;
@@ -81,8 +104,9 @@ export function aliceExpect(counts: Record<string, number>, env: ChipEnv, kinds:
   for (const k of kinds) {
     const p = unseen(k) / U;
     if (!p) continue;
-    let hits = counts[k] ?? 0;
-    if (tulip) for (const nb of tulipNeighbors(k)) hits += counts[nb] ?? 0;
+    const kk = unswapKind(k);
+    let hits = counts[kk] ?? 0;
+    if (tulip) for (const nb of tulipNeighbors(kk)) hits += counts[nb] ?? 0;
     eh += p * hits;
     if (hits > 0) ph += p;
   }
