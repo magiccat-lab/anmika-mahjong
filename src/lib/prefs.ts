@@ -17,8 +17,10 @@ export interface Prefs {
   autoNuki: boolean;
   /** BGM (通常の 8bit 版とフィーバー中の原曲のアンミカーニバル) を流さない。卓の「BGM」で切り替える [2026-10-14 リョー「BGM音量操作トグルは付けて良いな、見える位置に」]。 */
   bgmOff: boolean;
-  /** 通常時の 8bit 版だけ流さない (フィーバー中の原曲は流す)。卓の「BGM」は 入 → フィーバーだけ → 切 の順に替わる [2026-10-14 リョー「通常BGM切ってフィーバーだけONにする設定も用意したい」]。 */
-  normalBgmOff: boolean;
+  /** 通常時の 8bit 版も流す。既定は流さない (フィーバー中の原曲だけ)。卓の「BGM」は フィーバーだけ → 入 → 切 の順に替わる
+   *  [2026-10-14 リョー「通常BGM切ってフィーバーだけONにする設定も用意したい」→「bgm、デフォはフィーバーだけにしておいて～」。
+   *  最初は normalBgmOff (既定 false) で出したが、既定を変える時に保存済みの false が残るので名前ごと替えた]。 */
+  normalBgmOn: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -27,7 +29,7 @@ export const DEFAULT_PREFS: Prefs = {
   colorAssist: false,
   autoNuki: false,
   bgmOff: false,
-  normalBgmOff: false,
+  normalBgmOn: false,
 };
 
 const KEY = 'anmika.prefs.v1';
@@ -95,15 +97,15 @@ export function playSound(src: string, volume = 1): HTMLAudioElement | null {
  */
 export { ANMIKA_RULE_VERSION } from './ruleVersion';
 
-/** 卓の「BGM」ボタンの 3 段。入 (両方) → フィーバーだけ → 切 → 入 */
+/** 卓の「BGM」ボタンの 3 段。フィーバーだけ (既定) → 入 (通常時も) → 切 → フィーバーだけ */
 export type BgmMode = 'on' | 'fever' | 'off';
-export function bgmMode(p: Pick<Prefs, 'bgmOff' | 'normalBgmOff'>): BgmMode {
+export function bgmMode(p: Pick<Prefs, 'bgmOff' | 'normalBgmOn'>): BgmMode {
   if (p.bgmOff) return 'off';
-  return p.normalBgmOff ? 'fever' : 'on';
+  return p.normalBgmOn ? 'on' : 'fever';
 }
 export function nextBgmPrefs(p: Prefs): Prefs {
   const m = bgmMode(p);
-  if (m === 'on') return { ...p, bgmOff: false, normalBgmOff: true };
-  if (m === 'fever') return { ...p, bgmOff: true, normalBgmOff: true };
-  return { ...p, bgmOff: false, normalBgmOff: false };
+  if (m === 'fever') return { ...p, bgmOff: false, normalBgmOn: true };
+  if (m === 'on') return { ...p, bgmOff: true, normalBgmOn: false };
+  return { ...p, bgmOff: false, normalBgmOn: false };
 }

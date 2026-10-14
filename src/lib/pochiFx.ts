@@ -65,3 +65,16 @@ export function kakuteiOf(candidates: PochiColor[]): 'good' | 'bad' | null {
   if (candidates.every((c) => !POCHI_GOOD[c])) return 'bad';
   return null;
 }
+
+/** 手牌の表示の鍵 (bu ・ br ・ bg ・ by と z5b 〜 z5y) から白ぽっちの色 */
+export function pochiColorOfKey(key: string): PochiColor | null {
+  const map: Record<string, PochiColor> = { bu: 'blue', br: 'red', bg: 'green', by: 'yellow' };
+  return map[key] ?? colorOfPai(key);
+}
+/** フィーバー中に見せる「ぽっちの残り」(2026-10-14 リョー「フィーバー時にポッチの残り状況も待ちと一緒に見せたい」
+ *  「これは他家の手牌はいれずにね」)。見えている牌 (河 ・ 鳴き ・ ドラ表示) と自分の手牌に出た色を除いた色。
+ *  他の人の手牌は数えない (持っていても残りに入る) */
+export function pochiLeftForViewer(game: any, ownTiles: string[]): PochiColor[] {
+  const own = new Set(ownTiles.map(pochiColorOfKey).filter((c): c is PochiColor => !!c));
+  return publicPochiCandidates(game).filter((c) => !own.has(c));
+}

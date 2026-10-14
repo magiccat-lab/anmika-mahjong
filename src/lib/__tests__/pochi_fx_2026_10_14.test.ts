@@ -41,3 +41,23 @@ describe('PochiSqueeze', () => {
     expect(body).toContain('/tiles/Pin1.svg');
   });
 });
+
+// [2026-10-14 リョー「フィーバー時にポッチの残り状況も待ちと一緒に見せたい」「これは他家の手牌はいれずにね」]
+import { pochiLeftForViewer, pochiColorOfKey } from '../pochiFx';
+describe('フィーバー中のぽっちの残り', () => {
+  const game = (discards: Record<number, string[]>, baopai: string[] = [], hands: Record<number, string[]> = {}) => ({
+    discardLog: [0, 1, 2].map((p) => (discards[p] ?? []).map((c) => ({ pochi: c }))),
+    shoupai: { get: (p: number) => ({ _anmikaFulouPhysical: [], _hand: hands[p] ?? [] }) },
+    shan: { baopai },
+  });
+  it('河 ・ ドラ表示 ・ 自分の手牌に出た色を除く', () => {
+    expect(pochiLeftForViewer(game({ 1: ['red'] }, ['z5y']), ['m1', 'bu'])).toEqual(['green']);
+  });
+  it('他の人の手牌は数えない (持っていても残りに入る)', () => {
+    // 他の人の手牌は shoupai の中にあっても見ない。自分の手牌として渡した物だけ除く
+    expect(pochiLeftForViewer(game({}, [], { 1: ['z5b'] }), [])).toEqual(['blue', 'red', 'green', 'yellow']);
+  });
+  it('表示の鍵から色', () => {
+    expect([pochiColorOfKey('bu'), pochiColorOfKey('z5r'), pochiColorOfKey('bg'), pochiColorOfKey('p5')]).toEqual(['blue', 'red', 'green', null]);
+  });
+});

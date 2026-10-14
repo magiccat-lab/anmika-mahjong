@@ -19,7 +19,7 @@
   import KinpeiModal from './lib/KinpeiModal.svelte';
   import SaiKoroModal from './lib/SaiKoroModal.svelte';
   import PochiSqueeze from './lib/PochiSqueeze.svelte';
-  import { publicPochiCandidates, kakuteiOf, expectationGlow, POCHI_GOOD, type Glow, type PochiColor } from './lib/pochiFx';
+  import { publicPochiCandidates, kakuteiOf, expectationGlow, POCHI_GOOD, pochiLeftForViewer, type Glow, type PochiColor } from './lib/pochiFx';
   import LobbyPanel from './lib/LobbyPanel.svelte';
   import RoomPanel from './lib/RoomPanel.svelte';
   import EntryMenu from './lib/EntryMenu.svelte';
@@ -172,8 +172,8 @@
   const NORMAL_BGM_ENABLED = true;
   const BGM_MODE_LABEL = { on: '入', fever: 'フィーバーだけ', off: '切' } as const;
   $: bgmModeNow = bgmMode($prefs);
-  // [2026-10-14 リョー「通常BGM切ってフィーバーだけONにする設定も用意したい」] normalBgmOff の時は通常時だけ鳴らさない
-  $: syncBgm(!bgmAllowed ? null : someoneFeverBgm ? 'fever' : (NORMAL_BGM_ENABLED && !$prefs.normalBgmOff) ? 'normal' : null);
+  // [2026-10-14 リョー「通常BGM切ってフィーバーだけONにする設定も用意したい」→「デフォはフィーバーだけ」] 通常時は normalBgmOn の時だけ
+  $: syncBgm(!bgmAllowed ? null : someoneFeverBgm ? 'fever' : (NORMAL_BGM_ENABLED && $prefs.normalBgmOn) ? 'normal' : null);
   function stopBgmFade(kind: BgmKind): void {
     const t = bgmFade[kind];
     if (t !== undefined) { clearInterval(t); delete bgmFade[kind]; }
@@ -1225,6 +1225,11 @@
     if (waitCores.size === 0) return tiles.map(() => 'back');
     return tiles.map((t) => (waitCores.has(displayTileWaitCore(t)) ? t : 'back'));
   }
+  // [2026-10-14 リョー「フィーバー時にポッチの残り状況も待ちと一緒に見せたい」「これは他家の手牌はいれずにね」]
+  // 河 ・ 鳴き ・ ドラ表示と自分の手牌に出た色を除いた白ぽっち。他の人の手牌は数えない
+  const POCHI_TILE: Record<PochiColor, string> = { blue: 'z5b', green: 'z5g', red: 'z5r', yellow: 'z5y' };
+  $: feverPochiLeft = feverWaits.length > 0 ? pochiLeftForViewer($game.game, shoupai0) : [];
+  $: feverPochiGood = feverPochiLeft.filter((c) => POCHI_GOOD[c]).length;
   // feverWaitCores: UI テキスト表示用 (online privacy filter 適用済み)
   $: feverWaitCores = new Set(feverWaits.flatMap((fw) => fw.waits.map((w) => w.tile)));
   // feverRevealCores: 牌の表向き表示用 — feverDeclareTing から直接取得
@@ -3199,15 +3204,22 @@
               </span>
             {/each}
           {/each}
+          <span class="fever-inline-player" title="河 ・ 鳴き ・ ドラ表示と自分の手牌に出ていない白ぽっち (他の人の手牌は数えない)">ぽっち残:</span>
+          {#if feverPochiLeft.length}
+            {#each feverPochiLeft as c}<span class="fever-inline-wait"><Tile pai={POCHI_TILE[c]} size="md" /></span>{/each}
+            <span class="fever-inline-remain">正{feverPochiGood} 逆{feverPochiLeft.length - feverPochiGood}</span>
+          {:else}
+            <span class="fever-inline-remain">なし</span>
+          {/if}
         {/if}
       </div>
       <div class="table-menu-wrap">
         <!-- [2026-10-14 リョー「BGM音量操作トグルは付けて良いな、見える位置に」] 卓の BGM (通常の 8bit 版 ・ フィーバーの原曲) を流すか。⋯ の隣に常に出す
              (手牌の上の帯に置くとスマホで自分の札が詰まった) -->
-        <!-- 押すたびに 入 (通常時とフィーバー中) → フィーバーだけ → 切 → 入 [同じ日「通常BGM切ってフィーバーだけONにする設定も用意したい」] -->
+        <!-- 押すたびに フィーバーだけ (既定) → 入 (通常時も) → 切 → フィーバーだけ [同じ日「通常BGM切ってフィーバーだけONにする設定も用意したい」「デフォはフィーバーだけ」] -->
         <button type="button" class="bgm-btn" class:off={bgmModeNow === 'off'} class:fever-only={bgmModeNow === 'fever'}
           aria-label={`BGM: ${BGM_MODE_LABEL[bgmModeNow]}。押すと ${BGM_MODE_LABEL[bgmMode(nextBgmPrefs($prefs))]} に替わる`}
-          title="BGM (アンミカーニバル): 入 → フィーバーだけ → 切" on:click={() => prefs.set(nextBgmPrefs($prefs))}>BGM {BGM_MODE_LABEL[bgmModeNow]}</button>
+          title="BGM (アンミカーニバル): フィーバーだけ → 入 → 切" on:click={() => prefs.set(nextBgmPrefs($prefs))}>BGM {BGM_MODE_LABEL[bgmModeNow]}</button>
         <button type="button" class="table-menu-btn" class:open={tableMenuOpen} aria-label="設定と退出" aria-expanded={tableMenuOpen} title="設定と退出" on:click={() => { tableMenuOpen = !tableMenuOpen; }}>⋯</button>
         {#if tableMenuOpen}
           <div class="table-menu" role="menu">
