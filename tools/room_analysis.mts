@@ -150,7 +150,7 @@ function optionEv(ctx: Ctx, sp: any, pai: string): { ev: number | null; xt: numb
 type Review = {
   match: number; hand: number; turn: number; seat: number; user: string; hand14: string; chosen: string; best: string;
   loss: number | null; loss_se: number; xiangting: number; best_xiangting: number; options: Array<{ pai: string; ev: number | null; xt: number; ukeire: number; danger: number; detail: string; combo: string }>;
-  kind: 'ev' | 'ukeire'; lizhi: boolean; bad: boolean;
+  kind: 'ev' | 'ukeire'; lizhi: boolean; bad: boolean; dealt_in?: boolean;
   // 悪手の時だけ局面を残す (河は席番号 → 打った牌、ドラ表示、リーチ者の席)
   rivers?: Record<string, string[]>; dora?: string[]; lizhi_seats?: number[];
 };
@@ -160,6 +160,7 @@ const oppValues: number[] = [];
 const oppChipLoss: number[] = [];
 // 局が誰かのアガリで終わる割合 (1 打あたり)。モンテカルロの局の長さに使う
 let turnsAll = 0;
+let lastDiscard: { seat: number; idx: number } | null = null;
 const diverged: Array<{ match: number; revision: number; reason: string }> = [];
 
 function review(game: any, action: Record<string, any>, match: number, hand: number, seat: number): void {
@@ -270,12 +271,15 @@ segments.forEach((segment, index) => {
     if (type === 'nextRound') handNo += 1;
     const before: any = authority.canonicalState();
     if (type === 'discard' || type === 'tsumokiri') turnsAll += 1;
+    if (type === 'discard' || type === 'tsumokiri') lastDiscard = null;
     if ((type === 'discard' || type === 'tsumokiri') && members.find((m: any) => m.seat === command.actorSeat && !m.is_cpu)) {
+      const n0 = reviews.length;
       try {
         review(before.game, command.action as Record<string, any>, match, handNo, command.actorSeat);
       } catch {
         // 分析は付けるだけ。読み直しは止めない
       }
+      if (reviews.length > n0) lastDiscard = { seat: command.actorSeat, idx: reviews.length - 1 };
     }
     const eventsBefore = (before.game.events ?? []).length;
     const reason = authority.validateAndApply(command.actorSeat, structuredClone(command.action), members);
@@ -288,6 +292,8 @@ segments.forEach((segment, index) => {
     const after: any = authority.canonicalState();
     for (const event of (after.game.events ?? []).slice(eventsBefore)) {
       if (event?.type === 'hule' && Number(event.defen) > 0) oppValues.push(Number(event.defen));
+      // その打牌で放銃したか (放銃率の当てっぽさを測るため)
+      if (event?.type === 'hule' && event.isRon && lastDiscard && Number(event.loser) === lastDiscard.seat) reviews[lastDiscard.idx].dealt_in = true;
       if (event?.type === 'hule' && event.isRon && event.loser != null) {
         const lost = -Number(event.chipTransfer?.delta?.[event.loser] ?? event.chipTransfer?.delta?.[String(event.loser)] ?? 0);
         if (Number.isFinite(lost) && lost > 0) oppChipLoss.push(lost);
