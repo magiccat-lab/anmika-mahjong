@@ -10,11 +10,14 @@
   //    点がのぞく手前の溜め (暗くして寄り、半分の速さでしかめくれない、心臓の音が速く)、虹の確定のまれなプレミア (虹の光線とサビ 3 秒)
   //  - 予告 (4 版の 2 の答え): 引いた瞬間に画面の上から牌へ稲妻が落ち、「ぽっちチャンス」の帯。稲妻の光りが期待度 (白 ・ 金 ・ 虹)。
   //    プレミアの時はプレミアが予告を兼ねる
+  //  - フリーズ (10-15 fx7「これぽっちの演出に入れたい」): 当たりのまれな確定で、予告の代わりに画面と音が 1.3 秒止まる (暗転 / 止め絵)。
+  //    明けにキュインが鳴り、光りは最初から虹 (FreezeFx、割合は pochiFx の FREEZE_RATE)
   // 閉じ方は前と同じ 3 重 (めくれて 1.6 秒 ・ めくれた後のタップ ・ 触られないまま 30 秒で自動でめくる)
   import { onMount, onDestroy } from 'svelte';
   import { playSound } from './prefs';
-  import { POCHI_DOT, POCHI_GOOD, STEP_GLOW, STEP_WORD, TAME_BEATS, TAME_FROM, TAME_TO, pochiRevealText, pochiTopStep, stepAt,
-    type Glow, type PochiColor } from './pochiFx';
+  import FreezeFx from './FreezeFx.svelte';
+  import { FREEZE_MS, POCHI_DOT, POCHI_GOOD, STEP_GLOW, STEP_WORD, TAME_BEATS, TAME_FROM, TAME_TO, pochiRevealText, pochiTopStep, stepAt,
+    type Glow, type PochiColor, type PochiFreeze } from './pochiFx';
 
   export let color: PochiColor;
   /** でかぽっちなら 'p1' / 'p2' */
@@ -27,6 +30,8 @@
   export let premium = false;
   /** 予告の種類: 稲妻か、決め台詞「白って 200 色あんねん」のカットイン (4 版の 3 の答え)。引いた人が決めて他の席へ流す */
   export let teaser: 'bolt' | 'line' | 'mono' = 'bolt';
+  /** フリーズ (当たりの確定)。引いた人が決めて他の席へ流す。出る時は予告とプレミアは出さない */
+  export let freeze: PochiFreeze | null = null;
   /** 前の型の光り 2 段 (古い端末から届いた時だけ使う) */
   export let glow: [Glow, Glow] | null = null;
   export let readOnly = false;
@@ -55,8 +60,10 @@
   let lastTouch = Date.now();
   let lastY = 0;
   const beats = new Set<number>();
-  let premiumShowing = premium;
-  let teaserShowing = !premium;
+  let freezeShowing = !!freeze;
+  let afterFreeze = false;
+  let premiumShowing = premium && !freeze;
+  let teaserShowing = !premium && !freeze;
   let kakuteiShowing = false;
   const teaserGlow = topStep >= 4 ? 'rainbow' : topStep >= 3 ? 'gold' : 'white';
   let stepNow = -1;
@@ -64,7 +71,7 @@
 
   $: tame = !revealed && peel >= TAME_FROM && peel < TAME_TO;
   $: glowNow = revealed ? (good ? (topStep >= 4 ? 'rainbow' : 'gold') : 'none')
-    : stepNow >= 0 ? STEP_GLOW[stepNow] : teaserShowing ? teaserGlow : kakutei === 'good' ? 'rainbow' : 'none';
+    : stepNow >= 0 ? STEP_GLOW[stepNow] : teaserShowing ? teaserGlow : (kakutei === 'good' || afterFreeze) ? 'rainbow' : 'none';
   $: if (readOnly) setPeel(progress);
 
   function se(name: string, vol = 0.6): void { playSound(`/sounds/fx/${name}.mp3`, vol); }
@@ -100,7 +107,7 @@
   function onDown(e: PointerEvent): void {
     lastTouch = Date.now();
     if (revealed) { close(); return; }
-    if (readOnly || kakuteiShowing || premiumShowing || teaserShowing) return;
+    if (readOnly || kakuteiShowing || premiumShowing || teaserShowing || freezeShowing) return;
     startY = e.clientY;
     lastY = e.clientY;
     startPeel = peel;
@@ -127,6 +134,7 @@
   let kakuteiTimer: ReturnType<typeof setTimeout> | undefined;
   let premiumTimer: ReturnType<typeof setTimeout> | undefined;
   let teaserTimer: ReturnType<typeof setTimeout> | undefined;
+  let freezeTimer: ReturnType<typeof setTimeout> | undefined;
   function startKakutei(): void {
     if (!kakutei) return;
     kakuteiShowing = true;
@@ -135,8 +143,15 @@
   }
   onMount(() => {
     if (!readOnly) onOpen();
-    se('pikiin', 0.4);
-    if (premium) {
+    if (freeze) {
+      // フリーズ: 引いた音も鳴らさず、いきなり止まる。明けのキュインは FreezeFx が鳴らす
+      freezeTimer = setTimeout(() => { freezeShowing = false; afterFreeze = true; startKakutei(); }, FREEZE_MS);
+    } else {
+      se('pikiin', 0.4);
+    }
+    if (freeze) {
+      // 予告とプレミアは出さない
+    } else if (premium) {
       // プレミア: 虹の光線とアンミカーニバルのサビ 3 秒 (曲のファイルは git に入れない public/sounds/bgm/)。終わってから確定の帯と絞り
       playSound('/sounds/bgm/premium_sabi.mp3', 0.55);
       premiumTimer = setTimeout(() => { premiumShowing = false; startKakutei(); }, 2800);
@@ -152,13 +167,14 @@
       if (Date.now() - lastTouch > (readOnly ? 60000 : 30000)) { if (readOnly) close(); else setPeel(1); }
     }, 1000);
   });
-  onDestroy(() => { clearTimeout(closeTimer); clearInterval(idleTimer); clearTimeout(kakuteiTimer); clearTimeout(premiumTimer); clearTimeout(teaserTimer); });
+  onDestroy(() => { clearTimeout(closeTimer); clearInterval(idleTimer); clearTimeout(kakuteiTimer); clearTimeout(premiumTimer); clearTimeout(teaserTimer); clearTimeout(freezeTimer); });
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div class="sq" class:revealed class:bad={revealed && !good} class:tame class:mono={teaserShowing && teaser === 'mono'} role="dialog" aria-label={revealed ? `${text.word} ${text.tag}` : `${who} ${deka ? 'でかぽっち' : '白ぽっち'} 絞り中`}
   tabindex="-1" on:pointerdown={onDown} on:pointermove={onMove} on:pointerup={onUp} on:pointercancel={onUp} on:keydown={onKey}>
   {#if who}<div class="sq-who">{who}{readOnly ? ' が絞っています' : ''}</div>{/if}
+  {#if freezeShowing && freeze}<FreezeFx kind={freeze} durationMs={FREEZE_MS} />{/if}
   {#if premiumShowing}
     <div class="sq-rays" aria-hidden="true"></div>
     <div class="sq-premium" aria-hidden="true">アンミカーニバル</div>
@@ -184,14 +200,14 @@
     <div class="sq-cover" style:clip-path={`inset(0 0 ${peel * 100}% 0)`}></div>
   </div>
   </div>{/key}
-  {#if !revealed && !premiumShowing && !kakuteiShowing && !teaserShowing}
+  {#if !revealed && !premiumShowing && !kakuteiShowing && !teaserShowing && !freezeShowing}
     <div class="sq-meter" aria-hidden="true">
       {#each STEP_GLOW as g, i}<span class="sq-pip" class:on={i <= stepNow} data-glow={g}></span>{/each}
     </div>
     {#if stepNow >= 0}{#key stepNow}<div class="sq-step" class:hot={stepNow >= 2}>{STEP_WORD[stepNow]}</div>{/key}{/if}
   {/if}
   {#if tame}<div class="sq-slow" aria-hidden="true">SLOW</div>{/if}
-  {#if !revealed && !readOnly && !kakuteiShowing && !premiumShowing && !teaserShowing && peel < 0.05}<div class="sq-hint">下から上へ指で絞る</div>{/if}
+  {#if !revealed && !readOnly && !kakuteiShowing && !premiumShowing && !teaserShowing && !freezeShowing && peel < 0.05}<div class="sq-hint">下から上へ指で絞る</div>{/if}
   {#if kakuteiShowing}
     <div class="sq-band" class:grey={kakutei === 'bad'}><span class="sq-word">確定</span><span class="sq-tag">{kakutei === 'good' ? '正のぽっち' : '逆のぽっち'}</span></div>
   {/if}

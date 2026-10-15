@@ -1299,6 +1299,8 @@ export type PochiFxRelay = {
   premium?: boolean;
   /** 予告の種類 (稲妻 ・ 決め台詞のカットイン) */
   teaser?: 'bolt' | 'line' | 'mono';
+  /** フリーズ (当たりの確定、暗転 ・ 止め絵) */
+  freeze?: 'black' | 'still';
 };
 const POCHI_FX_COLORS = new Set(['blue', 'red', 'green', 'yellow']);
 const POCHI_FX_GLOWS = new Set(['white', 'gold', 'rainbow']);
@@ -1326,6 +1328,8 @@ export function sanitizePochiFx(value: Record<string, unknown>): PochiFxRelay | 
     if (value.premium === true) out.premium = true;
     // [2026-10-15 fx5 V3] 3 つ目の予告「白黒」も中継する
     if (value.teaser === 'bolt' || value.teaser === 'line' || value.teaser === 'mono') out.teaser = value.teaser;
+    // [2026-10-15 fx7] フリーズ (暗転 ・ 止め絵) も中継する
+    if (value.freeze === 'black' || value.freeze === 'still') out.freeze = value.freeze;
   }
   return out;
 }

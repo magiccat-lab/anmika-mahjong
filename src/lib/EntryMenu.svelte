@@ -11,6 +11,8 @@
   // [2026-09-14] 説明書と画面設定を入口に出す
   export let onSelectRules: () => void = () => {};
   export let onSelectSettings: () => void = () => {};
+  // [2026-10-15 リョー「トップページに演出一覧ってボタン押してそこから見れるようにページ出して」] 演出ごとの出る割合と当たり
+  export let onSelectFxOdds: () => void = () => {};
 </script>
 
 <div class="entry-menu">
@@ -38,6 +40,9 @@
   <!-- [2026-09-14] ルールが特殊なので初見の入口を出す -->
   <button class="entry-btn rules" on:click={onSelectRules}>
     <span class="btn-main">説明書</span>
+  </button>
+  <button class="entry-btn fxodds" on:click={onSelectFxOdds}>
+    <span class="btn-main">演出一覧</span>
   </button>
   <button class="entry-btn settings" on:click={onSelectSettings}>
     <span class="btn-main">画面設定</span>

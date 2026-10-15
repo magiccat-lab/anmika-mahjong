@@ -102,8 +102,30 @@ export function pochiTopStep(good: boolean, kakutei: 'good' | 'bad' | null, rnd:
   return expectationStep(good, rnd);
 }
 /** プレミア: 虹まで上がる (= 正の確定) 時の 1 割。引いた瞬間に虹の光線とアンミカーニバルのサビ 3 秒 */
+export const PREMIUM_RATE = 0.1;
 export function premiumRoll(topStep: number, rnd: number): boolean {
-  return topStep >= 4 && rnd < 0.1;
+  return topStep >= 4 && rnd < PREMIUM_RATE;
+}
+
+// ---- 予告の割合 (演出一覧のページも同じ数を読む) ----
+/** 3 つ目の予告「白黒」(fx5 V3): 当たりで 25%、外れでも 6% (ガセ予告)。残りは稲妻と決め台詞を半々 */
+export const TEASER_MONO_RATE = { good: 0.25, bad: 0.06 } as const;
+export function teaserRoll(good: boolean, rnd1: number, rnd2: number): 'bolt' | 'line' | 'mono' {
+  if (rnd1 < (good ? TEASER_MONO_RATE.good : TEASER_MONO_RATE.bad)) return 'mono';
+  return rnd2 < 0.5 ? 'line' : 'bolt';
+}
+
+// ---- フリーズ (2026-10-15 fx7 の答え「これぽっちの演出に入れたい」、暗転 a ・ 止め絵) ----
+/** 引いた瞬間に画面と音が 1.3 秒止まり、明けにキュイン。当たりの確定で、外れでは出さない。
+ *  出た時は予告の代わりで、光りは虹まで上がる (プレミアとは重ならない)。当たりの 3% が暗転、6% が止め絵 */
+export type PochiFreeze = 'black' | 'still';
+export const FREEZE_RATE: Record<PochiFreeze, number> = { black: 0.03, still: 0.06 };
+export const FREEZE_MS = 1300;
+export function freezeRoll(good: boolean, rnd: number): PochiFreeze | null {
+  if (!good) return null;
+  if (rnd < FREEZE_RATE.black) return 'black';
+  if (rnd < FREEZE_RATE.black + FREEZE_RATE.still) return 'still';
+  return null;
 }
 /** 今の段 (-1 はまだ光っていない) */
 export function stepAt(peel: number, topStep: number): number {

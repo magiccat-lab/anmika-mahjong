@@ -24,7 +24,7 @@ async function pochi(page: Page, color = 'blue') {
 // [2026-10-14] 白ぽっちは指で下から絞る (PochiSqueeze)。牌の下から上へ引いて一気にめくる
 async function squeezeOpen(page: Page) {
   // [2026-10-14 4 版の 2] 絞りの前に予告 (稲妻と「ぽっちチャンス」、1.6 秒) とプレミアが入る。その間は指で引けない
-  await expect(page.locator('.sq-band.teaser, .sq-premium')).toHaveCount(0, { timeout: 6000 });
+  await expect(page.locator('.sq-band.teaser, .sq-premium, .fz')).toHaveCount(0, { timeout: 6000 }); // [10-15] 当たりの 9% はフリーズ (1.3 秒) が予告の代わり
   const box = (await page.locator('.sq-tile').boundingBox())!;
   const x = box.x + box.width / 2, y = box.y + box.height - 4;
   await page.mouse.move(x, y); await page.mouse.down();
@@ -124,7 +124,7 @@ test('FX02: drawn tile stays face-down while squeezing', async ({ page }) => {
   const during = await lastAlt();
   await shot(page, 'fx02-deka-during');
   expect(during.src).toContain('Back.svg');
-  await expect(page.locator('.sq-band.teaser, .sq-premium')).toHaveCount(0, { timeout: 6000 });
+  await expect(page.locator('.sq-band.teaser, .sq-premium, .fz')).toHaveCount(0, { timeout: 6000 }); // [10-15] 当たりの 9% はフリーズ (1.3 秒) が予告の代わり
   const box = (await page.locator('.sq-tile').boundingBox())!;
   const x = box.x + box.width / 2, y = box.y + box.height - 4;
   await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x, y - box.height * 1.2, { steps: 10 }); await page.mouse.up();

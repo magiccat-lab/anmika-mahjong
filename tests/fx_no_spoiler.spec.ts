@@ -23,7 +23,7 @@ async function pochi(page: Page) {
   await expect(page.locator('.sq-tile')).toBeVisible();
 }
 async function squeezeOpenAndWaitClose(page: Page) {
-  await expect(page.locator('.sq-band.teaser, .sq-premium')).toHaveCount(0, { timeout: 6000 });
+  await expect(page.locator('.sq-band.teaser, .sq-premium, .fz')).toHaveCount(0, { timeout: 6000 }); // [10-15] 当たりの 9% はフリーズ (1.3 秒) が予告の代わり
   const box = (await page.locator('.sq-tile').boundingBox())!;
   const x = box.x + box.width / 2, y = box.y + box.height - 4;
   await page.mouse.move(x, y); await page.mouse.down();

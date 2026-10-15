@@ -19,7 +19,8 @@
   import KinpeiModal from './lib/KinpeiModal.svelte';
   import SaiKoroModal from './lib/SaiKoroModal.svelte';
   import PochiSqueeze from './lib/PochiSqueeze.svelte';
-  import { publicPochiCandidates, kakuteiOf, POCHI_GOOD, pochiLeftForViewer, pochiTopStep, premiumRoll, legacyGlowOfStep, type Glow, type PochiColor } from './lib/pochiFx';
+  import Confetti from './lib/Confetti.svelte';
+  import { publicPochiCandidates, kakuteiOf, POCHI_GOOD, pochiLeftForViewer, pochiTopStep, premiumRoll, legacyGlowOfStep, teaserRoll, freezeRoll, type Glow, type PochiColor, type PochiFreeze } from './lib/pochiFx';
   import LobbyPanel from './lib/LobbyPanel.svelte';
   import RoomPanel from './lib/RoomPanel.svelte';
   import EntryMenu from './lib/EntryMenu.svelte';
@@ -27,6 +28,7 @@
   import AnalysisPanel from './lib/AnalysisPanel.svelte';
   import ReplayPanel from './lib/ReplayPanel.svelte';
   import RulesPanel from './lib/RulesPanel.svelte';
+  import FxOddsPanel from './lib/FxOddsPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
   import { prefs, bgmMode, nextBgmPrefs } from './lib/prefs';
   import OnlineGameView from './lib/OnlineGameView.svelte';
@@ -139,6 +141,15 @@
   // 中 [ツモ ・ ロン] と 重 [フィーバー] は真ん中の局の札の上、軽 [リーチ ・ ポン ・ カン] は宣言した人の席の札の上端の小札。
   // 座は game seat のまま席の札 [seatCard(p)] に当てるので、オンラインで自分が席 0 でなくても左右を取り違えない
   $: fxNow = $game.cutin;
+  // [2026-10-15 fx7 の答え C2 a] 重い演出 (フィーバー ・ 八華四北) と天和の帯の時に、色紙の紙吹雪を左右から噴き上げる (3.2 秒)
+  let confettiTs = 0;
+  let confettiTimer: ReturnType<typeof setTimeout> | null = null;
+  $: if (typeof window !== 'undefined' && fxNow && (CUTIN_TIER[fxNow.id] === 'heavy' || fxNow.style === 'tenhou') && fxNow.ts !== confettiTs) {
+    confettiTs = fxNow.ts;
+    if (confettiTimer !== null) clearTimeout(confettiTimer);
+    confettiTimer = setTimeout(() => { confettiTimer = null; confettiTs = 0; }, 3400);
+  }
+  onDestroy(() => { if (confettiTimer !== null) clearTimeout(confettiTimer); });
   $: fxTier = fxNow ? CUTIN_TIER[fxNow.id] : null;
   $: fxDur = cutinDurationMs(fxNow?.id);
   $: fxWho = !fxNow || fxNow.seat === undefined ? '' : (onlineGameStarted ? seatName(fxNow.seat) : (fxNow.seat === selfPlayer ? 'あなた' : `P${fxNow.seat}`));
@@ -366,18 +377,22 @@
   // cpuStepImpl が複数ターンを1 update で回すため shan.lastZimoPochi は上書きされる。
   // events 配列から z5 の色を直接取り、キューで複数回分を順番に表示する
   // [2026-10-14] でかぽっち (リーチ一発で引いた 1筒 ・ 2筒) も同じ絞りに。kakutei は見えている牌で正 ・ 逆が決まっている時
-  type PochiRevealItem = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean; deka?: 'p1' | 'p2' | null; kakutei?: 'good' | 'bad' | null; step?: number; premium?: boolean; teaser?: 'bolt' | 'line' | 'mono' };
+  type PochiRevealItem = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean; deka?: 'p1' | 'p2' | null; kakutei?: 'good' | 'bad' | null; step?: number; premium?: boolean; teaser?: 'bolt' | 'line' | 'mono'; freeze?: PochiFreeze | null };
   // 期待度 (光りが何段まで上がるか) とプレミアはここで決めて PochiSqueeze に渡す (オンラインは同じ物を他の席へ流す)。
   // [2026-10-14 リョー 4 版の答え: ステップアップ ・ 溜め ・ プレミアを入れる]
   // 予告は稲妻と決め台詞「白って 200 色あんねん」のカットインを半々 (4 版の 2 ・ 3 の答え)
   // [2026-10-15 fx5 V3] 3 つ目の予告「白黒」は強めの予告。当たりで 25%、外れでも 6% 出る (ガセ予告)
-  function pochiStep(color: PochiColor, kakutei: 'good' | 'bad' | null): { step: number; premium: boolean; teaser: 'bolt' | 'line' | 'mono' } {
-    const step = pochiTopStep(POCHI_GOOD[color], kakutei, Math.random());
+  // [2026-10-15 fx7「これぽっちの演出に入れたい」] 当たりのまれな確定でフリーズ (暗転 3% ・ 止め絵 6%)。出る時は光りを虹まで上げ、予告とプレミアは出さない
+  function pochiStep(color: PochiColor, kakutei: 'good' | 'bad' | null): { step: number; premium: boolean; teaser: 'bolt' | 'line' | 'mono'; freeze: PochiFreeze | null } {
     const good = kakutei === 'good' || (kakutei !== 'bad' && POCHI_GOOD[color]);
-    // 試験 (Playwright) だけ予告の種類を決め打ちできる
-    const forced = (typeof navigator !== 'undefined' && (navigator as any).webdriver && (window as any).__forceTeaser) || null;
-    const teaser = forced ?? (Math.random() < (good ? 0.25 : 0.06) ? 'mono' : (Math.random() < 0.5 ? 'line' : 'bolt'));
-    return { step, premium: premiumRoll(step, Math.random()), teaser };
+    // 試験 (Playwright) だけ予告の種類とフリーズを決め打ちできる
+    const webdriver = typeof navigator !== 'undefined' && (navigator as any).webdriver;
+    const forced = (webdriver && (window as any).__forceTeaser) || null;
+    const forcedFreeze = webdriver && (window as any).__forceFreeze !== undefined ? ((window as any).__forceFreeze as PochiFreeze | null) : undefined;
+    const freeze = forcedFreeze !== undefined ? forcedFreeze : freezeRoll(good, Math.random());
+    const step = freeze ? 4 : pochiTopStep(POCHI_GOOD[color], kakutei, Math.random());
+    const teaser = forced ?? teaserRoll(good, Math.random(), Math.random());
+    return { step, premium: !freeze && premiumRoll(step, Math.random()), teaser, freeze };
   }
   let pochiReveal: PochiRevealItem | null = null;
   let pochiRevealQueue: PochiRevealItem[] = [];
@@ -436,7 +451,7 @@
   // [2026-10-14 リョー、演出のラフ 2 版「他の人の画面」] オンラインでは引いた人の絞りの進みを server が他の席へ中継する。
   // 引いた人: 開いた ・ 進み (70ms ごと) ・ めくれた ・ 閉じたを送る。色は点がのぞく 0.4 から
   // 他の席: remotePochi に受けて、同じ PochiSqueeze を readOnly で出す
-  type RemotePochi = { seat: number; deka: 'p1' | 'p2' | null; kakutei: 'good' | 'bad' | null; glow: [Glow, Glow]; step: number | null; premium: boolean; teaser: 'bolt' | 'line' | 'mono'; peel: number; color: PochiColor | null; key: number };
+  type RemotePochi = { seat: number; deka: 'p1' | 'p2' | null; kakutei: 'good' | 'bad' | null; glow: [Glow, Glow]; step: number | null; premium: boolean; teaser: 'bolt' | 'line' | 'mono'; freeze: PochiFreeze | null; peel: number; color: PochiColor | null; key: number };
   let remotePochi: RemotePochi | null = null;
   let pochiFxLast = 0;
   let pochiFxTimer: ReturnType<typeof setTimeout> | null = null;
@@ -455,7 +470,7 @@
     pochiFxQueued = null;
     if (pochiFxTimer) { clearTimeout(pochiFxTimer); pochiFxTimer = null; }
     const step = pochiReveal.step ?? 0;
-    sendPochiFx({ phase: 'open', deka: pochiReveal.deka ?? null, kakutei: pochiReveal.kakutei ?? null, glow: legacyGlowOfStep(step), step, premium: !!pochiReveal.premium, teaser: pochiReveal.teaser ?? 'bolt' });
+    sendPochiFx({ phase: 'open', deka: pochiReveal.deka ?? null, kakutei: pochiReveal.kakutei ?? null, glow: legacyGlowOfStep(step), step, premium: !!pochiReveal.premium, teaser: pochiReveal.teaser ?? 'bolt', freeze: pochiReveal.freeze ?? null });
   }
   function onPochiProgress(p: number): void {
     if (!pochiFxMine() || !pochiReveal || pochiFxRevealSent) return;
@@ -496,6 +511,7 @@
         glow: Array.isArray(msg.glow) && msg.glow.length === 2 ? msg.glow : ['white', 'white'],
         step: Number.isInteger(msg.step) && msg.step >= 0 && msg.step <= 4 ? msg.step : null, premium: msg.premium === true,
         teaser: msg.teaser === 'line' || msg.teaser === 'mono' ? msg.teaser : 'bolt',
+        freeze: msg.freeze === 'black' || msg.freeze === 'still' ? msg.freeze : null,
         peel: 0, color: null, key: Date.now(),
       };
       return;
@@ -506,7 +522,7 @@
     }
     // 開いたのを取り逃がしていたら (再接続など) ここで作る
     const cur: RemotePochi = remotePochi?.seat === gameSeat ? remotePochi
-      : { seat: gameSeat, deka: null, kakutei: null, glow: ['white', 'white'], step: null, premium: false, teaser: 'bolt', peel: 0, color: null, key: Date.now() };
+      : { seat: gameSeat, deka: null, kakutei: null, glow: ['white', 'white'], step: null, premium: false, teaser: 'bolt', freeze: null, peel: 0, color: null, key: Date.now() };
     const peel = msg.phase === 'reveal' ? 1 : Math.max(cur.peel, Number(msg.peel) || 0);
     remotePochi = { ...cur, color: color ?? cur.color, peel };
   }
@@ -1473,6 +1489,7 @@
   let replayPanelOpen = false;
   // [2026-09-14] 説明書と画面設定
   let rulesPanelOpen = false;
+  let fxOddsPanelOpen = false;
   let settingsPanelOpen = false;
   // [2026-09-14] ?replay=<id> で開かれたら、メニューではなく牌譜を直接出す。
   // 公開牌譜のリンクを踏んだ人が 3 手たどらずに局面へ着く
@@ -2827,7 +2844,11 @@
     onSelectAnalysis={() => { analysisPanelOpen = true; }}
     onSelectRules={() => { rulesPanelOpen = true; }}
     onSelectSettings={() => { settingsPanelOpen = true; }}
+    onSelectFxOdds={() => { fxOddsPanelOpen = true; }}
   />
+  {#if fxOddsPanelOpen}
+    <FxOddsPanel onClose={() => { fxOddsPanelOpen = false; }} />
+  {/if}
   {#if statsPanelOpen}
     <StatsPanel onClose={() => { statsPanelOpen = false; }} />
   {/if}
@@ -3120,14 +3141,14 @@
            持ち越されて 2 枚目が「開いたまま timer なし」で永久に残る。{#key} で毎回作り直す -->
       {#key pochiReveal}
         <PochiSqueeze color={pochiReveal.color} deka={pochiReveal.deka ?? null} kakutei={pochiReveal.kakutei ?? null}
-          step={pochiReveal.step ?? null} premium={!!pochiReveal.premium} teaser={pochiReveal.teaser ?? 'bolt'} who={onlineGameStarted ? seatName(pochiReveal.player) : ''}
+          step={pochiReveal.step ?? null} premium={!!pochiReveal.premium} teaser={pochiReveal.teaser ?? 'bolt'} freeze={pochiReveal.freeze ?? null} who={onlineGameStarted ? seatName(pochiReveal.player) : ''}
           onOpen={onPochiOpen} onProgress={onPochiProgress} onClose={closePochiReveal} />
       {/key}
     {:else if onlineGameStarted && remotePochi && !fxCutinBusy}
       <!-- [2026-10-14] 他の人の絞り。引いた人の指の進みをそのまま流す (観戦も同じ) -->
       {#key remotePochi.key}
         <PochiSqueeze readOnly color={remotePochi.color ?? 'blue'} colorKnown={!!remotePochi.color}
-          deka={remotePochi.deka} kakutei={remotePochi.kakutei} glow={remotePochi.glow} step={remotePochi.step} premium={remotePochi.premium} teaser={remotePochi.teaser} progress={remotePochi.peel}
+          deka={remotePochi.deka} kakutei={remotePochi.kakutei} glow={remotePochi.glow} step={remotePochi.step} premium={remotePochi.premium} teaser={remotePochi.teaser} freeze={remotePochi.freeze} progress={remotePochi.peel}
           who={seatName(remotePochi.seat)} onClose={() => { remotePochi = null; }} />
       {/key}
     {/if}
@@ -3479,6 +3500,9 @@
        6 版目「iでいい」「2かな」V3 b] 卓の真ん中を斜めの金と黒の帯が切り裂き、ポップな太い字が叩きつけられて揺れる。
        ツモ ・ ロン (中) とフィーバー (重) は暗転つき、リーチ ・ ポン ・ カン (軽) は細く短い帯で暗転なし [局の中で何度も出るので]。
        語の長さで字の大きさを詰める。重はタップで飛ばせる。宣言した人の席の札は金の枠 -->
+  {#if viewMode === 'single' && confettiTs}
+    {#key confettiTs}<Confetti />{/key}
+  {/if}
   {#if viewMode === 'single' && fxNow && fxTier}
     {#key fxNow.ts}
       <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
