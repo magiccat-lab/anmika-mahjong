@@ -104,6 +104,85 @@ describe('foldPaifu', () => {
     expect(last.seats[0].hand).toEqual(['m1', 'p7']);
   });
 
+  it('本物の牌譜の並び (補充の zimo → nukiBei) でも手牌が増えない [2026-10-16 先輩]', () => {
+    const rounds = foldPaifu([
+      { type: 'qipai', player: 0, tiles: ['m1', 'm9', 'p1'] },
+      { type: 'qipai', player: 1, tiles: [] },
+      { type: 'qipai', player: 2, tiles: [] },
+      { type: 'zimo', player: 0, pai: 'z4' },
+      { type: 'zimo', player: 0, pai: 's3' },
+      { type: 'nukiBei', player: 0, gold: false, replacement: 's3' },
+      { type: 'dapai', player: 0, pai: 'm1' },
+    ]);
+    const steps = rounds[0].steps;
+    const nuki = steps.find((x) => x.eventType === 'nukiBei')!;
+    expect(nuki.seats[0].hand).toEqual(['m1', 'm9', 'p1', 's3']);
+    expect(nuki.seats[0].nuki).toBe(1);
+    // 15 枚に見えていた補充の「ツモ」の場面は北抜きに置き換わる
+    expect(steps.map((x) => x.eventType)).toEqual(['qipai', 'zimo', 'nukiBei', 'dapai']);
+    expect(steps[steps.length - 1].seats[0].hand).toEqual(['m9', 'p1', 's3']);
+  });
+
+  it('古い牌譜の並び (nukiBei → 補充の zimo) でも増えない', () => {
+    const rounds = foldPaifu([
+      { type: 'qipai', player: 0, tiles: ['z4', 'm1'] },
+      { type: 'qipai', player: 1, tiles: [] },
+      { type: 'qipai', player: 2, tiles: [] },
+      { type: 'nukiBei', player: 0, gold: false, replacement: 'm7' },
+      { type: 'zimo', player: 0, pai: 'm7' },
+      { type: 'dapai', player: 0, pai: 'm1' },
+    ]);
+    const last = rounds[0].steps[rounds[0].steps.length - 1];
+    expect(last.seats[0].hand).toEqual(['m7']);
+  });
+
+  it('金北の補充も同じ', () => {
+    const rounds = foldPaifu([
+      { type: 'qipai', player: 1, tiles: ['gN', 'p5'] },
+      { type: 'qipai', player: 0, tiles: [] },
+      { type: 'qipai', player: 2, tiles: [] },
+      { type: 'zimo', player: 1, pai: 'z7' },
+      { type: 'nukiBei', player: 1, gold: true, replacement: 'z7' },
+    ]);
+    const last = rounds[0].steps[rounds[0].steps.length - 1];
+    expect(last.seats[1].hand).toEqual(['p5', 'z7']);
+  });
+
+  it('加槓はポンを槓に替え、手牌から 1 枚だけ出す。嶺上を先に積んだツモの場面は槓に置き換わる', () => {
+    const rounds = foldPaifu([
+      { type: 'qipai', player: 0, tiles: ['z1', 'z1', 'p2', 'p3'] },
+      { type: 'qipai', player: 1, tiles: [] },
+      { type: 'qipai', player: 2, tiles: [] },
+      { type: 'dapai', player: 1, pai: 'z1' },
+      { type: 'fulou', player: 0, from: 1, mianzi: 'z111+', pai: 'z1' },
+      { type: 'dapai', player: 0, pai: 'p2' },
+      { type: 'zimo', player: 0, pai: 'z1' },
+      { type: 'zimo', player: 0, pai: 's6' },
+      { type: 'gang', player: 0, mianzi: 'z111+1' },
+      { type: 'dapai', player: 0, pai: 'p3' },
+    ]);
+    const steps = rounds[0].steps;
+    const gang = steps.find((x) => x.eventType === 'gang')!;
+    expect(gang.seats[0].melds).toEqual(['z111+1']);
+    expect(gang.seats[0].hand).toEqual(['p3', 's6']);
+    expect(steps.filter((x) => x.eventType === 'zimo')).toHaveLength(1);
+  });
+
+  it('暗槓の嶺上も同じ', () => {
+    const rounds = foldPaifu([
+      { type: 'qipai', player: 0, tiles: ['p3', 'p3', 'p3', 'm9'] },
+      { type: 'qipai', player: 1, tiles: [] },
+      { type: 'qipai', player: 2, tiles: [] },
+      { type: 'zimo', player: 0, pai: 'p3' },
+      { type: 'zimo', player: 0, pai: 'z6' },
+      { type: 'gang', player: 0, mianzi: 'p3333' },
+    ]);
+    const last = rounds[0].steps[rounds[0].steps.length - 1];
+    expect(last.seats[0].hand).toEqual(['m9', 'z6']);
+    expect(last.seats[0].melds).toEqual(['p3333']);
+    expect(rounds[0].steps.map((x) => x.eventType)).toEqual(['qipai', 'zimo', 'gang']);
+  });
+
   it('ゴミ入力に耐える', () => {
     expect(foldPaifu(null)).toEqual([]);
     expect(foldPaifu([null, 42, { type: 'zimo' }, { type: 'unknown', player: 0 }])).toEqual([]);

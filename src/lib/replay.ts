@@ -88,6 +88,14 @@ export function foldPaifu(events: unknown): ReplayRound[] {
   let prevWasQipai = false;
   let current: ReplayRound | null = null;
   let pendingQipai: Record<number, string[] | number> = {};
+  // 直前の event がツモだった時の (席, 牌)。北抜き ・ 槓の補充 (嶺上) は、game が先に zimo を積んでから
+  // nukiBei / gang を積む (zimo → zimo 嶺上 → gang)
+  let lastZimo: { seat: number; pai: string } | null = null;
+  // その前の event が同じ席の北抜き ・ 槓だった時 (北抜き → 嶺上 zimo → 槓 の並び)
+  let lastDraw2: { seat: number; type: string } | null = null;
+  let lastDraw: { seat: number; type: string } | null = null;
+  // 古い牌譜は北抜きの後に補充の zimo を積んでいる (nukiBei replacement m7 → zimo m7)。足した補充を覚えておく
+  let nukiAdded: { seat: number; pai: string } | null = null;
 
   const pushStep = (desc: string, eventType: string) => {
     if (!current) {
@@ -135,9 +143,22 @@ export function foldPaifu(events: unknown): ReplayRound[] {
     prevWasQipai = false;
 
     const seat = isSeat(ev.player) ? ev.player : null;
+    const prevNuki = nukiAdded;
+    nukiAdded = null;
+    const prevZimo = lastZimo;
+    const prevDraw2 = lastDraw2;
+    lastDraw2 = lastDraw;
+    lastDraw = seat !== null && ['zimo', 'nukiBei', 'gang'].includes(etype) ? { seat, type: etype } : null;
+    lastZimo = etype === 'zimo' && seat !== null && typeof ev.pai === 'string' ? { seat, pai: ev.pai } : null;
+    // 補充の牌を先に積んだツモの場面 (手牌が 1 枚多く見える) を、北抜き ・ 槓の場面に置き換える
+    const dropDrawnStep = () => {
+      const cur = current as ReplayRound | null;
+      if (cur && cur.steps.length && cur.steps[cur.steps.length - 1].eventType === 'zimo') cur.steps.pop();
+    };
     switch (etype) {
       case 'zimo': {
         if (seat === null) break;
+        if (prevNuki && prevNuki.seat === seat && prevNuki.pai === ev.pai) break; // 北抜きで足した補充と同じ牌
         seats[seat].hand.push(typeof ev.pai === 'string' ? ev.pai : 'back');
         pushStep(`${seatName(seat)} ツモ`, etype);
         break;
@@ -168,8 +189,17 @@ export function foldPaifu(events: unknown): ReplayRound[] {
         if (seat === null) break;
         const mianzi = String(ev.mianzi ?? '');
         const open = /[+\-=]/.test(mianzi);
-        for (const t of mianziConsumedTiles(mianzi)) removeFromHand(seats[seat].hand, t);
-        seats[seat].melds.push(mianzi);
+        // 加槓 (z111+1): 手牌から出るのは足した 1 枚だけで、前のポン (z111+) を槓に替える [2026-10-16]
+        const ponIdx = open ? seats[seat].melds.indexOf(mianzi.slice(0, -1)) : -1;
+        if (ponIdx >= 0) {
+          removeFromHand(seats[seat].hand, mianzi[0] + mianzi[mianzi.length - 1]);
+          seats[seat].melds[ponIdx] = mianzi;
+        } else {
+          for (const t of mianziConsumedTiles(mianzi)) removeFromHand(seats[seat].hand, t);
+          seats[seat].melds.push(mianzi);
+        }
+        // 嶺上を先に積んだ並び: 同じ席の zimo → zimo (嶺上) → gang、または 北抜き → zimo (嶺上) → gang
+        if (prevZimo && prevZimo.seat === seat && prevDraw2 && prevDraw2.seat === seat) dropDrawnStep();
         pushStep(`${seatName(seat)} ${open ? '加槓' : '暗槓'} [${mianzi}]`, etype);
         break;
       }
@@ -188,8 +218,17 @@ export function foldPaifu(events: unknown): ReplayRound[] {
         if (seat === null) break;
         seats[seat].nuki += 1;
         removeFromHand(seats[seat].hand, ev.gold === true ? 'gN' : 'z4');
-        if (typeof ev.replacement === 'string' && ev.replacement) seats[seat].hand.push(ev.replacement);
-        pushStep(`${seatName(seat)} 北抜き${ev.gold === true ? ' [金]' : ''}`, etype);
+        // [2026-10-16 先輩「牌譜に北を抜くと手牌が増えるバグがあった」] 本物の牌譜は補充の牌を
+        // zimo で先に積んでいる (zimo s3 → nukiBei replacement s3)。その時は補充を足し直さず、
+        // 手牌が 15 枚に見えていた直前の「ツモ」の場面を「北抜き」の場面に置き換える
+        const replacement = typeof ev.replacement === 'string' && ev.replacement ? ev.replacement : null;
+        const drawnAlready = replacement !== null && prevZimo !== null && prevZimo.seat === seat && prevZimo.pai === replacement;
+        if (replacement !== null && !drawnAlready) {
+          seats[seat].hand.push(replacement);
+          nukiAdded = { seat, pai: replacement };
+        }
+        if (drawnAlready) dropDrawnStep();
+        pushStep(`${seatName(seat)} 北抜き${ev.gold === true ? ' [金]' : ''}${replacement ? ` → 補充 ${replacement}` : ''}`, etype);
         break;
       }
       case 'hule': {
