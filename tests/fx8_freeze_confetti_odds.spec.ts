@@ -48,6 +48,9 @@ test('FX8: 入口の演出一覧に割合と当たりが出る (無演出の行�
   await expect(dlg.locator('td.pic .ball')).toHaveCount(4);
   await expect(dlg).not.toContainText('出る割合はその演出が出る割合');
   await expect(dlg).toContainText('夏夏金北');
+  // 表もスマホの幅で横に収まる (「当たり」の列が隠れない)
+  const wide = await dlg.locator('.table-wrap').evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth + 1).length);
+  expect(wide).toBe(0);
   await expect(dlg.locator('.sure').first()).toHaveText('確定');
   // 横にはみ出さない (スマホ)
   const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

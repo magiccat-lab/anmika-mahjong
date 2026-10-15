@@ -102,7 +102,17 @@
   th, td { border: 1px solid rgba(255, 255, 255, 0.15); padding: 6px 10px; text-align: left; vertical-align: middle; }
   .num { font-size: 17px; }
   td.pic, th.pic { width: 1%; padding: 4px; }
-  .pic img { display: block; width: clamp(96px, 22vw, 168px); aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; background: #000; }
+  .pic img { display: block; width: clamp(64px, 18vw, 168px); aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; background: #000; }
+  /* スマホの幅でも「当たり」の列まで横に収める (字を大きくした分、見出しは折り返し、余白を詰める) */
+  @media (max-width: 560px) {
+    .panel { padding: 12px 10px; }
+    table { font-size: 14px; }
+    .num { font-size: 15px; }
+    th, td { padding: 5px 6px; }
+    th { white-space: normal; }
+    .memo { font-size: 12px; }
+    .name { min-width: 0; }
+  }
   /* サイコロの玉 (SaiKoroModal の .ball と同じ色) */
   .ball { display: block; width: 34px; height: 34px; margin: 0 auto; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #cfd6dd 60%, #8b96a0); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6); }
   .ball.blue { background: radial-gradient(circle at 35% 30%, #cfe6ff, #3a78ff 60%, #10307a); box-shadow: 0 0 12px 4px rgba(80, 140, 255, 0.8); }
