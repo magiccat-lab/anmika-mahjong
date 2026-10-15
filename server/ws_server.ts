@@ -2405,6 +2405,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       }
       const delay = Math.max(0, room.holdReleaseAt - performance.now());
       announceDeadline('reaction', [], delay);
+      // 本物の鳴き待ち (人間の候補あり) は期限を控えていて、つながり直し ・ resync にも期限 (鳴けない席には kind:none) を返す。
+      // 偽ラグでも同じ数の deadline が届く様に控える [控えないと、resync で deadline が来ない事で偽と分かる]
+      room.deadlineInfo = { kind: 'reaction', seats: [], endsAt: room.holdReleaseAt, revision };
+      // 解くのに失敗した時は 0.5 秒おきに試し直す [0 秒で回し続けない ・ 投げても止まったままにしない]
+      const retryLater = () => {
+        room.holdReleaseAt = performance.now() + FAKE_LAG_MIN_MS;
+        scheduleRoomDeadline(room);
+      };
       room.deadlineTimer = setTimeout(() => {
         room.queue = room.queue.then(async () => {
           const live = room.authority;
@@ -2416,10 +2424,19 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
             { type: 'releaseHold' },
             `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
           );
-          if (result.command) broadcastAction(room, result.command);
-          else warn('[anmika-ws] releaseHold reject', result.reason);
+          if (!result.command) {
+            warn('[anmika-ws] releaseHold reject', result.reason);
+            retryLater();
+            return;
+          }
+          room.holdRevision = undefined;
+          room.holdReleaseAt = undefined;
+          broadcastAction(room, result.command);
           scheduleRoomDeadline(room);
-        }).catch((error) => warn('[anmika-ws] releaseHold failed', error));
+        }).catch((error) => {
+          warn('[anmika-ws] releaseHold failed', error);
+          retryLater();
+        });
       }, delay);
       return;
     }
@@ -3278,6 +3295,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         const dropped = persistence.rewindRoom(rewound, keepThrough);
         if (room) {
           room.authority = authority;
+          // [2026-10-16 偽ラグ] 巻き戻すと revision が同じ番号に戻るので、控えていた解く時刻を捨てる
+          room.holdRevision = undefined;
+          room.holdReleaseAt = undefined;
           room.snapshot = rewound;
           // 巻き戻し前に張られた期限タイマーは、巻き戻し後の局面に対しては無効。
           // 止めずに残すと古い手番の自動打牌が走りかねないし、張り直さないと

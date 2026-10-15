@@ -139,6 +139,12 @@ describe('偽ラグ [2026-10-16 先輩 a]', () => {
         }
         const nextRelay = actionsAt(clients[next], discardRev)[0];
         expect(nextRelay.action._state.store.lastZimo ?? null).toBeNull();
+        // 止めている間に resync した席にも、本物の鳴き待ちと同じく期限 (鳴けない席には kind:none) が届く
+        const watcher = clients[(next + 1) % 3];
+        const seen = watcher.messages.length;
+        watcher.ws.send(JSON.stringify({ type: 'resync' }));
+        const deadline = await waitUntil(() => watcher.messages.slice(seen).find((m) => m.type === 'deadline'), 2000, 'deadline after resync');
+        expect(deadline.kind).toBe('none');
         // 止めている間: client の releaseHold と次の人の drawNext は通らない
         clients[next].ws.send(command(room, { type: 'releaseHold' }, 'cheat'));
         clients[next].ws.send(command(room, { type: 'drawNext' }, 'early'));
