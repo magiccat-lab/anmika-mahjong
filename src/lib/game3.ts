@@ -2684,10 +2684,13 @@ export class Game3 {
     const kamiDoraOccurrences = this.getKamiPochiDoraOccurrences(player);
     const selectedKamiDora = kamiDoraOccurrences.filter((occurrence) => occurrence.target !== null);
     if (selectedKamiDora.length > 0) {
+        // [2026-10-15 通報「ポッチツモれなくなった」] base の param と同じく華 [f1-4] の表示牌は外す。
+        // 外さないと f2 などが majiang-core に渡り、神ぽっちを選んだ後の hule がどれも null になって
+        // store.tsumo が「神ぽっち選択後のツモ再計算失敗」で止まる [裏ドラ表示 z5g ・ f2 の局]
         const newBaopai = this.kamiPochiEffectiveIndicators_(player, 'baopai', [...(this.shan.baopai ?? [])])
-          .map(normalizeBaopaiForMajiang);
+          .filter((p) => !p.startsWith('f')).map(normalizeBaopaiForMajiang);
         const newFubaopai = this.kamiPochiEffectiveIndicators_(player, 'fubaopai', [...(this.shan.fubaopai ?? [])])
-          .map(normalizeBaopaiForMajiang);
+          .filter((p) => !p.startsWith('f')).map(normalizeBaopaiForMajiang);
         const newParam = { ...param, baopai: newBaopai, fubaopai: this.lizhi.has(player) ? newFubaopai : param.fubaopai };
         // [2026-05-21 fix] 神ぽっち適用後の param を保持、 後続の 白ぽっち / でかぽっち
         // オールマイティ swap path がこの修正済 baopai/fubaopai を使い続けるように。 旧 code は
