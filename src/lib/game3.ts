@@ -1431,11 +1431,25 @@ export class Game3 {
         }
       }
     }
+    // でかぽっち: 北抜き ・ 華の補充でもリーチ一発のままなら、通常ツモと同じく 2p は黄 [逆払い]。
+    // hule 側はこの補充牌もでかぽっち オールマイティで和了らせるので、ここで倍率を付けないと逆払いが抜ける
+    // [2026-10-15 通報「一局前、2pが逆になってなかった」33NU rev 1542: 金北を抜いた補充の 2p で一発ツモ]
+    const dekapochiCandidate = this.lizhi.has(player) && this.yifaActive[player] && (corePai === 'p1' || corePai === 'p2');
+    const isDekapochi = dekapochiCandidate && !this.getTingpaiListBeforeZimo(player).includes(corePai);
+    if (isDekapochi && !this.shan.lastZimoPochi) {
+      if (corePai === 'p1') {
+        this.shan.lastZimoPochi = 'green';
+      } else {
+        this.shan.lastZimoPochi = 'yellow';
+        this.applyPochiColorMultiplier(player, 'yellow');
+        if (this.kinpeiTarget[player] === null) this.autoResolveKinpei(player);
+      }
+    }
     // lastZimoInfo [ツモ切り meta 判定用]
     this.lastZimoInfo = {
       player,
       pai,
-      pochi: corePai === 'z5' ? (this.shan.lastZimoPochi ?? null) : null,
+      pochi: corePai === 'z5' || isDekapochi ? (this.shan.lastZimoPochi ?? null) : null,
       gold: this.shan.lastZimoGold && (pai === 'gp' || pai === 'gs' || pai === 'gN'),
     };
     this.events.push({ type: 'zimo', player, pai });
