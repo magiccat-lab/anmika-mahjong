@@ -17,7 +17,7 @@
   import { playSound } from './prefs';
   import FreezeFx from './FreezeFx.svelte';
   import { FREEZE_MS, POCHI_DOT, POCHI_GOOD, STEP_GLOW, STEP_WORD, TAME_BEATS, TAME_FROM, TAME_TO, pochiRevealText, pochiTopStep, stepAt,
-    type Glow, type PochiColor, type PochiFreeze } from './pochiFx';
+    type Glow, type PochiColor, type PochiFreeze, type Teaser } from './pochiFx';
 
   export let color: PochiColor;
   /** でかぽっちなら 'p1' / 'p2' */
@@ -29,7 +29,7 @@
   /** プレミア (虹の確定のまれな演出)。引いた人が決めて他の席へ流す */
   export let premium = false;
   /** 予告の種類: 稲妻か、決め台詞「白って 200 色あんねん」のカットイン (4 版の 3 の答え)。引いた人が決めて他の席へ流す */
-  export let teaser: 'bolt' | 'line' | 'mono' = 'bolt';
+  export let teaser: Teaser = 'bolt';
   /** フリーズ (当たりの確定)。引いた人が決めて他の席へ流す。出る時は予告とプレミアは出さない */
   export let freeze: PochiFreeze | null = null;
   /** 前の型の光り 2 段 (古い端末から届いた時だけ使う) */
@@ -63,7 +63,8 @@
   let freezeShowing = !!freeze;
   let afterFreeze = false;
   let premiumShowing = premium && !freeze;
-  let teaserShowing = !premium && !freeze;
+  // 無演出 (teaser 'none') は予告を出さない
+  let teaserShowing = !premium && !freeze && teaser !== 'none';
   let kakuteiShowing = false;
   const teaserGlow = topStep >= 4 ? 'rainbow' : topStep >= 3 ? 'gold' : 'white';
   let stepNow = -1;
@@ -155,6 +156,9 @@
       // プレミア: 虹の光線とアンミカーニバルのサビ 3 秒 (曲のファイルは git に入れない public/sounds/bgm/)。終わってから確定の帯と絞り
       playSound('/sounds/bgm/premium_sabi.mp3', 0.55);
       premiumTimer = setTimeout(() => { premiumShowing = false; startKakutei(); }, 2800);
+    } else if (teaser === 'none') {
+      // [2026-10-15 fx9 B7] 無演出: 予告を出さずにそのまま (確定の帯があればそれから) 絞りに入る
+      startKakutei();
     } else {
       // 予告: 稲妻と「ぽっちチャンス」の帯 (1.6 秒)、または決め台詞のカットインの後に帯 (2.4 秒)。その後に確定の帯と絞り
       // [2026-10-15 fx5 V3] 3 つ目の予告「白黒」: 卓の色が抜けて牌の光だけ残り、2.2 秒後に色が戻る

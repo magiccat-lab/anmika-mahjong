@@ -2484,6 +2484,9 @@ if _DIST_DIR.exists():
     # error になり、黙ってシステムのフォントに落ちる (画面は出るので気づけない)
     if (_DIST_DIR / "fonts").exists():
         app.mount("/fonts", StaticFiles(directory=str(_DIST_DIR / "fonts")), name="fonts")
+    # [2026-10-15] 演出一覧の行の絵 (public/fx_odds)
+    if (_DIST_DIR / "fx_odds").exists():
+        app.mount("/fx_odds", StaticFiles(directory=str(_DIST_DIR / "fx_odds")), name="fx_odds")
 
     @app.get("/favicon.svg")
     async def _favicon_svg():

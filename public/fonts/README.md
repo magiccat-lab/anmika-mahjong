@@ -49,3 +49,8 @@
 
 白ぽっちの予告の決め台詞「白って 200 色あんねん」専用。Dela Gothic One (SIL OFL 1.1) を `css2?family=Dela+Gothic+One&text=白って 200 色あんねん` で取った物 (2KB)。
 先輩が 4 案 (Dela Gothic One ・ Yusei Magic ・ Rampart One ・ Mochiy Pop One) から a を選んだ。台詞を変える時は text= を変えて取り直す。使う所は `src/app.css` の 'CI Line' だけ
+
+# fx-mochiypopone-kinpei.woff2 (2026-10-15)
+
+NN金北のカットイン (春春金北 ・ 夏夏金北 ・ 秋秋金北 ・ 冬冬金北) で足りなかった 5 字 (春 ・ 夏 ・ 秋 ・ 冬 ・ 金)。`css2?family=Mochiy+Pop+One&text=春夏秋冬金` で取った物 (1.6KB)。
+`src/app.css` で同じ 'FX Kana' に unicode-range で重ねる (元のサブセットの字の一覧は残っていないので、取り直さずに足した)

@@ -35,7 +35,19 @@ test('FX8: 入口の演出一覧に割合と当たりが出る (無演出の行�
   await expect(dlg).toBeVisible();
   await expect(dlg).toContainText('フリーズ (暗転)');
   await expect(dlg).toContainText('白のまま (光りが上がらない)');
-  await expect(dlg.locator('.tag')).toHaveCount(4); // 無演出の札: 光りが白のまま ・ 予告の光りが白 ・ 玉が白 ・ リーチ無し
+  // 無演出の札: 予告なし (10-15 fx9 B7) ・ 光りが白のまま ・ 予告の光りが白 ・ 玉が白 ・ リーチ無し
+  await expect(dlg.locator('.tag')).toHaveCount(5);
+  // [10-15 先輩「ラフで画像とか入れてあげよう」「出る割合は～の1行目消そう」] 白ぽっちの行は絵 (15 枚が読める)、サイコロは玉、頭の 1 行は無い
+  await expect(dlg.locator('td.pic img')).toHaveCount(15);
+  // 絵は loading=lazy なので、画面の外の分は URL が読めるかで見る
+  for (const src of await dlg.locator('td.pic img').evaluateAll((els) => els.map((e) => e.getAttribute('src')!))) {
+    const res = await page.request.get(src);
+    expect(res.status(), src).toBe(200);
+    expect((await res.body()).length, src).toBeGreaterThan(100); // 暗転の絵は黒に線 1 本で 262 バイト
+  }
+  await expect(dlg.locator('td.pic .ball')).toHaveCount(4);
+  await expect(dlg).not.toContainText('出る割合はその演出が出る割合');
+  await expect(dlg).toContainText('夏夏金北');
   await expect(dlg.locator('.sure').first()).toHaveText('確定');
   // 横にはみ出さない (スマホ)
   const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -67,9 +79,19 @@ for (const kind of ['black', 'still'] as const) {
 
 test('FX8: フリーズを決め打ちしない時は予告が出る (外れの色でフリーズは出ない)', async ({ page }) => {
   await solo(page);
+  // [10-15 fx9 B7] 外れの 38% は無演出 (予告なし) になったので、予告は決め打ちして見る
+  await page.evaluate(() => { (window as any).__forceTeaser = 'bolt'; });
   await pochi(page, 'red');
   await expect(page.locator('.sq-band.teaser, .sq-premium')).toHaveCount(1);
   await expect(page.locator('.fz')).toHaveCount(0);
+});
+
+test('FX10: 無演出の引きは予告もフリーズも出さずに絞りに入る', async ({ page }) => {
+  await solo(page);
+  await page.evaluate(() => { (window as any).__forceTeaser = 'none'; });
+  await pochi(page, 'red');
+  await expect(page.locator('.sq-hint')).toBeVisible();
+  await expect(page.locator('.sq-band.teaser, .sq-premium, .sq-ci, .sq-bolt, .fz')).toHaveCount(0);
 });
 
 test('FX8: フィーバーの帯で紙吹雪が噴き上がり、3.4 秒で消える', async ({ page }) => {
@@ -83,4 +105,23 @@ test('FX8: フィーバーの帯で紙吹雪が噴き上がり、3.4 秒で消�
   await page.evaluate(() => (window as any).__gameStore.enqueueCutin('tsumo', 0, { label: 'ツモ' }));
   await page.waitForTimeout(400);
   await expect(page.locator('canvas.confetti')).toHaveCount(0);
+});
+
+test('FX10: 夏夏金北が揃うとカットイン (字は演出の字体で出る)', async ({ page }) => {
+  await solo(page);
+  await page.evaluate(() => {
+    const s = (window as any).__game;
+    s.game.huapai[0] = ['f2', 'f2'];
+    s.game.nukidoraGold[0] = 1;
+    (window as any).__gameStore.setCpuSeats([]);
+  });
+  await expect(page.locator('.dr-word')).toHaveText('夏夏金北', { timeout: 4000 });
+  await shot(page, 'fx10-kinpei');
+  // 春 ・ 夏 ・ 秋 ・ 冬 ・ 金は足したサブセットから引く (読めないとシステムの字に落ちる)
+  expect(await page.evaluate(async () => { await document.fonts.load("40px 'FX Kana'", '夏夏金北'); return document.fonts.check("40px 'FX Kana'", '春夏秋冬金北'); })).toBe(true);
+  // 同じ局でもう一度揃えても出ない
+  await expect(page.locator('.dr-word')).toHaveCount(0, { timeout: 4000 });
+  await page.evaluate(() => (window as any).__gameStore.setCpuSeats([]));
+  await page.waitForTimeout(600);
+  await expect(page.locator('.dr-word')).toHaveCount(0);
 });

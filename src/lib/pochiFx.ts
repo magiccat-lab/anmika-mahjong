@@ -110,8 +110,14 @@ export function premiumRoll(topStep: number, rnd: number): boolean {
 // ---- 予告の割合 (演出一覧のページも同じ数を読む) ----
 /** 3 つ目の予告「白黒」(fx5 V3): 当たりで 25%、外れでも 6% (ガセ予告)。残りは稲妻と決め台詞を半々 */
 export const TEASER_MONO_RATE = { good: 0.25, bad: 0.06 } as const;
-export function teaserRoll(good: boolean, rnd1: number, rnd2: number): 'bolt' | 'line' | 'mono' {
-  if (rnd1 < (good ? TEASER_MONO_RATE.good : TEASER_MONO_RATE.bad)) return 'mono';
+/** 無演出 (2026-10-15 fx9 B7 a、先輩「無演出でもあたるように」): 予告が何も出ないまま絞りに入る。
+ *  当たりの 2%、外れの 38% (無演出の時に当たる割合は約 4%)。白黒の次に決め、残りが稲妻と決め台詞の半々 */
+export const TEASER_NONE_RATE = { good: 0.02, bad: 0.38 } as const;
+export type Teaser = 'bolt' | 'line' | 'mono' | 'none';
+export function teaserRoll(good: boolean, rnd1: number, rnd2: number): Teaser {
+  const mono = good ? TEASER_MONO_RATE.good : TEASER_MONO_RATE.bad;
+  if (rnd1 < mono) return 'mono';
+  if (rnd1 < mono + (good ? TEASER_NONE_RATE.good : TEASER_NONE_RATE.bad)) return 'none';
   return rnd2 < 0.5 ? 'line' : 'bolt';
 }
 

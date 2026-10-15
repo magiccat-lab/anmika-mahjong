@@ -73,6 +73,8 @@ export const CUTIN_DURATION_MS = 1800;
 export type CutinId = 'reach' | 'ron' | 'tsumo' | 'fever' | 'kan' | 'pon'
   // [2026-10-14 リョー] 華と北が揃った時 [lib/setCutin.ts]
   | 'shika' | 'shipei' | 'hachika' | 'shikashipei' | 'hachikashipei'
+  // [2026-10-15] 同じ季節の華 2 枚と金北 (label に「夏夏金北」など)
+  | 'kinpei'
   // [2026-10-15 fx5 V2] 一発 ・ 嶺上開花などの役の名前の帯 (label に役名、style に見た目)
   | 'yaku';
 
@@ -91,6 +93,7 @@ export const CUTIN_TIER: Record<CutinId, 'light' | 'mid' | 'heavy'> = {
   hachika: 'mid',
   shikashipei: 'mid',
   hachikashipei: 'heavy',
+  kinpei: 'mid',
   yaku: 'mid',
 };
 

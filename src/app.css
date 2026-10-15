@@ -3,6 +3,15 @@
    取り方と増やし方は public/fonts/README.md。
    font-display: block = 読み込み前は出さない。演出は 0.7 秒なので、
    違う字で出てから入れ替わるより、少し遅れて正しい字が出る方がいい */
+/* [2026-10-15] NN金北のカットイン (夏夏金北など) の 5 字 (春 ・ 夏 ・ 秋 ・ 冬 ・ 金) だけのサブセット。取り方は public/fonts/README.md */
+@font-face {
+  font-family: 'FX Kana';
+  src: url('/fonts/fx-mochiypopone-kinpei.woff2?v=20261015') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+  unicode-range: U+51AC, U+590F, U+6625, U+79CB, U+91D1;
+}
 /* [2026-10-15 fx5 V2 ・ V5] 役の名前と「連続」の字だけのサブセット。同じ 'FX Kana' に重ね、この字だけここから引く */
 @font-face {
   font-family: 'FX Kana';

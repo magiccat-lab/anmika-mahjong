@@ -10,5 +10,6 @@ import type { CutinId } from './store';
 export const FX_LABELS: Record<CutinId, string> = {
   reach: 'リーチ', ron: 'ロン', tsumo: 'ツモ', fever: 'フィーバー', kan: 'カン', pon: 'ポン',
   shika: '四華', shipei: '四北', hachika: '八華', shikashipei: '四華四北', hachikashipei: '八華四北',
+  kinpei: '金北',
   yaku: '役',
 };
