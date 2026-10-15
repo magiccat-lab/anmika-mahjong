@@ -66,3 +66,5 @@ tmp/
 
 # 私用で流す曲 (10-14 リョー「私用で権利大丈夫だからmp3で流してほしい」)。git には入れない
 public/sounds/bgm/
+# [2026-10-15] 煽り演出のアンミカさんの声 (BGM と同じく git に入れない)
+public/sounds/voice/

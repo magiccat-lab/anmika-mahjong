@@ -76,7 +76,10 @@ export type CutinId = 'reach' | 'ron' | 'tsumo' | 'fever' | 'kan' | 'pon'
   // [2026-10-15] 同じ季節の華 2 枚と金北 (label に「夏夏金北」など)
   | 'kinpei'
   // [2026-10-15 fx5 V2] 一発 ・ 嶺上開花などの役の名前の帯 (label に役名、style に見た目)
-  | 'yaku';
+  | 'yaku'
+  // [2026-10-15 リョー「ロンするときの煽り演出も入れたいな。2シャンテン以上からの放銃で…どっから切っとんねーん！って言ってロン」
+  //  「役満放銃とかにもなんかあってもいいかも」] ロンの帯の前に、振り込んだ人へアンミカさんの声で煽る (seat は振り込んだ人)
+  | 'aori' | 'yakumanHoju';
 
 /** 演出の重さ 3 段 [2026-09-20 演出ゼロベース再検討 原則 3、リョー選択 E+F]。
  *  軽: 宣言と鳴き。その場で消える / 中: 和了 / 重: フィーバー。
@@ -95,6 +98,8 @@ export const CUTIN_TIER: Record<CutinId, 'light' | 'mid' | 'heavy'> = {
   hachikashipei: 'heavy',
   kinpei: 'mid',
   yaku: 'mid',
+  aori: 'mid',
+  yakumanHoju: 'mid',
 };
 
 // [2026-10-15 リョー「演出の速度もうちょい落として楽しめるようにして」] 3 段とも約 1.4 倍 [旧 700 / 1200 / 1800]
@@ -171,6 +176,8 @@ export interface StoreState {
   cutinQueue: CutinPayload[];
   // [2026-10-15 fx5 V5] フィーバー中に同じ人が続けて和了った数 (局が変わる ・ 他の人が和了る ・ フィーバーでない和了で戻る)
   winStreak?: { player: number; count: number; rk: string } | null;
+  /** 煽りを積んだ打牌 (ダブロンで 2 回積まない) */
+  aoriKey?: string | null;
   /** WSA: online replay mode — canonical store uses this instead of window.__anmikaOnline */
   _onlineMode?: boolean;
 }
@@ -517,7 +524,17 @@ export function enqueueCutinState(s: StoreState, id: CutinId, seat?: PlayerId, e
     const prev = s.winStreak;
     const count = fever && prev && prev.player === seat && prev.rk === rk ? prev.count + 1 : 1;
     s.winStreak = fever ? { player: seat, count, rk } : null;
-    const sp = specialYakuOf(winResultFor(s, seat));
+    const result = winResultFor(s, seat);
+    // 煽り: ロンの時、振り込んだ人が 2 シャンテン以上 (向聴数 2 以上) なら「どっから切っとんねーん！」、役満の放銃なら役満放銃
+    const from = id === 'ron' ? s.lastDapai?.player : undefined;
+    if (from !== undefined && from !== seat) {
+      const key = `${rk}-${s.game?.events?.length ?? 0}-${from}`;
+      if (s.aoriKey !== key) {
+        if ((result?.damanguan ?? 0) > 0) { s.aoriKey = key; s = enqueueCutinState(s, 'yakumanHoju', from as PlayerId, { label: '役満放銃' }); }
+        else if ((s.game?.xiangting?.(from as PlayerId) ?? 0) >= 2) { s.aoriKey = key; s = enqueueCutinState(s, 'aori', from as PlayerId, { label: 'どっから切っとんねーん！' }); }
+      }
+    }
+    const sp = specialYakuOf(result);
     if (sp) s = enqueueCutinState(s, 'yaku', seat, sp);
     if (count >= 2) extra = { combo: count };
   }

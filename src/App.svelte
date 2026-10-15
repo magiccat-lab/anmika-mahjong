@@ -30,7 +30,7 @@
   import RulesPanel from './lib/RulesPanel.svelte';
   import FxOddsPanel from './lib/FxOddsPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
-  import { prefs, bgmMode, nextBgmPrefs } from './lib/prefs';
+  import { prefs, bgmMode, nextBgmPrefs, playSound } from './lib/prefs';
   import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
@@ -141,6 +141,13 @@
   // 中 [ツモ ・ ロン] と 重 [フィーバー] は真ん中の局の札の上、軽 [リーチ ・ ポン ・ カン] は宣言した人の席の札の上端の小札。
   // 座は game seat のまま席の札 [seatCard(p)] に当てるので、オンラインで自分が席 0 でなくても左右を取り違えない
   $: fxNow = $game.cutin;
+  // [2026-10-15 煽り演出のラフ] 煽り ・ 役満放銃の帯が出た時にアンミカさんの声 (public/sounds/voice/、git に入れない)
+  const AORI_VOICE: Record<string, string> = { aori: '/sounds/voice/anmika_aori.wav', yakumanHoju: '/sounds/voice/anmika_yakuman.wav' };
+  let aoriVoiceTs = 0;
+  $: if (typeof window !== 'undefined' && fxNow && AORI_VOICE[fxNow.id] && fxNow.ts !== aoriVoiceTs) {
+    aoriVoiceTs = fxNow.ts;
+    playSound(AORI_VOICE[fxNow.id], 0.9);
+  }
   // [2026-10-15 fx7 の答え C2 a] 重い演出 (フィーバー ・ 八華四北) と天和の帯の時に、色紙の紙吹雪を左右から噴き上げる (3.2 秒)
   let confettiTs = 0;
   let confettiTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3508,7 +3515,15 @@
   {#if viewMode === 'single' && confettiTs}
     {#key confettiTs}<Confetti />{/key}
   {/if}
-  {#if viewMode === 'single' && fxNow && fxTier}
+  {#if viewMode === 'single' && fxNow && (fxNow.id === 'aori' || fxNow.id === 'yakumanHoju')}
+    {#key fxNow.ts}
+      <!-- [2026-10-15 リョー「ロンするときの煽り演出も入れたいな」] 煽りは決め台詞と同じピンクの斜めの帯、役満放銃は黒と赤の帯にヒビ -->
+      <div class="ao {fxNow.id === 'aori' ? 'ao-aori' : 'ao-yakuman'}" style="--fx-dur: {fxDur}ms" aria-hidden="true">
+        {#if fxNow.id === 'yakumanHoju'}<svg class="ao-crack" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M50 50 L38 26 L42 6 M50 50 L66 30 L72 4 M50 50 L26 56 L4 50 M50 50 L74 58 L97 54 M50 50 L44 72 L36 96 M50 50 L60 74 L70 98" /></svg>{/if}
+        <div class="ao-band"><div class="ao-speed"></div><div class="ao-line">{fxNow.label ?? FX_LABELS[fxNow.id]}</div><div class="ao-sig">アン ミカ</div>{#if fxWho}<div class="ao-who">{fxWho} の放銃</div>{/if}</div>
+      </div>
+    {/key}
+  {:else if viewMode === 'single' && fxNow && fxTier}
     {#key fxNow.ts}
       <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
       <div class="fx fx-{fxNow.id} fx-{fxTier} dr {fxNow.style ? 'yk-' + fxNow.style : ''} {fxNow.combo && fxNow.combo >= 2 ? 'combo-' + Math.min(fxNow.combo, 4) : ''}" class:fx-skippable={fxTier === 'heavy'}
@@ -6626,6 +6641,32 @@
     60% { box-shadow: 0 0 0 2px #ffd75a, 0 0 14px 3px rgba(255, 215, 90, 0.6); filter: brightness(1.1); }
     100% { box-shadow: 0 0 0 0 rgba(255, 215, 90, 0); filter: brightness(1); }
   }
+  /* [2026-10-15 煽り演出のラフ] 煽り: 決め台詞のカットイン (PochiSqueeze の .sq-ci) と同じピンクの斜めの帯。字は Dela Gothic One (CI Aori)
+     役満放銃: 暗くして黒と赤の帯、真ん中からヒビ、揺れる */
+  .ao { position: fixed; inset: 0; z-index: 800; overflow: hidden; pointer-events: none; }
+  .ao::before { content: ''; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); animation: drFlash var(--fx-dur) linear both; }
+  .ao-band { position: absolute; left: -10%; right: -10%; top: 50%; height: clamp(90px, 24vh, 200px); margin-top: calc(clamp(90px, 24vh, 200px) / -2);
+    display: flex; align-items: center; justify-content: center; overflow: hidden; transform: rotate(-6deg);
+    background: repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.07) 0 3px, transparent 3px 42px), linear-gradient(180deg, #120612 0 6%, #c2185b 6% 50%, #7b0e3c 50% 94%, #120612 94%);
+    box-shadow: 0 0 0 4px #fff inset, 0 12px 34px rgba(0, 0, 0, 0.6);
+    animation: aoIn 0.22s cubic-bezier(0.2, 0.9, 0.2, 1) both, aoOut 0.2s ease-in calc(var(--fx-dur) - 0.2s) forwards; }
+  .ao-speed { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, transparent 0 18px, rgba(255, 255, 255, 0.16) 18px 20px); }
+  .ao-line { position: relative; font-family: 'CI Aori', 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: clamp(28px, 7.4vw, 92px); color: #fff !important; white-space: nowrap;
+    -webkit-text-stroke: clamp(4px, 0.6vw, 7px) #120612; paint-order: stroke fill; text-shadow: 5px 5px 0 #3a0820; transform: skewX(-8deg);
+    animation: aoWord 0.3s cubic-bezier(0.2, 1.6, 0.4, 1) 0.12s both, drShake 0.1s linear 0.42s 4; }
+  .ao-sig { position: absolute; right: 16%; bottom: 8%; font: 700 clamp(12px, 2.2vw, 24px) 'Zen Kaku Gothic New', sans-serif; color: #ffd1e6 !important; letter-spacing: 0.2em; }
+  .ao-who { position: absolute; left: 16%; top: 10%; padding: 2px 12px; background: #111; color: #fff !important; font: 700 clamp(12px, 1.9vw, 20px) 'Zen Kaku Gothic New', sans-serif; transform: skewX(-8deg); }
+  .ao-yakuman::before { background: rgba(0, 0, 0, 0.72); }
+  .ao-yakuman .ao-band { background: repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.05) 0 3px, transparent 3px 42px), linear-gradient(180deg, #000 0 6%, #b71c1c 6% 50%, #5d0a0a 50% 94%, #000 94%);
+    box-shadow: 0 0 0 4px #ffd75a inset, 0 0 60px 14px rgba(255, 40, 40, 0.6); }
+  .ao-yakuman .ao-line { font-size: clamp(40px, 11vw, 140px); letter-spacing: 0.08em; }
+  .ao-crack { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
+  .ao-crack path { fill: none; stroke: rgba(255, 255, 255, 0.85); stroke-width: 0.5; stroke-dasharray: 60; stroke-dashoffset: 60; animation: aoCrack 0.25s ease-out 0.15s forwards; }
+  .ao-yakuman { animation: drShake 0.08s linear 0.15s 6; }
+  @keyframes aoIn { from { transform: rotate(-6deg) translateX(110%); } to { transform: rotate(-6deg) translateX(0); } }
+  @keyframes aoOut { to { transform: rotate(-6deg) translateX(-110%); } }
+  @keyframes aoWord { 0% { opacity: 0; transform: skewX(-8deg) scale(2.2); } 100% { opacity: 1; transform: skewX(-8deg) scale(1); } }
+  @keyframes aoCrack { to { stroke-dashoffset: 0; } }
   .seat-card.fx-hit { box-shadow: inset 0 0 0 2px var(--jz-gold), 0 0 0 2px var(--jz-gold), var(--jz-shadow); }
   @media (prefers-reduced-motion: reduce) {
     .dr::before, .dr.fx-heavy::after { animation: none; opacity: 0; }

@@ -12,4 +12,5 @@ export const FX_LABELS: Record<CutinId, string> = {
   shika: '四華', shipei: '四北', hachika: '八華', shikashipei: '四華四北', hachikashipei: '八華四北',
   kinpei: '金北',
   yaku: '役',
+  aori: 'どっから切っとんねーん！', yakumanHoju: '役満放銃',
 };

@@ -28,6 +28,12 @@
   font-style: normal;
   font-display: block;
 }
+/* [2026-10-15 煽り演出のラフ] 煽り「どっから切っとんねーん！」と役満放銃のセリフ専用 (Dela Gothic One のサブセット) */
+@font-face {
+  font-family: 'CI Aori';
+  src: url('/fonts/ci-delagothicone-aori.woff2?v=20261015') format('woff2');
+  font-display: block;
+}
 /* [2026-10-14 リョー 4 版の 3 の答え a] 白ぽっちの予告の決め台詞「白って 200 色あんねん」専用 (Dela Gothic One のサブセット、この台詞の字だけ) */
 @font-face {
   font-family: 'CI Line';
