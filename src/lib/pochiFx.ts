@@ -131,6 +131,10 @@ export function lampRoll(good: boolean, rnd: number): LampTiming | null { return
  *  フリーズの時は引いた音が鳴らないので遅れも無い */
 export const DELAY_RATE = { good: 0.2, bad: 0.05 } as const;
 export const DELAY_MS = 300;
+/** 予告 (稲妻 ・ 決め台詞 ・ 白黒) の尺。終わってから確定の帯と絞りに入る。
+ *  [2026-10-15 リョー「ポッチツモチャンスの演出が出てくるのが高速すぎてイけないな」] 稲妻 1.6 → 2.6 秒、決め台詞 2.4 → 3.3 秒、白黒 2.2 → 3.0 秒。
+ *  帯の入りも 0.28 → 0.5 秒にした (PochiSqueeze の .sq-band.teaser)。1 回の演出は 4 秒まで (fx6) */
+export const TEASER_MS = { bolt: 2600, line: 3300, mono: 3000 } as const;
 export function delayRoll(good: boolean, rnd: number): boolean { return rnd < (good ? DELAY_RATE.good : DELAY_RATE.bad); }
 
 // ---- フリーズ (2026-10-15 fx7 の答え「これぽっちの演出に入れたい」、暗転 a ・ 止め絵) ----

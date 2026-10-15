@@ -18,7 +18,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { playSound } from './prefs';
   import FreezeFx from './FreezeFx.svelte';
-  import { DELAY_MS, FREEZE_MS, POCHI_DOT, POCHI_GOOD, STEP_GLOW, STEP_WORD, TAME_BEATS, TAME_FROM, TAME_TO, pochiRevealText, pochiTopStep, stepAt,
+  import { DELAY_MS, FREEZE_MS, TEASER_MS, POCHI_DOT, POCHI_GOOD, STEP_GLOW, STEP_WORD, TAME_BEATS, TAME_FROM, TAME_TO, pochiRevealText, pochiTopStep, stepAt,
     type Glow, type LampTiming, type PochiColor, type PochiFreeze, type Teaser } from './pochiFx';
 
   export let color: PochiColor;
@@ -181,10 +181,10 @@
       // [2026-10-15 fx9 B7] 無演出: 予告を出さずにそのまま (確定の帯があればそれから) 絞りに入る
       startKakutei();
     } else {
-      // 予告: 稲妻と「ぽっちチャンス」の帯 (1.6 秒)、または決め台詞のカットインの後に帯 (2.4 秒)。その後に確定の帯と絞り
-      // [2026-10-15 fx5 V3] 3 つ目の予告「白黒」: 卓の色が抜けて牌の光だけ残り、2.2 秒後に色が戻る
+      // 予告: 稲妻と「ぽっちチャンス」の帯、または決め台詞のカットインの後に帯。その後に確定の帯と絞り (尺は pochiFx の TEASER_MS)
+      // [2026-10-15 fx5 V3] 3 つ目の予告「白黒」: 卓の色が抜けて牌の光だけ残り、終わりに色が戻る
       if (teaser === 'line') { se('kira', 0.6); se('gyuiin', 0.5); } else if (teaser === 'mono') { se('gashan', 0.4); se('kira', 0.7); } else { se('gashan', 0.6); se('gyuiin', 0.5); }
-      teaserTimer = setTimeout(() => { teaserShowing = false; startKakutei(); }, teaser === 'line' ? 2400 : teaser === 'mono' ? 2200 : 1600);
+      teaserTimer = setTimeout(() => { teaserShowing = false; startKakutei(); }, TEASER_MS[teaser]);
     }
     // 触られないまま 30 秒たったら一気にめくる (他の人を待たせ続けない)。他の人の画面は引いた人に合わせるので 60 秒
     idleTimer = setInterval(() => {
@@ -289,25 +289,26 @@
   /* 牌の後ろに描く (上から牌に落ちて見える) */
   .sq-bolt { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .sq-bolt path { fill: none; stroke: #fff; stroke-width: 0.9; vector-effect: non-scaling-stroke; stroke-width: 7px; stroke-linejoin: round;
-    stroke-dasharray: 2000; stroke-dashoffset: 2000; animation: sqBoltDraw 0.18s linear forwards, sqBoltFade 0.4s ease-out 1.1s forwards;
+    stroke-dasharray: 2000; stroke-dashoffset: 2000; animation: sqBoltDraw 0.3s linear forwards, sqBoltFade 0.5s ease-out 2s forwards;
     filter: drop-shadow(0 0 8px #8fd0ff) drop-shadow(0 0 20px #4a8cff); }
   .sq-bolt.glow-gold path { filter: drop-shadow(0 0 8px #ffe27a) drop-shadow(0 0 22px #f2a43a); }
-  .sq-bolt.glow-rainbow path { filter: drop-shadow(0 0 8px #ff5ad1) drop-shadow(0 0 22px #5ad1ff); animation: sqBoltDraw 0.18s linear forwards, sqHue 0.6s linear infinite, sqBoltFade 0.4s ease-out 1.1s forwards; }
-  .sq-flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 5; pointer-events: none; animation: sqFlash 0.35s ease-out 0.15s; }
-  .sq-band.teaser { top: 70%; --h: clamp(60px, 13vh, 110px); --fs: calc(min(8vw, 76px, var(--h) * 0.6)); z-index: 6; animation-delay: 0.35s; }
-  .sq-band.teaser .sq-word { animation-delay: 0.35s; }
-  /* 決め台詞のカットイン: ピンクの斜めの帯が右から入り、1.2 秒で左へ抜ける。字は Dela Gothic One (CI Line)。帯の縁の光りが期待度 */
+  .sq-bolt.glow-rainbow path { filter: drop-shadow(0 0 8px #ff5ad1) drop-shadow(0 0 22px #5ad1ff); animation: sqBoltDraw 0.3s linear forwards, sqHue 0.6s linear infinite, sqBoltFade 0.5s ease-out 2s forwards; }
+  .sq-flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 5; pointer-events: none; animation: sqFlash 0.45s ease-out 0.25s; }
+  /* [10-15「出てくるのが高速すぎて」] 予告の帯は稲妻が落ちきってから 0.5 秒かけて入り、字も 0.6 秒で座る */
+  .sq-band.teaser { top: 70%; --h: clamp(60px, 13vh, 110px); --fs: calc(min(8vw, 76px, var(--h) * 0.6)); z-index: 6; animation-delay: 0.5s; animation-duration: 0.5s; }
+  .sq-band.teaser .sq-word { animation-delay: 0.6s; animation-duration: 0.6s; }
+  /* 決め台詞のカットイン: ピンクの斜めの帯が右から入り、1.8 秒で左へ抜ける。字は Dela Gothic One (CI Line)。帯の縁の光りが期待度 */
   .sq-ci { position: absolute; left: -10%; right: -10%; top: 42%; height: clamp(90px, 24vh, 200px); margin-top: calc(clamp(90px, 24vh, 200px) / -2); z-index: 6; overflow: hidden;
     display: flex; align-items: center; justify-content: center; transform: rotate(-6deg); pointer-events: none;
     background: repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.07) 0 3px, transparent 3px 42px), linear-gradient(180deg, #120612 0 6%, #c2185b 6% 50%, #7b0e3c 50% 94%, #120612 94%);
-    box-shadow: 0 0 0 4px #fff inset, 0 12px 34px rgba(0, 0, 0, 0.6); animation: sqCiIn 0.22s cubic-bezier(0.2, 0.9, 0.2, 1) both, sqCiOut 0.2s ease-in 1.2s forwards; }
+    box-shadow: 0 0 0 4px #fff inset, 0 12px 34px rgba(0, 0, 0, 0.6); animation: sqCiIn 0.35s cubic-bezier(0.2, 0.9, 0.2, 1) both, sqCiOut 0.3s ease-in 1.8s forwards; }
   .sq-ci.glow-gold { box-shadow: 0 0 0 4px #f2d27a inset, 0 0 40px 10px rgba(255, 200, 70, 0.8); }
   .sq-ci.glow-rainbow { box-shadow: 0 0 0 4px #fff inset, 0 0 46px 12px rgba(120, 220, 255, 0.85); }
   .sq-ci-speed { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, transparent 0 18px, rgba(255, 255, 255, 0.16) 18px 20px); }
   .sq-ci-line { position: relative; font-family: 'CI Line', 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: clamp(30px, 8.4vw, 96px); color: #fff; white-space: nowrap;
-    -webkit-text-stroke: clamp(4px, 0.6vw, 7px) #120612; paint-order: stroke fill; text-shadow: 5px 5px 0 #3a0820; transform: skewX(-8deg); animation: sqCiWord 0.3s cubic-bezier(0.2, 1.6, 0.4, 1) 0.12s both; }
+    -webkit-text-stroke: clamp(4px, 0.6vw, 7px) #120612; paint-order: stroke fill; text-shadow: 5px 5px 0 #3a0820; transform: skewX(-8deg); animation: sqCiWord 0.45s cubic-bezier(0.2, 1.6, 0.4, 1) 0.2s both; }
   .sq-ci-sig { position: absolute; right: 16%; bottom: 8%; font: 700 clamp(12px, 2.2vw, 24px) 'Zen Kaku Gothic New', sans-serif; color: #ffd1e6; letter-spacing: 0.2em; }
-  .sq-band.teaser.line, .sq-band.teaser.line .sq-word { animation-delay: 1.3s; }
+  .sq-band.teaser.line, .sq-band.teaser.line .sq-word { animation-delay: 2s; }
   @keyframes sqCiIn { from { transform: rotate(-6deg) translateX(110%); } to { transform: rotate(-6deg) translateX(0); } }
   @keyframes sqCiOut { to { transform: rotate(-6deg) translateX(-110%); } }
   @keyframes sqCiWord { 0% { opacity: 0; transform: skewX(-8deg) scale(2.2); } 100% { opacity: 1; transform: skewX(-8deg) scale(1); } }
@@ -350,8 +351,8 @@
   @media (prefers-reduced-motion: reduce) { .sq-edge::before { animation: none; opacity: 0.6; } .sq-edge-run { animation: none; opacity: 0; } }
   /* [2026-10-15 fx5 V3] 白黒の予告: 幕を薄くして卓を見せ、卓の色を抜く。牌 (上の層) は色のまま光る */
   .sq.mono { background: rgba(4, 8, 6, 0.3); transition: background 0.2s; }
-  .sq-mono { position: absolute; inset: 0; z-index: 1; backdrop-filter: grayscale(1) contrast(1.35) brightness(0.75); animation: sqMono 2.2s ease-out both; pointer-events: none; }
-  .sq-mono-scan { position: absolute; left: 0; right: 0; height: 18%; top: -20%; background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.35), transparent); animation: sqScan 1.1s linear 0.2s 2; }
+  .sq-mono { position: absolute; inset: 0; z-index: 1; backdrop-filter: grayscale(1) contrast(1.35) brightness(0.75); animation: sqMono 3s ease-out both; pointer-events: none; }
+  .sq-mono-scan { position: absolute; left: 0; right: 0; height: 18%; top: -20%; background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.35), transparent); animation: sqScan 1.4s linear 0.2s 2; }
   @keyframes sqMono { 0% { opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { opacity: 0; } }
   @keyframes sqScan { 0% { top: -20%; } 100% { top: 105%; } }
   .sq-band.teaser.mono { filter: grayscale(1) contrast(1.4); }
