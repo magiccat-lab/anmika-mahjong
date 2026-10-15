@@ -38,7 +38,10 @@ test('FX8: 入口の演出一覧に割合と当たりが出る (無演出の行�
   // 無演出の札: 予告なし (10-15 fx9 B7) ・ 光りが白のまま ・ 予告の光りが白 ・ 玉が白 ・ リーチ無し
   await expect(dlg.locator('.tag')).toHaveCount(5);
   // [10-15 先輩「ラフで画像とか入れてあげよう」「出る割合は～の1行目消そう」] 白ぽっちの行は絵 (15 枚が読める)、サイコロは玉、頭の 1 行は無い
-  await expect(dlg.locator('td.pic img')).toHaveCount(15);
+  // [10-15 fx10] 引いた後の告知ランプ (先 ・ 後) の絵 2 枚を足して 17 枚
+  await expect(dlg.locator('td.pic img')).toHaveCount(17);
+  await expect(dlg).toContainText('告知ランプ (先告知)');
+  await expect(dlg).toContainText('遅れ (ピキーンが 0.3 秒遅れる)');
   // 絵は loading=lazy なので、画面の外の分は URL が読めるかで見る
   for (const src of await dlg.locator('td.pic img').evaluateAll((els) => els.map((e) => e.getAttribute('src')!))) {
     const res = await page.request.get(src);

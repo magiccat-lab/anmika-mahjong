@@ -10,7 +10,7 @@ const RAW = 'tmp/fx_odds_raw';
 test.skip(!process.env.FX_ODDS_IMAGES, 'FX_ODDS_IMAGES=1 の時だけ撮る');
 test.setTimeout(180_000);
 
-type Shot = { name: string; color?: string; teaser?: string | null; freeze?: string | null; step?: number; premium?: boolean; waitMs?: number; pull?: number };
+type Shot = { name: string; color?: string; teaser?: string | null; freeze?: string | null; lamp?: 'pre' | 'post' | null; step?: number; premium?: boolean; waitMs?: number; pull?: number };
 const SHOTS: Shot[] = [
   { name: 'freeze_black', freeze: 'black', waitMs: 120 },
   { name: 'freeze_still', freeze: 'still', waitMs: 700 },
@@ -23,6 +23,9 @@ const SHOTS: Shot[] = [
   { name: 'bolt_gold', teaser: 'bolt', step: 3, waitMs: 450 },
   { name: 'bolt_white', teaser: 'bolt', step: 1, waitMs: 450 },
   // 光りの段: 予告なしで、点がのぞく手前 (0.44) まで絞った所。溜め (0.37〜) は指の半分しか進まないので 0.51 引く
+  // [fx10] 告知ランプ: 先告知は引いた直後、後告知はめくれた後
+  { name: 'lamp_pre', teaser: 'none', step: 1, lamp: 'pre', waitMs: 900 },
+  { name: 'lamp_post', teaser: 'none', step: 3, lamp: 'post', waitMs: 700, pull: 1.05 },
   ...[4, 3, 2, 1, 0].map((k) => ({ name: `step${k}`, teaser: 'none', step: k, waitMs: 500, pull: 0.51 })),
 ];
 
@@ -47,6 +50,8 @@ test('演出一覧の絵を撮る', async ({ browser }) => {
       w.__forceFreeze = s.freeze ?? null;
       w.__forceStep = typeof s.step === 'number' ? s.step : undefined;
       w.__forcePremium = typeof s.premium === 'boolean' ? s.premium : false;
+      w.__forceLamp = s.lamp ?? null;
+      w.__forceDelay = false;
       const g = w.__game;
       g.game.lizhi.add(0);
       g.game.feverActive = [false, false, false];

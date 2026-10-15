@@ -1301,6 +1301,9 @@ export type PochiFxRelay = {
   teaser?: 'bolt' | 'line' | 'mono' | 'none';
   /** フリーズ (当たりの確定、暗転 ・ 止め絵) */
   freeze?: 'black' | 'still';
+  /** [2026-10-15 fx10] 告知ランプ (先 ・ 後) と遅れ */
+  lamp?: 'pre' | 'post';
+  delay?: boolean;
 };
 const POCHI_FX_COLORS = new Set(['blue', 'red', 'green', 'yellow']);
 const POCHI_FX_GLOWS = new Set(['white', 'gold', 'rainbow']);
@@ -1330,6 +1333,9 @@ export function sanitizePochiFx(value: Record<string, unknown>): PochiFxRelay | 
     if (value.teaser === 'bolt' || value.teaser === 'line' || value.teaser === 'mono' || value.teaser === 'none') out.teaser = value.teaser;
     // [2026-10-15 fx7] フリーズ (暗転 ・ 止め絵) も中継する
     if (value.freeze === 'black' || value.freeze === 'still') out.freeze = value.freeze;
+    // [2026-10-15 fx10] 告知ランプと遅れも中継する
+    if (value.lamp === 'pre' || value.lamp === 'post') out.lamp = value.lamp;
+    if (value.delay === true) out.delay = true;
   }
   return out;
 }

@@ -5,7 +5,7 @@
   // [2026-10-15 リョー「ページが見づらいから、ラフで画像とか入れてあげよう。文字サイズも小さいし。出る割合は～の1行目消そう」
   //  「必ず出る演出は別に画像つけなくていいや」] 行ごとに本物の卓で撮ったコマ (public/fx_odds/、tests/fx_odds_images.spec.ts で撮り直す)、
   //  サイコロの玉は玉の絵。字を大きくし、頭の説明の 1 行は消した。白ぽっちの数の前提 (当たり 50%) は表の下の注に移した
-  import { diceBallRows, diceReachRows, pct, pochiOpeningRows, pochiStepRows, pochiTeaserGlowRows, type OddsRow } from './fxOdds';
+  import { diceBallRows, diceReachRows, pct, pochiExtraRows, pochiOpeningRows, pochiStepRows, pochiTeaserGlowRows, type OddsRow } from './fxOdds';
   import { CUTIN_TIER_DURATION_MS } from './store';
 
   export let onClose: () => void = () => {};
@@ -13,6 +13,7 @@
   const sec = (ms: number) => `${(ms / 1000).toFixed(1)} 秒`;
   const sections: { title: string; lead: string; rows: OddsRow[]; hitLabel: string }[] = [
     { title: '白ぽっち: 引いた瞬間', lead: 'リーチ中に自分で白ぽっちを引いた時に、どれか 1 つが出ます。何も出ない無演出でも当たる事があります', rows: pochiOpeningRows(), hitLabel: '当たり' },
+    { title: '白ぽっち: 引いた後', lead: '告知ランプと遅れは、引いた瞬間の演出とは別に決まります。当たりなら告知ランプが必ずどちらかで光ります', rows: pochiExtraRows(), hitLabel: '当たり' },
     { title: '白ぽっち: 稲妻と決め台詞の光り', lead: '稲妻 ・ 決め台詞の光りの色は、絞りの光りが上がる所と同じです', rows: pochiTeaserGlowRows(), hitLabel: '当たり' },
     { title: '白ぽっち: 絞りの光り (ステップアップ)', lead: '絞ると光りが白 → 青 → 緑 → 金 → 虹と上がります。どこで止まるか。白のままが無演出です', rows: pochiStepRows(), hitLabel: '当たり' },
     { title: 'サイコロチャンス: 玉の色', lead: '1 振りごと。宣言した 2 つの目がそろえば当たり、ゾロ目はリプレイ', rows: diceBallRows(), hitLabel: '当たり' },

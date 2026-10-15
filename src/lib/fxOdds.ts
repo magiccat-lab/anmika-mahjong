@@ -3,7 +3,7 @@
 // 0〜1 の乱数を細かく順に入れて数える。演出の割合を変えたらこのページの数も一緒に変わる。
 //  - 出る割合: その演出が出る割合 (白ぽっちは 1 回引くごと、サイコロは 1 振りごと)
 //  - 当たり: その演出が出た時に当たりだった割合 (パチスロの「信頼度」)
-import { expectationStep, freezeRoll, premiumRoll, teaserRoll, type PochiFreeze } from './pochiFx';
+import { delayRoll, expectationStep, freezeRoll, lampRoll, premiumRoll, teaserRoll, type PochiFreeze } from './pochiFx';
 import { ballColor, planRoll, type BallColor } from './diceFx';
 
 // img: 演出一覧に出す絵 (public/fx_odds/<img>.webp、本物の卓で撮ったコマ)。ball: サイコロの玉の色 (絵の代わりに玉を描く)
@@ -63,6 +63,26 @@ export function pochiOpeningRows(pGood = 0.5): OddsRow[] {
     row('予告「白って 200 色あんねん」', o, (x) => x.teaser === 'line', { img: 'teaser_line' }),
     row('予告「稲妻」', o, (x) => x.teaser === 'bolt', { img: 'teaser_bolt' }),
     row('無演出 (予告なし)', o, (x) => x.teaser === 'none', { none: true, note: '予告が何も出ないまま絞りに入る', img: 'teaser_none' }),
+  ];
+}
+
+/** [2026-10-15 fx10] 引いた後の演出 (告知ランプ ・ 遅れ)。引いた瞬間の演出とは別に決まる。
+ *  遅れはフリーズの時は出ない (引いた音が鳴らない) ので、フリーズの分を除いて数える */
+export function pochiExtraRows(pGood = 0.5): OddsRow[] {
+  const g = grid();
+  const share = (good: boolean, pick: (r: number) => boolean): number => {
+    const noFreeze = g.filter((r) => freezeRoll(good, r) === null).length / N;
+    return noFreeze * (g.filter(pick).length / N);
+  };
+  const mk = (name: string, good: number, bad: number, extra: Partial<OddsRow> = {}): OddsRow => {
+    const rate = pGood * good + (1 - pGood) * bad;
+    return { name, rate, hit: rate > 0 ? (pGood * good) / rate : null, ...extra };
+  };
+  const lamp = (good: boolean, t: 'pre' | 'post'): number => g.filter((r) => lampRoll(good, r) === t).length / N;
+  return [
+    mk('告知ランプ (先告知)', lamp(true, 'pre'), lamp(false, 'pre'), { note: '引いた瞬間に画面の外周が金に光る', img: 'lamp_pre' }),
+    mk('告知ランプ (後告知)', lamp(true, 'post'), lamp(false, 'post'), { note: 'めくれた後に画面の外周が金に光る', img: 'lamp_post' }),
+    mk('遅れ (ピキーンが 0.3 秒遅れる)', share(true, (r) => delayRoll(true, r)), share(false, (r) => delayRoll(false, r)), { note: '音だけの演出。牌と画面は普通に動く' }),
   ];
 }
 

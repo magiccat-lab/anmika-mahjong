@@ -12,12 +12,14 @@
   //    プレミアの時はプレミアが予告を兼ねる
   //  - フリーズ (10-15 fx7「これぽっちの演出に入れたい」): 当たりのまれな確定で、予告の代わりに画面と音が 1.3 秒止まる (暗転 / 止め絵)。
   //    明けにキュインが鳴り、光りは最初から虹 (FreezeFx、割合は pochiFx の FREEZE_RATE)
+  //  - 告知ランプ (10-15 fx10 L1 a): 当たりなら画面の外周が金に光ってキュイン。引いた瞬間 (先告知) か、めくれた後 (後告知)
+  //  - 遅れ (10-15 fx10 B1 a): 引いた時のピキーンだけが 0.3 秒遅れる。割合はどちらも pochiFx (LAMP_PRE_RATE ・ DELAY_RATE)
   // 閉じ方は前と同じ 3 重 (めくれて 1.6 秒 ・ めくれた後のタップ ・ 触られないまま 30 秒で自動でめくる)
   import { onMount, onDestroy } from 'svelte';
   import { playSound } from './prefs';
   import FreezeFx from './FreezeFx.svelte';
-  import { FREEZE_MS, POCHI_DOT, POCHI_GOOD, STEP_GLOW, STEP_WORD, TAME_BEATS, TAME_FROM, TAME_TO, pochiRevealText, pochiTopStep, stepAt,
-    type Glow, type PochiColor, type PochiFreeze, type Teaser } from './pochiFx';
+  import { DELAY_MS, FREEZE_MS, POCHI_DOT, POCHI_GOOD, STEP_GLOW, STEP_WORD, TAME_BEATS, TAME_FROM, TAME_TO, pochiRevealText, pochiTopStep, stepAt,
+    type Glow, type LampTiming, type PochiColor, type PochiFreeze, type Teaser } from './pochiFx';
 
   export let color: PochiColor;
   /** でかぽっちなら 'p1' / 'p2' */
@@ -30,6 +32,10 @@
   export let premium = false;
   /** 予告の種類: 稲妻か、決め台詞「白って 200 色あんねん」のカットイン (4 版の 3 の答え)。引いた人が決めて他の席へ流す */
   export let teaser: Teaser = 'bolt';
+  /** 告知ランプ: 当たりの時に画面の外周が光る (pre = 引いた瞬間、post = めくれた後)。引いた人が決めて他の席へ流す */
+  export let lamp: LampTiming | null = null;
+  /** 遅れ: 引いた時のピキーンが 0.3 秒遅れる。引いた人が決めて他の席へ流す */
+  export let delay = false;
   /** フリーズ (当たりの確定)。引いた人が決めて他の席へ流す。出る時は予告とプレミアは出さない */
   export let freeze: PochiFreeze | null = null;
   /** 前の型の光り 2 段 (古い端末から届いた時だけ使う) */
@@ -65,6 +71,7 @@
   let premiumShowing = premium && !freeze;
   // 無演出 (teaser 'none') は予告を出さない
   let teaserShowing = !premium && !freeze && teaser !== 'none';
+  let lampOn = false;
   let kakuteiShowing = false;
   const teaserGlow = topStep >= 4 ? 'rainbow' : topStep >= 3 ? 'gold' : 'white';
   let stepNow = -1;
@@ -75,7 +82,13 @@
     : stepNow >= 0 ? STEP_GLOW[stepNow] : teaserShowing ? teaserGlow : (kakutei === 'good' || afterFreeze) ? 'rainbow' : 'none';
   $: if (readOnly) setPeel(progress);
 
-  function se(name: string, vol = 0.6): void { playSound(`/sounds/fx/${name}.mp3`, vol); }
+  // 試験 (Playwright) は録画に音が入らないので、鳴らした音と時刻を window.__seLog に残す (遅れの試験と録画の音入れ)
+  function snd(path: string, vol: number): void {
+    playSound(path, vol);
+    if (typeof navigator !== 'undefined' && (navigator as any).webdriver) ((window as any).__seLog ??= []).push({ path, vol, at: Date.now() });
+  }
+  function se(name: string, vol = 0.6): void { snd(`/sounds/fx/${name}.mp3`, vol); }
+  function lightLamp(): void { if (lampOn || closing) return; lampOn = true; se('kyuin', 0.7); }
   function setPeel(p: number): void {
     if (revealed || closing) return;
     const v = Math.max(0, Math.min(1, p));
@@ -97,7 +110,8 @@
     revealed = true;
     peel = 1;
     if (!readOnly) onProgress(1);
-    if (good) { se('kyuin', 0.6); playSound('/sounds/se_a.mp3', 0.6); } else { se('hazure', 0.6); playSound('/sounds/se_b.mp3', 0.6); }
+    if (good) { se('kyuin', 0.6); snd('/sounds/se_a.mp3', 0.6); } else { se('hazure', 0.6); snd('/sounds/se_b.mp3', 0.6); }
+    if (lamp === 'post' && good) lampTimer = setTimeout(lightLamp, 350);
     closeTimer = setTimeout(close, 1600);
   }
   function close(): void {
@@ -136,6 +150,8 @@
   let premiumTimer: ReturnType<typeof setTimeout> | undefined;
   let teaserTimer: ReturnType<typeof setTimeout> | undefined;
   let freezeTimer: ReturnType<typeof setTimeout> | undefined;
+  let lampTimer: ReturnType<typeof setTimeout> | undefined;
+  let delayTimer: ReturnType<typeof setTimeout> | undefined;
   function startKakutei(): void {
     if (!kakutei) return;
     kakuteiShowing = true;
@@ -147,14 +163,19 @@
     if (freeze) {
       // フリーズ: 引いた音も鳴らさず、いきなり止まる。明けのキュインは FreezeFx が鳴らす
       freezeTimer = setTimeout(() => { freezeShowing = false; afterFreeze = true; startKakutei(); }, FREEZE_MS);
+    } else if (delay) {
+      // 遅れ: 牌と画面は普通に出して、ピキーンだけ 0.3 秒遅れる
+      delayTimer = setTimeout(() => se('pikiin', 0.4), DELAY_MS);
     } else {
       se('pikiin', 0.4);
     }
+    // 先告知のランプは引いた直後 (フリーズの時は明けてから)
+    if (lamp === 'pre') lampTimer = setTimeout(lightLamp, freeze ? FREEZE_MS + 100 : 250);
     if (freeze) {
       // 予告とプレミアは出さない
     } else if (premium) {
       // プレミア: 虹の光線とアンミカーニバルのサビ 3 秒 (曲のファイルは git に入れない public/sounds/bgm/)。終わってから確定の帯と絞り
-      playSound('/sounds/bgm/premium_sabi.mp3', 0.55);
+      snd('/sounds/bgm/premium_sabi.mp3', 0.55);
       premiumTimer = setTimeout(() => { premiumShowing = false; startKakutei(); }, 2800);
     } else if (teaser === 'none') {
       // [2026-10-15 fx9 B7] 無演出: 予告を出さずにそのまま (確定の帯があればそれから) 絞りに入る
@@ -171,7 +192,7 @@
       if (Date.now() - lastTouch > (readOnly ? 60000 : 30000)) { if (readOnly) close(); else setPeel(1); }
     }, 1000);
   });
-  onDestroy(() => { clearTimeout(closeTimer); clearInterval(idleTimer); clearTimeout(kakuteiTimer); clearTimeout(premiumTimer); clearTimeout(teaserTimer); clearTimeout(freezeTimer); });
+  onDestroy(() => { clearTimeout(closeTimer); clearInterval(idleTimer); clearTimeout(kakuteiTimer); clearTimeout(premiumTimer); clearTimeout(teaserTimer); clearTimeout(freezeTimer); clearTimeout(lampTimer); clearTimeout(delayTimer); });
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -179,6 +200,7 @@
   tabindex="-1" on:pointerdown={onDown} on:pointermove={onMove} on:pointerup={onUp} on:pointercancel={onUp} on:keydown={onKey}>
   {#if who}<div class="sq-who">{who}{readOnly ? ' が絞っています' : ''}</div>{/if}
   {#if freezeShowing && freeze}<FreezeFx kind={freeze} durationMs={FREEZE_MS} />{/if}
+  {#if lampOn}<div class="sq-edge" aria-hidden="true"><div class="sq-edge-run"></div></div>{/if}
   {#if premiumShowing}
     <div class="sq-rays" aria-hidden="true"></div>
     <div class="sq-premium" aria-hidden="true">アンミカーニバル</div>
@@ -315,6 +337,17 @@
   @keyframes sqWord { 0% { opacity: 0; transform: skewX(-12deg) scale(2.4); } 60% { opacity: 1; transform: skewX(-12deg) scale(0.94); } 100% { opacity: 1; transform: skewX(-12deg) scale(1); } }
   @keyframes sqDraw { to { stroke-dashoffset: 0; } }
   @media (prefers-reduced-motion: reduce) { .sq-band, .sq-word, .sq-crack path, .sq-shake.go, .sq-rays, .sq-slow, .sq-ci-line { animation: none; } .sq-crack path { stroke-dashoffset: 0; } .sq-tile.glow-rainbow { animation: none; box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #ff5ad1, 0 0 80px 30px rgba(120, 220, 255, 0.9); } }
+  /* [2026-10-15 fx10 L1] 告知ランプ = 画面の外周。点いた瞬間に白く光り、金の縁が脈打つ。
+     影の大きさは動かさず、重ねた 2 枚の opacity だけを動かす (影を毎こま描き直すと録画もスマホも重い) */
+  .sq-edge { position: absolute; inset: 0; z-index: 7; pointer-events: none;
+    box-shadow: inset 0 0 0 6px #ffd23b, inset 0 0 70px 26px rgba(255, 170, 30, 0.8), inset 0 0 160px 40px rgba(255, 120, 0, 0.3); }
+  .sq-edge::before { content: ''; position: absolute; inset: 0; box-shadow: inset 0 0 0 10px #fff3b0, inset 0 0 110px 44px rgba(255, 200, 60, 0.95);
+    opacity: 0; animation: sqEdgePulse 0.6s ease-in-out 0.35s infinite alternate; will-change: opacity; }
+  .sq-edge-run { position: absolute; inset: 0; box-shadow: inset 0 0 0 36px #fff, inset 0 0 220px 90px rgba(255, 255, 255, 0.9);
+    animation: sqEdgeFlash 0.4s ease-out forwards; will-change: opacity; }
+  @keyframes sqEdgePulse { to { opacity: 1; } }
+  @keyframes sqEdgeFlash { to { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .sq-edge::before { animation: none; opacity: 0.6; } .sq-edge-run { animation: none; opacity: 0; } }
   /* [2026-10-15 fx5 V3] 白黒の予告: 幕を薄くして卓を見せ、卓の色を抜く。牌 (上の層) は色のまま光る */
   .sq.mono { background: rgba(4, 8, 6, 0.3); transition: background 0.2s; }
   .sq-mono { position: absolute; inset: 0; z-index: 1; backdrop-filter: grayscale(1) contrast(1.35) brightness(0.75); animation: sqMono 2.2s ease-out both; pointer-events: none; }

@@ -121,6 +121,18 @@ export function teaserRoll(good: boolean, rnd1: number, rnd2: number): Teaser {
   return rnd2 < 0.5 ? 'line' : 'bolt';
 }
 
+// ---- 告知ランプと遅れ (2026-10-15 fx10 の答え L1 a ・ B1 a。演出一覧のページも同じ数を読む) ----
+/** 告知ランプ: 当たりなら必ず画面の外周が金に光る。引いた瞬間 (先告知) が 3 割、めくれた後 (後告知) が 7 割。外れは光らない
+ *  (fx9 B2 の「ぽっちランプがダサすぎる、画面の外周が光るとかで」から作り直した形) */
+export type LampTiming = 'pre' | 'post';
+export const LAMP_PRE_RATE = 0.3;
+export function lampRoll(good: boolean, rnd: number): LampTiming | null { return good ? (rnd < LAMP_PRE_RATE ? 'pre' : 'post') : null; }
+/** 遅れ: 引いた時の「ピキーン」だけが 0.3 秒遅れる (牌と画面は普通に動く)。当たりの 20%、外れの 5%。
+ *  フリーズの時は引いた音が鳴らないので遅れも無い */
+export const DELAY_RATE = { good: 0.2, bad: 0.05 } as const;
+export const DELAY_MS = 300;
+export function delayRoll(good: boolean, rnd: number): boolean { return rnd < (good ? DELAY_RATE.good : DELAY_RATE.bad); }
+
 // ---- フリーズ (2026-10-15 fx7 の答え「これぽっちの演出に入れたい」、暗転 a ・ 止め絵) ----
 /** 引いた瞬間に画面と音が 1.3 秒止まり、明けにキュイン。当たりの確定で、外れでは出さない。
  *  出た時は予告の代わりで、光りは虹まで上がる (プレミアとは重ならない)。当たりの 3% が暗転、6% が止め絵 */
