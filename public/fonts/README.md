@@ -54,3 +54,8 @@
 
 NN金北のカットイン (春春金北 ・ 夏夏金北 ・ 秋秋金北 ・ 冬冬金北) で足りなかった 5 字 (春 ・ 夏 ・ 秋 ・ 冬 ・ 金)。`css2?family=Mochiy+Pop+One&text=春夏秋冬金` で取った物 (1.6KB)。
 `src/app.css` で同じ 'FX Kana' に unicode-range で重ねる (元のサブセットの字の一覧は残っていないので、取り直さずに足した)
+
+# fx-mochiypopone-fuyu.woff2 (2026-10-15)
+
+冬冬金北の冬めくり (src/lib/FuyuFlip.svelte) の字だけのサブセット。`'FX Fuyu'` で使う (app.css)。
+字は「冬金北めくりタップでラストチャンス終了合計枚+×0123456789ヒット!」。取り方は上と同じ (`css2?family=Mochiy+Pop+One&text=<字>` を Chrome の UA で取り、返る woff2 をそのまま保存)。6.5KB

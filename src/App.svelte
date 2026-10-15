@@ -19,6 +19,7 @@
   import KinpeiModal from './lib/KinpeiModal.svelte';
   import SaiKoroModal from './lib/SaiKoroModal.svelte';
   import PochiSqueeze from './lib/PochiSqueeze.svelte';
+  import FuyuFlip from './lib/FuyuFlip.svelte';
   import Confetti from './lib/Confetti.svelte';
   import { publicPochiCandidates, kakuteiOf, POCHI_GOOD, pochiLeftForViewer, pochiTopStep, premiumRoll, legacyGlowOfStep, teaserRoll, freezeRoll, lampRoll, delayRoll, type Glow, type LampTiming, type PochiColor, type PochiFreeze, type Teaser } from './lib/pochiFx';
   import LobbyPanel from './lib/LobbyPanel.svelte';
@@ -188,7 +189,56 @@
   // 主因は PochiReveal が独立キュー + z-index 9999 で他演出を覆っていた事
   $: fxCutinBusy = !!$game.cutin || (($game.cutinQueue?.length ?? 0) > 0);
   $: fxPochiRevealShowing = (!!pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat)) || (onlineGameStarted && !!remotePochi);
-  $: fxPresentationBusy = fxCutinBusy || fxPochiRevealShowing;
+  // [2026-10-15 リョー ○ anmika-fuyu1 の 3] 冬冬金北の冬めくりは伏せた牌を自分でめくる (FuyuFlip)。
+  // 和了の帯が終わってから出し、めくり終わって OK を押すまで和了の板 ・ サイコロ ・ CPU の自動の次局送りを待たせる。
+  // 出し直さない印は局と和了の中身から作る (オンラインは投影が来るたびに和了の物が作り直されるので、物では覚えられない)
+  let fuyuFlipSeen = new Set<string>();
+  type FuyuFlipEntry = { key: string; player: PlayerId; log: Array<{ pai: string; tier: 'upper' | 'lower'; hit: number }> };
+  $: fuyuFlipEntry = ((): FuyuFlipEntry | null => {
+    if (viewMode !== 'single' || !$game.lastHuleResult || $game.game.state?.finished || $game.pendingKinpei || fxCutinBusy) return null;
+    const entries = ($game.ronResults?.length ?? 0) > 0 ? $game.ronResults
+      : ($game.lastWinner !== null ? [{ player: $game.lastWinner, result: $game.lastHuleResult }] : []);
+    const st: any = $game.game.state ?? {};
+    for (const hw of entries) {
+      const log = (hw.result as any)?.fuyuLog;
+      if (!Array.isArray(log) || log.length === 0 || !log.some((e: any) => e?.tier === 'lower')) continue;
+      const w = hw.player as PlayerId;
+      if ($game.game.effectiveHuapaiAtHule(w).filter((x: string) => x === 'f4').length < 2) continue;
+      const key = `${st.changshu ?? ''}-${st.jushu ?? ''}-${st.benbang ?? ''}-${w}:${log.map((e: any) => `${e.pai}${e.hit}`).join(',')}`;
+      if (fuyuFlipSeen.has(key)) continue;
+      return { key, player: w, log };
+    }
+    return null;
+  })();
+  // オンライン: 和了った人の画面がめくった枚数を流し、他の席 ・ 観戦は同じ所まで返す
+  let fuyuRemote: { key: string; seat: number; opened: number } | null = null;
+  $: fuyuFlipMine = !!fuyuFlipEntry && (!onlineGameStarted || fuyuFlipEntry.player === actorSeat);
+  $: fuyuFlipRemote = !!fuyuFlipEntry && onlineGameStarted && fuyuFlipEntry.player !== actorSeat && !$game.cpu[fuyuFlipEntry.player];
+  $: fuyuRemoteOpened = fuyuFlipEntry && fuyuRemote && fuyuRemote.seat === fuyuFlipEntry.player ? fuyuRemote.opened : 0;
+  $: if (!$game.roundEnded && fuyuRemote) fuyuRemote = null;
+  function sendFuyuFx(opened: number): void {
+    if (!onlineGameStarted || !fuyuFlipMine || !onlineWs || onlineWs.readyState !== WebSocket.OPEN) return;
+    try { onlineWs.send(JSON.stringify({ type: 'fuyuFx', opened })); } catch { /* 演出だけなので捨てる */ }
+  }
+  function onRemoteFuyuFx(gameSeat: number, msg: any): void {
+    const opened = Number(msg.opened);
+    if (!Number.isInteger(opened) || opened < 0) return;
+    const key = fuyuFlipEntry?.key ?? '';
+    const prev = fuyuRemote && fuyuRemote.seat === gameSeat && fuyuRemote.key === key ? fuyuRemote.opened : 0;
+    fuyuRemote = { key, seat: gameSeat, opened: Math.max(prev, opened) };
+  }
+  function fuyuFlipHand(w: PlayerId): string[] {
+    const out = handTiles($game.game.shoupai.get(w), w);
+    for (let i = 0; i < ($game.game.nukidora[w] ?? 0); i++) out.push('z4');
+    for (let i = 0; i < ($game.game.nukidoraGold[w] ?? 0); i++) out.push('gN');
+    return [...out, ...($game.game.huapai[w] ?? [])];
+  }
+  function closeFuyuFlip(key: string): void {
+    fuyuFlipSeen.add(key);
+    fuyuFlipSeen = fuyuFlipSeen;
+    if (fuyuRemote?.key === key) fuyuRemote = null;
+  }
+  $: fxPresentationBusy = fxCutinBusy || fxPochiRevealShowing || !!fuyuFlipEntry;
   // [2026-10-14 リョー「アンミカの演出、裏に上がりが出てばれてることあるよ」] 自分の白ぽっちの絞りの幕 (78%) の裏で
   // ツモのボタン ・ 上の帯の「ツモ和了」・ シャンテンが透けて、めくる前に和了が分かっていた。外れの時はリーチの自動ツモ切りが
   // 絞りの途中で牌を河へ捨てていた。絞りの間はどれも出さず、自動ツモ切り ・ 自動和了も絞りが閉じるまで待つ
@@ -1982,6 +2032,13 @@
       } else if (msg.type === 'cpuSaiFast') {
         // [2026-10-09 shun] 卓の誰かが CPU のサイコロをスキップした。server が刻みを詰めるので、演出も止める
         cpuSaiFast = true;
+      } else if (msg.type === 'fuyuFx') {
+        // [2026-10-15] 他の人の冬冬金北のめくり。めくった枚数だけが届く
+        const roomSeat = typeof msg.seat === 'number' ? msg.seat : -1;
+        if (roomSeat !== (onlineRoomMeta?.mySeat ?? -2)) {
+          const gameSeat = clientRoomToGameSeat(onlineActiveMapping, roomSeat);
+          if (gameSeat !== null && gameSeat !== actorSeat) onRemoteFuyuFx(gameSeat, msg);
+        }
       } else if (msg.type === 'pochiFx') {
         // [2026-10-14] 他の人の白ぽっちの絞り。自分の分は自分の画面で出している
         const roomSeat = typeof msg.seat === 'number' ? msg.seat : -1;
@@ -2719,6 +2776,7 @@
         && $game.cpuWinAck  // [2026-07-17] CPU和了は人間の確認まで自動進行しない
         && !$game.lastDapai  // ron 時は lastDapai が残ってる、 tsumo のみ
         && !fxCutinBusy  // [2026-10-15] 役の名前 + ツモの帯 (3.4 秒) を見せ終わってから 3 秒数える
+        && !fuyuFlipEntry  // [2026-10-15] 冬冬金北のめくりを見終わってから
         && !cpuAutoAdvanceFired) {
     cpuAutoAdvanceFired = true;
     setTimeout(() => {
@@ -3152,6 +3210,15 @@
     <!-- [2026-07-22] online の祝儀表示は RoundEndPanel の chip slot に統合済み [重複防止で撤去] -->
     <!-- 2026-05-14 codex review #3 fix: online で 自家 [selfPlayer] のみ表示、
          他家のぽっち色 [非公開情報] 漏洩防止 -->
+    {#if fuyuFlipEntry}
+      {#key fuyuFlipEntry.key}
+        <FuyuFlip log={fuyuFlipEntry.log} hand={fuyuFlipHand(fuyuFlipEntry.player)}
+          name={fuyuFlipMine ? '' : (seatDisplayNames[fuyuFlipEntry.player] ?? '')}
+          auto={!!$game.cpu[fuyuFlipEntry.player]} remote={fuyuFlipRemote} remoteOpened={fuyuRemoteOpened}
+          on:flip={(e) => sendFuyuFx(e.detail.opened)}
+          on:done={() => fuyuFlipEntry && closeFuyuFlip(fuyuFlipEntry.key)} />
+      {/key}
+    {/if}
     {#if pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat) && !fxCutinBusy}
       <!-- 2026-07-22 fix [リョー報告: 追いかけリーチ時 白ぽっち演出で停止]: 開示が連続すると
            {#if} は component を再生成せず props 差替えだけになり、前回の revealed/closing が
@@ -3774,7 +3841,7 @@
     <!-- [2026-10-15 リョー「ロンのカットインが次局になってない？」] 和了の帯 (煽り ・ 役の名前 ・ ロン) が全部終わってから出す。
          決まった遅れ 1.35 秒だと、帯が 3 枚続く時に板と「次局へ」が先に出て、押すと残りの帯が次の局で流れていた -->
     <div class="agari-unified-panel" class:appear-after-cutin={!!$game.lastHuleResult && !state.finished}
-      class:wait-cutin={!!$game.lastHuleResult && !state.finished && fxCutinBusy}
+      class:wait-cutin={!!$game.lastHuleResult && !state.finished && (fxCutinBusy || !!fuyuFlipEntry)}
       class:pingju-small={$game.pendingPingju && !$game.lastHuleResult && !state.finished && !$game.pendingKinpei}
       class:kinpei-only={!!$game.pendingKinpei && !$game.pendingKinpei.preview && !$game.lastHuleResult && !state.finished && !$game.pendingPingju}>
       <div class="agari-left" class:pingju-only={$game.pendingPingju && !$game.lastHuleResult && !state.finished}>

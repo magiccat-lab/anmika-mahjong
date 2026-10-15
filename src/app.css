@@ -4,6 +4,14 @@
    font-display: block = 読み込み前は出さない。演出は 0.7 秒なので、
    違う字で出てから入れ替わるより、少し遅れて正しい字が出る方がいい */
 /* [2026-10-15] NN金北のカットイン (夏夏金北など) の 5 字 (春 ・ 夏 ・ 秋 ・ 冬 ・ 金) だけのサブセット。取り方は public/fonts/README.md */
+/* [2026-10-15] 冬冬金北のめくり (FuyuFlip) の字だけのサブセット (冬 ・ 金 ・ 北 ・ ラストチャンス ・ 合計 ・ 枚 ・ 数字)。取り方は public/fonts/README.md */
+@font-face {
+  font-family: 'FX Fuyu';
+  src: url('/fonts/fx-mochiypopone-fuyu.woff2?v=20261015') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
 @font-face {
   font-family: 'FX Kana';
   src: url('/fonts/fx-mochiypopone-kinpei.woff2?v=20261015') format('woff2');

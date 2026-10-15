@@ -1339,6 +1339,13 @@ export function sanitizePochiFx(value: Record<string, unknown>): PochiFxRelay | 
   }
   return out;
 }
+/** [2026-10-15 リョー ○ anmika-fuyu1] 冬冬金北の冬めくりで、和了った人の画面がめくった枚数を他の席へ流す。
+ *  めくる牌と当たりは全員の和了の結果に入っているので、流すのは枚数だけ [牌も点も通さない] */
+export function sanitizeFuyuFx(value: Record<string, unknown>): { opened: number } | null {
+  const opened = value.opened;
+  if (!Number.isInteger(opened) || (opened as number) < 0 || (opened as number) > 128) return null;
+  return { opened: opened as number };
+}
 /** 絞りの中継の間引き: 1 席 1 秒に 30 通まで、open は 2 秒に 1 回 */
 const pochiFxRate = new WeakMap<object, Map<number, { openAt: number; winAt: number; n: number }>>();
 export function allowPochiFx(room: object, roomSeat: number, phase: PochiFxRelay['phase'], now = performance.now()): boolean {
@@ -2822,6 +2829,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           room.cpuSaiFast = true;
           broadcast(room, { type: 'cpuSaiFast' });
           scheduleRoomDeadline(room);
+          return;
+        }
+        if ((msg as Record<string, unknown>)?.type === 'fuyuFx') {
+          // [2026-10-15] 冬冬金北のめくりの枚数を他の席 ・ 観戦へ流す [revision は進めない]。間引きは絞りと同じ枠
+          if (!room.snapshot.started || typeof payload.seat !== 'number' || payload.seat < 0) return;
+          const relay = sanitizeFuyuFx(msg as Record<string, unknown>);
+          if (!relay || !allowPochiFx(room, payload.seat, 'peel')) return;
+          broadcast(room, { type: 'fuyuFx', seat: payload.seat, ...relay });
           return;
         }
         if ((msg as Record<string, unknown>)?.type === 'pochiFx') {
