@@ -3074,6 +3074,9 @@ export function createGameStore() {
         }
         const winner = s.lastWinner;
         const blindState = (remotePool as any)?._blindState;
+        // [2026-10-15 リョー「cpu対戦したけどロンのカットインが次局になってない？」] 煽り ・ 役の名前 ・ ロンの帯は
+        // 続けて 5 秒ほど流れるので、その途中で次局へ進むと残りが次の局の頭で出ていた。前の局の帯は局と一緒に捨てる
+        if (!onlineMode) { s.cutin = null; s.cutinQueue = []; }
         s.game.nextRound({ winner: winner as any, preShuffledPool: blindState ? undefined : remotePool as any });
         if (s.game.isGameEnd()) {
           s.game.state.finished = true;

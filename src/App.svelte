@@ -2718,6 +2718,7 @@
         && !$game.pendingKinpei && !$game.pendingFuyu && !$game.pendingKamiPochi && !$game.pendingPochiSwap && !$game.pendingSaiKoro
         && $game.cpuWinAck  // [2026-07-17] CPU和了は人間の確認まで自動進行しない
         && !$game.lastDapai  // ron 時は lastDapai が残ってる、 tsumo のみ
+        && !fxCutinBusy  // [2026-10-15] 役の名前 + ツモの帯 (3.4 秒) を見せ終わってから 3 秒数える
         && !cpuAutoAdvanceFired) {
     cpuAutoAdvanceFired = true;
     setTimeout(() => {
@@ -3770,7 +3771,10 @@
     <!-- 2026-10-08 fix [リョー報告「今がめんが写ってない」→「強化先の選択は上がりとか一式の情報見て選ぶから先に出して」]:
          金北選択の間は lastHuleResult がまだ無いので左の和了欄が空の白い板だった。強化前の暫定和了
          [pendingKinpei.preview] を和了パネルで出す。preview が無い時だけ、選択の帯に畳んで盤面を見せる -->
+    <!-- [2026-10-15 リョー「ロンのカットインが次局になってない？」] 和了の帯 (煽り ・ 役の名前 ・ ロン) が全部終わってから出す。
+         決まった遅れ 1.35 秒だと、帯が 3 枚続く時に板と「次局へ」が先に出て、押すと残りの帯が次の局で流れていた -->
     <div class="agari-unified-panel" class:appear-after-cutin={!!$game.lastHuleResult && !state.finished}
+      class:wait-cutin={!!$game.lastHuleResult && !state.finished && fxCutinBusy}
       class:pingju-small={$game.pendingPingju && !$game.lastHuleResult && !state.finished && !$game.pendingKinpei}
       class:kinpei-only={!!$game.pendingKinpei && !$game.pendingKinpei.preview && !$game.lastHuleResult && !state.finished && !$game.pendingPingju}>
       <div class="agari-left" class:pingju-only={$game.pendingPingju && !$game.lastHuleResult && !state.finished}>
@@ -5248,7 +5252,13 @@
   }
   /* 和了時はロン/ツモ cutin [1.85s] を先に見せ、被って濁らないよう遅らせて登場 */
   main.mode-single .agari-unified-panel.appear-after-cutin {
-    animation-delay: 1.35s;
+    animation-delay: 0.15s;
+  }
+  /* 帯が流れている間は板を出さない。外れた時に入りの動きが始まる */
+  main.mode-single .agari-unified-panel.wait-cutin {
+    visibility: hidden;
+    pointer-events: none;
+    animation: none;
   }
   main.mode-single .agari-unified-panel .kinpei-provisional-note {
     font-size: 14px;
