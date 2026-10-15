@@ -75,11 +75,67 @@ for (const s of ['m', 'p', 's']) for (let n = 1; n <= 9; n++) if (s !== 'm' || n
 for (let n = 1; n <= 7; n++) DRAW_KINDS.push('z' + n);
 // 分析の中で使う種類 (7萬 は 1萬 で持つ。chip_value の swapM7)
 const SW_KINDS = DRAW_KINDS.map(swapKind);
-/** アンミカのシャンテン: 7萬を 1萬にした手の通常形と、アメリカン七対子の小さい方 */
+/** アンミカのシャンテン: 7萬を 1萬にした手の通常形 ・ 七対子 ・ アメリカン七対子の一番小さい物。
+ *  国士は入れない (10-16 先輩「国士絡みのシャンテン戻しをダハイミスで判定することが多い」。ヤオ九牌 8 種の
+ *  4 シャンテンの国士で数えると、普通に字牌を切った手が全部シャンテン戻しになっていた)。国士に向かう打牌は
+ *  review の中で別に見る (guoshiXt) */
 function anmikaXt(aSw: any): number {
-  let xt = Majiang.Util.xiangting(aSw);
+  let xt = Math.min(Majiang.Util.xiangting_yiban(aSw), Majiang.Util.xiangting_qidui(aSw));
   try { xt = Math.min(xt, americanChitoiXiangting(unswapM1(aSw.clone()))); } catch { /* 通常形だけ */ }
   return xt;
+}
+
+/** 国士のシャンテン (7萬を 1萬にした手)。鳴いていれば 99 */
+function guoshiXt(aSw: any): number {
+  const g = Majiang.Util.xiangting_guoshi(aSw);
+  return Number.isFinite(g) ? g : 99;
+}
+// 国士に向かっていると見るのは、国士で 4 シャンテン以内 (ヤオ九牌 9 種くらい) から
+const GUOSHI_ROUTE_XT = 4;
+
+/** シャンテン戻しの目安 (10-16 先輩「間8p絡みのシャンテン戻しとかをダハイミスで判定することが多い」)。
+ *  戻した手は 2 回ツモを進めて、戻さなかった手の 1 回と同じ所に着く。1 回目の受け入れ uk1 と、
+ *  進んだ先で一番広く構えた時の受け入れ uk2 (1 回目のツモの枚数で重み付け) から、
+ *  2 回分を 1 回に直した受け入れ 1 / (1/uk1 + 1/uk2) を出す。戻さなかった手の受け入れと並べて比べる */
+function backUkeire(ctx: Ctx, sp: any, pai: string): { uk1: number; uk2: number; eff: number } {
+  let a = sp.clone();
+  try { a.dapai(pai); } catch { return { uk1: 0, uk2: 0, eff: 0 }; }
+  a = swapM7(a);
+  const xt0 = anmikaXt(a);
+  const ukeireOf = (h: any, xt: number) => {
+    let n = 0;
+    for (const k of SW_KINDS) {
+      const rem = ctx.unseenSw(k);
+      if (!rem) continue;
+      h._bingpai[k[0]][Number(k[1])] += 1;
+      if (anmikaXt(h) < xt) n += rem;
+      h._bingpai[k[0]][Number(k[1])] -= 1;
+    }
+    return n;
+  };
+  let uk1 = 0, acc = 0;
+  for (const k of SW_KINDS) {
+    const rem = ctx.unseenSw(k);
+    if (!rem) continue;
+    const b = a.clone();
+    b._bingpai[k[0]][Number(k[1])] += 1;
+    if (anmikaXt(b) >= xt0) continue;
+    uk1 += rem;
+    // 引いた後に一番広く構える打牌 (シャンテンを落とさない物の中で)
+    let best = 0;
+    for (const s of ['m', 'p', 's', 'z']) {
+      for (let n = 1; n <= 9; n++) {
+        if (!(b._bingpai[s]?.[n] > 0)) continue;
+        b._bingpai[s][n] -= 1;
+        if (anmikaXt(b) === xt0 - 1) best = Math.max(best, ukeireOf(b, xt0 - 1));
+        b._bingpai[s][n] += 1;
+      }
+    }
+    acc += rem * best;
+  }
+  const uk2 = uk1 ? acc / uk1 : 0;
+  const eff = uk1 && uk2 ? 1 / (1 / uk1 + 1 / uk2) : 0;
+  return { uk1, uk2: Math.round(uk2 * 10) / 10, eff: Math.round(eff * 10) / 10 };
 }
 
 type Ctx = { game: any; player: number; unseen: (t: string) => number; unseenSw: (t: string) => number; unseenTotal: number; draws: number; paishu: number; param: any; env: ChipEnv; cache: Map<string, any> };
@@ -160,7 +216,9 @@ function optionEv(ctx: Ctx, sp: any, pai: string): { ev: number | null; xt: numb
 type Review = {
   match: number; hand: number; turn: number; seat: number; user: string; hand14: string; chosen: string; best: string;
   loss: number | null; loss_se: number; xiangting: number; best_xiangting: number; options: Array<{ pai: string; ev: number | null; xt: number; ukeire: number; danger: number; detail: string; combo: string }>;
-  kind: 'ev' | 'ukeire'; lizhi: boolean; bad: boolean; dealt_in?: boolean;
+  kind: 'ev' | 'ukeire' | 'back'; lizhi: boolean; bad: boolean; dealt_in?: boolean;
+  // シャンテン戻しの受け入れ (backUkeire) と、安牌を残した打牌の印
+  back?: { uk1: number; uk2: number; eff: number }; keep_safe?: boolean; guoshi?: number;
   // 悪手の時だけ局面を残す (河は席番号 → 打った牌、ドラ表示、リーチ者の席)
   rivers?: Record<string, string[]>; dora?: string[]; lizhi_seats?: number[];
 };
@@ -219,7 +277,7 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
       if (anmikaXt(a) < xt) uk += rem;
       a._bingpai[k[0]][Number(k[1])] -= 1;
     }
-    return { ...r, xiangting: xt, ukeire: uk };
+    return { ...r, xiangting: xt, ukeire: uk, gxt: guoshiXt(a) };
   });
   const chosenRowSw = rows.find((r) => r.pai === chosenRow.pai) ?? chosenRow;
   const minXt = Math.min(...rows.map((r) => r.xiangting));
@@ -251,9 +309,32 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
       if (better) best = o;
     }
   }
-  const loss = kind === 'ev'
+  let loss: number | null = kind === 'ev'
     ? Math.max(0, Math.round(((best.ev as number) - (chosen.ev as number)) * 10) / 10)
     : (chosen.xt > best.xt ? null : best.ukeire > 0 ? Math.round((1 - chosen.ukeire / best.ukeire) * 100) / 100 : 0);
+  // シャンテン戻し (1 つ): 「戻しは全部悪手」をやめ、戻した手が 2 回進む受け入れを 1 回に直して比べる (backUkeire)
+  let kindOut: 'ev' | 'ukeire' | 'back' = kind;
+  let back: { uk1: number; uk2: number; eff: number } | null = null;
+  // 国士に向かう打牌: 通常の形では損でも、国士のシャンテンが一番進む切り方なら損にしない
+  const minG = Math.min(...rows.map((r) => (r as any).gxt ?? 99));
+  const guoshiRoute = minG <= GUOSHI_ROUTE_XT && ((chosenRowSw as any).gxt ?? 99) === minG && (loss === null || loss > 0);
+  if (guoshiRoute) {
+    loss = 0;
+    chosen.detail = `国士に向かう打牌 (国士 ${minG} シャンテン)`;
+  } else if (kind !== 'ev' && chosen.xt === best.xt + 1) {
+    back = backUkeire(ctx, sp, chosen.pai);
+    kindOut = 'back';
+    loss = best.ukeire > 0 ? Math.max(0, Math.round((1 - back.eff / best.ukeire) * 100) / 100) : 0;
+    chosen.detail = `シャンテン戻し: 受け入れ ${back.uk1} 枚 → 進んだ先 ${fmt(back.uk2)} 枚 (1 回に直すと ${fmt(back.eff)} 枚)`;
+  }
+  // 安牌を残した打牌 (10-16 先輩「安牌抱えとかをダハイミスで判定することが多い」): リーチが無くても、
+  // 一番良い打牌が相手 2 人の現物か残り 1 枚以下の字牌で、それを残して他を切った時は守りの判断として線を倍にする
+  const isSafe = (b: string) => {
+    if (b[0] === 'z' && unseen(b) <= 1) return true;
+    const opp = [0, 1, 2].filter((p) => p !== player);
+    return opp.every((p) => ((game.he.get(p)?._pai ?? []) as string[]).some((d) => baseOf(d) === b));
+  };
+  const keepSafe = !hasLizhi && best.base !== chosen.base && isSafe(best.base);
   // モンテカルロの差の揺れ: 同じ山の並びで比べた 1 回ずつの差の標準誤差。誤差の内 (2 倍未満) の差は一致に数え、悪手にしない
   let lossSe = 0;
   if (kind === 'ev' && best.samples && chosen.samples && best !== chosen) {
@@ -264,7 +345,8 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
     lossSe = n > 1 ? Math.sqrt(Math.max(0, m2 / n - m * m) / (n - 1)) : 0;
   }
   lossSe = Math.round(lossSe * 10) / 10;
-  const bad = loss === null || (kind === 'ev' ? (loss as number) >= BAD_CHIPS && (loss as number) >= 2 * lossSe : (loss as number) >= 0.4);
+  const scale = keepSafe ? 2 : 1;
+  const bad = loss === null || (kind === 'ev' ? loss >= BAD_CHIPS * scale && loss >= 2 * lossSe : loss >= 0.4 * scale);
   const context = bad ? {
     rivers: Object.fromEntries([0, 1, 2].map((p) => [String(p), [...((game.he.get(p)?._pai ?? []) as string[])]])),
     dora: [...((game.shan?.baopai ?? []) as string[])],
@@ -272,7 +354,8 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
   } : {};
   reviews.push({
     match, hand, turn: (game.he.get(player)?._pai ?? []).length + 1, seat, user: roomSeatUser[seat] ?? '', hand14: String(sp?.toString?.() ?? ''),
-    chosen: chosenRaw, best: best.pai, loss, loss_se: lossSe, xiangting: chosen.xt, best_xiangting: best.xt, kind, lizhi: hasLizhi, bad, ...context,
+    chosen: chosenRaw, best: best.pai, loss, loss_se: lossSe, xiangting: chosen.xt, best_xiangting: best.xt, kind: kindOut, lizhi: hasLizhi, bad, ...context,
+    ...(back ? { back } : {}), ...(keepSafe ? { keep_safe: true } : {}), ...(guoshiRoute ? { guoshi: minG } : {}),
     options: options.map((o) => ({ pai: o.pai, ev: o.ev === null ? null : Math.round(o.ev * 10) / 10, xt: o.xt, ukeire: o.ukeire, danger: o.danger, detail: o.detail,
       combo: hasLizhi ? comboBreakdown(game, player, o.base) : '' })),
   });
@@ -329,7 +412,7 @@ segments.forEach((segment, index) => {
   }
 });
 
-// 人ごと: 一致率 (損 0)、悪手率 (期待値で 1,000 点以上 ・ シャンテン戻し ・ 受け入れ 4 割以上減)、期待値の損の合計
+// 人ごと: 一致率 (損 0)、悪手率 (期待値で 2 枚以上 ・ 受け入れ 4 割以上減 ・ シャンテン戻しは 2 回分の受け入れが 4 割以上減。安牌を残した時は線が倍)、期待値の損の合計
 const byUser: Record<string, { discards: number; match: number; bad: number; ev_loss: number; ev_count: number }> = {};
 for (const r of reviews) {
   const u = (byUser[r.user] ??= { discards: 0, match: 0, bad: 0, ev_loss: 0, ev_count: 0 });
