@@ -133,6 +133,11 @@ export interface StoreState {
   ronDeclaredPlayers: number[];
   ronResults: Array<{ player: number; result: any }>;
   awaitingFulou: boolean;        // 副露 [pon / 大明槓] 判定待ち
+  /** [2026-10-16 偽ラグ] 誰も鳴けない打牌の後、サーバーが次のツモを少し止めている間。online の権威だけが立てる。
+   *  配る投影では awaitingFulou に混ぜて出す [本物の鳴き待ちと見分けが付かない様に]。releaseHold で次のツモへ */
+  pendingHold?: boolean;
+  /** [2026-10-16 偽ラグ] 権威が打牌の直前に立てる。その打牌で誰も鳴けなければ pendingHold にする。打牌 1 回で消える */
+  _holdArmed?: boolean;
   ponCandidates: ReactionCandidate[];
   kanCandidates: ReactionCandidate[]; // 大明槓候補
   roundEnded: boolean;           // 局終了 [次局ボタン表示用]
@@ -495,6 +500,7 @@ function isLiveTurnActionBlocked(s: StoreState, allowLizhiDiscard = false): bool
     || s.pendingPingju
     || s.awaitingRonDecision
     || s.awaitingFulou
+    || !!s.pendingHold
     || s.pendingQianggang !== null
     || s.pendingNukiBei != null
     || hasPostWinDecision(s)
@@ -565,6 +571,7 @@ export function createGameStore() {
       ronDeclaredPlayers: [],
       ronResults: [],
     awaitingFulou: false,
+        pendingHold: false,
     ponCandidates: [],
     kanCandidates: [],
     roundEnded: false,
@@ -956,6 +963,7 @@ export function createGameStore() {
       ronDeclaredPlayers: [],
       ronResults: [],
         awaitingFulou: false,
+        pendingHold: false,
         ponCandidates: [],
         kanCandidates: [],
         roundEnded: false,
@@ -3130,6 +3138,18 @@ export function createGameStore() {
     },
     /** 次の zimo を実行 [load 後 / dapai 後の中間 state から ツモへ進める]
      *  既に zimo 済 [lastZimo 存在] なら no-op。 山切れなら roundEnded set。 */
+    /** [2026-10-16 偽ラグ] 権威 (server の canonical) だけが打牌の直前に呼ぶ。その打牌で誰も鳴けなければ次のツモを止める */
+    setHoldArmed(armed: boolean) {
+      update((st) => ({ ...st, _holdArmed: armed }));
+    },
+    /** [2026-10-16 偽ラグ] 止めていた次のツモを引かせる [権威が 0.5〜1.5 秒後に呼ぶ] */
+    releaseHold() {
+      update((st) => {
+        if (!st.pendingHold) return st;
+        const s: StoreState = { ...st, pendingHold: false };
+        return drawAfterNoCall(s);
+      });
+    },
     drawNext() {
       // R4 P1 #18 fix: online で drawNext が local 進行で desync する bug。
       // currentPlayer 限定 gate + WS broadcast に乗せて 同期させる
@@ -3364,6 +3384,7 @@ export function createGameStore() {
       ronDeclaredPlayers: [],
       ronResults: [],
         awaitingFulou: false,
+        pendingHold: false,
         ponCandidates: [],
         kanCandidates: [],
         roundEnded: false,
@@ -3612,6 +3633,9 @@ export function triggerSaiKoroIfAny(s: StoreState, result: any, winner: number):
 }
 
 export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean; pochi?: 'blue' | 'red' | 'green' | 'yellow'; tsumogiri?: boolean }): StoreState {
+  // [2026-10-16 偽ラグ] 権威が立てた印はこの打牌 1 回だけに効かせる [同じ action の中で続く打牌には効かせない]
+  const holdArmed = !!s._holdArmed;
+  s._holdArmed = false;
   // 局終了・反応待ち・和了後 modal 中は no-op。自動進行ボタンや遅延 action が
   // 勝利局面を打牌で上書きすると復帰不能になるため、最下層でも必ず止める。
   if (isLiveTurnActionBlocked(s)) return { ...s };
@@ -3846,6 +3870,30 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
       s.message = null; // [2026-07-22 リョー指摘] 内部状態文言は出さない
       return { ...s };
     }
+    // [2026-10-16 先輩「偽ラグ」a] 誰も鳴けない打牌でも、権威が印を付けた時は次のツモを止める
+    // [鳴ける人が居る時だけツモが止まると、止まった事で鳴ける人が居ると分かってしまうため]。
+    // フィーバー中は強制ツモ切りが続くので止めない
+    if (holdArmed && !([0, 1, 2] as const).some((p) => s.game.feverActive[p])) {
+      s.pendingHold = true;
+      s.message = null;
+      return { ...s };
+    }
+    return drawAfterNoCall(s);
+  }
+  // 人間 ron 候補が残っている [CPU は ronCandidates にいた場合上で auto-ron 済]
+  // R13 P0 #5 fix: ロン全員 pass 後 副露候補 消失 bug fix。 ponCands / kanCands を
+  // state に保存 [human 候補のみ]、 pass() 経由で全員 ron pass 後 awaitingFulou に遷移
+  enterRonDecisionStage(s, {
+    ponCandidates: ponCands.filter((c) => !s.cpu[c.player as 0|1|2]),
+    kanCandidates: kanCands.filter((c) => !s.cpu[c.player as 0|1|2]),
+  });
+  s.message = `ロン可能: player ${ronCandidates.join(',')}`;
+  return { ...s };
+}
+
+/** 誰も鳴かない打牌の後の、次の人のツモ [innerDiscard の続き。偽ラグの releaseHold からも呼ぶ] */
+export function drawAfterNoCall(s: StoreState): StoreState {
+  {
     // 誰もポンしない → 通常のツモへ
     try {
       s = confirmPendingFeverBeforeDraw(s);
@@ -3909,15 +3957,6 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     s = autoLizhiInline(s);
     return { ...s };
   }
-  // 人間 ron 候補が残っている [CPU は ronCandidates にいた場合上で auto-ron 済]
-  // R13 P0 #5 fix: ロン全員 pass 後 副露候補 消失 bug fix。 ponCands / kanCands を
-  // state に保存 [human 候補のみ]、 pass() 経由で全員 ron pass 後 awaitingFulou に遷移
-  enterRonDecisionStage(s, {
-    ponCandidates: ponCands.filter((c) => !s.cpu[c.player as 0|1|2]),
-    kanCandidates: kanCands.filter((c) => !s.cpu[c.player as 0|1|2]),
-  });
-  s.message = `ロン可能: player ${ronCandidates.join(',')}`;
-  return { ...s };
 }
 
 /** リーチ済 player の自動ターン: ツモ和了可なら止める、 z4 / 春夏秋冬は抜く、 待ち不変の暗槓は自動、 そうでなければツモ切り */

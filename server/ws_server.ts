@@ -37,6 +37,12 @@ const DEFAULT_DISCONNECT_GRACE_MS = 30_000;
 const DEFAULT_CPU_PROXY_GRACE_MS = 15_000;
 // CPU 代行席の 1 手 / 反応窓の待ち [CPU 席と同じ 750ms]
 const CPU_PROXY_STEP_MS = 750;
+// [2026-10-16 先輩「偽ラグ」a: 3 回に 1 回、0.5〜1.5 秒止める] 誰かが鳴ける時だけ次のツモが止まると、
+// 止まった事で鳴ける人が居ると分かる。誰も鳴けない打牌でも、この割合で次のツモを止める
+const DEFAULT_FAKE_LAG_RATE = 1 / 3;
+const FAKE_LAG_MIN_MS = 500;
+const FAKE_LAG_MAX_MS = 1500;
+const SERVER_HOLD_UID = '__server_hold__';
 // [2026-10-15 リョー「フィーバーの時にツモギリの速度をちょっと遅くしたい」] フィーバー中の 1 巡の刻み
 // [CPU と人の強制ツモ切り]。client の FEVER_TSUMOGIRI_MS と同じ。人の分は client が先に送り、権威はその 0.2 秒後の保険
 const FEVER_STEP_MS = 1000;
@@ -140,6 +146,9 @@ type Room = {
   stampLastAt: Map<number, number>;
   // [2026-10-09 遊真 A3] サーバーが保存 POST を出した試合の `${roomInstanceId}:${matchId}`
   recordedMatchKeys: Set<string>;
+  // [2026-10-16 偽ラグ] 今止めている次のツモを、どの revision でいつ引かせるか [張り直しで延びない様に控える]
+  holdRevision?: number;
+  holdReleaseAt?: number;
 };
 
 export type WsRuntimeOptions = {
@@ -150,6 +159,8 @@ export type WsRuntimeOptions = {
   internalApiSecret?: string;
   persistence?: RoomPersistence;
   reactionTimeoutMs?: number;
+  /** [2026-10-16 偽ラグ] 誰も鳴けない打牌で次のツモを止める割合 [env ANMIKA_FAKE_LAG_RATE、既定 1/3。vitest の中は 0] */
+  fakeLagRate?: number;
   turnTimeoutMs?: number;
   disconnectGraceMs?: number;
   /** [2026-10-09 遊真 A2] 切断から CPU 代行に切り替わるまで [env ANMIKA_CPU_PROXY_GRACE_MS、既定 15000] */
@@ -448,6 +459,8 @@ export function sanitizeIncomingAction(actionInput: Record<string, unknown>): Re
   delete action._state;
   // [2026-10-09 遊真 A5] 復元の起点になるので client からは受けない
   delete action._startChipLedger;
+  // [2026-10-16 偽ラグ] 次のツモを止める印はサーバーだけが付ける
+  delete action._hold;
   return action;
 }
 
@@ -1066,7 +1079,8 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       ronPassedPlayers: own === null ? [] : state.ronPassedPlayers.filter((player) => player === own),
       ronDeclaredPlayers: structuredClone(state.ronDeclaredPlayers),
       ronResults: reactionWindowOpen ? [] : structuredClone(state.ronResults),
-      awaitingFulou: state.awaitingFulou,
+      // [2026-10-16 偽ラグ] 止めている次のツモは、鳴けない席から見た本物の鳴き待ちと同じに見せる
+      awaitingFulou: state.awaitingFulou || !!state.pendingHold,
       ponCandidates: structuredClone(ownPonCandidates),
       kanCandidates: structuredClone(ownKanCandidates),
       roundEnded: state.roundEnded,
@@ -1164,6 +1178,7 @@ function sanitizeActionForSeat(actionInput: Record<string, unknown>, recipientSe
   if (action._blindState && typeof action._blindState === 'object') {
     action._blindState = maskBlindStart(action._blindState as BlindStartState, recipientSeat);
   }
+  delete action._hold;
   if (action._draw && typeof action._draw === 'object') {
     const draw = { ...(action._draw as Record<string, unknown>) };
     const ownDraw = draw.player === recipientSeat;
@@ -1211,7 +1226,10 @@ function actionRelay(
   // [見送り = その牌が待ちではない/鳴けた、の盗み見を塞ぐ。client は _state の hydrate だけで進む]。
   // from_seat は受信者自身の席 [client の seat 検証 0..2 を通すための伏せ値。観戦/抜け番は 0]
   const actorRoomSeat = command.actorRoomSeat ?? command.actorSeat;
-  const neutral = isPrivatePassAction(command.action) && recipientRoomSeat !== actorRoomSeat;
+  // [2026-10-16 偽ラグ] 止めた次のツモを引かせる releaseHold は、全員に見送りと同じ中立な progress で配る
+  // [本物の鳴き待ちが見送りで閉じた時と、他の席からは同じに見える]
+  const neutral = (isPrivatePassAction(command.action) && recipientRoomSeat !== actorRoomSeat)
+    || command.action?.type === 'releaseHold';
   if (neutral) {
     const { player: _passSeat, ...rest } = action;
     action = { ...rest, type: 'progress' };
@@ -1520,6 +1538,11 @@ function validateAction(room: Room, uid: string, seat: number, action: Record<st
   if (action.type === 'nextRound' && uid !== SERVER_NEXT_ROUND_UID) {
     return { actorSeat: actor.actorSeat, actorRoomSeat: actor.actorRoomSeat, reason: 'nextRound advances after all players press ready' };
   }
+  // [2026-10-16 偽ラグ] 止めた次のツモはサーバーだけが引かせる。理由は状態によらず同じ文にする
+  // [止めている時だけ通る/弾かれる差が出ると、偽の止めと本物の鳴き待ちを見分けられる]
+  if (action.type === 'releaseHold' && uid !== SERVER_HOLD_UID) {
+    return { actorSeat: actor.actorSeat, actorRoomSeat: actor.actorRoomSeat, reason: 'releaseHold is server-only' };
+  }
   return actor;
 }
 
@@ -1535,6 +1558,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     ?? wsSecret;
   const persistence = options.persistence ?? new RoomPersistence();
   const reactionTimeoutMs = options.reactionTimeoutMs ?? Number(process.env.ANMIKA_REACTION_TIMEOUT_MS || DEFAULT_REACTION_TIMEOUT_MS);
+  const fakeLagRate = options.fakeLagRate
+    ?? (process.env.ANMIKA_FAKE_LAG_RATE !== undefined ? Number(process.env.ANMIKA_FAKE_LAG_RATE)
+      : process.env.VITEST ? 0 : DEFAULT_FAKE_LAG_RATE);
   const turnTimeoutMs = options.turnTimeoutMs ?? Number(process.env.ANMIKA_TURN_TIMEOUT_MS || DEFAULT_TURN_TIMEOUT_MS);
   const disconnectGraceMs = options.disconnectGraceMs ?? Number(process.env.ANMIKA_DISCONNECT_GRACE_MS || DEFAULT_DISCONNECT_GRACE_MS);
   const nextRoundTimeoutMs = options.nextRoundTimeoutMs ?? Number(process.env.ANMIKA_NEXT_ROUND_TIMEOUT_MS || DEFAULT_NEXT_ROUND_TIMEOUT_MS);
@@ -1896,6 +1922,13 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
   ): { reason: string | null; command?: AcceptedRoomCommand; ack?: CommandAck } => {
     let previous = room.snapshot;
     const action = sanitizeIncomingAction(actionInput);
+    // [2026-10-16 偽ラグ] 打牌の前に、誰も鳴けなかった時に次のツモを止めるかを決めておく [鳴けるかどうかを見てから決めない]。
+    // フィーバー中は強制ツモ切りが続くので止めない
+    if ((action.type === 'discard' || action.type === 'tsumokiri') && fakeLagRate > 0 && room.authority
+      && !([0, 1, 2] as const).some((p) => room.authority!.game.feverActive[p])
+      && Math.random() < fakeLagRate) {
+      action._hold = true;
+    }
     // actorSeat は envelope 検証時に確定済み。中継後は CPU 代理という transport
     // detail を残さず、その席が発した正規 command として全 client に適用させる。
     delete action.cpuRelay;
@@ -2359,6 +2392,35 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           issueServerNextRound(room, revision, actorRoomSeat, 'no-active-human');
         }, noActiveHumanNextRoundMs);
       }
+      return;
+    }
+
+    // [2026-10-16 先輩「偽ラグ」a] 誰も鳴けない打牌で止めた次のツモを、0.5〜1.5 秒後にサーバーが引かせる。
+    // 配る期限は本物の鳴き待ちで鳴けない席に配る物 [kind:none] と同じ
+    if (authority.isHoldPending()) {
+      const revision = room.snapshot.revision;
+      if (room.holdRevision !== revision || room.holdReleaseAt === undefined) {
+        room.holdRevision = revision;
+        room.holdReleaseAt = performance.now() + FAKE_LAG_MIN_MS + Math.random() * (FAKE_LAG_MAX_MS - FAKE_LAG_MIN_MS);
+      }
+      const delay = Math.max(0, room.holdReleaseAt - performance.now());
+      announceDeadline('reaction', [], delay);
+      room.deadlineTimer = setTimeout(() => {
+        room.queue = room.queue.then(async () => {
+          const live = room.authority;
+          if (!live || !live.isHoldPending()) { scheduleRoomDeadline(room); return; }
+          const result = acceptAction(
+            room,
+            live.currentPlayer(),
+            SERVER_HOLD_UID,
+            { type: 'releaseHold' },
+            `srv:${room.roomId}:${room.snapshot.revision + 1}:${randomUUID()}`,
+          );
+          if (result.command) broadcastAction(room, result.command);
+          else warn('[anmika-ws] releaseHold reject', result.reason);
+          scheduleRoomDeadline(room);
+        }).catch((error) => warn('[anmika-ws] releaseHold failed', error));
+      }, delay);
       return;
     }
 

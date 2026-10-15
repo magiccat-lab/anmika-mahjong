@@ -76,6 +76,8 @@ const LIVE_GAMEPLAY_ACTIONS = new Set([
   // [2026-09-20 堅牢性レビュー 4.2-1] 宣言牌を選び直す取消。ここに無かったので
   // authority が `unknown action type` で reject し、client は宣言待ちのまま詰んでいた
   'cancelLizhi',
+  // [2026-10-16 先輩「偽ラグ」a] サーバーが止めていた次のツモを引かせる。client からは受けない (ws の sanitize で落とす)
+  'releaseHold',
 ]);
 
 function asPlayerId(value: number): PlayerId | null {
@@ -308,6 +310,8 @@ export class RoomAuthority {
           reason = this.applyNextRound(action); break;
         case 'nextMatch':
           reason = this.applyNextMatch(action); break;
+        case 'releaseHold':
+          reason = this.canonicalState().pendingHold ? null : 'releaseHold: no hold is pending'; break;
         default:
           reason = POST_WIN_ACTIONS.has(action.type)
             ? this.validatePostWinAction(actor, action)
@@ -422,6 +426,7 @@ export class RoomAuthority {
       roundEnded: state.roundEnded,
       awaitingRonDecision: state.awaitingRonDecision,
       awaitingFulou: state.awaitingFulou,
+      pendingHold: !!state.pendingHold,
       ronCandidates: this.ronCandidates,
       ronPassedPlayers: state.ronPassedPlayers,
       ronDeclaredPlayers: state.ronDeclaredPlayers,
@@ -440,6 +445,18 @@ export class RoomAuthority {
   }
 
   private applyCanonicalAction(actor: PlayerId, action: any): void {
+    // [2026-10-16 偽ラグ] ws が印 (_hold) を付けた打牌だけ、誰も鳴けなければ次のツモを止める。
+    // 印は command log に残るので、復元 ・ 巻き戻しでも同じ所で止まる
+    const holdable = action.type === 'discard' || action.type === 'tsumokiri';
+    if (holdable) this.canonicalStore.setHoldArmed(action._hold === true);
+    try {
+      this.applyCanonicalActionInner(actor, action);
+    } finally {
+      if (holdable) this.canonicalStore.setHoldArmed(false);
+    }
+  }
+
+  private applyCanonicalActionInner(actor: PlayerId, action: any): void {
     const store = this.canonicalStore as any;
     switch (action.type) {
       case 'stamp': break;
@@ -454,6 +471,7 @@ export class RoomAuthority {
       case 'nukiBei': store.nukiBei(action.meta); break;
       case 'tsumokiri': store.tsumokiri(); break;
       case 'drawNext': store.drawNext(); break;
+      case 'releaseHold': store.releaseHold(); break;
       case 'selectFuyu': store.selectFuyu(action.use); break;
       case 'selectKinpei': store.selectKinpei(action.target); break;
       case 'selectKamiPochi': store.selectKamiPochi(action.target, action.occurrenceKey); break;
@@ -569,7 +587,13 @@ export class RoomAuthority {
   }
 
   private hasReactionPending(): boolean {
-    return this.awaitingRonDecision || this.awaitingFulou || this.pendingQianggang !== null;
+    return this.awaitingRonDecision || this.awaitingFulou || this.pendingQianggang !== null
+      || this.isHoldPending();
+  }
+
+  /** [2026-10-16 偽ラグ] 誰も鳴けない打牌の後、次のツモを止めている間 */
+  isHoldPending(): boolean {
+    return !!this.canonicalState().pendingHold;
   }
 
   private requireCurrent(actor: PlayerId, type: string): string | null {
