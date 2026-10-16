@@ -532,12 +532,14 @@ export function enqueueCutinState(s: StoreState, id: CutinId, seat?: PlayerId, e
     s.winStreak = fever ? { player: seat, count, rk } : null;
     const result = winResultFor(s, seat);
     // 煽り: ロンの時、振り込んだ人が 2 シャンテン以上 (向聴数 2 以上) なら「どっから切っとんねーん！」、役満の放銃なら役満放銃
+    // [2026-10-16 リョー「フィーバー中はどっから切っとんねん出ないようにしていいな」] 誰かがフィーバー中はツモ切りしかできないので煽りは出さない (役満放銃は出す)
     const from = id === 'ron' ? s.lastDapai?.player : undefined;
+    const anyFever = ([0, 1, 2] as PlayerId[]).some((p) => s.game?.feverActive?.[p]);
     if (from !== undefined && from !== seat) {
       const key = `${rk}-${s.game?.events?.length ?? 0}-${from}`;
       if (s.aoriKey !== key) {
         if ((result?.damanguan ?? 0) > 0) { s.aoriKey = key; s = enqueueCutinState(s, 'yakumanHoju', from as PlayerId, { label: '役満放銃' }); }
-        else if ((s.game?.xiangting?.(from as PlayerId) ?? 0) >= 2) { s.aoriKey = key; s = enqueueCutinState(s, 'aori', from as PlayerId, { label: 'どっから切っとんねーん！' }); }
+        else if (!anyFever && (s.game?.xiangting?.(from as PlayerId) ?? 0) >= 2) { s.aoriKey = key; s = enqueueCutinState(s, 'aori', from as PlayerId, { label: 'どっから切っとんねーん！' }); }
       }
     }
     const sp = specialYakuOf(result);

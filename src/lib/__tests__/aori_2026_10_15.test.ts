@@ -17,7 +17,7 @@ const YAKUHAI = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 's2', 's3', 's4', 'z6', 'z6
 const FAR = ['p1', 'p4', 'p7', 's2', 's5', 's8', 'p2', 'p5', 's3', 's6', 'z1', 'z2', 'z3'];
 const NEAR = ['p2', 'p3', 'p4', 'p5', 'p6', 'p7', 's2', 's3', 's4', 's5', 's6', 's7', 'm1'];
 
-function ronWith(winnerHand: string[], discarderHand: string[]) {
+function ronWith(winnerHand: string[], discarderHand: string[], feverSeat?: 'winner') {
   const store = createGameStore();
   const game: Game3 = read(store).game;
   store.setCpuSeats([]);
@@ -41,6 +41,7 @@ function ronWith(winnerHand: string[], discarderHand: string[]) {
   // ダマ禁止 (副露 ・ リーチなしは役満以外ロンできない) なので、和了る人はリーチ済みにする
   (game as any).lizhi.add(winner);
   game.shoupai.set(third, buildShoupai(['p2', 'p3', 'p5', 'p7', 'p8', 's2', 's4', 's6', 's7', 'm1', 'm9', 'p9', 's9']));
+  if (feverSeat) (game as any).feverActive[winner] = true;
   const dsp = buildShoupai(discarderHand);
   dsp.zimo('z7');
   game.shoupai.set(discarder, dsp);
@@ -100,6 +101,18 @@ describe('煽り演出 (2 シャンテン以上からの放銃) と役満放銃'
       expect(seen.find((c) => c.id === 'yakumanHoju')!.seat).toBe(discarder);
       expect(ids.indexOf('yakumanHoju')).toBeLessThan(ids.indexOf('ron'));
     }
+  });
+  it('誰かがフィーバー中なら 2 シャンテン以上からの放銃でも煽りは出さない (10-16)', () => {
+    // フィーバー中に他家はロンできないので、和了るのはフィーバー中の人
+    const { seen, discarder, game } = ronWith(YAKUHAI, FAR, 'winner');
+    expect(game.xiangting(discarder)).toBeGreaterThanOrEqual(2);
+    const ids = seen.map((c) => c.id);
+    expect(ids).toContain('ron');
+    expect(ids).not.toContain('aori');
+  });
+  it('フィーバー中でも役満放銃は出す', () => {
+    const { seen } = ronWith(KOKUSHI, FAR, 'winner');
+    expect(seen.map((c) => c.id)).toContain('yakumanHoju');
   });
   it('尺は中、帯の字は決め台詞', () => {
     expect(CUTIN_TIER.aori).toBe('mid');
