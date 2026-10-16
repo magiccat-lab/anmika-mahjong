@@ -357,7 +357,7 @@ export function enterFuyuKamiPochiStage(s: StoreState, context: WinChoiceContext
       if (!pending?.occurrenceKey) break;
       const best = s.game.bestFuyuKamiPochiTarget(winner);
       const pick = pending.candidates.includes(best) ? best : pending.candidates[0];
-      const advance = s.game.resumeFuyuKamiPochi(winner, pending.occurrenceKey, pick);
+      const advance = s.game.resumeFuyuKamiPochi(winner, pending.occurrenceKey, pick, resultForWinner(s, winner));
       if (!advance) throw new Error('冬の神ぽっち自動選択に失敗しました');
       syncFuyuResult(s, winner);
       if (advance.status === 'complete') break;
@@ -2186,7 +2186,7 @@ export function createGameStore() {
           return { ...s };
         }
 
-        const advance = s.game.resumeFuyuKamiPochi(context.winner, pending.occurrenceKey, target);
+        const advance = s.game.resumeFuyuKamiPochi(context.winner, pending.occurrenceKey, target, resultForWinner(s, context.winner));
         if (!advance) return { ...s };
         s.pendingKamiPochi = null;
         syncFuyuResult(s, context.winner);

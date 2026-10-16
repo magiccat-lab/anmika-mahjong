@@ -168,7 +168,7 @@ export function settleRonResultsInKamichaOrder(
       if (!pending?.occurrenceKey) break;
       const best = game.bestFuyuKamiPochiTarget(claim.player as PlayerId);
       const pick = pending.candidates.includes(best) ? best : pending.candidates[0];
-      const advance = game.resumeFuyuKamiPochi(claim.player as PlayerId, pending.occurrenceKey, pick);
+      const advance = game.resumeFuyuKamiPochi(claim.player as PlayerId, pending.occurrenceKey, pick, claim.result);
       if (!advance || advance.status === 'complete') break;
     }
     claim.result._anmikaRonSettlementApplied = true;

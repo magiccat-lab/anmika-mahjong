@@ -4410,10 +4410,15 @@ export class Game3 {
     return this.createKamiPochiPending(winner, 'fuyu', pending.occurrenceKey);
   }
 
-  resumeFuyuKamiPochi(winner: PlayerId, occurrenceKey: string, target: string): FuyuAdvanceResult | null {
+  resumeFuyuKamiPochi(winner: PlayerId, occurrenceKey: string, target: string, result: any = null): FuyuAdvanceResult | null {
     const state = this.fuyuRevealState[winner];
     if (!state || state.complete || state.pendingChoice?.occurrenceKey !== occurrenceKey) return null;
     if (!this.getKamiPochiCandidates('fuyu').includes(target)) return null;
+    // [2026-10-16 通報 20261016_0「冬冬金北がチップに反映されてない」] めくりで正ぽっちが出ると
+    // 冬の祝儀は applyHule の後 [ここ] で動くので、焼き込み済みの chipTransfer ・ chipTotal ・
+    // chipBreakdown に足す。ledger は正しく動いていて、結果の板と戦績 [hule event] だけ抜けていた
+    const ledgerBefore = { 0: this.chipLedger[0], 1: this.chipLedger[1], 2: this.chipLedger[2] } as Record<PlayerId, number>;
+    const breakdownStart = this.chipBreakdown.length;
     const advance = applyFuyuChipHelper(
       this._huleChipCtx(),
       winner,
@@ -4422,10 +4427,30 @@ export class Game3 {
       state.hasKinpei,
       { occurrenceKey, target },
     );
+    if (result) this.bakeLateFuyuChips(result, winner, ledgerBefore, breakdownStart);
     if (advance.status === 'complete' && this.feverActive[winner] && this.fuyuConsumed[winner]) {
       this.endFever(winner);
     }
     return advance;
+  }
+
+  /** applyHule の後に動いた冬の祝儀を、和了の結果の焼き込み値に足す [hule event の chipTransfer は同じ物] */
+  private bakeLateFuyuChips(result: any, winner: PlayerId, ledgerBefore: Record<PlayerId, number>, breakdownStart: number): void {
+    const diff = {
+      0: this.chipLedger[0] - ledgerBefore[0],
+      1: this.chipLedger[1] - ledgerBefore[1],
+      2: this.chipLedger[2] - ledgerBefore[2],
+    } as Record<PlayerId, number>;
+    if (diff[0] === 0 && diff[1] === 0 && diff[2] === 0) return;
+    if (typeof result.chipTotal === 'number') result.chipTotal += diff[winner];
+    if (Array.isArray(result.chipBreakdown)) result.chipBreakdown.push(...this.chipBreakdown.slice(breakdownStart));
+    const ct = result.chipTransfer;
+    if (ct?.after && ct?.delta) {
+      for (const p of [0, 1, 2] as PlayerId[]) {
+        ct.after[p] = (ct.after[p] ?? 0) + diff[p];
+        ct.delta[p] = (ct.delta[p] ?? 0) + diff[p];
+      }
+    }
   }
 
   clearFuyuRevealState(winner: PlayerId): void {
