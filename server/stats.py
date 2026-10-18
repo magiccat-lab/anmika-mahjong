@@ -195,10 +195,11 @@ def derive_match_stats(paifu: Any) -> dict[str, Any]:
         rows[s]["rounds"] = rounds
 
     # 順位: 最終 defen 降順、同点は起家に近い順 [qijia からの席順]
+    # 席は反時計 (qijia=1 なら 東 1 → 南 0 → 西 2) なので距離は qijia - s (2026-10-18 通報 20261018_0)
     if last_defen_after is not None:
         for s in SEATS:
             rows[s]["final_defen"] = last_defen_after[s]
-        order = sorted(SEATS, key=lambda s: (-last_defen_after[s], (s - qijia) % 3))
+        order = sorted(SEATS, key=lambda s: (-last_defen_after[s], (qijia - s) % 3))
         for rank, s in enumerate(order, start=1):
             rows[s]["placement"] = rank
 

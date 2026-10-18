@@ -1136,11 +1136,13 @@ export class Game3 {
     // R23 #6 fix: 同点タイブレーク = 起家順 [qijia から距離が近い順、 アンミカ三麻仕様]、
     // 旧 sort は stability 依存で player id 順 [0/1/2] になってた、 qijia=1 だと
     // 同点時 P0 が上位になって 起家規則と齟齬。 第二 key で qijia 距離を比較
+    // [2026-10-18 通報 20261018_0: 席は反時計 (qijia=1 なら 東 P1 → 南 P0 → 西 P2) なので
+    //  距離は qijia - player。 player - qijia だと南と西が入れ替わっていた]
     const qijia = this.state.qijia;
     arr.sort((a, b) => {
       if (b.defen !== a.defen) return b.defen - a.defen;
-      const da = (a.player - qijia + 3) % 3;
-      const db = (b.player - qijia + 3) % 3;
+      const da = (qijia - a.player + 3) % 3;
+      const db = (qijia - b.player + 3) % 3;
       return da - db;
     });
     return arr.map((x, i) => ({ ...x, rank: i + 1 }));

@@ -116,10 +116,10 @@ def test_placement_tiebreak_prefers_qijia_side():
     }]
     d = derive_match_stats(ev)
     rows = d["seats"]
-    # 同点は起家 [qijia=1] に近い順: 1 → 2 → 0
+    # 同点は起家 [qijia=1] に近い順。席は反時計なので 東 1 → 南 0 → 西 2
     assert rows[1]["placement"] == 1
-    assert rows[2]["placement"] == 2
-    assert rows[0]["placement"] == 3
+    assert rows[0]["placement"] == 2
+    assert rows[2]["placement"] == 3
 
 
 def test_old_paifu_fallbacks():

@@ -25,6 +25,19 @@ describe('Game3 getRanking', () => {
     expect(r.map((x) => x.rank)).toEqual([1, 2, 3]);
   });
 
+  // 通報 20261018_0: qijia=1 で P0 と P2 が -15000 の同点。席は反時計で 東 P1 → 南 P0 → 西 P2
+  it('同点は起家から反時計の席順 [南家が上]', () => {
+    const g = new Game3({ qijia: 1 });
+    g.qipai();
+    g.state.defen = { 0: -15000, 1: 135000, 2: -15000 };
+    const r = g.getRanking();
+    expect(r.map((x) => x.player)).toEqual([1, 0, 2]);
+    g.state.defen = { 0: 35000, 1: 35000, 2: 35000 };
+    expect(g.getRanking().map((x) => x.player)).toEqual([1, 0, 2]);
+    g.state.qijia = 0;
+    expect(g.getRanking().map((x) => x.player)).toEqual([0, 2, 1]);
+  });
+
   it('マイナス点でも sort 正しい', () => {
     const g = new Game3();
     g.qipai();
