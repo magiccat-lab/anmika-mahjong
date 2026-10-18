@@ -2195,6 +2195,8 @@ export class Game3 {
     if (this.lizhi.has(player)) return [];
     // 抜き直後の他家ポン不可 [ルール 2-4]
     if (this.justNukidBei[from]) return [];
+    // 河底牌 [山 0 枚の後の打牌] はポン不可、 ロンだけ。 大明槓と同じ [通報 20261018_1「はいていでテンパイ取れちゃった」]
+    if (this.shan.paishu <= 0) return [];
     // 反時計周り [P0→P2→P1] 用に dir 計算を逆方向に [2026-05-13 fix]
     // from が player の何個前 [反時計]: diff=1 → 上家 (+)、 diff=2 → 下家 (-)
     const diff = (from - player + 3) % 3;

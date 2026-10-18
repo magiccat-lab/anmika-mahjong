@@ -129,3 +129,19 @@ describe('Game3 getKanCandidates', () => {
     expect(sp._fulou).toContain('z5555');
   });
 });
+
+// 通報 20261018_1: 山 0 枚の後のツモ切り [河底牌] をポンして流局テンパイが取れていた
+describe('河底牌の副露', () => {
+  it('山 0 枚ならポン ・ 大明槓とも候補 0 件、 山が残っていればポンできる', () => {
+    const g = new Game3({ qijia: 1 });
+    g.qipai();
+    const player = 0 as PlayerId;
+    const from = 2 as PlayerId;
+    g.shoupai.set(player, buildShoupai(['s1','s1','s1','p1','p2','p3','p4','p5','p6','z1','z2','m7','m9']));
+    (g.shan as any)._pai = ['p7'];
+    expect(g.getPonCandidates(player, from, 's1').length).toBeGreaterThan(0);
+    (g.shan as any)._pai = [];
+    expect(g.getPonCandidates(player, from, 's1')).toEqual([]);
+    expect(g.getDamingangCandidates(player, from, 's1')).toEqual([]);
+  });
+});
