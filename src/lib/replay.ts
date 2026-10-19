@@ -264,6 +264,10 @@ export function foldPaifu(events: unknown): ReplayRound[] {
         pushStep(`${seat !== null ? seatName(seat) : ''} シュバリ返還`, etype);
         break;
       }
+      case 'lizhiRefund': {
+        pushStep(`${seat !== null ? seatName(seat) : ''} リーチ棒返還`, etype);
+        break;
+      }
       default:
         break; // 未知 event は state を触らず読み飛ばす
     }

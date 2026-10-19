@@ -4180,6 +4180,19 @@ export class Game3 {
       this.lizhiDeclareDapai[loser]
       || (this.pendingRonWindow?.player === loser && this.pendingRonWindow.declaration === true)
     );
+    // 通常 ・ オープンのリーチ宣言牌への放銃も同じでリーチ不成立。宣言で供託した棒を宣言者へ戻す
+    // [2026-10-19 通報 20261019_0「リーチ宣言牌で放銃したが、リーチ棒を回収されている」。
+    // 返金がシュバだけに付いていたので、通常リーチの棒は下の供託総取りで winner に渡っていた]
+    if (loser !== null && declarationRon && !this.shuvariActive[loser] && this.lizhi.has(loser)) {
+      const wasOpen = this.openLizhi.has(loser);
+      this.state.defen[loser] += wasOpen ? 2000 : 1000;
+      this.state.lizhibang = Math.max(0, this.state.lizhibang - (wasOpen ? 2 : 1));
+      this.lizhi.delete(loser);
+      this.openLizhi.delete(loser);
+      this.doubleLizhi.delete(loser);
+      this.yifaActive[loser] = false;
+      this.events.push({ type: 'lizhiRefund', player: loser } as any);
+    }
     if (loser !== null && declarationRon && this.shuvariActive[loser]) {
       // シュバリ宣言牌への放銃はシュバ不成立。シュバ権に加えて、宣言で供託した
       // リーチ棒 [通常 1000 / オープン 2000] も宣言者へ戻す。
