@@ -54,7 +54,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(appmod, "_notify_ws_purge", fake_notify_purge)
     appmod.init_db()
     appmod.hub.start_payloads.clear()
-    return SimpleNamespace(purged=purged, client=TestClient(appmod.app))
+    return SimpleNamespace(purged=purged, client=TestClient(appmod.app, base_url="https://testserver"))
 
 
 def add_user(uid, name=None):
@@ -700,3 +700,55 @@ def test_ws_token_spectate_allowed_for_outsider(env, room):
     login(env.client, "u9")
     r = env.client.post("/api/ws-token", json={"room_id": room, "spectate": True})
     assert r.status_code == 200, r.text
+
+
+# ---------------- 2026-10-21 点検: 名牌譜マークは参加者かホストだけ ----------------
+
+def _add_match(room_id, member_ids):
+    with appmod.db_conn() as c:
+        c.execute(
+            "INSERT INTO matches(room_id, match_no, match_uuid, members_json, paifu_json, chip_delta_json)"
+            " VALUES(?,?,?,?,?,?)",
+            (room_id, 1, "uuid-star", json.dumps([{"user_id": u, "seat": i} for i, u in enumerate(member_ids)]), "[]", "{}"),
+        )
+        c.commit()
+        return c.execute("SELECT match_id FROM matches WHERE room_id=?", (room_id,)).fetchone()["match_id"]
+
+
+def test_star_match_participant_ok_outsider_403(env, room):
+    mid = _add_match(room, ["u1", "u2"])
+    add_user("u9")
+    login(env.client, "u9")
+    r = env.client.post(f"/api/matches/{mid}/star", json={"starred": True, "title": "x"})
+    assert r.status_code == 403, r.text
+    with appmod.db_conn() as c:
+        assert c.execute("SELECT starred FROM matches WHERE match_id=?", (mid,)).fetchone()["starred"] == 0
+    login(env.client, "u2")  # 参加者
+    r = env.client.post(f"/api/matches/{mid}/star", json={"starred": True, "title": "a" * 100})
+    assert r.status_code == 200, r.text
+    assert r.json()["starred"] == 1 and len(r.json()["title"]) == 80
+    assert env.client.post("/api/matches/9999/star", json={"starred": True}).status_code == 404
+
+
+def test_star_match_room_host_ok(env, room):
+    mid = _add_match(room, ["u2"])  # u1 は snapshot に居ないが ROOM のホスト
+    login(env.client, "u1")
+    r = env.client.post(f"/api/matches/{mid}/star", json={"starred": True, "title": "host"})
+    assert r.status_code == 200, r.text
+
+
+# ---------------- 2026-10-21 点検: session cookie Secure + HSTS ----------------
+
+def test_session_cookie_secure_and_hsts_on_https(env):
+    assert appmod._HTTPS_ONLY is True  # 既定 ON
+    r = env.client.post("/auth/test/login", json={"user_id": "u1", "username": "u1"})
+    assert r.status_code == 200
+    set_cookie = r.headers.get("set-cookie", "")
+    assert "secure" in set_cookie.lower(), set_cookie
+    assert r.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
+    # proxy 経由 [x-forwarded-proto: https] でも付く
+    plain = TestClient(appmod.app)  # http://testserver
+    r = plain.get("/api/me")
+    assert "strict-transport-security" not in r.headers
+    r = plain.get("/api/me", headers={"x-forwarded-proto": "https"})
+    assert r.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"

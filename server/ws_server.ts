@@ -2727,6 +2727,23 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     // room.members には入れず [ゲーム進行・全員ready・cleanup 判定に不関与]、
     // 受信は resync だけ処理して action は一切 authority に触らせない
     if (payload.spectator === true) {
+      // [2026-10-21 点検] 席に着いている人の観戦接続は拒否 [別接続で全員の手牌が見えるため]。
+      // 発行側 [/api/ws-token] の拒否より前に出た token や使い回しの token もここで止める。
+      // 生きた member は API が正 [fetchMembers]。取れない/secret 無しの時は room.members で見る
+      let seatedMember = false;
+      if (internalApiSecret) {
+        try {
+          const liveMembersForSpec = await fetchMembers(roomId);
+          seatedMember = liveMembersForSpec.some((member) => !member.is_cpu && member.user_id === payload.uid);
+        } catch (error) {
+          warn(`[anmika-ws] spectator member check failed room=${roomId}`, error);
+          ws.close(1013, 'member authority unavailable');
+          return;
+        }
+      } else {
+        seatedMember = room.members.has(payload.uid);
+      }
+      if (seatedMember) { ws.close(4403, 'seated player cannot spectate'); return; }
       const generation = ++room.generation;
       const previousSpec = room.spectators.get(payload.uid);
       if (previousSpec?.ws && previousSpec.ws !== ws) previousSpec.ws.close(4001, 'replaced by newer connection');

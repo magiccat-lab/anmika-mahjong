@@ -271,10 +271,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 # R21 P2 fix: https_only も環境変数で切替、 prod は HTTPS 必須にする
-_HTTPS_ONLY = os.environ.get("ANMIKA_SESSION_HTTPS_ONLY", "0") == "1"
+# [2026-10-21 点検] 既定を ON に反転 [本番は Cloudflare https 配下]。
+# http のローカル開発だけ ANMIKA_SESSION_HTTPS_ONLY=0 [または false/no/off] で切る
+_HTTPS_ONLY = os.environ.get("ANMIKA_SESSION_HTTPS_ONLY", "1").strip().lower() not in ("0", "false", "no", "off")
 app.add_middleware(
     SessionMiddleware, secret_key=SESSION_SECRET, https_only=_HTTPS_ONLY, same_site="lax"
 )
+
+
+@app.middleware("http")
+async def _hsts_header(request: Request, call_next):
+    """[2026-10-21 点検] https の応答だけ HSTS を付ける [http の手元開発には出さない]。
+    Cloudflare 経由は x-forwarded-proto で判定"""
+    response = await call_next(request)
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "").split(",")[0].strip().lower()
+    if proto == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 
 # ---- helpers ----
@@ -2406,7 +2419,8 @@ async def set_match_public(match_id: int, request: Request):
 
 @app.post("/api/matches/{match_id}/star")
 async def star_match(match_id: int, request: Request):
-    """名牌譜マーク [starred/title]。ログイン済みなら誰でも [身内運用]"""
+    """名牌譜マーク [starred/title]。その試合の参加者か、その部屋のホストだけ。
+    [2026-10-21 点検] 以前はログイン済みなら誰の試合でも書き換えられた [参加者以外は 403]"""
     u = current_user(request)
     if not u:
         raise HTTPException(status_code=401, detail="login required")
@@ -2414,9 +2428,24 @@ async def star_match(match_id: int, request: Request):
     starred = 1 if body.get("starred") else 0
     title = str(body.get("title") or "").strip()[:80]
     with db_conn() as c:
-        row = c.execute("SELECT match_id FROM matches WHERE match_id=?", (match_id,)).fetchone()
+        row = c.execute(
+            "SELECT match_id, room_id, members_json FROM matches WHERE match_id=?", (match_id,)
+        ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="match not found")
+        # 参加者 = 試合開始時 snapshot [members_json] の user_id。部屋のホストも可
+        try:
+            snap = json.loads(row["members_json"] or "[]")
+        except Exception:
+            snap = []
+        allowed = {m.get("user_id") for m in snap if isinstance(m, dict)}
+        room_row = c.execute(
+            "SELECT host_user_id FROM rooms WHERE room_id=?", (row["room_id"],)
+        ).fetchone()
+        if room_row:
+            allowed.add(room_row["host_user_id"])
+        if u["user_id"] not in allowed:
+            raise HTTPException(status_code=403, detail="not a participant of this match")
         c.execute(
             "UPDATE matches SET starred=?, title=? WHERE match_id=?",
             (starred, title, match_id),

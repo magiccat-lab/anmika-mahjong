@@ -38,6 +38,9 @@ set -a
 # shellcheck disable=SC1090
 . "$SECRETS_FILE"
 set +a
+# [2026-10-21 点検] 本番は Cloudflare https 配下なので session cookie を Secure 固定にする
+# [app.py の既定も ON だが、環境ファイルで 0 にされても本番起動では上書きする]
+export ANMIKA_SESSION_HTTPS_ONLY=1
 
 mkdir -p server/logs server/run server/data
 
