@@ -683,3 +683,20 @@ def test_summaries_list_and_image(env, monkeypatch, tmp_path):
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/html") and "分析" in r.text
     assert "content-disposition" not in r.headers
     assert c.get("/api/summaries/GFIO-20261013-2310/analysis.json").status_code == 404
+
+
+# ---------------- 2026-10-21 点検: 席に着いている人は観戦 token を取れない ----------------
+
+def test_ws_token_spectate_refused_for_seated_player(env, room):
+    login(env.client, "u2")
+    r = env.client.post("/api/ws-token", json={"room_id": room, "spectate": True})
+    assert r.status_code == 403, r.text
+    r = env.client.post("/api/ws-token", json={"room_id": room})
+    assert r.status_code == 200, r.text
+
+
+def test_ws_token_spectate_allowed_for_outsider(env, room):
+    add_user("u9")
+    login(env.client, "u9")
+    r = env.client.post("/api/ws-token", json={"room_id": room, "spectate": True})
+    assert r.status_code == 200, r.text

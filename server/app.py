@@ -479,6 +479,9 @@ async def issue_ws_token(request: Request):
         ).fetchone()
         if not member and not spectate:
             raise HTTPException(status_code=403, detail="not a room member")
+        # [2026-10-21 点検] 席に着いている人に観戦の token を出すと、別の接続で全員の手牌が見える
+        if member and spectate:
+            raise HTTPException(status_code=403, detail="seated players cannot spectate")
     now = int(_time.time())
     is_spectator = spectate or not member
     payload = {
