@@ -34,10 +34,10 @@ describe('冬冬金北: 南も風のチューリップに入る [通報 20261020
     expect(r.state.fuyuLog.length).toBe(4);
   });
 
-  it('風は 東・南・西・北 のどれがめくれても残りの 3 つに当たる', () => {
-    expect(new Set(tulipNeighbors('z2'))).toEqual(new Set(['z1', 'z3', 'z4']));
-    expect(new Set(tulipNeighbors('z1'))).toEqual(new Set(['z2', 'z3', 'z4']));
-    expect(new Set(tulipNeighbors('z3'))).toEqual(new Set(['z1', 'z2', 'z4']));
-    expect(new Set(tulipNeighbors('z4'))).toEqual(new Set(['z1', 'z2', 'z3']));
+  it('風は 東→南→西→北→東 の輪で両隣だけに当たる [2026-10-20 リョー「西は南と北だよね」]', () => {
+    expect(new Set(tulipNeighbors('z2'))).toEqual(new Set(['z1', 'z3']));
+    expect(new Set(tulipNeighbors('z1'))).toEqual(new Set(['z2', 'z4']));
+    expect(new Set(tulipNeighbors('z3'))).toEqual(new Set(['z2', 'z4']));
+    expect(new Set(tulipNeighbors('z4'))).toEqual(new Set(['z3', 'z1']));
   });
 });
