@@ -14,12 +14,12 @@ describe('tulipNeighbors [チューリップ隣接、リョー裁定 2026-07-20]
     expect(new Set(tulipNeighbors('z5'))).toEqual(new Set(['z6', 'z7']));
   });
 
-  it('北 z4 → 西 z3・東 z1 [旧 estimator は欠落していた]', () => {
-    expect(new Set(tulipNeighbors('z4'))).toEqual(new Set(['z3', 'z1']));
+  it('北 z4 → 西 z3・東 z1・南 z2 [旧 estimator は欠落していた。南は 10-20]', () => {
+    expect(new Set(tulipNeighbors('z4'))).toEqual(new Set(['z3', 'z1', 'z2']));
   });
 
-  it('西 z3 → 東 z1・北 z4', () => {
-    expect(new Set(tulipNeighbors('z3'))).toEqual(new Set(['z1', 'z4']));
+  it('西 z3 → 東 z1・北 z4・南 z2', () => {
+    expect(new Set(tulipNeighbors('z3'))).toEqual(new Set(['z1', 'z4', 'z2']));
   });
 
   it('三元牌は両方向 [2026-10-14 リョー「世の中のルールと同じ」]: 發・中 めくりも残りの 2 つに当たる', () => {
@@ -27,9 +27,9 @@ describe('tulipNeighbors [チューリップ隣接、リョー裁定 2026-07-20]
     expect(new Set(tulipNeighbors('z7'))).toEqual(new Set(['z5', 'z6']));
   });
 
-  it('風は 東・西・北 が両方向、南は隣接なし', () => {
-    expect(new Set(tulipNeighbors('z1'))).toEqual(new Set(['z3', 'z4']));
-    expect(tulipNeighbors('z2')).toEqual([]);
+  it('風は 東・南・西・北 が互いに隣 [南は 2026-10-20 通報 20261020_0]', () => {
+    expect(new Set(tulipNeighbors('z1'))).toEqual(new Set(['z2', 'z3', 'z4']));
+    expect(new Set(tulipNeighbors('z2'))).toEqual(new Set(['z1', 'z3', 'z4']));
   });
 
   it('数牌は ±1、端は循環 [1↔9]', () => {
