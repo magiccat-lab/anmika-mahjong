@@ -5021,7 +5021,8 @@
     flex: 1 1 auto;
     min-width: 0;
     background: rgba(0, 0, 0, 0.35) !important;
-    border: 0 !important;
+    /* [2026-10-21] 自分の番の枠 2px と同じ太さの透明な枠を常に持つ。0 → 2px で手牌が 2px 動き、横持ちの 1 枚の幅 (100cqw) も変わっていた */
+    border: 2px solid transparent !important;
     margin: 0 !important;
     padding: 6px 8px !important;
     border-radius: 4px;
@@ -7256,7 +7257,8 @@
       row-gap: 4px;
       margin: 0 auto;
     }
-    main.mode-single.ui-board-v2 .seat-bottom :global(.tile-btn.tsumo-tile) { margin-left: 0; }
+    main.mode-single.ui-board-v2 .seat-bottom :global(.tile-btn.tsumo-tile),
+    main.mode-single.ui-board-v2 .seat-bottom :global(.tile-btn.tsumo-slot) { margin-left: 0; }
     .me-strip { flex-wrap: nowrap; min-height: 40px; gap: 6px; }
     .seat-card.sc-me { padding: 2px 8px; gap: 8px; min-height: 40px; flex: 1 1 0; min-width: 0; overflow: hidden; }
     .seat-card.sc-me .sc-sub { display: none; }

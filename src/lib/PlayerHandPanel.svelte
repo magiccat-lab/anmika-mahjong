@@ -28,7 +28,10 @@
   export let shuvariActive: boolean = false;
   // [2026-10-14] 手牌の行に並ぶ牌の数 (横持ちで 1 枚の幅を枠に収めるのに使う)。鳴きは区切りの隙間で 0.7 枚、横向きは 0.4 枚、
   // ツモの隙間と余りで 0.6 枚を足す (横持ちの隙間は App.svelte の @media (orientation: landscape) で詰めてある)
-  $: handSlots = shoupai.length + fulou.reduce((n, m) => n + m.tiles.length + (m.rotateIdx != null && m.rotateIdx >= 0 ? 0.4 : 0) + 0.7, 0) + 0.6;
+  // [2026-10-21 先輩「ツモった時に手牌の絶対位置がちょいずれる、手牌の位置固定に」] ツモ牌の無い時 (13 枚 ・ 鳴いた後の 10 枚等) も
+  // 右端にツモ牌 1 枚分の見えない枠を置く。中央寄せの行の幅と横持ちの 1 枚の幅がツモの前後で変わらず、牌が動かない
+  $: tsumoSlot = shoupai.length % 3 === 1;
+  $: handSlots = shoupai.length + (tsumoSlot ? 1 : 0) + fulou.reduce((n, m) => n + m.tiles.length + (m.rotateIdx != null && m.rotateIdx >= 0 ? 0.4 : 0) + 0.7, 0) + 0.6;
 </script>
 
 <section class="player" class:active={isCurrent}>
@@ -57,6 +60,9 @@
         {#if isPendingCandidate}<span class="cut-marker" aria-hidden="true">切る</span>{/if}
       </button>
     {/each}
+    {#if tsumoSlot && shoupai.length > 0}
+      <span class="tile-btn tsumo-slot" aria-hidden="true" data-testid="tsumo-slot"><Tile pai={shoupai[0]} face="down" /></span>
+    {/if}
     {#each fulou as m}
       <span class="fulou-group">
         {#each m.tiles as t, i}
@@ -164,6 +170,8 @@
   }
   .tile-btn:disabled { cursor: default; opacity: 0.6; }
   .tile-btn.tsumo-tile { box-shadow: 0 0 0 2px #f0c040 inset; border-radius: 4px; margin-left: 16px; }
+  /* ツモ牌の来る所の見えない枠 [幅だけ取る、押せない] */
+  .tile-btn.tsumo-slot { display: inline-block; margin-left: 16px; visibility: hidden; pointer-events: none; }
   /* [2026-07-22 リョー要望] 表ドラ現物の常時ハイライト [水色。鳴き金リングより弱め、下に置いて負ける] */
   .tile-btn.dora-glow {
     box-shadow: 0 0 0 2px #27c4e8, 0 0 8px rgba(39, 196, 232, 0.75);
