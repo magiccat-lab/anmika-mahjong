@@ -68,3 +68,5 @@ tmp/
 public/sounds/bgm/
 # [2026-10-15] 煽り演出のアンミカさんの声 (BGM と同じく git に入れない)
 public/sounds/voice/
+# 2026-10-21 yuma2: 手で別名 build した残り (deploy-app は git status が空でないと止まる)
+dist_next/
