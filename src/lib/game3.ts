@@ -5268,6 +5268,17 @@ export class Game3 {
     );
   }
 
+  /** 待ち枯れの流局で、白の待ちが山に白ぽっちとして残っているか [ルール 5-3 で数えない分]。
+   *  流局の文言を「山に無い」と「ぽっちしか無い」で分けるためだけに使う */
+  feverWaitPochiOnlyLeft(player: PlayerId): boolean {
+    const waits = this.feverDeclareTing[player].length > 0
+      ? this.feverDeclareTing[player]
+      : this.getTingpaiList(player);
+    if (!waits.some((t) => toCorePai(String(t).replace(/[\+=\-_*]/g, '')) === 'z5')) return false;
+    if (this.shan.isBlind) return false;
+    return ([...((this.shan as any)._pai ?? [])] as string[]).some((p) => toCorePai(p) === 'z5');
+  }
+
   /** FEVER中、一度だけ発生するサイコロ条件の消費済awardKey。 */
   feverSaiAwarded: Record<PlayerId, string[]> = { 0: [], 1: [], 2: [] };
 
