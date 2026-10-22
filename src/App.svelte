@@ -59,6 +59,7 @@
   const FEVER_TSUMOGIRI_MS = 1000;
   import type { FeverCheck } from './lib/game3/feverLizhi';
   import { parseFulouList, fulouPhysicalFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
+  import { isLizhiDeclareEntry } from './lib/riverMarks';
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
   import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint, buildDiagnosticDump } from './lib/store/paifuIo';
   import { serializeCanonical } from './lib/canonicalJson';
@@ -1192,7 +1193,7 @@
     let lizhiSeen = false;
     // F1 [2026-05-15]: He.fulou で 末尾に付与される 副露 marker [+/=/-] を検出 → `#n` suffix で 河 表示薄化
     const raw = (he._pai ?? []).map((p: string) => {
-      const hasLizhi = p.endsWith('__');
+      const hasLizhi = isLizhiDeclareEntry(p);
       const hasNaki = /[\+\=\-]/.test(p);
       const stripped = p.replace(/[\+\=\-_*]/g, '');
       let s = stripped;
