@@ -7411,4 +7411,6 @@
     width: max-content; max-width: calc(100vw - 16px);
     pointer-events: auto;
   }
+  /* スマホは手牌の上の「ツモ切り」の段に重なるので、パネルはタップを通す [見るだけで押す物が無い] */
+  @media (hover: none) { .riichi-wait-float { pointer-events: none; } }
 </style>
