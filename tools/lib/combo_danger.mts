@@ -6,6 +6,8 @@
 // [2026-10-14、tools/calib_assumptions.mts]。両面を 1 として 嵌張 0.68 ・ 辺張 0.70 ・ 双碰 0.76 ・ 単騎 0.54。
 // 愚形でもリーチする三麻の打ち方でも、両面の方が多く出る。数が増えたら同じ道具で測り直す。
 // フリテン: リーチ者の河にある牌を待ちに含む形は数えない (スジ ・ 現物の効き目はここから出る)。
+// リーチの後に他家が切って通った牌もリーチ者は見逃しでフリテンなので、同じく現物に数える (passedTracker、
+// 10-23 先輩「リーチ後に切られた牌を現物安牌として認識されてなくて安全度計算みすってそう」)。
 // アンミカの萬子は 7 ・ 9 だけで順子にならないので、字牌と同じく双碰と単騎だけ。
 import { toCorePai } from '../../src/lib/helpers';
 
@@ -67,15 +69,42 @@ export function waitShapes(river: Set<string>, unseen: (t: string) => number): S
   return out;
 }
 
+export type Passed = Map<number, Set<string>>;
+
+/** リーチ者ごとの、リーチ後に他家が通した牌。game3 は打牌の通し番号を持たないので、読み直しの 1 手ごとに
+ * before (適用前) と after (適用後) を呼んで河の伸びで数える。局が替わって河が縮んだら空に戻す */
+export function passedTracker() {
+  const passed: Passed = new Map();
+  let lens: number[] = [];
+  let lizhi: number[] = [];
+  const heLens = (game: any) => [0, 1, 2].map((p) => ((game.he.get(p)?._pai ?? []) as string[]).length);
+  return {
+    passed,
+    before(game: any) { lens = heLens(game); lizhi = [...(game.lizhi ?? [])] as number[]; },
+    after(game: any) {
+      const now = heLens(game);
+      if (now.some((n, p) => n < lens[p])) { passed.clear(); return; }
+      for (const p of [0, 1, 2]) {
+        if (now[p] <= lens[p]) continue;
+        const t = baseOf(((game.he.get(p)?._pai ?? []) as string[])[now[p] - 1]);
+        for (const lp of lizhi) if (lp !== p) { if (!passed.has(lp)) passed.set(lp, new Set()); passed.get(lp)!.add(t); }
+      }
+    },
+  };
+}
+
+const riverOf = (game: any, lp: number, passed?: Passed) =>
+  new Set([...((game.he.get(lp)?._pai ?? []) as string[]).map(baseOf), ...(passed?.get(lp) ?? [])]);
+
 /** 牌 (base) ごとの放銃率 (%)。リーチ者が複数なら 1 − Π(1 − p)。リーチ者がいなければ空 */
-export function comboDanger(game: any, player: number): Map<string, number> {
+export function comboDanger(game: any, player: number, passed?: Passed): Map<string, number> {
   const opps = [...(game.lizhi ?? [])].filter((p: number) => p !== player) as number[];
   const result = new Map<string, number>();
   if (!opps.length) return result;
   const unseen = unseenCounter(game, player);
   const safe = new Map<string, number>();
   for (const lp of opps) {
-    const river = new Set(((game.he.get(lp)?._pai ?? []) as string[]).map(baseOf));
+    const river = riverOf(game, lp, passed);
     const shapes = waitShapes(river, unseen);
     const total = shapes.reduce((a, s) => a + s.combos * SHAPE_WEIGHT[s.kind], 0);
     const hit = new Map<string, number>();
@@ -91,13 +120,13 @@ export function comboDanger(game: any, player: number): Map<string, number> {
 }
 
 /** 牌ごとの放銃率の内訳 (形ごとの組み合わせの数)。説明の 1 行に使う */
-export function comboBreakdown(game: any, player: number, base: string): string {
+export function comboBreakdown(game: any, player: number, base: string, passed?: Passed): string {
   const opps = [...(game.lizhi ?? [])].filter((p: number) => p !== player) as number[];
   if (!opps.length) return '';
   const unseen = unseenCounter(game, player);
   const parts: string[] = [];
   for (const lp of opps) {
-    const river = new Set(((game.he.get(lp)?._pai ?? []) as string[]).map(baseOf));
+    const river = riverOf(game, lp, passed);
     if (river.has(base)) { parts.push('現物'); continue; }
     const byKind: Record<string, number> = {};
     for (const sh of waitShapes(river, unseen)) if (sh.waits.includes(base)) byKind[sh.kind] = (byKind[sh.kind] ?? 0) + sh.combos * SHAPE_WEIGHT[sh.kind];

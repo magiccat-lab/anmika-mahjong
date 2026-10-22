@@ -32,6 +32,26 @@ export function unswapM1(sp: any): any {
   if (sp._zimo === 'm1') sp._zimo = 'm7';
   return sp;
 }
+/** 嵌八萬 (7萬 9萬 の嵌張。8萬は無い): 門前でリーチした後、ぽっちのツモ (どの色でも) か正のぽっち (緑 ・ 青) のロンでだけアガれる。
+ *  7萬を 1萬にした手では形にならないので、元の手の通常形のシャンテンで別に数える。門前でなければ 99
+ *  [2026-10-23 先輩「間8mを含めた効率の精査」] */
+export function kanpamanXt(spSw: any): number {
+  if (!(Number(spSw?._bingpai?.m?.[1] ?? 0) > 0 && Number(spSw?._bingpai?.m?.[9] ?? 0) > 0)) return 99;
+  if (((spSw._fulou ?? []) as string[]).some((m) => /[-+=]/.test(m))) return 99;
+  try { return Majiang.Util.xiangting_yiban(unswapM1(spSw.clone())); } catch { return 99; }
+}
+/** 13 枚の手 (7萬を 1萬にした手) が嵌八萬だけのテンパイか */
+export function isKanpamanTenpai(spSw13: any): boolean {
+  if (kanpamanXt(spSw13) !== 0) return false;
+  try { return Majiang.Util.xiangting(spSw13) !== 0; } catch { return false; }
+}
+/** 嵌八萬のロンの値 (8萬でアガった形で数える)。正のぽっちは白 4 枚のうち 2 枚 */
+export const POSITIVE_POCHI_RATE = 0.5;
+export function kanpamanValue(spSw13: any, param: any, env: ChipEnv | undefined, kinds: string[], unseen: (t: string) => number): number {
+  const sp = unswapM1(spSw13.clone());
+  if (env) return winValue(sp, 'm8', false, param, env, kinds, unseen, 0);
+  try { return Number(Majiang.Util.hule(sp, 'm8-', param)?.defen ?? 0); } catch { return 0; }
+}
 /** 分析の牌の種類 (7萬 は 1萬 で持つ) と、その見えていない枚数 */
 export const swapKind = (t: string) => (t === 'm7' ? 'm1' : t);
 export const unswapKind = (t: string) => (t === 'm1' ? 'm7' : t);

@@ -11,6 +11,7 @@
 //   ロン 0.5 ・ 局の終わり = 部屋のアガリ ÷ 打牌 × END_SCALE 1.75 ・ ぽっちあり で、和了率 53.6% (実際 53.7%)、
 //   リーチ 1 回あたりツモ 33.8% (30.5%) ・ ロン 19.8% (23.2%)。和了の当てっぽさ (Brier) 0.242 は、全員に同じ率を当てた 0.249 より良い
 //  - 自分の河の牌で待つ形はフリテンなのでロンしない
+//  - 嵌八萬 (7萬 9萬) だけのテンパイは、ぽっちのツモ (pochiWild) と、相手が切った正のぽっちのロンでアガる [10-23]
 //  - 相手の番ごとに endRate の割合で局が終わる (誰かのアガリ。部屋のアガリの回数 ÷ 打牌の回数で、room_analysis が渡す)
 // 値: env (chip_value の ChipEnv) があればチップ (点 × CHIP_PER_POINT + 祝儀)、無ければ点だけ (calib_assumptions 用)。
 // 山は普通の牌の種類だけで、後から引く赤 ・ 金 ・ 虹 ・ 華は数えない
@@ -18,7 +19,7 @@
 // @ts-ignore - majiang-core 型定義なし
 import Majiang from '@kobalab/majiang-core';
 import { canFeverLizhi } from '../../src/lib/game3/feverLizhi';
-import { winValue, unswapM1, type ChipEnv } from './chip_value.mts';
+import { winValue, unswapM1, isKanpamanTenpai, kanpamanValue, POSITIVE_POCHI_RATE, type ChipEnv } from './chip_value.mts';
 
 export const RON_TAKE = 0.5;
 export const END_SCALE = 1.75;
@@ -49,11 +50,16 @@ function addTile(sp: any, t: string): void {
 }
 
 // テンパイの手 (13 枚) の待ちと、待ちごとの値 (ロン ・ ツモ)、フィーバーの段。同じ手は覚えておく
-export type Waits = { waits: string[]; ron: Map<string, number>; tsumo: Map<string, number>; furiten: boolean; fever: number };
+export type Waits = { waits: string[]; ron: Map<string, number>; tsumo: Map<string, number>; furiten: boolean; fever: number; pochiRon?: number };
 function waitsOf(sp13: any, ctx: McCtx, cache: Map<string, Waits>): Waits {
   const key = sp13.toString();
   const hit = cache.get(key);
   if (hit) return hit;
+  if (isKanpamanTenpai(sp13)) {
+    const k = { waits: [], ron: new Map(), tsumo: new Map(), furiten: false, fever: 0, pochiRon: kanpamanValue(sp13, ctx.param, ctx.env, ctx.kinds, ctx.unseen) };
+    cache.set(key, k);
+    return k;
+  }
   let waits: string[] = [];
   try { waits = (Majiang.Util.tingpai(sp13) ?? []).filter((w: string) => ctx.kinds.includes(w)); } catch { waits = []; }
   let fever = 0;
@@ -139,7 +145,7 @@ export function mcOption(sp13: any, ctx: McCtx, sims: number, cache: Map<string,
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
     const hand = sp13.clone();
     hand._zimo = null;
-    let tenpai: Waits | null = Majiang.Util.xiangting(hand) === 0 ? waitsOf(hand, ctx, cache) : null;
+    let tenpai: Waits | null = Majiang.Util.xiangting(hand) === 0 || isKanpamanTenpai(hand) ? waitsOf(hand, ctx, cache) : null;
     let got = 0;
     let byTsumo = false;
     let pochiWin = false;
@@ -166,7 +172,7 @@ export function mcOption(sp13: any, ctx: McCtx, sims: number, cache: Map<string,
         addTile(hand, t);
         const c = greedyDiscard(hand, ctx);
         hand.dapai(c);
-        if (Majiang.Util.xiangting(hand) === 0) tenpai = waitsOf(hand, ctx, cache);
+        if (Majiang.Util.xiangting(hand) === 0 || isKanpamanTenpai(hand)) tenpai = waitsOf(hand, ctx, cache);
         if (tenpai?.fever) continue;
       }
       // 相手 2 人の番: 局が終わるか、打牌でロン
@@ -176,6 +182,7 @@ export function mcOption(sp13: any, ctx: McCtx, sims: number, cache: Map<string,
         if (rand() < ctx.endRate) { ended = true; break; }
         const x = pool.pop() as string;
         if (tenpai && !tenpai.furiten && tenpai.ron.has(x) && rand() < (ctx.ronTake ?? RON_TAKE)) { ron = tenpai.ron.get(x) ?? 0; break; }
+        if (tenpai?.pochiRon && x === 'z5' && rand() < POSITIVE_POCHI_RATE && rand() < (ctx.ronTake ?? RON_TAKE)) { ron = tenpai.pochiRon; break; }
       }
       if (ron) { got = ron; break; }
       if (ended) break;

@@ -13,7 +13,7 @@ import { createRoomAuthority, type RoomAuthority } from '../server/authority';
 import { toCorePai } from '../src/lib/helpers';
 import Majiang from '@kobalab/majiang-core';
 import { canFeverLizhi } from '../src/lib/game3/feverLizhi';
-import { comboDanger, comboBreakdown } from './lib/combo_danger.mts';
+import { comboDanger, comboBreakdown, passedTracker } from './lib/combo_danger.mts';
 import { parseCanonicalRoomSnapshot, type AcceptedRoomCommand } from '../server/protocol';
 
 const roomId = process.argv[2];
@@ -65,6 +65,8 @@ type Hule = { match: number; seat: number | null; ron: boolean; defen: number; h
 type Hand = { match: number; ordinal: number; delta: Record<string, number>; hules: number; firstRevision: number; lastRevision: number };
 const dice: Dice[] = [];
 const hules: Hule[] = [];
+// リーチ後に他家が通した牌 (放銃率の現物に足す)
+let passed = passedTracker();
 const diverged: Array<{ match: number; revision: number; reason: string }> = [];
 // 打牌の見返し (10-14 先輩「打牌のミスとかjsonで見返せるようにしたいな。牌効率の問題とか祝儀/フィーバー効率の問題とか」)。
 // 人が切る直前に Game3.adviseDiscard (CPU と同じ物差し: シャンテン → 受け入れ → 祝儀温存の減点込みの優先度、リーチ者がいれば安全度) を当てる。
@@ -191,7 +193,7 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
   // 降り率: リーチを受けて 2 シャンテン以上 (CPU なら降りる) の打牌のうち、目安の放銃率が一番安全な牌から 1.5% 以内だった割合
   const minXtAll = Math.min(...rows.map((r) => r.xiangting));
   // 放銃率はコンボ理論で見積もる (10-14 先輩「コンボ理論採用して解析してほしい」。前の目安の表 dangerPct は使わない)
-  const combo = comboDanger(game, player);
+  const combo = comboDanger(game, player, passed.passed);
   const danger = new Map<string, number>(rows.map((r) => [r.base, combo.get(r.base) ?? 0]));
   const minDanger = Math.min(...danger.values());
   const foldSpot = rows[0].hasLizhiOpponent && minXtAll >= 2;
@@ -263,7 +265,7 @@ function reviewDiscard(game: any, action: Record<string, any>, match: number, ha
   const dSafe = danger.get(safest.base) ?? 0;
   if (foldSpot && dChosen - dSafe >= 5) {
     tags.push('危険牌');
-    notes.push(`${minXt} シャンテンでリーチを受けたら CPU は降りる。コンボ理論の放銃率は、切った ${tileName(chosen.base)} ${dChosen}% (${comboBreakdown(game, player, chosen.base)})、${tileName(safest.base)} なら ${dSafe}%`);
+    notes.push(`${minXt} シャンテンでリーチを受けたら CPU は降りる。コンボ理論の放銃率は、切った ${tileName(chosen.base)} ${dChosen}% (${comboBreakdown(game, player, chosen.base, passed.passed)})、${tileName(safest.base)} なら ${dSafe}%`);
   }
   if (flush && tags.includes('牌効率')) notes.push('染め手に向かう打牌かも (CPU は役を見ない)');
   for (const t of tags) st.tags[t] = (st.tags[t] ?? 0) + 1;
@@ -375,6 +377,7 @@ segments.forEach((segment, index) => {
   }
   const mine = dice.filter((d) => d.match === match);
   let handNo = 1;
+  passed = passedTracker();
   for (const command of body) {
     const type = String(command.action.type);
     if (type === 'stamp') continue;
@@ -404,6 +407,7 @@ segments.forEach((segment, index) => {
       }
     }
     const eventsBefore = (before.game.events ?? []).length;
+    passed.before(before.game);
     const reason = authority.validateAndApply(command.actorSeat, structuredClone(command.action), members);
     if (reason) {
       diverged.push({ match, revision: command.revision, reason });
@@ -412,6 +416,7 @@ segments.forEach((segment, index) => {
     authority.takeCanonicalChipEffects();
     authority.takePendingCutins();
     const after: any = authority.canonicalState();
+    passed.after(after.game);
     // アガリは game の hule event で拾う [華や金北を選ぶ和了は tsumo の command の後で確定する]
     for (const event of (after.game.events ?? []).slice(eventsBefore)) {
       if (event?.type !== 'hule') continue;

@@ -16,9 +16,9 @@ import { parseCanonicalRoomSnapshot, type AcceptedRoomCommand } from '../server/
 import { toCorePai, normalizeBaopaiForMajiang, isPositiveZ5 } from '../src/lib/helpers';
 import { canFeverLizhi } from '../src/lib/game3/feverLizhi';
 import { americanChitoiXiangting } from '../src/lib/game3/tingpai';
-import { comboDanger, comboBreakdown } from './lib/combo_danger.mts';
+import { comboDanger, comboBreakdown, passedTracker } from './lib/combo_danger.mts';
 import { mcOption, END_SCALE } from './lib/mc_eval.mts';
-import { chipEnvOf, winValue, CHIP_PER_POINT, swapM7, unswapM1, swapKind, unswapKind, type ChipEnv } from './lib/chip_value.mts';
+import { chipEnvOf, winValue, CHIP_PER_POINT, swapM7, unswapM1, swapKind, unswapKind, kanpamanXt, isKanpamanTenpai, kanpamanValue, POSITIVE_POCHI_RATE, type ChipEnv } from './lib/chip_value.mts';
 
 const argv = process.argv.slice(2);
 const mcAt = argv.indexOf('--mc');
@@ -80,8 +80,16 @@ const SW_KINDS = DRAW_KINDS.map(swapKind);
  *  4 シャンテンの国士で数えると、普通に字牌を切った手が全部シャンテン戻しになっていた)。国士に向かう打牌は
  *  review の中で別に見る (guoshiXt) */
 function anmikaXt(aSw: any): number {
-  let xt = Math.min(Majiang.Util.xiangting_yiban(aSw), Majiang.Util.xiangting_qidui(aSw));
-  try { xt = Math.min(xt, americanChitoiXiangting(unswapM1(aSw.clone()))); } catch { /* 通常形だけ */ }
+  return Math.min(normalXt(aSw), chiitoiXt(aSw));
+}
+/** 通常形のシャンテン。嵌八萬 (7萬 9萬) も門前なら形に数える (kanpamanXt) */
+function normalXt(aSw: any): number {
+  return Math.min(Majiang.Util.xiangting_yiban(aSw), kanpamanXt(aSw));
+}
+/** 七対子とアメリカン七対子のシャンテン */
+function chiitoiXt(aSw: any): number {
+  let xt = Majiang.Util.xiangting_qidui(aSw);
+  try { xt = Math.min(xt, americanChitoiXiangting(unswapM1(aSw.clone()))); } catch { /* 七対子だけ */ }
   return xt;
 }
 
@@ -143,6 +151,11 @@ type Ctx = { game: any; player: number; unseen: (t: string) => number; unseenSw:
 // 13 枚のテンパイの手: 待ちの見えていない枚数と、待ちごとの値 (ロン、リーチ付き。点とチップを chip_value で枚に) の重み付き平均。
 // フィーバーになる形は、残りの山に出る待ち牌を全部アガるので、値を「待ち × 山 ÷ 見えていない牌」回分にする (feverWins)
 function tenpaiValue(ctx: Ctx, e: any): { wait: number; value: number; fever: number; feverWins: number } {
+  // 嵌八萬だけのテンパイ: 相手が切った正のぽっちでロン (ぽっちのツモは色が正 ・ 逆で見込み 0)。
+  // tingpai はテンパイでない手には進む牌を返すので、先に見る
+  if (isKanpamanTenpai(e)) {
+    return { wait: ctx.unseenSw('z5') * POSITIVE_POCHI_RATE, value: kanpamanValue(e, ctx.param, ctx.env, SW_KINDS, ctx.unseenSw), fever: 0, feverWins: 0 };
+  }
   let waits: string[] = [];
   try { waits = Majiang.Util.tingpai(e) ?? []; } catch { waits = []; }
   let fever = 0;
@@ -195,12 +208,12 @@ function optionEv(ctx: Ctx, sp: any, pai: string): { ev: number | null; xt: numb
     const b = a.clone();
     b._bingpai[tk[0]][Number(tk[1])] += 1;
     b._zimo = tk;
-    if (Majiang.Util.xiangting(b) !== 0) continue;
+    if (Majiang.Util.xiangting(b) !== 0 && kanpamanXt(b) !== 0) continue;
     let best = 0;
     for (const c of b.get_dapai(false) as string[]) {
       const e = b.clone();
       try { e.dapai(c); } catch { continue; }
-      if (Majiang.Util.xiangting(e) !== 0) continue;
+      if (Majiang.Util.xiangting(e) !== 0 && !isKanpamanTenpai(e)) continue;
       const t = tenpaiValue(ctx, e);
       // テンパイになった後のツモは残りの半分くらい。フィーバーは山の半分に出る待ちを全部アガる
       best = Math.max(best, t.fever ? (t.feverWins / 2) * t.value : winProb(t.wait, ctx.unseenTotal, Math.max(1, Math.floor(ctx.draws / 2))) * t.value);
@@ -218,7 +231,7 @@ type Review = {
   loss: number | null; loss_se: number; xiangting: number; best_xiangting: number; options: Array<{ pai: string; ev: number | null; xt: number; ukeire: number; danger: number; detail: string; combo: string }>;
   kind: 'ev' | 'ukeire' | 'back'; lizhi: boolean; bad: boolean; dealt_in?: boolean;
   // シャンテン戻しの受け入れ (backUkeire) と、安牌を残した打牌の印
-  back?: { uk1: number; uk2: number; eff: number }; keep_safe?: boolean; guoshi?: number;
+  back?: { uk1: number; uk2: number; eff: number }; keep_safe?: boolean; guoshi?: number; chiitoi_route?: boolean;
   // 悪手の時だけ局面を残す (河は席番号 → 打った牌、ドラ表示、リーチ者の席)
   rivers?: Record<string, string[]>; dora?: string[]; lizhi_seats?: number[];
 };
@@ -229,6 +242,7 @@ const oppChipLoss: number[] = [];
 // 局が誰かのアガリで終わる割合 (1 打あたり)。モンテカルロの局の長さに使う
 let turnsAll = 0;
 let lastDiscard: { seat: number; idx: number } | null = null;
+let passed = passedTracker();
 const diverged: Array<{ match: number; revision: number; reason: string }> = [];
 
 function review(game: any, action: Record<string, any>, match: number, hand: number, seat: number): void {
@@ -269,22 +283,29 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
     try { a.dapai(r.pai); } catch { return { ...r }; }
     a = swapM7(a);
     const xt = anmikaXt(a);
-    let uk = 0;
+    const yxt = normalXt(a);
+    let uk = 0, yuk = 0;
     for (const k of SW_KINDS) {
       const rem = ctx.unseenSw(k);
       if (!rem) continue;
       a._bingpai[k[0]][Number(k[1])] += 1;
       if (anmikaXt(a) < xt) uk += rem;
+      if (normalXt(a) < yxt) yuk += rem;
       a._bingpai[k[0]][Number(k[1])] -= 1;
     }
-    return { ...r, xiangting: xt, ukeire: uk, gxt: guoshiXt(a) };
+    return { ...r, xiangting: xt, ukeire: uk, gxt: guoshiXt(a), yxt, yuk, cxt: chiitoiXt(a) };
   });
   const chosenRowSw = rows.find((r) => r.pai === chosenRow.pai) ?? chosenRow;
   const minXt = Math.min(...rows.map((r) => r.xiangting));
-  const comboDanger0 = comboDanger(game, player);
+  const comboDanger0 = comboDanger(game, player, passed.passed);
   // 見る候補: 一番少ないシャンテンの物と、切った牌 (多くても 8 つ。受け入れの多い順)。リーチを受けていれば一番安い牌 (降りの候補) も
   const safest = hasLizhi ? [...rows].sort((a, b) => (comboDanger0.get(a.base) ?? 0) - (comboDanger0.get(b.base) ?? 0))[0] : null;
-  const cand = [chosenRowSw, ...(safest ? [safest] : []), ...rows.filter((r) => r.xiangting === minXt).sort((a, b) => b.ukeire - a.ukeire).slice(0, 8)]
+  // 通常形で一番進む物も (七対子の道の比べ直しに使う)
+  const EV_XT = MC_SIMS ? 2 : 1;
+  const minY = Math.min(...rows.map((r: any) => r.yxt ?? 99));
+  const cand = [chosenRowSw, ...(safest ? [safest] : []), ...rows.filter((r) => r.xiangting === minXt).sort((a, b) => b.ukeire - a.ukeire).slice(0, 8),
+    // 期待値で比べられる局面を受け入れの比べに落とさない様、期待値の出ない深さの物は足さない
+    ...rows.filter((r: any) => r.yxt === minY && (minXt > EV_XT || r.xiangting <= EV_XT)).sort((a: any, b: any) => b.yuk - a.yuk).slice(0, 4)]
     .filter((r, i, arr) => arr.findIndex((x) => x.base === r.base) === i);
   // 放銃率はコンボ理論 (tools/lib/combo_danger.mts)
   const combo = comboDanger0;
@@ -294,7 +315,8 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
     // リーチを受けている時、2 シャンテン以上に下がる切り方は降り (アガリを見ない) として −放銃率 × 相手の打点で比べる
     const fold = e.ev === null && hasLizhi;
     const ev = fold ? -(danger / 100) * vOpp : e.ev === null ? null : e.ev - (hasLizhi ? (danger / 100) * vOpp : 0);
-    return { pai: r.pai, base: r.base, ev, xt: e.xt === 99 ? r.xiangting : e.xt, ukeire: r.ukeire, danger, detail: fold ? '降り (アガリを見ない)' : e.detail, samples: e.samples };
+    return { pai: r.pai, base: r.base, ev, xt: e.xt === 99 ? r.xiangting : e.xt, ukeire: r.ukeire, danger, detail: fold ? '降り (アガリを見ない)' : e.detail, samples: e.samples,
+      yxt: (r as any).yxt ?? 99, yuk: (r as any).yuk ?? 0, cxt: (r as any).cxt ?? 99 };
   });
   const chosen = options.find((o) => o.base === chosenRowSw.base)!;
   let best = options[0];
@@ -318,9 +340,25 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
   // 国士に向かう打牌: 通常の形では損でも、国士のシャンテンが一番進む切り方なら損にしない
   const minG = Math.min(...rows.map((r) => (r as any).gxt ?? 99));
   const guoshiRoute = minG <= GUOSHI_ROUTE_XT && ((chosenRowSw as any).gxt ?? 99) === minG && (loss === null || loss > 0);
+  // 七対子の道 (10-23 先輩「悪手率の計算でチートイが過剰評価されすぎ」): 一番良い打牌が七対子で進むだけで、
+  // 切った牌は通常形で同じか先に進んでいる時は、七対子を見ずに通常形の一番良い打牌と比べ直す。七対子のテンパイ (0) は残す
+  const isChiitoiLed = (o: { yxt: number; cxt: number }) => o.cxt < o.yxt;
+  const chiitoiRoute = !guoshiRoute && best !== chosen && isChiitoiLed(best) && best.cxt > 0 && !isChiitoiLed(chosen) && chosen.yxt <= best.yxt;
   if (guoshiRoute) {
     loss = 0;
     chosen.detail = `国士に向かう打牌 (国士 ${minG} シャンテン)`;
+  } else if (chiitoiRoute) {
+    const normal = options.filter((o) => !isChiitoiLed(o));
+    let nb = chosen;
+    if (kind === 'ev') {
+      for (const o of normal) if ((o.ev as number) > (nb.ev as number)) nb = o;
+      loss = Math.max(0, Math.round(((nb.ev as number) - (chosen.ev as number)) * 10) / 10);
+    } else {
+      for (const o of normal) if (o.yxt < nb.yxt || (o.yxt === nb.yxt && o.yuk > nb.yuk)) nb = o;
+      loss = chosen.yxt > nb.yxt ? null : nb.yuk > 0 ? Math.max(0, Math.round((1 - chosen.yuk / nb.yuk) * 100) / 100) : 0;
+    }
+    chosen.detail = `${chosen.detail ? chosen.detail + ' ・ ' : ''}七対子 (${best.cxt} シャンテン) を見ずに通常形で比べた`;
+    best = nb;
   } else if (kind !== 'ev' && chosen.xt === best.xt + 1) {
     back = backUkeire(ctx, sp, chosen.pai);
     kindOut = 'back';
@@ -355,9 +393,9 @@ function review(game: any, action: Record<string, any>, match: number, hand: num
   reviews.push({
     match, hand, turn: (game.he.get(player)?._pai ?? []).length + 1, seat, user: roomSeatUser[seat] ?? '', hand14: String(sp?.toString?.() ?? ''),
     chosen: chosenRaw, best: best.pai, loss, loss_se: lossSe, xiangting: chosen.xt, best_xiangting: best.xt, kind: kindOut, lizhi: hasLizhi, bad, ...context,
-    ...(back ? { back } : {}), ...(keepSafe ? { keep_safe: true } : {}), ...(guoshiRoute ? { guoshi: minG } : {}),
+    ...(back ? { back } : {}), ...(keepSafe ? { keep_safe: true } : {}), ...(guoshiRoute ? { guoshi: minG } : {}), ...(chiitoiRoute ? { chiitoi_route: true } : {}),
     options: options.map((o) => ({ pai: o.pai, ev: o.ev === null ? null : Math.round(o.ev * 10) / 10, xt: o.xt, ukeire: o.ukeire, danger: o.danger, detail: o.detail,
-      combo: hasLizhi ? comboBreakdown(game, player, o.base) : '' })),
+      combo: hasLizhi ? comboBreakdown(game, player, o.base, passed.passed) : '' })),
   });
 }
 
@@ -375,6 +413,7 @@ segments.forEach((segment, index) => {
     body = segment.slice(1);
   }
   let handNo = 1;
+  passed = passedTracker();
   for (const command of body) {
     const type = String(command.action.type);
     if (type === 'stamp') continue;
@@ -392,6 +431,7 @@ segments.forEach((segment, index) => {
       if (reviews.length > n0) lastDiscard = { seat: command.actorSeat, idx: reviews.length - 1 };
     }
     const eventsBefore = (before.game.events ?? []).length;
+    passed.before(before.game);
     const reason = authority.validateAndApply(command.actorSeat, structuredClone(command.action), members);
     if (reason) {
       diverged.push({ match, revision: command.revision, reason });
@@ -400,6 +440,7 @@ segments.forEach((segment, index) => {
     authority.takeCanonicalChipEffects();
     authority.takePendingCutins();
     const after: any = authority.canonicalState();
+    passed.after(after.game);
     for (const event of (after.game.events ?? []).slice(eventsBefore)) {
       if (event?.type === 'hule' && Number(event.defen) > 0) oppValues.push(Number(event.defen));
       // その打牌で放銃したか (放銃率の当てっぽさを測るため)
