@@ -40,9 +40,8 @@ export function feverWaitInfoFromLiveWall(ting: string[], liveWall: string[]): F
     const tile = normalizedWaitCore(rawWait);
     if (!/^[mpsz][0-9]$/.test(tile) || seen.has(tile)) continue;
     seen.add(tile);
-    const remaining = tile === 'z5'
-      ? []
-      : liveWall.filter((pai) => normalizedWaitCore(pai) === tile);
+    // 白単騎は山の白 (4 枚とも色付きのぽっち) をそのまま数える [リョー 2026-10-22「ただの白単騎待ち」]
+    const remaining = liveWall.filter((pai) => normalizedWaitCore(pai) === tile);
     rows.push({
       tile,
       remain: remaining.length,
@@ -288,15 +287,15 @@ export function isFeverWaitExhausted(
 ): boolean {
   if (ting.length === 0) return true;
   // 配置が分かる権威側では、見えている枚数からの推定ではなく生牌領域を直接見る。
-  // 白ぽっちは待ち牌として残数に数えず、王牌内の牌も生存待ちに含めない。
+  // 王牌内の牌は生存待ちに含めない。
   if (Array.isArray(liveWall)) {
-    const waits = new Set(ting
-      .map(normalizedWaitCore)
-      .filter((p) => p !== 'z5'));
+    const waits = new Set(ting.map(normalizedWaitCore));
     if (waits.size === 0) return true;
-    // ぽっちは待ち牌として数えない。ルールブック 5-3
+    // ぽっちを他の待ちの代わりには数えない。ルールブック 5-3
     // 「白ぽっちのみ残りの場合は待ちが山にあるとみなさない」
     // [2026-09-14: 向こうはぽっちでも続けていたが、ルールブックはうちの側]
+    // ただし白単騎 (待ちが z5 そのもの) は山の白をそのまま待ちとして数える
+    // [2026-10-22 リョー「白単騎待ちとして見るから3枚残り扱いになるよ、これはただの白単騎待ちだから」]
     if (liveWall.some((p) => waits.has(normalizedWaitCore(p)))) return false;
     // [2026-09-14] 山に華が残っていると、引いた時に王牌から補充される。
     // その補充牌に待ちかぽっちがあれば、まだ待ちは切れていない。
@@ -308,7 +307,7 @@ export function isFeverWaitExhausted(
         const p = reserve[i];
         pulls -= 1;
         if (String(p).startsWith('f')) { pulls += 1; continue; }   // 華の補充でもう 1 枚
-        if (waits.has(normalizedWaitCore(p))) return false;        // ぽっちは 5-3 により数えない
+        if (waits.has(normalizedWaitCore(p))) return false;        // 白は白単騎の時だけ当たる
       }
     }
     return true;
@@ -316,10 +315,6 @@ export function isFeverWaitExhausted(
   const baseTile = normalizedWaitCore;
   let totalRemain = 0;
   for (const t of ting) {
-    if (toCorePai(t) === 'z5') {
-      // ぽっちだけが残った待ちは「山に残っている」とみなさない。
-      continue;
-    }
     const tNorm = baseTile(t);
     const ss = tNorm[0]; const nn = parseInt(tNorm[1]);
     let visible = 0;

@@ -52,8 +52,9 @@ describe('isFeverWaitExhausted [待ち枯渇 → 1 人テンパイ流局]', () =
   it('待ち 0 件は true', () => {
     expect(isFeverWaitExhausted([], new Map(), new Map(), [])).toBe(true);
   });
-  it('白ぽっちしか残っていない待ちは枯渇扱い', () => {
-    expect(isFeverWaitExhausted(['z5'], new Map(), new Map(), [])).toBe(true);
+  // [2026-10-22 リョー「ただの白単騎待ちだから」] 白単騎は白を普通の待ちとして数える。5-3 はぽっちを他の待ちの代わりに数えない話
+  it('白単騎、 白が 4 枚どこにも見えてない → not exhausted', () => {
+    expect(isFeverWaitExhausted(['z5'], new Map(), new Map(), [])).toBe(false);
   });
   it('m1 待ち、 全 4 枚どこにも見えてない → not exhausted [remain=4]', () => {
     expect(isFeverWaitExhausted(['m1'], new Map(), new Map(), [])).toBe(false);
@@ -114,7 +115,7 @@ describe('FEVER live-wall wait display', () => {
     )).toEqual([
       { tile: 'p5', remain: 3, hasRed: true, hasGold: true, hasNiji: false },
       { tile: 'p3', remain: 2, hasRed: false, hasGold: false, hasNiji: true },
-      { tile: 'z5', remain: 0, hasRed: false, hasGold: false, hasNiji: false },
+      { tile: 'z5', remain: 1, hasRed: false, hasGold: false, hasNiji: false },
     ]);
   });
 

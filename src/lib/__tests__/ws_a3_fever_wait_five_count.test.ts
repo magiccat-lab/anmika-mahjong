@@ -26,7 +26,8 @@ describe('WSA-A3 fever wait visible-five counting', () => {
   it('keeps all four colored white fives in the shared z5 denominator', () => {
     const rivers = new Map([[0, { _pai: ['z5b', 'z5r', 'z5g'] }]]);
 
-    expect(isFeverWaitExhausted(['z5'], new Map(), rivers, [])).toBe(true);
+    // 白単騎は白を普通の待ちとして数える [2026-10-22 リョー]。4 色で 4 枚の枠を共有する
+    expect(isFeverWaitExhausted(['z5'], new Map(), rivers, [])).toBe(false);
     expect(isFeverWaitExhausted(['z5'], new Map(), rivers, ['z5y'])).toBe(true);
   });
 });
