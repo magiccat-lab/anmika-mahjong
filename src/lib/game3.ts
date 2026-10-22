@@ -4998,6 +4998,16 @@ export class Game3 {
     return this.getKanCandidates(player);
   }
 
+  /** リーチ後に白ぽっちを引いて和了れる時は見逃せない [2026-10-22 通報 20261022_0
+   *  「ポッチツモ後、ポッチを切ることで上がり拒否ができてしまう」]。ルール 2-3 はリーチ後の
+   *  ぽっちを強制高め取りとし、逆ぽっちを避けられるのは白待ちの時だけ。切って逃げると
+   *  逆ぽっちの払いを避けられてしまう。白暗刻のカンは選べるまま [打牌だけ止める]。 */
+  mustDeclarePochiTsumo(player: PlayerId): boolean {
+    const zimo = this.shoupai.get(player)?._zimo;
+    if (!this.lizhi.has(player) || typeof zimo !== 'string' || toCorePai(zimo) !== 'z5') return false;
+    return this.canTsumo(player);
+  }
+
   /** リーチ後のツモがぽっちか: 白 (4 枚とも色付きのぽっち) か、リーチ一発の 1p ・ 2p (でかぽっち)。 */
   isLizhiPochiDraw(player: PlayerId): boolean {
     const sp = this.shoupai.get(player);

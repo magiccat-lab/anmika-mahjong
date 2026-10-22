@@ -1344,6 +1344,10 @@ export function createGameStore() {
             s.message = `p${turnPlayer} はシュバリ中、 見逃し不可。 ツモ宣言してください`;
             return { ...s };
           }
+          if (s.game.mustDeclarePochiTsumo(turnPlayer)) {
+            s.message = `p${turnPlayer} はリーチ後の白ぽっちツモ、 見逃し不可。 ツモ宣言してください`;
+            return { ...s };
+          }
         }
         // リーチ pending 中なら 宣言牌候補チェック + リーチ確定
         if (s.lizhiPending !== null) {

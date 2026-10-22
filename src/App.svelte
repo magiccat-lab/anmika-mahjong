@@ -1285,6 +1285,8 @@
     // シュバリ中はツモ和了を見逃せない [ロン見逃し不可と同じ扱い]。
     // ツモ可の状態で手牌を触っても打牌させず、ツモ宣言 button へ誘導する。
     if ($game.game.shuvariActive[player as PlayerId] && canTsumo) return;
+    // リーチ後の白ぽっちツモも同じく見逃せない [2026-10-22 通報 20261022_0]
+    if ($game.game.mustDeclarePochiTsumo(player as PlayerId)) return;
     // リーチ中は物理的なツモ牌そのものだけを切れる。core 化後に比較すると
     // gp→p0 等で正しい金牌ツモ切りを拒否し、逆に別物の赤牌を許してしまう。
     const selectedPhysicalPai = pai.replace(/[_*]$/, '');

@@ -640,6 +640,10 @@ export class RoomAuthority {
     if (this.game.shuvariActive[actor] && this.game.canTsumo(actor)) {
       return `discard: player ${actor} is in shuvari and must declare tsumo`;
     }
+    // Riichi + white pochi draw that completes the hand cannot be declined (rule 2-3).
+    if (this.game.mustDeclarePochiTsumo(actor)) {
+      return `discard: player ${actor} drew pochi after riichi and must declare tsumo`;
+    }
     if (!paiValue) return 'discard: missing pai';
 
     const pai = paiValue as Pai;
