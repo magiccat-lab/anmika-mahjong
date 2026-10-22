@@ -51,6 +51,8 @@
   import { FX_LABELS } from './lib/fxArtwork';
   import { NO_SET, kinpeiPairLabels, setCutinFor, setFlags, type SetFlags } from './lib/setCutin';
   import LizhiControls from './lib/LizhiControls.svelte';
+  import RiichiWaitPanel from './lib/RiichiWaitPanel.svelte';
+  import { riichiWaitSuggestions } from './lib/riichiWaitSuggest';
   import { CUTIN_DURATION_MS, CUTIN_TIER, cutinDurationMs, game, isFeverForcedTsumogiri, type StampId, type StoreState } from './lib/store';
   import type { PlayerId } from './lib/types';
   // フィーバー中の 1 巡の刻み [人の強制ツモ切り ・ CPU]。オンラインは ws_server の FEVER_STEP_MS と合わせる
@@ -1462,6 +1464,21 @@
     return { pai, tier: (fc?.tier ?? 1) as 1 | 2 | 3 | 4, rainbow: !!fc?.rainbow, waits };
   });
   $: selectedLizhiLabel = lizhiChoiceLabel(lizhiChoiceId(pendingLizhiFlags));
+  // [2026-10-22 先輩「リーチ時の待ち牌サジェスト」] 宣言牌を選ぶ間、候補ごとの待ちと自分から見た残り枚数。
+  // 自分の席の手番だけ [CPU の宣言待ちでは出さない]。待ちの判定は feverCandidateViews と同じ clone().dapai() + getTingpaiList
+  let riichiHoverPai: string | null = null;
+  $: riichiSuggestions = ($game.lizhiPending !== null && $game.lizhiPending === currentPlayer && currentPlayer === srv0)
+    ? riichiWaitSuggestions(
+        $game.game, currentPlayer, physicalLizhiCandidates(lizhiCandidates),
+        (pai) => {
+          const sp = $game.game.shoupai.get(currentPlayer)?.clone();
+          if (!sp) return [];
+          sp.dapai(pai);
+          return tingpaiForShoupai(sp);
+        },
+      )
+    : [];
+  $: if (riichiSuggestions.length === 0) riichiHoverPai = null;
 
   // [2026-07-22 リョー要望] 鳴き判断中の対象は自分の手牌側でハイライトする
   // [河の牌に付けると全 client で同じ牌が光り、鳴ける牌が出た事が他家にバレる]
@@ -3699,6 +3716,10 @@
           </div>
       </div>
     {/if}
+    {#if riichiSuggestions.length > 0}
+      <!-- 手牌の真上に重ねる [高さ 0 の台座に絶対配置。手牌の位置は動かさない] -->
+      <div class="riichi-wait-anchor"><div class="riichi-wait-float"><RiichiWaitPanel suggestions={riichiSuggestions} activePai={riichiHoverPai} /></div></div>
+    {/if}
     <PlayerHandPanel
       player={srv0} label="player {srv0} [自家]"
       isCurrent={currentPlayer === srv0}
@@ -3715,6 +3736,7 @@
       isDoraPai={isDoraPai}
       lizhiPending={$game.lizhiPending === currentPlayer}
       lizhiKindLabel={selectedLizhiLabel}
+      onCandidateHover={(t) => { riichiHoverPai = t; }}
       onTileClick={onTileClick}
       disabled={needsZimo}
       shuvariActive={$game.game.shuvariActive[srv0]}
@@ -7379,5 +7401,14 @@
     border-radius: var(--jz-rad);
     font-size: 15px;
     font-weight: 700;
+  }
+
+  /* リーチ宣言牌ごとの待ち牌パネル: 手牌の真上に重ねる。台座の高さは 0 で、手牌の位置を動かさない */
+  .riichi-wait-anchor { position: relative; height: 0; z-index: 60; pointer-events: none; }
+  main.mode-single .riichi-wait-anchor { margin-top: -6px; } /* seat-bottom の gap 6px を打ち消す */
+  .riichi-wait-float {
+    position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%);
+    width: max-content; max-width: calc(100vw - 16px);
+    pointer-events: auto;
   }
 </style>
