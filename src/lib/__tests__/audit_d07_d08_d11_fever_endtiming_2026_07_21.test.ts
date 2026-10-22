@@ -34,6 +34,10 @@ function feverExhaustedGame(): { g: Game3; player: PlayerId } {
   g.feverDeclareTing[player] = ['s9'];
   // 待ち牌 s9 を山から完全に除去して待ち枯れ状態にする
   (g.shan as any)._pai = ((g.shan as any)._pai as string[]).filter((p) => p !== 's9');
+  // 王牌の補充列からも除く [山に華が残ると補充の s9 を待ちと数え、配牌しだいで約半分落ちていた]
+  (g.shan as any)._rinshan = ((g.shan as any)._rinshan as string[]).filter((p) => p !== 's9');
+  // 表示牌の冬も手持ちに数えるので、冬の有無を手持ちだけで決めるために表示牌の華を外す
+  (g.shan as any)._baopai = ((g.shan as any)._baopai as string[]).map((p) => (/^f[1-4]$/.test(p) ? 'm9' : p));
   return { g, player };
 }
 
