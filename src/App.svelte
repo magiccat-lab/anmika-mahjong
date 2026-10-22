@@ -38,6 +38,7 @@
   import HeaderInfo from './lib/HeaderInfo.svelte';
   import RoundEndPanel from './lib/RoundEndPanel.svelte';
   import NextDrawsPanel from './lib/NextDrawsPanel.svelte';
+  import { kinpeiOptions } from './lib/kinpeiLabel';
   import GameEndPanel from './lib/GameEndPanel.svelte';
   import PaifuLoadPanel from './lib/PaifuLoadPanel.svelte';
   import FeverWaitsPanel from './lib/FeverWaitsPanel.svelte';
@@ -3953,18 +3954,10 @@
             </div>
           {/if}
           <div class="kinpei-btns">
-            {#if effectiveKinpeiHua.includes('f1')}
-              <button class="kinpei-btn haru" on:click={() => game.selectKinpei('haru')}>春</button>
-            {/if}
-            {#if effectiveKinpeiHua.includes('f2')}
-              <button class="kinpei-btn natsu" on:click={() => game.selectKinpei('natsu')}>夏</button>
-            {/if}
-            {#if effectiveKinpeiHua.includes('f3')}
-              <button class="kinpei-btn aki" on:click={() => game.selectKinpei('aki')}>秋</button>
-            {/if}
-            {#if effectiveKinpeiHua.includes('f4')}
-              <button class="kinpei-btn fuyu" on:click={() => game.selectKinpei('fuyu')}>冬</button>
-            {/if}
+            <!-- [2026-10-22 リョー] 同じ季節を重ねて持っている時は枚数分の字で出す [春春 ・ 冬冬] -->
+            {#each kinpeiOptions(effectiveKinpeiHua) as opt (opt.target)}
+              <button class="kinpei-btn {opt.target}" data-kinpei-option={opt.target} title={`${opt.label} [${opt.count}枚] を強化先にする`} on:click={() => game.selectKinpei(opt.target)}>{opt.label}</button>
+            {/each}
             {#if $game.game.feverActive[$game.pendingKinpei.winner as PlayerId]}
               <button class="kinpei-btn hold" on:click={() => game.selectKinpei(null)}>保留 [今局のみ]</button>
             {/if}

@@ -11,6 +11,7 @@
 
   // 2026-08-13 手順F: shell を Sheet へ統合 [寸法・色は従来値をそのまま渡す]
   import Sheet from './Sheet.svelte';
+  import { kinpeiOptions } from './kinpeiLabel';
 </script>
 
 <Sheet
@@ -26,18 +27,9 @@
     <div class="preview">現時点: {preview.fanshu !== undefined ? `${preview.fanshu}翻` : '役満'} / {(preview.hupai ?? []).map((h) => h.name).join('・')}</div>
   {/if}
   <div class="actions">
-    {#if huapai.includes('f1')}
-      <button class="haru" on:click={() => onSelect('haru')}>春</button>
-    {/if}
-    {#if huapai.includes('f2')}
-      <button class="natsu" on:click={() => onSelect('natsu')}>夏</button>
-    {/if}
-    {#if huapai.includes('f3')}
-      <button class="aki" on:click={() => onSelect('aki')}>秋</button>
-    {/if}
-    {#if huapai.includes('f4')}
-      <button class="fuyu" on:click={() => onSelect('fuyu')}>冬</button>
-    {/if}
+    {#each kinpeiOptions(huapai) as opt (opt.target)}
+      <button class={opt.target} data-kinpei-option={opt.target} title={`${opt.label} [${opt.count}枚] を強化先にする`} on:click={() => onSelect(opt.target)}>{opt.label}</button>
+    {/each}
     {#if allowHold}
       <button class="hold" on:click={() => onSelect(null)}>保留 [今局のみ]</button>
     {/if}
