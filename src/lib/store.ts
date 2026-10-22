@@ -3229,7 +3229,7 @@ export function createGameStore() {
           if (replacement) {
             s.lastZimo = replacement;
             enqueueCutinState(s, 'kan', player as any);
-            s.message = `[自動カン] player ${player} 暗槓 [${kanCands[0]}]、 嶺上 ${replacement}`;
+            s.message = `[自動カン] player ${player} 暗槓 [${kanCands[0]}]`;
             return { ...s };
           }
         }
@@ -3874,7 +3874,7 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
         s.lastZimo = replacement;
         clearReactionStage(s);
         enqueueCutinState(s, 'kan', cand.player as any);
-        s.message = `[CPU] player ${cand.player} 大明槓 [${cand.mianzi[0]}]、 嶺上 ${replacement}`;
+        s.message = `[CPU] player ${cand.player} 大明槓 [${cand.mianzi[0]}]`;
         return { ...s };
       }
     }

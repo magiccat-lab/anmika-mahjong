@@ -27,7 +27,7 @@ export function declareKanImpl(initial: StoreState, mianzi: string): StoreState 
   // [2026-07-22 リョー要望] カンもリーチ同様のカットインを出す
   enqueueCutinState(s as any, 'kan', player as any);
   s.lastZimo = replacement;
-  s.message = `player ${player} カン [${mianzi}]、 嶺上 ${replacement}`;
+  s.message = `player ${player} カン [${mianzi}]`;
   return { ...s };
 }
 
@@ -82,6 +82,6 @@ export function damingangImpl(initial: StoreState, player: number, mianzi: strin
   // 塞がれて嶺上開花が宣言できず、和了種別も ロン に誤分類される
   s.lastDapai = null;
   s.lastZimo = replacement;
-  s.message = `player ${player} 大明槓 [${mianzi}]、 嶺上 ${replacement}`;
+  s.message = `player ${player} 大明槓 [${mianzi}]`;
   return { ...s };
 }

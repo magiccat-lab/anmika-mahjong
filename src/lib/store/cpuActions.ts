@@ -137,7 +137,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       // [2026-07-23 総点検 P2] CPU のカンにも人間と同じカットイン [演出一貫性]
       s = enqueueCutinState(s, 'kan', cur as 0 | 1 | 2);
       s.lastZimo = replacement;
-      s.message = `[CPU 強制カン] player ${cur} 暗槓 [${forcedLizhiKan[0]}]、 嶺上 ${replacement}`;
+      s.message = `[CPU 強制カン] player ${cur} 暗槓 [${forcedLizhiKan[0]}]`;
       safety++;
       continue;
     }
@@ -284,7 +284,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
             if (repl) {
               s = enqueueCutinState(s, 'kan', cur as 0 | 1 | 2);
               s.lastZimo = repl;
-              s.message = `[CPU 自動カン] player ${cur} 暗槓 [${m}]、 嶺上 ${repl}`;
+              s.message = `[CPU 自動カン] player ${cur} 暗槓 [${m}]`;
               didKan = true;
               break;
             }

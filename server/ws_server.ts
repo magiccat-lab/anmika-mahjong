@@ -864,6 +864,14 @@ export function shouldRevealUra(authority: RoomAuthority): boolean {
 }
 
 /**
+ * [2026-10-22 先輩「カンすると嶺上のログが全員に見えて嶺上牌がわかる」] 槓の文言に補充牌 [「、 嶺上 m5」] を
+ * 付けていた。store からは外したが、外す前から続いている部屋の state にも残るので、配る前に全席で消す。
+ */
+export function stripRinshanTile(message: string): string {
+  return message.replace(/、 ?嶺上 [0-9a-z_*+\-]+/g, '');
+}
+
+/**
  * [2026-10-09 R1] 反応窓を開いた時に store が積む文言 [「ロン可能: player 1,2」「槍槓 ron 候補 p1 の判断待ち」
  * 「北抜きロン可能: player 1」] は、鳴ける/ロンできる席の一覧そのもの。projection で全席に配ると
  * 「誰がその牌でアガれたか」[= 待ち] が見えるので、本人にだけ本人の席を示す形に直す。
@@ -871,6 +879,7 @@ export function shouldRevealUra(authority: RoomAuthority): boolean {
  */
 export function reactionCandidateMessage(message: unknown, own: number | null, ownIsRonCandidate: boolean): unknown {
   if (typeof message !== 'string') return message;
+  message = stripRinshanTile(message);
   const isNorthRon = message.startsWith('北抜きロン可能:');
   if (!isNorthRon && !message.startsWith('ロン可能:') && !message.includes('槍槓 ron 候補')) return message;
   if (!ownIsRonCandidate || own === null) return null;
