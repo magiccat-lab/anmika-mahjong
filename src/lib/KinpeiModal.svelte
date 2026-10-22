@@ -12,8 +12,15 @@
   // 2026-08-13 手順F: shell を Sheet へ統合 [寸法・色は従来値をそのまま渡す]
   import Sheet from './Sheet.svelte';
   import { kinpeiOptions } from './kinpeiLabel';
+  import KinpeiPeekBar from './KinpeiPeekBar.svelte';
+
+  // [2026-10-22 リョー] 選ぶ前に盤面 [河 ・ 手牌 ・ 点] を見たい。たたむだけで、選択は pending のまま
+  let peeking = false;
 </script>
 
+{#if peeking}
+  <KinpeiPeekBar onBack={() => (peeking = false)} />
+{:else}
 <Sheet
   ariaLabel="金北 強化対象選択"
   tone="dark"
@@ -22,7 +29,7 @@
   border="2px solid gold"
   z={1000}
 >
-  <div class="title">🎁 金北 強化対象選択 [{winnerName ?? `player ${winner}`}]{allowHold ? '' : ' [必須]'}</div>
+  <div class="title">🎁 金北 強化対象選択 [{winnerName ?? `player ${winner}`}]{allowHold ? '' : ' [必須]'} <button type="button" class="peek" on:click={() => (peeking = true)}>盤面を見る</button></div>
   {#if preview}
     <div class="preview">現時点: {preview.fanshu !== undefined ? `${preview.fanshu}翻` : '役満'} / {(preview.hupai ?? []).map((h) => h.name).join('・')}</div>
   {/if}
@@ -35,6 +42,7 @@
     {/if}
   </div>
 </Sheet>
+{/if}
 
 <style>
   .preview { font-size: 11px; color: #ffe9ad; margin-bottom: 8px; max-width: 420px; line-height: 1.5; }
@@ -54,4 +62,15 @@
   .actions .aki { background: #c06040; }
   .actions .fuyu { background: #4080c0; }
   .actions .hold { background: #888; font-weight: normal; }
+  .title .peek {
+    margin-left: 8px;
+    padding: 3px 10px;
+    border: 1px solid #c0a040;
+    border-radius: 4px;
+    background: transparent;
+    color: #ffe9ad;
+    font-size: 12px;
+    font-weight: normal;
+    cursor: pointer;
+  }
 </style>

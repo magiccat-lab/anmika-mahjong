@@ -39,6 +39,10 @@
   import RoundEndPanel from './lib/RoundEndPanel.svelte';
   import NextDrawsPanel from './lib/NextDrawsPanel.svelte';
   import { kinpeiOptions } from './lib/kinpeiLabel';
+  import KinpeiPeekBar from './lib/KinpeiPeekBar.svelte';
+  // [2026-10-22 リョー「金北選択時に盤面に戻って情報見れるように」] 金北の選択の板をたたんで盤面を見る。選択 [pendingKinpei] は pending のまま
+  let kinpeiPeek = false;
+  $: if (!$game.pendingKinpei) kinpeiPeek = false;
   import GameEndPanel from './lib/GameEndPanel.svelte';
   import PaifuLoadPanel from './lib/PaifuLoadPanel.svelte';
   import FeverWaitsPanel from './lib/FeverWaitsPanel.svelte';
@@ -3838,6 +3842,9 @@
        金北選択は lastHuleResult 確定前に pendingKinpei だけ立てて return する
        [秋ドラ表示を上がりまで隠すため]。この panel が唯一の金北UIなので、
        pendingKinpei 単独でも開くようにしないと single で操作手段が消えて詰む -->
+  {#if kinpeiPeek && $game.pendingKinpei && viewMode === 'single'}
+    <KinpeiPeekBar onBack={() => { kinpeiPeek = false; }} />
+  {/if}
   {#if ($game.lastHuleResult || state.finished || $game.pendingPingju || $game.pendingKinpei) && viewMode === 'single'}
     <!-- 2026-10-08 fix [リョー報告「今がめんが写ってない」→「強化先の選択は上がりとか一式の情報見て選ぶから先に出して」]:
          金北選択の間は lastHuleResult がまだ無いので左の和了欄が空の白い板だった。強化前の暫定和了
@@ -3847,6 +3854,7 @@
     <div class="agari-unified-panel" class:appear-after-cutin={!!$game.lastHuleResult && !state.finished}
       class:wait-cutin={!!$game.lastHuleResult && !state.finished && (fxCutinBusy || !!fuyuFlipEntry)}
       class:pingju-small={$game.pendingPingju && !$game.lastHuleResult && !state.finished && !$game.pendingKinpei}
+      class:kinpei-peek-hidden={kinpeiPeek && !!$game.pendingKinpei}
       class:kinpei-only={!!$game.pendingKinpei && !$game.pendingKinpei.preview && !$game.lastHuleResult && !state.finished && !$game.pendingPingju}>
       <div class="agari-left" class:pingju-only={$game.pendingPingju && !$game.lastHuleResult && !state.finished}>
         {#if state.finished}
@@ -3945,7 +3953,9 @@
       {#if $game.pendingKinpei && viewMode === 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(actorSeat)) && !fxPresentationBusy}
         {@const effectiveKinpeiHua = $game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)}
         <div class="kinpei-inline">
-          <div class="kinpei-title">金北 強化対象 [{seatDisplayNames[$game.pendingKinpei.winner as 0|1|2]} 選択]</div>
+          <div class="kinpei-title">金北 強化対象 [{seatDisplayNames[$game.pendingKinpei.winner as 0|1|2]} 選択]
+            <button type="button" class="kinpei-peek-btn" on:click={() => { kinpeiPeek = true; }}>盤面を見る</button>
+          </div>
           <!-- [2026-07-22 リョー要望] 強化前の暫定和了を見せてから選ばせる -->
           {#if $game.pendingKinpei.preview}
             <div class="kinpei-preview">
@@ -5524,6 +5534,19 @@
     font-weight: 700;
     color: #806000;
     margin-bottom: 10px;
+  }
+  /* 金北の選択の板をたたむ [盤面を見る]。消すだけで state は触らない */
+  main.mode-single .agari-unified-panel.kinpei-peek-hidden { display: none !important; }
+  main.mode-single .agari-unified-panel .kinpei-peek-btn {
+    margin-left: 10px;
+    padding: 3px 10px;
+    border: 1px solid #c0a040;
+    border-radius: 4px;
+    background: transparent;
+    color: #806000;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
   }
   main.mode-single .agari-unified-panel .kinpei-btns {
     display: flex;
