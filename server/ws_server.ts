@@ -14,6 +14,7 @@ import { decideFever, pickLizhiDapai } from '../src/lib/store/cpuLizhi';
 import { decideCpuShuvari } from '../src/lib/store/cpuShuvari';
 import { createRoomAuthority, type AuthorityMember, type RoomAuthority } from './authority';
 import { RoomPersistence } from './persistence';
+import { computeSpectatorNextDraws } from './next_draws';
 import {
   appendAcceptedCommand,
   createEmptyRoomSnapshot,
@@ -876,6 +877,11 @@ export function reactionCandidateMessage(message: unknown, own: number | null, o
   return `${isNorthRon ? '北抜きロン可能' : 'ロン可能'}: player ${own}`;
 }
 
+function spectatorNextDrawsField(state: ReturnType<RoomAuthority['canonicalState']>): { nextDraws?: Record<number, string[]> } {
+  const nextDraws = computeSpectatorNextDraws(state);
+  return nextDraws ? { nextDraws } : {};
+}
+
 /**
  * Seat-scoped canonical state.  A client may optimistically run its local
  * reducer for animation, but this projection is the source of truth after
@@ -1006,6 +1012,9 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       fuyuRevealed: [...(shan._fuyuRevealed ?? [])],
     },
     privateHand: own === null ? null : (serializePrivateHand(game.shoupai.get(own)) ?? emptyPrivateHand()),
+    // [2026-10-22 リョー「観戦モードに限りそのあとのそれぞれのツモ見れるように」] 観戦 [seat -1] にだけ、
+    // 局が終わった後の「続けたら引いたはずの牌」を載せる。打ち手 [0-2] と局の途中の観戦には key ごと出さない
+    ...(recipientSeat === SPECTATOR_SEAT ? spectatorNextDrawsField(state) : {}),
     publicHands,
     rivers: {
       0: [...(game.he.get(0)?._pai ?? [])],

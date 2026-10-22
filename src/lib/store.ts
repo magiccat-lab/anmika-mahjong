@@ -183,8 +183,20 @@ export interface StoreState {
   winStreak?: { player: number; count: number; rk: string } | null;
   /** 煽りを積んだ打牌 (ダブロンで 2 回積まない) */
   aoriKey?: string | null;
+  /** [2026-10-22 観戦] 局が終わった後の「続けたら各席が引いたはずの牌」 [引く順]。server が観戦 [seat -1] の投影にだけ載せる。それ以外は null */
+  spectatorNextDraws?: Record<number, string[]> | null;
   /** WSA: online replay mode — canonical store uses this instead of window.__anmikaOnline */
   _onlineMode?: boolean;
+}
+
+function parseNextDraws(value: unknown): Record<number, string[]> | null {
+  if (!value || typeof value !== 'object') return null;
+  const out: Record<number, string[]> = {};
+  for (const seat of [0, 1, 2]) {
+    const list = (value as Record<string, unknown>)[String(seat)];
+    out[seat] = Array.isArray(list) ? list.filter((t): t is string => typeof t === 'string') : [];
+  }
+  return out;
 }
 
 function formatFanshu(f: any): string {
@@ -852,6 +864,8 @@ export function createGameStore() {
         pendingNukiBei: cloneWire(wireStore.pendingNukiBei ?? null),
         pendingSaiKoro: cloneWire(wireStore.pendingSaiKoro ?? null),
         cpuWinAck: wireStore.cpuWinAck !== false,
+        // [2026-10-22] 観戦の投影だけが持つ。打ち手の画面には届かないので、席ありなら常に null
+        spectatorNextDraws: myOnlineSeat === -1 ? parseNextDraws((projection as any).nextDraws) : null,
         _onlineMode: true,
       };
       // Candidate identity remains private, but tests/debug views may consume

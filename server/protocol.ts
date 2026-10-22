@@ -73,6 +73,8 @@ export type OnlineSeatProjection = {
     fuyuRevealed: string[];
   };
   privateHand: SerializedOnlineHand | null;
+  /** [2026-10-22] 観戦 [seat -1] 専用。局が終わった後だけ、続けたら各席が引いたはずの牌 [引く順]。打ち手には送らない */
+  nextDraws?: Record<number, string[]>;
   publicHands: Record<number, {
     concealedCount: number;
     /** True only for a real 2/3-character draw tile. */
