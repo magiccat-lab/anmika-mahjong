@@ -650,8 +650,8 @@ export function applyChipsOnHule(
         .reduce((sum: number, h: any) => sum + (typeof h.fanshu === 'number' ? h.fanshu : 0), 0);
       const chipN = Math.max(0, reportedFanshu - natsuRankBoost + natsuW * 2);
       if (chipN > 0) {
-        if (loser !== null) ctx.applyChipFromLoser(winner, loser, chipN);
-        else ctx.applyChipOall(winner, chipN);
+        if (loser !== null) ctx.applyChipFromLoser(winner, loser, chipN, { label: '秋秋金北 ハン数分' });
+        else ctx.applyChipOall(winner, chipN, { label: '秋秋金北 ハン数分' });
       }
       label = '秋秋金北 [ハン数分祝儀]';
     } else if (target === 'aki' && akis === 1) {

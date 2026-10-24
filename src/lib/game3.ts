@@ -426,6 +426,9 @@ export function restFormsMentsuAndPair(bp: Record<string, number[]>, suit: strin
   return false;
 }
 
+/** 金北の選び直しで打ち消すために覚えておく drain 済み effect の数 */
+const CHIP_EFFECTS_DRAINED_KEEP = 200;
+
 export class Game3 {
   state: GameState;
   shan: Shan3;
@@ -883,7 +886,33 @@ export class Game3 {
   takeChipEffects(): ChipSettlementEffect[] {
     const out = this.chipEffects;
     this.chipEffects = [];
+    this.chipEffectsDrainedTotal += out.length;
+    this.chipEffectsDrained.push(...out);
+    if (this.chipEffectsDrained.length > CHIP_EFFECTS_DRAINED_KEEP) {
+      this.chipEffectsDrained.splice(0, this.chipEffectsDrained.length - CHIP_EFFECTS_DRAINED_KEEP);
+    }
     return out;
+  }
+  /** [2026-10-24 ZOGE 監査] 金北の選び直し [selectKinpei] は前の command で drain 済みのロンの精算を
+   *  restoreSnapshot で持ちチップごと戻すが、部屋チップには焼いた delta が残り、選び直しのアガリで二重に数えていた。
+   *  drain した effect の通し番号を覚え、snapshot より後に drain した分は打ち消しの effect を積んで部屋側も戻す */
+  chipEffectsDrainedTotal = 0;
+  chipEffectsDrained: ChipSettlementEffect[] = [];
+  /** snapshot 用の通し番号 [drain 済み + 未 drain] */
+  chipEffectsSeq(): number {
+    return this.chipEffectsDrainedTotal + this.chipEffects.length;
+  }
+  /** snapshot の通し番号まで effect を巻き戻す。未 drain は截断、drain 済みは符号を逆にした effect を積む */
+  rewindChipEffects(seq: number): void {
+    if (seq >= this.chipEffectsDrainedTotal) {
+      this.chipEffects.length = Math.min(this.chipEffects.length, seq - this.chipEffectsDrainedTotal);
+      return;
+    }
+    this.chipEffects.length = 0;
+    const keptFrom = this.chipEffectsDrainedTotal - this.chipEffectsDrained.length;
+    for (const e of this.chipEffectsDrained.slice(Math.max(0, seq - keptFrom))) {
+      this.chipEffects.push({ ...e, perPayer: -e.perPayer, label: `${e.label} [取り消し]` });
+    }
   }
 
   /** chip helper 用の state ビュー [readonly では無く、 helper が直接 mutate] */

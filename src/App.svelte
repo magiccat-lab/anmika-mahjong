@@ -123,6 +123,9 @@
     void onlineMembers;
     // [2026-10-24 リョー「抜け版がまわると席の名前とかの表示がずれてる」] seatName は mapping を読むが、関数の中の読みは $: に追われない
     void onlineActiveMapping;
+    // [2026-10-24 リョー「なんか俺の席だけisgになってるよ」] 席の札 ・ 華の板は seatName(p) を直に呼ぶと
+    // legacy の template が関数の中の読みを untrack で包み、試合が替わって mapping が変わっても名前が前の試合のまま残る。
+    // 札の側も必ずこの seatDisplayNames を読む
     seatDisplayNames = onlineGameStarted
       ? [seatName(0), seatName(1), seatName(2)]
       : ['P0', 'P1', 'P2'];
@@ -172,7 +175,7 @@
   onDestroy(() => { if (confettiTimer !== null) clearTimeout(confettiTimer); });
   $: fxTier = fxNow ? CUTIN_TIER[fxNow.id] : null;
   $: fxDur = cutinDurationMs(fxNow?.id);
-  $: fxWho = !fxNow || fxNow.seat === undefined ? '' : (onlineGameStarted ? seatName(fxNow.seat) : (fxNow.seat === selfPlayer ? 'あなた' : `P${fxNow.seat}`));
+  $: fxWho = !fxNow || fxNow.seat === undefined ? '' : (onlineGameStarted ? seatDisplayNames[fxNow.seat as 0 | 1 | 2] : (fxNow.seat === selfPlayer ? 'あなた' : `P${fxNow.seat}`));
   // [2026-10-14 リョー「四華とか四北がそろったらカットイン出るようにして」] 華と北が揃った瞬間に 1 回だけ出す [lib/setCutin.ts]。
   // 最初に見た局面 [読み直し ・ 途中から入った] は覚えるだけ。局が変わったら空から数え直す [配牌で揃っても出る]。
   // 局の後と和了の処理中 [秋のめくりで華が増える] も覚えるだけで出さない
@@ -2879,7 +2882,7 @@
   <div class="seat-card sc-{pos}" class:turn={currentPlayer === p && !$game.roundEnded} class:oya={wind === '東'} class:fx-hit={!!fxNow && fxNow.seat === p}>
     <div class="sc-head">
       <span class="sc-wind" title={wind === '東' ? '親' : ''}>{wind}</span>
-      <span class="sc-name">{onlineGameStarted ? seatName(p) : (pos === 'me' ? 'あなた' : `P${p}`)}</span>
+      <span class="sc-name">{onlineGameStarted ? seatDisplayNames[p] : (pos === 'me' ? 'あなた' : `P${p}`)}</span>
       {#if $game.game.lizhi.has(p)}<span class="sc-tag">リーチ</span>{/if}
       {#if $game.game.shuvariActive[p]}<span class="sc-tag hot">シュバ</span>{/if}
       {#if $game.game.feverActive[p]}<span class="sc-tag hot">フィーバー</span>{/if}
@@ -2903,8 +2906,8 @@
      旧: 席の札の中に 18px の牌 [自分の分が分からない、リョー 10-09]。華は種類ごとにまとめて牌の下に効果、北は一段小さく -->
 {#snippet huaPanel(p: PlayerId, pos: 'left' | 'right' | 'me')}
   {@const groups = huaGroups($game.game.huapai[p] ?? [], $game.game.nukidora[p] ?? 0, $game.game.nukidoraGold[p] ?? 0)}
-  <section class="hua-panel hp-{pos}" class:hp-dense={groups.length >= 4} aria-label="{pos === 'me' && !watchOnly ? 'あなた' : (onlineGameStarted ? seatName(p) : `P${p}`)}の華と北">
-    <span class="hp-title">{pos === 'me' && !watchOnly ? 'あなたの華' : `${onlineGameStarted ? seatName(p) : `P${p}`} の華`}</span>
+  <section class="hua-panel hp-{pos}" class:hp-dense={groups.length >= 4} aria-label="{pos === 'me' && !watchOnly ? 'あなた' : (onlineGameStarted ? seatDisplayNames[p] : `P${p}`)}の華と北">
+    <span class="hp-title">{pos === 'me' && !watchOnly ? 'あなたの華' : `${onlineGameStarted ? seatDisplayNames[p] : `P${p}`} の華`}</span>
     {#if groups.length === 0}
       <span class="hp-none">まだなし</span>
     {:else}
@@ -3287,7 +3290,7 @@
            持ち越されて 2 枚目が「開いたまま timer なし」で永久に残る。{#key} で毎回作り直す -->
       {#key pochiReveal}
         <PochiSqueeze color={pochiReveal.color} deka={pochiReveal.deka ?? null} kakutei={pochiReveal.kakutei ?? null}
-          step={pochiReveal.step ?? null} premium={!!pochiReveal.premium} teaser={pochiReveal.teaser ?? 'bolt'} freeze={pochiReveal.freeze ?? null} lamp={pochiReveal.lamp ?? null} delay={!!pochiReveal.delay} who={onlineGameStarted ? seatName(pochiReveal.player) : ''}
+          step={pochiReveal.step ?? null} premium={!!pochiReveal.premium} teaser={pochiReveal.teaser ?? 'bolt'} freeze={pochiReveal.freeze ?? null} lamp={pochiReveal.lamp ?? null} delay={!!pochiReveal.delay} who={onlineGameStarted ? seatDisplayNames[pochiReveal.player as 0 | 1 | 2] : ''}
           onOpen={onPochiOpen} onProgress={onPochiProgress} onClose={closePochiReveal} />
       {/key}
     {:else if onlineGameStarted && remotePochi && !fxCutinBusy}
@@ -3295,7 +3298,7 @@
       {#key remotePochi.key}
         <PochiSqueeze readOnly color={remotePochi.color ?? 'blue'} colorKnown={!!remotePochi.color}
           deka={remotePochi.deka} kakutei={remotePochi.kakutei} glow={remotePochi.glow} step={remotePochi.step} premium={remotePochi.premium} teaser={remotePochi.teaser} freeze={remotePochi.freeze} lamp={remotePochi.lamp} delay={remotePochi.delay} progress={remotePochi.peel}
-          who={seatName(remotePochi.seat)} onClose={() => { remotePochi = null; }} />
+          who={seatDisplayNames[remotePochi.seat as 0 | 1 | 2]} onClose={() => { remotePochi = null; }} />
       {/key}
     {/if}
     <!-- 2026-05-14 ゆーま 自走 bug fix: FuyuModal も winner client のみ表示、
@@ -4001,7 +4004,7 @@
            server が観戦 [抜け番を含む] の投影にだけ送る。和了 ・ 流局の板の本文 [agari-left] の末尾に置く [盤面の手牌に重ねない] -->
       {#if ($game.roundEnded || $game.pendingPingju) && !$game.pendingKinpei && (onlineSpectator || onlineInactive) && $game.spectatorNextDraws}
         <NextDrawsPanel
-          rows={[srv1, srv0, srv2].map((p) => ({ seat: p, name: seatName(p) }))}
+          rows={[srv1, srv0, srv2].map((p) => ({ seat: p, name: seatDisplayNames[p] }))}
           draws={$game.spectatorNextDraws}
         />
       {/if}

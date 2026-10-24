@@ -38,6 +38,8 @@ export type PreHuleSnapshot = {
   chipBreakdownLen: number;
   /** [2026-07-23 4人回し Phase1] chipEffects の截断復元用 [旧 snapshot 互換で optional] */
   chipEffectsLen?: number;
+  /** [2026-10-24] drain 済みも含めた effect の通し番号 [Game3.chipEffectsSeq]。あれば chipEffectsLen より優先 */
+  chipEffectsSeq?: number;
   fuyuRevealState: any;
 };
 
@@ -137,6 +139,7 @@ export function saveSnapshot(refs: SnapshotRefs): PreHuleSnapshot {
     eventsLen: (refs.game?.events ?? []).length,
     chipBreakdownLen: (refs.game?.chipBreakdown ?? []).length,
     chipEffectsLen: (refs.game?.chipEffects ?? []).length,
+    chipEffectsSeq: typeof refs.game?.chipEffectsSeq === 'function' ? refs.game.chipEffectsSeq() : undefined,
     fuyuRevealState: refs.game?.fuyuRevealState
       ? JSON.parse(JSON.stringify(refs.game.fuyuRevealState))
       : { 0: null, 1: null, 2: null },
@@ -209,7 +212,10 @@ export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null
     if (Array.isArray(refs.game.events)) refs.game.events.length = snap.eventsLen;
     if (Array.isArray(refs.game.chipBreakdown)) refs.game.chipBreakdown.length = snap.chipBreakdownLen;
     // [2026-07-23 4人回し Phase1] 投機評価の巻き戻しで effect も一緒に截断 [幻の精算を残さない]
-    if (Array.isArray(refs.game.chipEffects) && typeof snap.chipEffectsLen === 'number') {
+    // [2026-10-24] drain 済みの精算 [前の command で部屋チップに焼いた分] は打ち消しの effect で戻す
+    if (typeof snap.chipEffectsSeq === 'number' && typeof refs.game.rewindChipEffects === 'function') {
+      refs.game.rewindChipEffects(snap.chipEffectsSeq);
+    } else if (Array.isArray(refs.game.chipEffects) && typeof snap.chipEffectsLen === 'number') {
       refs.game.chipEffects.length = Math.min(refs.game.chipEffects.length, snap.chipEffectsLen);
     }
     refs.game.fuyuRevealState = snap.fuyuRevealState
