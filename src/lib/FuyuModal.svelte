@@ -9,8 +9,16 @@
 
   // 2026-08-13 手順F: shell を Sheet へ統合 [寸法・色は従来値をそのまま渡す]
   import Sheet from './Sheet.svelte';
+  import KinpeiPeekBar from './KinpeiPeekBar.svelte';
+
+  // [2026-10-24 先輩「冬冬金北とか選ぶか考える時に山の残り枚数とか川とか見れるように」]
+  // 金北の選択と同じく板をたたんで盤面 [河 ・ 残り ・ ドラ] を見る。選択 [pendingFuyu] は pending のまま
+  let peeking = false;
 </script>
 
+{#if peeking}
+  <KinpeiPeekBar note="冬を使うかの選択待ち [盤面を見ています]" onBack={() => (peeking = false)} />
+{:else}
 <Sheet
   ariaLabel="フィーバー中の冬使用選択"
   tone="dark"
@@ -19,7 +27,7 @@
   border="3px solid skyblue"
   z={1010}
 >
-  <div class="title">❄️ フィーバー中、 冬を使う？ [{winnerName ?? `player ${winner}`}]</div>
+  <div class="title">❄️ フィーバー中、 冬を使う？ [{winnerName ?? `player ${winner}`}] <button type="button" class="peek" on:click={() => (peeking = true)}>盤面を見る</button></div>
   <div class="info">
     <div class="info-row">残り待ち牌: <strong>{waitRemain}</strong> 枚</div>
     <div class="info-row">残り山: <strong>{shanRemain}</strong> 枚</div>
@@ -29,6 +37,7 @@
     <button class="secondary" on:click={() => onSelect(false)}>保留 [継続]</button>
   </div>
 </Sheet>
+{/if}
 
 <style>
   .title { font-weight: bold; margin-bottom: 14px; font-size: 20px; }
@@ -46,4 +55,16 @@
   }
   .actions .primary { background: #2080d0; color: #fff; }
   .actions .secondary { background: #888; color: #fff; }
+  .title .peek {
+    margin-left: 8px;
+    padding: 4px 12px;
+    border: 1px solid skyblue;
+    border-radius: 4px;
+    background: transparent;
+    color: #d8f0ff;
+    font-size: 14px;
+    font-weight: normal;
+    cursor: pointer;
+    vertical-align: middle;
+  }
 </style>

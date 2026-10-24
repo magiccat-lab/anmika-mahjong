@@ -3,10 +3,12 @@
   // 金北の選択の板を一時的にたたんだ間、画面の下に残す 1 本の帯。押すと選択に戻る。
   // 選択そのもの [pendingKinpei] ・ 制限時間は触らない。見た目を隠すだけ。
   export let onBack: () => void;
+  // [2026-10-24 先輩「冬冬金北とか選ぶか考える時に山の残り枚数とか川とか見れるように」] 冬を使うかの板でも使う
+  export let note = '金北の選択待ち [盤面を見ています]';
 </script>
 
 <div class="kinpei-peek-bar" role="status">
-  <span class="kinpei-peek-note">金北の選択待ち [盤面を見ています]</span>
+  <span class="kinpei-peek-note">{note}</span>
   <button type="button" class="kinpei-peek-back" on:click={onBack}>選択に戻る</button>
 </div>
 

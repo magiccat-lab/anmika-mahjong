@@ -8,6 +8,8 @@
   export let onSelect: (target: 'haru' | 'natsu' | 'aki' | 'fuyu' | null) => void;
   /** true: フィーバー時、 保留可。 false: 通常アガリ、 保留不可 [リョー指示 2026-05-12] */
   export let allowHold: boolean = false;
+  /** [2026-10-24 先輩] 強化先を選ぶ時に山の残り枚数も見たい */
+  export let shanRemain: number | null = null;
 
   // 2026-08-13 手順F: shell を Sheet へ統合 [寸法・色は従来値をそのまま渡す]
   import Sheet from './Sheet.svelte';
@@ -30,6 +32,9 @@
   z={1000}
 >
   <div class="title">🎁 金北 強化対象選択 [{winnerName ?? `player ${winner}`}]{allowHold ? '' : ' [必須]'} <button type="button" class="peek" on:click={() => (peeking = true)}>盤面を見る</button></div>
+  {#if shanRemain !== null}
+    <div class="shan">残り山 <strong>{shanRemain}</strong> 枚</div>
+  {/if}
   {#if preview}
     <div class="preview">現時点: {preview.fanshu !== undefined ? `${preview.fanshu}翻` : '役満'} / {(preview.hupai ?? []).map((h) => h.name).join('・')}</div>
   {/if}
@@ -45,6 +50,8 @@
 {/if}
 
 <style>
+  .shan { font-size: 12px; color: #ffe9ad; margin-bottom: 6px; }
+  .shan strong { color: #ffd060; font-size: 15px; font-variant-numeric: tabular-nums; }
   .preview { font-size: 11px; color: #ffe9ad; margin-bottom: 8px; max-width: 420px; line-height: 1.5; }
   .title { font-weight: bold; margin-bottom: 8px; font-size: 13px; }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; }

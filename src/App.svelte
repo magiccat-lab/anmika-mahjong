@@ -3289,7 +3289,7 @@
     <!-- 2026-05-14 ゆーま 自走 bug fix: online で winner != selfPlayer の client にも
          modal が出てて 誤クリックで他人の金北選択を送れた、 winner のみ表示に gate -->
     {#if $game.pendingKinpei && viewMode !== 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(actorSeat)) && !fxPresentationBusy}
-      <KinpeiModal preview={$game.pendingKinpei.preview ?? null} winnerName={onlineGameStarted ? seatDisplayNames[$game.pendingKinpei.winner] : null} winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} />
+      <KinpeiModal preview={$game.pendingKinpei.preview ?? null} winnerName={onlineGameStarted ? seatDisplayNames[$game.pendingKinpei.winner] : null} winner={$game.pendingKinpei.winner} huapai={$game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)} onSelect={(t) => game.selectKinpei(t)} allowHold={$game.game.feverActive[$game.pendingKinpei.winner as PlayerId]} shanRemain={paishu} />
     {/if}
     {#if $game.pendingKamiPochi && (!onlineGameStarted || $game.pendingKamiPochi.decisionOwners.includes(actorSeat)) && !fxPresentationBusy}
       <Sheet ariaLabel="神ぽっちの牌選択" tone="light" size="wide" backdrop="hand-peek" top="12px" border="2px solid #e9c95c" z={9401}>
@@ -3987,6 +3987,8 @@
         <div class="kinpei-inline">
           <div class="kinpei-title">金北 強化対象 [{seatDisplayNames[$game.pendingKinpei.winner as 0|1|2]} 選択]
             <button type="button" class="kinpei-peek-btn" on:click={() => { kinpeiPeek = true; }}>盤面を見る</button>
+            <!-- [2026-10-24 先輩] 強化先を選ぶ時に山の残り枚数も見たい -->
+            <span class="kinpei-shan">残り山 {paishu} 枚</span>
           </div>
           <!-- [2026-07-22 リョー要望] 強化前の暫定和了を見せてから選ばせる -->
           {#if $game.pendingKinpei.preview}
@@ -5578,6 +5580,13 @@
     font-size: 12px;
     font-weight: 700;
     cursor: pointer;
+  }
+  main.mode-single .agari-unified-panel .kinpei-shan {
+    margin-left: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #806000;
+    white-space: nowrap;
   }
   main.mode-single .agari-unified-panel .kinpei-btns {
     display: flex;
