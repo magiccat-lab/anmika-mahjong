@@ -37,9 +37,10 @@ describe('白単騎フィーバーは山の白を待ちとして数える', () =
     expect(feverWaitInfoFromLiveWall(['z5'], wall)[0].remain).toBe(3);
   });
 
-  it('山に白が 1 枚も無ければ今までどおり「山に残っていない」で流局', () => {
+  it('山にも王牌にも白が 1 枚も無ければ今までどおり「山に残っていない」で流局', () => {
     const s = armWhiteSingle();
-    (s.game.shan as any)._pai = ((s.game.shan as any)._pai as string[]).filter((p) => toCorePai(p) !== 'z5');
+    const shan = s.game.shan as any;
+    for (const k of ['_pai', '_rinshan', '_fubaopai']) shan[k] = (shan[k] as string[] ?? []).filter((p) => toCorePai(p) !== 'z5');
     const after = confirmPendingFeverBeforeDraw(s);
     expect(after.pendingPingju || after.roundEnded).toBe(true);
     expect(String(after.message)).toContain('待ち牌が山に残っていない');
@@ -52,6 +53,7 @@ describe('白単騎フィーバーは山の白を待ちとして数える', () =
     wall.push('z5g', 'z5r', 'z5y');
     (s.game.shan as any)._pai = wall;
     (s.game.shan as any)._rinshan = ((s.game.shan as any)._rinshan as string[] ?? []).filter((p) => toCorePai(p) !== 's9');
+    (s.game.shan as any)._fubaopai = ((s.game.shan as any)._fubaopai as string[] ?? []).filter((p) => toCorePai(p) !== 's9');
     expect(s.game.isFeverWaitExhausted(1)).toBe(true);
   });
 });

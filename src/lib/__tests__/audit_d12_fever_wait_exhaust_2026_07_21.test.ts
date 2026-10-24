@@ -28,7 +28,8 @@ describe('D-12: FEVER 待ち枯れの再判定', () => {
   it('待ち牌が山から消えていれば次ツモ前に流局する', () => {
     const s = armFeverSingleWait();
     const g = s.game;
-    (g.shan as any)._pai = ((g.shan as any)._pai as string[]).filter((p) => toCorePai(p) !== 's9');
+    // 王牌の見えていない牌も残りに数えるので、そちらからも抜く [2026-10-24]
+    for (const k of ['_pai', '_rinshan', '_fubaopai']) (g.shan as any)[k] = (((g.shan as any)[k] as string[]) ?? []).filter((p) => toCorePai(p) !== 's9');
     const after = confirmPendingFeverBeforeDraw(s);
     expect(after.pendingPingju || after.roundEnded).toBe(true);
     expect(String(after.message)).toContain('待ち牌が山に残っていない');

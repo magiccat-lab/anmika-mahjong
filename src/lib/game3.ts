@@ -5251,20 +5251,24 @@ export class Game3 {
   feverPendingShuvari: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false };
 
   /** フィーバー成立後、 待ち牌が山に残ってるか check
-   *  全 0 なら 1 人テンパイ流局 [ルール 5-2 step 4] */
+   *  全 0 なら 1 人テンパイ流局 [ルール 5-2 step 4]
+   *  ツモ山に加えて王牌の見えていない牌 (嶺上 ・ 未公開のドラ表 ・ 裏ドラ) も残りに数え、
+   *  ツモ山が尽きるまでは続ける [2026-10-24 リョー「裏ドラは上がるまで捲らないんだから山0まではめくるでしょ。ぽっちとかもあるかもだし」]。
+   *  ツモ山が 0 になったら王牌に待ちがあっても引けないので枯れ扱い (今までの山の終わりと同じ) */
   isFeverWaitExhausted(player: PlayerId): boolean {
     const waits = this.feverDeclareTing[player].length > 0
       ? this.feverDeclareTing[player]
       : this.getTingpaiList(player);
     const liveWall = this.shan.isBlind ? undefined : ([...((this.shan as any)._pai ?? [])] as string[]);
-    const reserve = this.shan.isBlind ? undefined : ([...((this.shan as any)._rinshan ?? [])] as string[]);
+    const unseen = liveWall && liveWall.length > 0
+      ? [...liveWall, ...(this.shan.concealedDeadWall as string[])]
+      : liveWall;
     return isFeverWaitExhaustedHelper(
       waits,
       this.shoupai as any,
       this.he as any,
       [...(this.shan.baopai ?? [])],
-      liveWall,
-      reserve,
+      unseen,
     );
   }
 

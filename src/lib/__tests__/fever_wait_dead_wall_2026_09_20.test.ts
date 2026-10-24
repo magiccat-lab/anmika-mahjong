@@ -29,10 +29,11 @@ describe('FEVER 待ち表示の枚数 [王牌込み]', () => {
 });
 
 describe('Shan3.concealedDeadWall', () => {
-  it('嶺上 + 未公開ドラ表 + 未公開裏ドラ の合計と一致する', () => {
+  it('嶺上 + 未公開ドラ表 + 裏ドラ の合計と一致する', () => {
     const shan = new Shan3(defaultSanmaRule());
     const hiddenBaopai = shan.baopai.length - shan.displayBaopai.length;
-    const hiddenFubaopai = (shan.fubaopai?.length ?? 0) - (shan.displayFubaopai?.length ?? 0);
+    // 裏ドラは局の途中では表にしないので全部 [2026-10-24 リョー「裏ドラは上がるまで捲らない」]
+    const hiddenFubaopai = shan.fubaopai?.length ?? 0;
 
     expect(shan.concealedDeadWall.length).toBe(
       shan.rinshanRemaining + hiddenBaopai + hiddenFubaopai,

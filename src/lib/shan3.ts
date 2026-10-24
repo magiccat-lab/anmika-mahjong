@@ -308,13 +308,15 @@ export class Shan3 {
    *  「王牌も含んだ枚数で」]。live wall だけで数えると「山に無い = 王牌に居る」が
    *  引き算で分かってしまう。王牌を足すと「見えていない枚数」になり、その漏れが消える。
    *  公開済みのドラ表は盤面に出ているので含めない [含めると見えている牌を残りと数える]。
+   *  裏ドラは局の途中では表にしない (和了の結果にだけ出る) ので全部含める
+   *  [2026-10-24 リョー「裏ドラは上がるまで捲らない」。前は確定枚数で切っていて、局の始めから全部が見えている扱いだった]。
    *  blind [online の projection] では現物を持たないので空を返す。 */
   get concealedDeadWall(): Pai[] {
     if (this._blind) return [];
     return [
       ...this._rinshan,
       ...this._baopai.slice(this._committedBaopaiLen),
-      ...(this._fubaopai ? this._fubaopai.slice(this._committedFubaopaiLen) : []),
+      ...(this._fubaopai ?? []),
     ];
   }
 

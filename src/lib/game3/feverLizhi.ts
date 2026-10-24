@@ -287,7 +287,7 @@ export function isFeverWaitExhausted(
 ): boolean {
   if (ting.length === 0) return true;
   // 配置が分かる権威側では、見えている枚数からの推定ではなく生牌領域を直接見る。
-  // 王牌内の牌は生存待ちに含めない。
+  // game3 はツモ山 + 王牌の見えていない牌を渡す [2026-10-24 リョー「山0まではめくるでしょ」]
   if (Array.isArray(liveWall)) {
     const waits = new Set(ting.map(normalizedWaitCore));
     if (waits.size === 0) return true;
