@@ -1320,58 +1320,41 @@ export function allowStamp(room: Pick<Room, 'stampLastAt'>, roomSeat: number, no
   return true;
 }
 
-/** [2026-10-14 リョー、演出のラフ 2 版「他の人の画面」] 白ぽっちの絞りの進みを他の席へ流す。
- *  引いた人の画面の指の進み (peel 0〜1) をそのまま中継する。見せ方だけで、点と牌には触らない。
- *  色は点がのぞく所 (peel 0.4 から) と めくれた時だけ送ってくる [それより前に色を流さない] */
+/** [2026-10-25 リョー「白ぽっち演出の作り直し」] 白ぽっちのムービーを他の席へ流す。
+ *  open = 引いた人の画面が開いた (deka ・ kakutei ・ plan = 演出の台本)。reveal = PUSH が押された (色)。close = 閉じた。
+ *  色は reveal でしか流さない [open の plan に色は入らない]。plan は決まった鍵だけ通す */
+export type PochiFxPlan = {
+  opening: string | null; glow: string | null; pulse: string | null; particle: string | null;
+  crack: string | null; push: string | null; lamp: string | null; premium: string | null; delay?: true;
+};
 export type PochiFxRelay = {
-  phase: 'open' | 'peel' | 'reveal' | 'close';
-  peel?: number;
+  phase: 'open' | 'reveal' | 'close' | 'peel';
   color?: 'blue' | 'red' | 'green' | 'yellow';
   deka?: 'p1' | 'p2' | null;
   kakutei?: 'good' | 'bad' | null;
-  glow?: ['white' | 'gold' | 'rainbow', 'white' | 'gold' | 'rainbow'];
-  /** [2026-10-14 4 版] 光りが何段まで上がるか (0〜4、ステップアップ) と、プレミアか */
-  step?: number;
-  premium?: boolean;
-  /** 予告の種類 (稲妻 ・ 決め台詞のカットイン) */
-  teaser?: 'bolt' | 'line' | 'mono' | 'none';
-  /** フリーズ (当たりの確定、暗転 ・ 止め絵) */
-  freeze?: 'black' | 'still';
-  /** [2026-10-15 fx10] 告知ランプ (先 ・ 後) と遅れ */
-  lamp?: 'pre' | 'post';
-  delay?: boolean;
+  plan?: PochiFxPlan;
 };
 const POCHI_FX_COLORS = new Set(['blue', 'red', 'green', 'yellow']);
-const POCHI_FX_GLOWS = new Set(['white', 'gold', 'rainbow']);
+const POCHI_FX_PLAN_KEYS = ['opening', 'glow', 'pulse', 'particle', 'crack', 'push', 'lamp', 'premium'] as const;
 export function sanitizePochiFx(value: Record<string, unknown>): PochiFxRelay | null {
   const phase = value.phase;
-  if (phase !== 'open' && phase !== 'peel' && phase !== 'reveal' && phase !== 'close') return null;
+  if (phase !== 'open' && phase !== 'reveal' && phase !== 'close') return null;
   const out: PochiFxRelay = { phase };
-  if (phase === 'peel' || phase === 'reveal') {
-    const peel = phase === 'reveal' ? 1 : Number(value.peel);
-    if (!Number.isFinite(peel) || peel < 0 || peel > 1) return null;
-    out.peel = Math.round(peel * 1000) / 1000;
-    if (typeof value.color === 'string' && POCHI_FX_COLORS.has(value.color) && (phase === 'reveal' || out.peel >= 0.4)) {
-      out.color = value.color as PochiFxRelay['color'];
-    }
-    if (phase === 'reveal' && !out.color) return null;
+  if (phase === 'reveal') {
+    if (typeof value.color !== 'string' || !POCHI_FX_COLORS.has(value.color)) return null;
+    out.color = value.color as PochiFxRelay['color'];
   }
   if (phase === 'open') {
     out.deka = value.deka === 'p1' || value.deka === 'p2' ? value.deka : null;
     out.kakutei = value.kakutei === 'good' || value.kakutei === 'bad' ? value.kakutei : null;
-    const g = value.glow;
-    out.glow = Array.isArray(g) && g.length === 2 && g.every((x) => typeof x === 'string' && POCHI_FX_GLOWS.has(x))
-      ? [g[0], g[1]] as PochiFxRelay['glow']
-      : ['white', 'white'];
-    if (Number.isInteger(value.step) && (value.step as number) >= 0 && (value.step as number) <= 4) out.step = value.step as number;
-    if (value.premium === true) out.premium = true;
-    // [2026-10-15 fx5 V3] 3 つ目の予告「白黒」も中継する
-    if (value.teaser === 'bolt' || value.teaser === 'line' || value.teaser === 'mono' || value.teaser === 'none') out.teaser = value.teaser;
-    // [2026-10-15 fx7] フリーズ (暗転 ・ 止め絵) も中継する
-    if (value.freeze === 'black' || value.freeze === 'still') out.freeze = value.freeze;
-    // [2026-10-15 fx10] 告知ランプと遅れも中継する
-    if (value.lamp === 'pre' || value.lamp === 'post') out.lamp = value.lamp;
-    if (value.delay === true) out.delay = true;
+    const src = value.plan && typeof value.plan === 'object' ? value.plan as Record<string, unknown> : {};
+    const plan = {} as Record<string, unknown>;
+    for (const k of POCHI_FX_PLAN_KEYS) {
+      const v = src[k];
+      plan[k] = typeof v === 'string' && v.length > 0 && v.length <= 16 ? v : null;
+    }
+    if (src.delay === true) plan.delay = true;
+    out.plan = plan as PochiFxPlan;
   }
   return out;
 }

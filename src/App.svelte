@@ -21,7 +21,7 @@
   import PochiSqueeze from './lib/PochiSqueeze.svelte';
   import FuyuFlip from './lib/FuyuFlip.svelte';
   import Confetti from './lib/Confetti.svelte';
-  import { publicPochiCandidates, kakuteiOf, POCHI_GOOD, pochiLeftForViewer, pochiTopStep, premiumRoll, legacyGlowOfStep, teaserRoll, freezeRoll, lampRoll, delayRoll, type Glow, type LampTiming, type PochiColor, type PochiFreeze, type Teaser } from './lib/pochiFx';
+  import { publicPochiCandidates, kakuteiOf, POCHI_GOOD, pochiLeftForViewer, rollPlan, pochiGood, planFromRelay, DEFAULT_PLAN, type PochiColor, type PochiPlan } from './lib/pochiFx';
   import LobbyPanel from './lib/LobbyPanel.svelte';
   import RoomPanel from './lib/RoomPanel.svelte';
   import EntryMenu from './lib/EntryMenu.svelte';
@@ -445,28 +445,13 @@
   // cpuStepImpl が複数ターンを1 update で回すため shan.lastZimoPochi は上書きされる。
   // events 配列から z5 の色を直接取り、キューで複数回分を順番に表示する
   // [2026-10-14] でかぽっち (リーチ一発で引いた 1筒 ・ 2筒) も同じ絞りに。kakutei は見えている牌で正 ・ 逆が決まっている時
-  type PochiRevealItem = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean; deka?: 'p1' | 'p2' | null; kakutei?: 'good' | 'bad' | null; step?: number; premium?: boolean; teaser?: Teaser; freeze?: PochiFreeze | null; lamp?: LampTiming | null; delay?: boolean };
-  // 期待度 (光りが何段まで上がるか) とプレミアはここで決めて PochiSqueeze に渡す (オンラインは同じ物を他の席へ流す)。
-  // [2026-10-14 リョー 4 版の答え: ステップアップ ・ 溜め ・ プレミアを入れる]
-  // 予告は稲妻と決め台詞「白って 200 色あんねん」のカットインを半々 (4 版の 2 ・ 3 の答え)
-  // [2026-10-15 fx5 V3] 3 つ目の予告「白黒」は強めの予告。当たりで 25%、外れでも 6% 出る (ガセ予告)
-  // [2026-10-15 fx7「これぽっちの演出に入れたい」] 当たりのまれな確定でフリーズ (暗転 3% ・ 止め絵 6%)。出る時は光りを虹まで上げ、予告とプレミアは出さない
-  function pochiStep(color: PochiColor, kakutei: 'good' | 'bad' | null): { step: number; premium: boolean; teaser: Teaser; freeze: PochiFreeze | null; lamp: LampTiming | null; delay: boolean } {
-    const good = kakutei === 'good' || (kakutei !== 'bad' && POCHI_GOOD[color]);
-    // 試験 (Playwright) だけ予告の種類とフリーズを決め打ちできる
+  type PochiRevealItem = { player: number; color: 'blue' | 'red' | 'green' | 'yellow'; isCpu: boolean; deka?: 'p1' | 'p2' | null; kakutei?: 'good' | 'bad' | null; plan: PochiPlan };
+  // [2026-10-25 リョー「白ぽっち演出の作り直し」] 演出の台本 (plan) はここで一度だけ決めて PochiSqueeze に渡す。
+  // 当たり外れで抽選表を引き分け、同じ plan をオンラインでは他の席へ流す。試験 (Playwright) だけ window.__forcePlan で一部を決め打ちできる
+  function pochiPlanFor(color: PochiColor, kakutei: 'good' | 'bad' | null): PochiPlan {
     const webdriver = typeof navigator !== 'undefined' && (navigator as any).webdriver;
-    const forced = (webdriver && (window as any).__forceTeaser) || null;
-    const forcedFreeze = webdriver && (window as any).__forceFreeze !== undefined ? ((window as any).__forceFreeze as PochiFreeze | null) : undefined;
-    const freeze = forcedFreeze !== undefined ? forcedFreeze : freezeRoll(good, Math.random());
-    // 演出一覧の絵を撮る時 (tests/fx_odds_images.spec.ts) だけ、光りの段とプレミアも決め打ちできる
-    const forcedStep = webdriver && typeof (window as any).__forceStep === 'number' ? ((window as any).__forceStep as number) : null;
-    const forcedPremium = webdriver && typeof (window as any).__forcePremium === 'boolean' ? ((window as any).__forcePremium as boolean) : null;
-    const step = freeze ? 4 : forcedStep ?? pochiTopStep(POCHI_GOOD[color], kakutei, Math.random());
-    const teaser = forced ?? teaserRoll(good, Math.random(), Math.random());
-    // [2026-10-15 fx10 L1 a ・ B1 a] 告知ランプ (当たりなら必ず外周が光る) と遅れ (ピキーンが 0.3 秒遅れる)。試験は __forceLamp ・ __forceDelay で決め打ち
-    const lamp = webdriver && (window as any).__forceLamp !== undefined ? ((window as any).__forceLamp as LampTiming | null) : lampRoll(good, Math.random());
-    const delay = !freeze && (webdriver && typeof (window as any).__forceDelay === 'boolean' ? ((window as any).__forceDelay as boolean) : delayRoll(good, Math.random()));
-    return { step, premium: !freeze && (forcedPremium ?? premiumRoll(step, Math.random())), teaser, freeze, lamp, delay };
+    const forced = webdriver ? ((window as any).__forcePlan as Partial<PochiPlan> | undefined) : undefined;
+    return { ...rollPlan(pochiGood(color, kakutei)), ...(forced ?? {}) };
   }
   let pochiReveal: PochiRevealItem | null = null;
   let pochiRevealQueue: PochiRevealItem[] = [];
@@ -503,7 +488,7 @@
             && $game.cpu[ev.player] !== true
             && !(someoneFeverNow && !$game.game.feverActive[ev.player])) {
           const kakutei = kakuteiOf(publicPochiCandidates($game.game));
-          pochiRevealQueue.push({ player: ev.player, color, isCpu: false, kakutei, ...pochiStep(color, kakutei) });
+          pochiRevealQueue.push({ player: ev.player, color, isCpu: false, kakutei, plan: pochiPlanFor(color, kakutei) });
         }
         // でかぽっち: リーチ一発で引いた本待ちでない 1筒 ・ 2筒。game が lastZimoInfo.pochi に色 (緑 ・ 黄) を入れている
         const zi = $game.game.lastZimoInfo as { player?: number; pai?: string; pochi?: string | null } | null;
@@ -513,7 +498,7 @@
             && zi && zi.player === ev.player && (zi.pochi === 'green' || zi.pochi === 'yellow')
             && $game.cpu[ev.player] !== true
             && !(someoneFeverNow && !$game.game.feverActive[ev.player])) {
-          pochiRevealQueue.push({ player: ev.player, color: zi.pochi, isCpu: false, deka: corePai, ...pochiStep(zi.pochi, null) });
+          pochiRevealQueue.push({ player: ev.player, color: zi.pochi, isCpu: false, deka: corePai, plan: pochiPlanFor(zi.pochi, null) });
         }
       }
       lastSeenZimoEventCount = zimoEvents.length;
@@ -522,15 +507,11 @@
       }
     }
   }
-  // [2026-10-14 リョー、演出のラフ 2 版「他の人の画面」] オンラインでは引いた人の絞りの進みを server が他の席へ中継する。
-  // 引いた人: 開いた ・ 進み (70ms ごと) ・ めくれた ・ 閉じたを送る。色は点がのぞく 0.4 から
-  // 他の席: remotePochi に受けて、同じ PochiSqueeze を readOnly で出す
-  type RemotePochi = { seat: number; deka: 'p1' | 'p2' | null; kakutei: 'good' | 'bad' | null; glow: [Glow, Glow]; step: number | null; premium: boolean; teaser: Teaser; freeze: PochiFreeze | null; lamp: LampTiming | null; delay: boolean; peel: number; color: PochiColor | null; key: number };
+  // [2026-10-25 リョー] オンラインでは引いた人の画面が open (deka ・ kakutei ・ plan) と reveal (PUSH で色) と close を server 経由で他の席へ流す。
+  // 色は reveal でしか流れない。他の席: remotePochi に受けて、同じ PochiSqueeze を readOnly で出す
+  type RemotePochi = { seat: number; deka: 'p1' | 'p2' | null; kakutei: 'good' | 'bad' | null; plan: PochiPlan; color: PochiColor | null; revealed?: boolean; key: number };
   let remotePochi: RemotePochi | null = null;
-  let pochiFxLast = 0;
-  let pochiFxTimer: ReturnType<typeof setTimeout> | null = null;
-  let pochiFxQueued: Record<string, unknown> | null = null;
-  let pochiFxRevealSent = false;
+  let pochiPushed = false;
   function sendPochiFx(body: Record<string, unknown>): void {
     if (!onlineGameStarted || !onlineWs || onlineWs.readyState !== WebSocket.OPEN) return;
     try { onlineWs.send(JSON.stringify({ type: 'pochiFx', ...body })); } catch { /* 演出だけなので捨てる */ }
@@ -539,35 +520,14 @@
     return onlineGameStarted && !!pochiReveal && pochiReveal.player === actorSeat;
   }
   function onPochiOpen(): void {
+    pochiPushed = false;
     if (!pochiFxMine() || !pochiReveal) return;
-    pochiFxRevealSent = false;
-    pochiFxQueued = null;
-    if (pochiFxTimer) { clearTimeout(pochiFxTimer); pochiFxTimer = null; }
-    const step = pochiReveal.step ?? 0;
-    sendPochiFx({ phase: 'open', deka: pochiReveal.deka ?? null, kakutei: pochiReveal.kakutei ?? null, glow: legacyGlowOfStep(step), step, premium: !!pochiReveal.premium, teaser: pochiReveal.teaser ?? 'bolt', freeze: pochiReveal.freeze ?? null, lamp: pochiReveal.lamp ?? null, delay: !!pochiReveal.delay });
+    sendPochiFx({ phase: 'open', deka: pochiReveal.deka ?? null, kakutei: pochiReveal.kakutei ?? null, plan: pochiReveal.plan });
   }
-  function onPochiProgress(p: number): void {
-    if (!pochiFxMine() || !pochiReveal || pochiFxRevealSent) return;
-    const color = pochiReveal.color;
-    if (p >= 1) {
-      pochiFxRevealSent = true;
-      pochiFxQueued = null;
-      if (pochiFxTimer) { clearTimeout(pochiFxTimer); pochiFxTimer = null; }
-      sendPochiFx({ phase: 'reveal', color });
-      return;
-    }
-    const body = { phase: 'peel', peel: p, ...(p >= 0.4 ? { color } : {}) };
-    const now = performance.now();
-    if (now - pochiFxLast >= 70) { pochiFxLast = now; sendPochiFx(body); return; }
-    pochiFxQueued = body;
-    if (!pochiFxTimer) {
-      pochiFxTimer = setTimeout(() => {
-        pochiFxTimer = null;
-        pochiFxLast = performance.now();
-        if (pochiFxQueued && !pochiFxRevealSent) sendPochiFx(pochiFxQueued);
-        pochiFxQueued = null;
-      }, Math.max(0, 70 - (now - pochiFxLast)));
-    }
+  function onPochiPush(): void {
+    if (!pochiReveal || pochiPushed) return;
+    pochiPushed = true;
+    if (pochiFxMine()) sendPochiFx({ phase: 'reveal', color: pochiReveal.color });
   }
   function onRemotePochiFx(gameSeat: number, msg: any): void {
     // [2026-10-15 リョー「フィーバー中で他の人が一発でぽっちとかつもると関係ないのに演出は言ってるよ」]
@@ -582,32 +542,24 @@
       remotePochi = {
         seat: gameSeat, deka: msg.deka === 'p1' || msg.deka === 'p2' ? msg.deka : null,
         kakutei: msg.kakutei === 'good' || msg.kakutei === 'bad' ? msg.kakutei : null,
-        glow: Array.isArray(msg.glow) && msg.glow.length === 2 ? msg.glow : ['white', 'white'],
-        step: Number.isInteger(msg.step) && msg.step >= 0 && msg.step <= 4 ? msg.step : null, premium: msg.premium === true,
-        teaser: msg.teaser === 'line' || msg.teaser === 'mono' || msg.teaser === 'none' ? msg.teaser : 'bolt',
-        freeze: msg.freeze === 'black' || msg.freeze === 'still' ? msg.freeze : null,
-        lamp: msg.lamp === 'pre' || msg.lamp === 'post' ? msg.lamp : null, delay: msg.delay === true,
-        peel: 0, color: null, key: Date.now(),
+        plan: planFromRelay(msg.plan), color: null, key: Date.now(),
       };
       return;
     }
     if (msg.phase === 'close') {
-      if (remotePochi?.seat === gameSeat && remotePochi.peel < 1) remotePochi = null;
+      if (remotePochi?.seat === gameSeat && !remotePochi.revealed) remotePochi = null;
       return;
     }
+    if (msg.phase !== 'reveal' || !color) return;
     // 開いたのを取り逃がしていたら (再接続など) ここで作る
     const cur: RemotePochi = remotePochi?.seat === gameSeat ? remotePochi
-      : { seat: gameSeat, deka: null, kakutei: null, glow: ['white', 'white'], step: null, premium: false, teaser: 'bolt', freeze: null, lamp: null, delay: false, peel: 0, color: null, key: Date.now() };
-    const peel = msg.phase === 'reveal' ? 1 : Math.max(cur.peel, Number(msg.peel) || 0);
-    remotePochi = { ...cur, color: color ?? cur.color, peel };
+      : { seat: gameSeat, deka: null, kakutei: null, plan: DEFAULT_PLAN, color: null, key: Date.now() };
+    remotePochi = { ...cur, color, revealed: true };
   }
 
   function closePochiReveal() {
-    if (pochiFxMine()) {
-      if (pochiFxTimer) { clearTimeout(pochiFxTimer); pochiFxTimer = null; }
-      pochiFxQueued = null;
-      sendPochiFx({ phase: 'close' });
-    }
+    if (pochiFxMine()) sendPochiFx({ phase: 'close' });
+    pochiPushed = false;
     pochiReveal = null;
     if (pochiRevealQueue.length > 0) {
       pochiReveal = pochiRevealQueue.shift()!;
@@ -3250,15 +3202,15 @@
            {#if} は component を再生成せず props 差替えだけになり、前回の revealed/closing が
            持ち越されて 2 枚目が「開いたまま timer なし」で永久に残る。{#key} で毎回作り直す -->
       {#key pochiReveal}
-        <PochiSqueeze color={pochiReveal.color} deka={pochiReveal.deka ?? null} kakutei={pochiReveal.kakutei ?? null}
-          step={pochiReveal.step ?? null} premium={!!pochiReveal.premium} teaser={pochiReveal.teaser ?? 'bolt'} freeze={pochiReveal.freeze ?? null} lamp={pochiReveal.lamp ?? null} delay={!!pochiReveal.delay} who={onlineGameStarted ? seatName(pochiReveal.player) : ''}
-          onOpen={onPochiOpen} onProgress={onPochiProgress} onClose={closePochiReveal} />
+        <PochiSqueeze color={pochiReveal.color} pushed={pochiPushed} deka={pochiReveal.deka ?? null} kakutei={pochiReveal.kakutei ?? null}
+          plan={pochiReveal.plan} who={onlineGameStarted ? seatName(pochiReveal.player) : ''}
+          onOpen={onPochiOpen} onPush={onPochiPush} onClose={closePochiReveal} />
       {/key}
     {:else if onlineGameStarted && remotePochi && !fxCutinBusy}
-      <!-- [2026-10-14] 他の人の絞り。引いた人の指の進みをそのまま流す (観戦も同じ) -->
+      <!-- [2026-10-25] 他の人のムービー。引いた人の plan と PUSH の色を流す (観戦も同じ) -->
       {#key remotePochi.key}
-        <PochiSqueeze readOnly color={remotePochi.color ?? 'blue'} colorKnown={!!remotePochi.color}
-          deka={remotePochi.deka} kakutei={remotePochi.kakutei} glow={remotePochi.glow} step={remotePochi.step} premium={remotePochi.premium} teaser={remotePochi.teaser} freeze={remotePochi.freeze} lamp={remotePochi.lamp} delay={remotePochi.delay} progress={remotePochi.peel}
+        <PochiSqueeze readOnly revealColor={remotePochi.color}
+          deka={remotePochi.deka} kakutei={remotePochi.kakutei} plan={remotePochi.plan}
           who={seatName(remotePochi.seat)} onClose={() => { remotePochi = null; }} />
       {/key}
     {/if}

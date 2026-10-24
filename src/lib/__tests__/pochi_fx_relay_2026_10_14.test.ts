@@ -1,7 +1,8 @@
-// [2026-10-14 リョー、演出のラフ 2 版「他の人の画面」] 白ぽっちの絞りの進みの中継。
+// [2026-10-25 リョー「白ぽっち演出の作り直し」] 白ぽっちのムービーの中継 (旧: 2026-10-14 絞りの進み)。
 // 契約 [client 側が合わせる物]:
-// - client→server { type:'pochiFx', phase:'open'|'peel'|'reveal'|'close', ... }。server は送った席を seat に付けて全員と観戦へ配る
-// - 色は peel 0.4 から ・ reveal の時だけ通す [点がのぞく前に色を流さない]。reveal に色が無ければ捨てる
+// - client→server { type:'pochiFx', phase:'open'|'reveal'|'close', ... }。server は送った席を seat に付けて全員と観戦へ配る
+// - open は deka ・ kakutei ・ plan (opening/glow/pulse/particle/crack/push/lamp/premium は 16 字までの文字列か null、delay は true の時だけ) だけ通す。色は入れない
+// - 色は reveal の時だけ通す [PUSH の前に色を流さない]。reveal に正しい色が無ければ捨てる。peel は廃止
 // - 1 席 1 秒 30 通まで、open は 2 秒に 1 回 [連打で他の画面を塞がない]
 import jwt from 'jsonwebtoken';
 import { createServer, type Server } from 'node:http';
@@ -106,53 +107,62 @@ async function bootRoom(roomId: string) {
 }
 
 
-describe('白ぽっちの絞りの中継 [2026-10-14]', () => {
-  it('色は 0.4 より前は落とし、reveal は色が無ければ捨てる', () => {
-    expect(sanitizePochiFx({ phase: 'peel', peel: 0.2, color: 'red' })).toEqual({ phase: 'peel', peel: 0.2 });
-    expect(sanitizePochiFx({ phase: 'peel', peel: 0.45, color: 'red' })).toEqual({ phase: 'peel', peel: 0.45, color: 'red' });
-    expect(sanitizePochiFx({ phase: 'reveal', color: 'blue' })).toEqual({ phase: 'reveal', peel: 1, color: 'blue' });
+const PLAN = { opening: 'bolt', glow: 'gold', pulse: 'fast', particle: 'suck', crack: 'two', push: 'red', lamp: 'pre', delay: true, premium: 'kirin' };
+
+describe('白ぽっちのムービーの中継 [2026-10-25]', () => {
+  it('open は plan の決まった鍵だけ通し、reveal は正しい色が無ければ捨てる', () => {
+    expect(sanitizePochiFx({ phase: 'reveal', color: 'blue' })).toEqual({ phase: 'reveal', color: 'blue' });
     expect(sanitizePochiFx({ phase: 'reveal' })).toBeNull();
-    expect(sanitizePochiFx({ phase: 'peel', peel: 2 })).toBeNull();
-    expect(sanitizePochiFx({ phase: 'peel', peel: 0.5, color: 'purple' })).toEqual({ phase: 'peel', peel: 0.5 });
+    expect(sanitizePochiFx({ phase: 'reveal', color: 'purple' })).toBeNull();
+    expect(sanitizePochiFx({ phase: 'peel', peel: 0.5, color: 'red' })).toBeNull();
     expect(sanitizePochiFx({ phase: 'hack' })).toBeNull();
-    expect(sanitizePochiFx({ phase: 'open', deka: 'p1', kakutei: 'good', glow: ['gold', 'rainbow'] }))
-      .toEqual({ phase: 'open', deka: 'p1', kakutei: 'good', glow: ['gold', 'rainbow'] });
-    expect(sanitizePochiFx({ phase: 'open', deka: 'x', glow: ['<b>', 1] })).toEqual({ phase: 'open', deka: null, kakutei: null, glow: ['white', 'white'] });
-    // 4 版: 段 (0〜4) とプレミアも通す。範囲の外 ・ 型違いは落とす
-    expect(sanitizePochiFx({ phase: 'open', step: 4, premium: true })).toMatchObject({ step: 4, premium: true });
-    expect(sanitizePochiFx({ phase: 'open', step: 7, premium: 'yes' })).not.toHaveProperty('step');
-    expect(sanitizePochiFx({ phase: 'open', step: 2.5, premium: 'yes' })).not.toHaveProperty('premium');
-    // 予告の種類 (稲妻 ・ 決め台詞) も通す。知らない値は落とす
-    expect(sanitizePochiFx({ phase: 'open', teaser: 'line' })).toMatchObject({ teaser: 'line' });
-    expect(sanitizePochiFx({ phase: 'open', teaser: '<script>' })).not.toHaveProperty('teaser');
+    expect(sanitizePochiFx({ phase: 'close', color: 'red' })).toEqual({ phase: 'close' });
+    expect(sanitizePochiFx({ phase: 'open', deka: 'p1', kakutei: 'good', plan: PLAN }))
+      .toEqual({ phase: 'open', deka: 'p1', kakutei: 'good', plan: PLAN });
+    // plan 以外の鍵 (色 ・ 旧 glow/step など) は落とす
+    const dirty = sanitizePochiFx({ phase: 'open', color: 'red', glow: ['gold', 'gold'], step: 4, plan: { ...PLAN, color: 'red', evil: 1 } }) as any;
+    expect(dirty).not.toHaveProperty('color');
+    expect(dirty).not.toHaveProperty('glow');
+    expect(dirty).not.toHaveProperty('step');
+    expect(Object.keys(dirty.plan).sort()).toEqual(['crack', 'delay', 'glow', 'lamp', 'opening', 'particle', 'premium', 'pulse', 'push']);
+    // 型違い ・ 長すぎる文字列は null、delay は true だけ
+    const bad = sanitizePochiFx({ phase: 'open', deka: 'x', plan: { opening: 5, glow: 'x'.repeat(17), pulse: '<b>', delay: 'yes' } }) as any;
+    expect(bad.deka).toBeNull();
+    expect(bad.kakutei).toBeNull();
+    expect(bad.plan).toMatchObject({ opening: null, glow: null, pulse: '<b>', particle: null });
+    expect(bad.plan).not.toHaveProperty('delay');
+    // plan が無い open でも落ちない
+    expect(sanitizePochiFx({ phase: 'open' })).toMatchObject({ phase: 'open', plan: { opening: null } });
   });
 
   it('1 秒 30 通まで、open は 2 秒に 1 回', () => {
     const room = {};
     let ok = 0;
-    for (let i = 0; i < 50; i++) if (allowPochiFx(room, 0, 'peel', 1000 + i)) ok++;
+    for (let i = 0; i < 50; i++) if (allowPochiFx(room, 0, 'close', 1000 + i)) ok++;
     expect(ok).toBe(30);
-    expect(allowPochiFx(room, 0, 'peel', 2100)).toBe(true);
+    expect(allowPochiFx(room, 0, 'close', 2100)).toBe(true);
     expect(allowPochiFx(room, 1, 'open', 2100)).toBe(true);
     expect(allowPochiFx(room, 1, 'open', 3000)).toBe(false);
     expect(allowPochiFx(room, 1, 'open', 4200)).toBe(true);
   });
 
-  it('引いた人の進みが他の席に届く (送った席の seat 付き、色は 0.4 から)', async () => {
+  it('引いた人の open / reveal / close が他の 2 席に届く (送った席の seat 付き、色は reveal だけ)', async () => {
     const { clients } = await bootRoom('PF0001');
-    clients[0].ws.send(JSON.stringify({ type: 'pochiFx', phase: 'open', deka: null, kakutei: null, glow: ['white', 'gold'] }));
-    clients[0].ws.send(JSON.stringify({ type: 'pochiFx', phase: 'peel', peel: 0.3, color: 'green' }));
+    clients[0].ws.send(JSON.stringify({ type: 'pochiFx', phase: 'open', deka: null, kakutei: 'good', plan: PLAN }));
     clients[0].ws.send(JSON.stringify({ type: 'pochiFx', phase: 'peel', peel: 0.5, color: 'green' }));
     clients[0].ws.send(JSON.stringify({ type: 'pochiFx', phase: 'reveal', color: 'green' }));
-    const got = await waitUntil(() => {
-      const list = clients[1].messages.filter((m) => m.type === 'pochiFx');
-      return list.length >= 4 ? list : undefined;
-    }, 3000, 'relay to seat 1');
-    expect(got.map((m) => m.phase)).toEqual(['open', 'peel', 'peel', 'reveal']);
-    expect(got.every((m) => m.seat === 0)).toBe(true);
-    expect(got[0].glow).toEqual(['white', 'gold']);
-    expect(got[1].color).toBeUndefined();
-    expect(got[2].color).toBe('green');
-    expect(got[3]).toMatchObject({ peel: 1, color: 'green' });
+    clients[0].ws.send(JSON.stringify({ type: 'pochiFx', phase: 'close' }));
+    for (const idx of [1, 2]) {
+      const got = await waitUntil(() => {
+        const list = clients[idx].messages.filter((m) => m.type === 'pochiFx');
+        return list.length >= 3 ? list : undefined;
+      }, 3000, `relay to seat ${idx}`);
+      // peel は捨てられる
+      expect(got.map((m) => m.phase)).toEqual(['open', 'reveal', 'close']);
+      expect(got.every((m) => m.seat === 0)).toBe(true);
+      expect(got[0]).toMatchObject({ kakutei: 'good', plan: PLAN });
+      expect(got[0].color).toBeUndefined();
+      expect(got[1].color).toBe('green');
+    }
   });
 });
