@@ -3078,16 +3078,12 @@
     </div>
   {/if}
   <!-- [2026-07-24 4人回し Phase6] rotation 部屋の room chip [4人分] と現在の抜け番 -->
-  {#if onlineGameStarted && onlineActiveMapping && onlineRoomChipLedger && !$prefs.hideRoomChip}
+  {#if onlineGameStarted && onlineActiveMapping && onlineRoomChipLedger}
     <!-- [2026-10-25 リョー「抜け番のチップ数とか、4人のチップは常に左上とかに出してもいいね」] 4 人分 [抜け番も] を左上に縦 1 列で常に出す。
-         席の札 [西] ・ 状況の札 [turn-status] ・ 手牌と重ならない左の空き。マウスは通す [× だけ受ける] -->
+         席の札 [西] ・ 状況の札 [turn-status] ・ 手牌と重ならない左の空き。マウスは通す。
+         [2026-10-25 リョー「部屋チップ、×押させないで強制で出すようにしよう」] × と ⚙️ の「部屋チップを隠す」は外した -->
     <div class="rotation-chip-bar" role="status">
-      <div class="rc-head">
-        <span class="rc-title">部屋チップ</span>
-        <!-- [2026-10-24 リョー「部屋チップって表示も消せるようにして」] 戻すのは ⚙️ 画面設定の「部屋チップを隠す」 -->
-        <button class="rc-hide" title="部屋チップを隠す [⚙️ 画面設定で戻せる]" aria-label="部屋チップを隠す"
-          on:click={() => prefs.update((p) => ({ ...p, hideRoomChip: true }))}>×</button>
-      </div>
+      <span class="rc-title">部屋チップ</span>
       {#each onlineMembers as m (m.seat)}
         <span class="rc-entry" class:rc-inactive={m.seat === onlineActiveMapping.inactiveRoomSeat}>
           <span class="rc-name">{m.seat === onlineActiveMapping.inactiveRoomSeat ? '[抜け番] ' : ''}{m.username}</span>
@@ -6383,24 +6379,11 @@
     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
     pointer-events: none;
   }
-  .rotation-chip-bar .rc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .rotation-chip-bar .rc-title { opacity: 0.75; }
   .rotation-chip-bar .rc-entry { display: flex; justify-content: space-between; gap: 8px; }
   .rotation-chip-bar .rc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rotation-chip-bar .rc-chips { font-variant-numeric: tabular-nums; flex: none; }
   .rotation-chip-bar .rc-entry.rc-inactive { opacity: 0.65; font-style: italic; }
-  .rotation-chip-bar .rc-hide {
-    pointer-events: auto;
-    background: none;
-    border: none;
-    color: inherit;
-    opacity: 0.7;
-    font-size: 13px;
-    line-height: 1;
-    padding: 0 0 0 2px;
-    cursor: pointer;
-  }
-  .rotation-chip-bar .rc-hide:hover { opacity: 1; }
   /* 横向きの携帯 [高さ 500px 以下]: 状況の札が小さく上に寄るので帯も上げて小さくする */
   @media (max-height: 500px) and (orientation: landscape) {
     .rotation-chip-bar { top: 48px; left: 6px; min-width: 108px; max-width: 128px; padding: 2px 6px; font-size: 10.5px; line-height: 1.2; }

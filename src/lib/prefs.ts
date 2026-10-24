@@ -22,8 +22,6 @@ export interface Prefs {
    *  [2026-10-14 リョー「通常BGM切ってフィーバーだけONにする設定も用意したい」→「bgm、デフォはフィーバーだけにしておいて～」。
    *  最初は normalBgmOff (既定 false) で出したが、既定を変える時に保存済みの false が残るので名前ごと替えた]。 */
   normalBgmOn: boolean;
-  /** 4 人回しの「部屋チップ」の帯を出さない。帯の × でも隠せる [2026-10-24 リョー「部屋チップって表示も消せるようにして」]。 */
-  hideRoomChip: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -33,7 +31,6 @@ export const DEFAULT_PREFS: Prefs = {
   autoNuki: false,
   bgmOff: false,
   normalBgmOn: false,
-  hideRoomChip: false,
 };
 
 const KEY = 'anmika.prefs.v1';

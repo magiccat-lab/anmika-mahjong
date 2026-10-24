@@ -12,7 +12,6 @@
     { key: 'autoNuki', label: '⚡ 自動抜き', note: '自分の手番で抜ける華牌・北があれば自動で抜く' },
     { key: 'normalBgmOn', label: '🎵 通常時も BGM を流す', note: '切ってある時はフィーバー中のアンミカーニバルだけ流す [卓の「BGM」でも替えられる]' },
     { key: 'bgmOff', label: '🔕 BGM を全部切る', note: '通常時もフィーバー中も BGM を流さない' },
-    { key: 'hideRoomChip', label: '🙈 部屋チップを隠す', note: '4 人回しの画面左上の「部屋チップ」の帯を出さない [帯の × でも隠せる]' },
   ];
 </script>
 

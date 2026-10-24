@@ -1,6 +1,6 @@
 // [2026-10-24 リョー「抜け番は観戦と同じものが見れるように」「部屋チップって表示も消せるようにして」
 //  「途中で誰か抜けて3人打ちもできるようにして」] 4 人とも人の 4 人回し部屋で
-//  抜け番の盤面 [全員の手牌を表 ・ 卓の辺の手牌] ・ 部屋チップの × ・ 抜け番が抜けた後の部屋を見る
+//  抜け番の盤面 [全員の手牌を表 ・ 卓の辺の手牌] ・ 部屋チップの帯 [10-25 から隠せない] ・ 抜け番が抜けた後の部屋を見る
 // 前提: server を ANMIKA_TEST_AUTH=1 で起動 [tools/run_online_e2e.mjs が担う]
 import { test, expect, BrowserContext, Page } from '@playwright/test';
 
@@ -24,7 +24,7 @@ async function spawnClient(browser: any, uid: string, name: string): Promise<Cli
   return { ctx, page, uid, name };
 }
 
-test('4人回し: 抜け番は観戦と同じ盤面、部屋チップは × で隠せる、抜け番が抜けても卓は続く', async ({ browser }) => {
+test('4人回し: 抜け番は観戦と同じ盤面、部屋チップは隠せず 4 人分出る、抜け番が抜けても卓は続く', async ({ browser }) => {
   test.setTimeout(180_000);
   const host = await spawnClient(browser, 'inv-host', 'イナホスト');
   const p1 = await spawnClient(browser, 'inv-p1', 'イナ壱');
@@ -75,14 +75,11 @@ test('4人回し: 抜け番は観戦と同じ盤面、部屋チップは × で�
   expect((await wallView(host.page)).tiles).toBe(0);
   if (SHOTS) await host.page.screenshot({ path: `${SHOTS}/host_view.png` });
 
-  // 部屋チップの × で帯が消え、設定に残る
+  // 部屋チップの帯は隠せない [× も設定も無い]
   const bar = bp.locator('.rotation-chip-bar');
   await expect(bar).toBeVisible({ timeout: 10000 });
-  await bar.locator('.rc-hide').click();
-  await expect(bp.locator('.rotation-chip-bar')).toHaveCount(0);
-  const saved = await bp.evaluate(() => JSON.parse(localStorage.getItem('anmika.prefs.v1') ?? '{}').hideRoomChip);
-  expect(saved).toBe(true);
-  // 他の人の帯はそのまま
+  await expect(bar.locator('button')).toHaveCount(0);
+  await expect(bar.locator('.rc-entry')).toHaveCount(4);
   await expect(host.page.locator('.rotation-chip-bar')).toBeVisible();
 
   // 抜け番が部屋を抜ける。打ち手 3 人の卓は止まらず、帯から抜けた人が消える
