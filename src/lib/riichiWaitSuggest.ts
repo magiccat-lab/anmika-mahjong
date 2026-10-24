@@ -4,6 +4,7 @@
 // 「見えていない枚数」は自分の視点で数える: 自分の手牌 ・ 全員の河 ・ 全員の副露 ・ 表示中のドラ表示牌 ・ 抜いた北。
 // 他家の手牌と山は使わない [オンラインでは client に無い。単独でも同じ数字にして、CPU の手牌を覗かない]。
 import { toCorePai } from './helpers';
+import { POCHI_GOOD, publicPochiCandidates } from './pochiFx';
 
 export type RiichiWaitRow = {
   /** 待ち牌 [m7 / p1 / z3 のような core 表記] */
@@ -19,6 +20,16 @@ export type RiichiWaitSuggestion = {
   /** unseen を持つ待ちの合計 [ぽっちは含めない] */
   total: number;
 };
+
+/** 嵌八萬の待ち [m8]。山に m8 は無く、正ぽっち [青 ・ 緑] の 2 枚が m8 の代わりになる。
+ *  [2026-10-24 先輩「8mが4枚残りみたいな表示になってるけど、これ正ぽっち2種が合計2枚待ち、という設定だからね」]
+ *  見えている物 [河 ・ 鳴き ・ ドラ表示] と自分の手牌に出た正ぽっちを引いた数 */
+export function kanpamanUnseen(g: any, viewer: number): number {
+  const own = g?.pochiHand?.[viewer] ?? {};
+  return publicPochiCandidates(g)
+    .filter((c) => POCHI_GOOD[c] && !((own[c] ?? 0) > 0))
+    .length;
+}
 
 /** 全ての牌は core で 4 枚 [p3 = 3 + 虹3筒、p5 = 2 + 赤 + 金、z3 = 3 + 虹西、z4 = 3 + 金北、m7 / m9 も 4 枚] */
 export const TILES_PER_KIND = 4;
@@ -107,7 +118,9 @@ export function riichiWaitSuggestions(
       done.add(tile);
       list.push({
         tile,
-        unseen: tile === 'z5' ? null : Math.max(0, TILES_PER_KIND - (seen[tile] ?? 0)),
+        unseen: tile === 'z5' ? null
+          : tile === 'm8' ? kanpamanUnseen(g, viewer)
+          : Math.max(0, TILES_PER_KIND - (seen[tile] ?? 0)),
       });
     }
     rows.push({ pai, waits: list, total: list.reduce((sum, r) => sum + (r.unseen ?? 0), 0) });

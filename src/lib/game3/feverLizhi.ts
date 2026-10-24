@@ -41,7 +41,11 @@ export function feverWaitInfoFromLiveWall(ting: string[], liveWall: string[]): F
     if (!/^[mpsz][0-9]$/.test(tile) || seen.has(tile)) continue;
     seen.add(tile);
     // 白単騎は山の白 (4 枚とも色付きのぽっち) をそのまま数える [リョー 2026-10-22「ただの白単騎待ち」]
-    const remaining = liveWall.filter((pai) => normalizedWaitCore(pai) === tile);
+    // 嵌八萬 [m8] は山に m8 が無く、正ぽっち [青 z5b ・ 緑 z5g] の 2 枚が待ち
+    // [2026-10-24 先輩「これ正ぽっち2種が合計2枚待ち、という設定だからね」]
+    const remaining = tile === 'm8'
+      ? liveWall.filter((pai) => /^z5[bg]/.test(String(pai).replace(/[\+=\-_*]/g, '')))
+      : liveWall.filter((pai) => normalizedWaitCore(pai) === tile);
     rows.push({
       tile,
       remain: remaining.length,
