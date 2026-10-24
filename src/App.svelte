@@ -915,6 +915,7 @@
   // [2026-07-20 リョー報告: 「次に進めなくなった、牌譜保存して見せたいのに」]
   // 牌譜保存は安全な保存ポイント限定なので、詰まった局面ではまさに落とせない。
   // 復元用ではなく「どこで止まったか」を渡すためのダンプは常に落とせるようにする。
+  // [2026-10-24 リョー「状態ダンプもう消してよさそう」] ボタンは外し、バグ通報が送れなかった時だけ落とす
   function exportDiagnostics() {
     downloadJson(buildDiagnosticDump($game), `stuck_${Date.now()}.json`);
   }
@@ -953,7 +954,8 @@
       alert(`送った [${data.report ?? 'ok'}]。調査して返す`);
     } catch (error) {
       console.error('[bugreport] failed', error);
-      alert('送れなかった。状態ダンプを落として Discord に貼ってくれ');
+      exportDiagnostics();
+      alert('送れなかった。落とした stuck_*.json を Discord に貼ってくれ');
     } finally {
       bugReportBusy = false;
     }
@@ -3406,7 +3408,6 @@
       <span class="row-label">システム:</span>
       <button on:click={() => game.reset()}>初期化</button>
       <button on:click={exportPaifu} disabled={!canSavePaifu} title={canSavePaifu ? '現在の局面を保存' : (onlineGameStarted ? 'オンライン対局の牌譜保存は未対応です' : '安全な手番開始時に保存できます')}>牌譜保存</button>
-      <button on:click={exportDiagnostics} title="進行不能になった時の状態を保存 [復元用ではなく調査用]">状態ダンプ</button>
       <button on:click={reportBug} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる">バグ通報</button>
       {#if onlineGameStarted && currentRoomId}
         <button on:click={requestRewind} disabled={rewindBusy} title="オンラインで事故った時、この局の冒頭まで巻き戻す [PW 必要]">🔧 局頭に戻す</button>
@@ -3486,7 +3487,6 @@
               <label class="tm-toggle" title="CPU の操作を2.5秒遅らせる"><input type="checkbox" bind:checked={cpuSlowMode}><span>CPU を 2.5 秒待たせる</span></label>
               <!-- 打牌アドバイス [2026-07-21 リョー要望]: CPU戦のみ -->
               <button type="button" class="table-setting-btn advice" class:advice-on={adviceOpen} on:click={() => { adviceOpen = !adviceOpen; tableMenuOpen = false; }} title="CPUと同じ評価で候補打牌を表示" aria-label="打牌の助言"><span class="settings-label">助言</span></button>
-              <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; exportDiagnostics(); }} title="進行不能になった時の状態を保存 [復元用ではなく調査用]" aria-label="状態ダンプ"><span class="settings-label">状態ダンプ</span></button>
               <button type="button" class="table-setting-btn save" on:click={() => { tableMenuOpen = false; reportBug(); }} disabled={bugReportBusy} title="本文と状態ダンプを送る。調査タスクになる" aria-label="バグ通報"><span class="settings-label">バグ通報</span></button>
             {:else}
               <!-- [2026-10-09 遊真 C5] オンライン中もバグ通報を押せる [🔧 局頭に戻すは出さない] -->
@@ -4022,7 +4022,6 @@
             <button on:click={() => game.continueFever()}>▶ フィーバー継続</button>
           {:else if state.finished}
             <button on:click={exportPaifu} disabled={!canSavePaifu}>牌譜保存</button>
-            <button on:click={exportDiagnostics}>状態ダンプ</button>
             <button on:click={reportBug} disabled={bugReportBusy}>バグ通報</button>
             <!-- [2026-07-23 リョー指示] online は全員の同意 vote、solo は従来 checkbox -->
             {#if onlineGameStarted && !onlineSpectator}
