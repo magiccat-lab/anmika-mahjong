@@ -4,6 +4,7 @@
   import { get } from 'svelte/store';
   import Tile from './lib/Tile.svelte';
   import { preloadTiles } from './lib/tilePreload';
+  import { preloadSounds } from './lib/soundPreload';
   import { activeCpuGameSeats, canHostToggleCpuProxy, clientGameToRoomSeat, clientRoomToGameSeat, hostGameSeat, isMemberCpuProxy, memberAtGameSeat, type OnlineMemberLike } from './lib/onlineSeats';
   import OnlineSeatStatus from './lib/OnlineSeatStatus.svelte';
   import DeadlineBar from './lib/DeadlineBar.svelte';
@@ -328,18 +329,24 @@
       audio.volume = BGM_TRACKS[kind].volume;
     }, stepMs);
   }
+  function makeBgm(kind: BgmKind): HTMLAudioElement {
+    const audio = new Audio(BGM_TRACKS[kind].src);
+    audio.loop = true;
+    audio.preload = 'auto';
+    bgmAudio[kind] = audio;
+    bgmTick += 1;
+    return audio;
+  }
+  // [2026-10-24 リョー「たまに演出とか音が遅れる」] フィーバーの曲は最初のフィーバーで作ると、3.8MB を取りに行く間 (約 1 秒) 鳴り出しが遅れた。
+  // 鳴らせる卓に入ったら先に作って読み始めておく (鳴らすのは syncBgm)
+  $: if (typeof window !== 'undefined' && bgmAllowed && !bgmAudio.fever) makeBgm('fever').load();
   function syncBgm(want: BgmKind | null): void {
     if (typeof window === 'undefined') return;
     for (const kind of Object.keys(BGM_TRACKS) as BgmKind[]) {
       if (kind !== want) { fadeOutBgm(kind); continue; }
       stopBgmFade(kind);
       let audio = bgmAudio[kind];
-      if (!audio) {
-        audio = new Audio(BGM_TRACKS[kind].src);
-        audio.loop = true;
-        bgmAudio[kind] = audio;
-        bgmTick += 1;
-      }
+      if (!audio) audio = makeBgm(kind);
       audio.volume = BGM_TRACKS[kind].volume;
       if (audio.paused) audio.play().catch(() => { /* まだ画面を触っていない時は鳴らせない。次の変化で鳴らす */ });
     }
@@ -2230,6 +2237,8 @@
     // 牌の絵は入口にいる間に読んでおく [卓が開いた時に絵が遅れて出ないように]
     const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
     if (ric) ric(preloadTiles, { timeout: 800 }); else setTimeout(preloadTiles, 200);
+    // 効果音も同じ [鳴らすたびに取りに行って音と演出が遅れていた。lib/soundPreload.ts]
+    if (ric) ric(preloadSounds, { timeout: 1500 }); else setTimeout(preloadSounds, 400);
     // 起動時 single モードの初期化 [P1/P2 CPU on、 revealAll off、 self=0]
     if (viewMode === 'single') {
       revealAll = false;

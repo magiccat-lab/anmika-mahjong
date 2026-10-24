@@ -5,6 +5,7 @@
  * ここに置いてよいのは「見え方と手数」だけ。ルールや点数に効くものは入れない。
  */
 import { writable, type Writable } from 'svelte/store';
+import { soundUrl } from './soundPreload';
 
 export interface Prefs {
   /** 効果音を鳴らさない。 */
@@ -77,7 +78,7 @@ export function playSound(src: string, volume = 1): HTMLAudioElement | null {
   unsub();
   if (muted) return null;
   try {
-    const audio = new Audio(src);
+    const audio = new Audio(soundUrl(src));
     audio.volume = volume;
     void audio.play().catch(() => { /* 自動再生が拒否されることがある */ });
     return audio;
