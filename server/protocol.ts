@@ -17,7 +17,7 @@ export type RoomMemberSnapshot = {
 export type RoomSeatMapping = {
   /** gameSeat (0..2) → roomSeat (0..3) */
   gameToRoom: [number, number, number];
-  /** 抜け番の roomSeat */
+  /** 抜け番の roomSeat。-1 = 抜け番なし [2026-10-24 4人のうち 1 人が抜けた後の 3 人打ち] */
   inactiveRoomSeat: number;
 };
 
@@ -220,17 +220,24 @@ function assertRoomChipDelta(delta: Record<string, number>): void {
 }
 
 /** [Sol Phase2 P1-①] mapping の shape 検証 [3 game seat が 0..3 の相異なる room seat、
- *  抜け番はその補集合の 1 席]。 */
+ *  抜け番はその補集合の 1 席]。
+ *  [2026-10-24 リョー「途中で誰か抜けて3人打ちも」] 抜け番 -1 [3人打ち継続] も許す
+ *  [その時は 3 席が相異なる 0..3 であることだけを見る]。 */
 function assertRoomSeatMapping(mapping: RoomSeatMapping): void {
   const seats = Array.isArray(mapping.gameToRoom) ? mapping.gameToRoom : null;
   if (!seats || seats.length !== 3) throw new Error('room mapping: gameToRoom must have 3 seats');
-  const all = [...seats, mapping.inactiveRoomSeat];
+  const playing = mapping.inactiveRoomSeat === -1;
+  const all = playing ? [...seats] : [...seats, mapping.inactiveRoomSeat];
   for (const seat of all) {
     if (!Number.isInteger(seat) || seat < 0 || seat > 3) {
       throw new Error(`room mapping: seat out of range ${seat}`);
     }
   }
-  if (new Set(all).size !== 4) throw new Error('room mapping: seats must be 4 distinct room seats');
+  if (new Set(all).size !== all.length) {
+    throw new Error(playing
+      ? 'room mapping: seats must be 3 distinct room seats'
+      : 'room mapping: seats must be 4 distinct room seats');
+  }
 }
 
 export function applyRoomChipCommand(

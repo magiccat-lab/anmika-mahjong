@@ -121,6 +121,8 @@
   let seatDisplayNames: [string, string, string] = ['P0', 'P1', 'P2'];
   $: {
     void onlineMembers;
+    // [2026-10-24 リョー「抜け版がまわると席の名前とかの表示がずれてる」] seatName は mapping を読むが、関数の中の読みは $: に追われない
+    void onlineActiveMapping;
     seatDisplayNames = onlineGameStarted
       ? [seatName(0), seatName(1), seatName(2)]
       : ['P0', 'P1', 'P2'];
@@ -1421,8 +1423,8 @@
     })
   );
   // 観戦は全員の手牌を表で見せる (2026-10-13 リョー)。サーバーが観戦にだけ手牌を送る
-  $: sideTiles1 = computeSideTiles(shoupai1, srv1, feverRevealCores, revealAll || onlineSpectator || pingjuShown($game, srv1), selfPlayer);
-  $: sideTiles2 = computeSideTiles(shoupai2, srv2, feverRevealCores, revealAll || onlineSpectator || pingjuShown($game, srv2), selfPlayer);
+  $: sideTiles1 = computeSideTiles(shoupai1, srv1, feverRevealCores, revealAll || watchOnly || pingjuShown($game, srv1), selfPlayer);
+  $: sideTiles2 = computeSideTiles(shoupai2, srv2, feverRevealCores, revealAll || watchOnly || pingjuShown($game, srv2), selfPlayer);
 
   // リーチ宣言牌候補 [リーチ button 押下後に表示、 候補以外を grayout]
   // 2026-07-16 リョー裁定: フィーバー宣言中はフィーバーが成立する宣言牌だけに絞る
@@ -1615,6 +1617,23 @@
   let onlineRoomChipLedger: Record<string, number> | null = null;
   $: onlineInactive = onlineGameStarted && !onlineSpectator && onlineSeatInfoReceived
     && onlineActiveMapping !== null && onlineGameSeat === null;
+  // [2026-10-24 リョー「抜け番は観戦と同じものが見れるように」] 盤面の見え方 (全員の手牌 ・ 卓の辺の手牌 ・ 自分の帯の設定を隠す) は
+  // 観戦と抜け番で同じにする。接続 (spectate の入り方 ・ URL ・ 退出) は onlineSpectator のまま分ける
+  $: watchOnly = onlineSpectator || onlineInactive;
+  // [2026-10-24 リョー「部屋チップといまの所持チップを揃えるようにしてね」] 4人回しの部屋は席のチップを部屋チップ [人ごとの通算] で出す。
+  // 試合の中の増減は game と部屋で同じなので、差 [部屋 - game] を足す。3人部屋は部屋チップが無く 0
+  function roomChipOffsets(
+    mapping: { gameToRoom: [number, number, number] } | null,
+    roomLedger: Record<string, number> | null,
+    gameLedger: Record<number, number>,
+  ): [number, number, number] {
+    if (!mapping || !roomLedger) return [0, 0, 0];
+    return [0, 1, 2].map((p) => (roomLedger[String(mapping.gameToRoom[p])] ?? 0) - (gameLedger[p] ?? 0)) as [number, number, number];
+  }
+  $: chipOffsets = roomChipOffsets(onlineActiveMapping, onlineRoomChipLedger, $game.game.chipLedger);
+  function withChipOffsets<T extends { player: number; chipBase?: number; chip: number; total: number }>(rows: T[], off: [number, number, number]): T[] {
+    return rows.map((r) => ({ ...r, chipBase: (r.chipBase ?? 0) + off[r.player], chip: r.chip + off[r.player], total: r.total + off[r.player] }));
+  }
   // [2026-10-09 遊真 A2] 自分の席を CPU が代打ちしている間は帯を出して「自分で打つ」を押せるようにする
   $: myMember = onlineMembers.find((m) => m.user_id === onlineMe?.user_id);
   $: myCpuProxy = onlineGameStarted && !onlineSpectator && isMemberCpuProxy(myMember);
@@ -1832,6 +1851,9 @@
       initOpts.preShuffledPool = msg.preShuffledPool;
     }
     game.initOnlineGame(initOpts);
+    // [2026-10-24 リョー「抜け番は観戦と同じものが見れるように」] 抜け番も席を -1 で持つ。mySeat が undefined だと
+    // store は null にし、開始の投影 [recipientSeat -1] をはじいて最初の手が来るまで手牌が出なかった [10-13 観戦と同じ型]
+    if (!onlineSpectator && onlineSeatInfoReceived && onlineGameSeat === null) game.setOnlineSeat(-1);
     if (msg.state && !game.hydrateOnlineProjection(msg.state)) {
       return false;
     }
@@ -2864,7 +2886,7 @@
     </div>
     <div class="sc-pt">{#key $game.game.state.defen[p]}<span class="sval">{$game.game.state.defen[p].toLocaleString()}</span>{/key}</div>
     <div class="sc-sub">
-      <span>チップ {$game.game.chipLedger[p] ?? 0}</span>
+      <span>チップ {($game.game.chipLedger[p] ?? 0) + chipOffsets[p]}</span>
       <span>{$game.game.shuvariUsed[p] ? 'シュバ済' : 'シュバ未'}</span>
       {#if (selfPlayer === p || (!onlineGameStarted && revealAll)) && !(mySqueezeShowing && pochiReveal?.player === p)}<span>シャンテン {$game.game.xiangting(p)}</span>{/if}
     </div>
@@ -2881,8 +2903,8 @@
      旧: 席の札の中に 18px の牌 [自分の分が分からない、リョー 10-09]。華は種類ごとにまとめて牌の下に効果、北は一段小さく -->
 {#snippet huaPanel(p: PlayerId, pos: 'left' | 'right' | 'me')}
   {@const groups = huaGroups($game.game.huapai[p] ?? [], $game.game.nukidora[p] ?? 0, $game.game.nukidoraGold[p] ?? 0)}
-  <section class="hua-panel hp-{pos}" class:hp-dense={groups.length >= 4} aria-label="{pos === 'me' ? 'あなた' : (onlineGameStarted ? seatName(p) : `P${p}`)}の華と北">
-    <span class="hp-title">{pos === 'me' ? 'あなたの華' : `${onlineGameStarted ? seatName(p) : `P${p}`} の華`}</span>
+  <section class="hua-panel hp-{pos}" class:hp-dense={groups.length >= 4} aria-label="{pos === 'me' && !watchOnly ? 'あなた' : (onlineGameStarted ? seatName(p) : `P${p}`)}の華と北">
+    <span class="hp-title">{pos === 'me' && !watchOnly ? 'あなたの華' : `${onlineGameStarted ? seatName(p) : `P${p}`} の華`}</span>
     {#if groups.length === 0}
       <span class="hp-none">まだなし</span>
     {:else}
@@ -3023,7 +3045,7 @@
     <button class="mode-toggle" on:click={() => { viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>← オフラインに戻る</button>
   </div>
 {:else}
-<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class:ws-down={onlineWsDown} class="ui-board-v2" class:spectating={onlineSpectator} on:contextmenu={onContextMenuTsumokiri}>
+<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class:ws-down={onlineWsDown} class="ui-board-v2" class:spectating={watchOnly} on:contextmenu={onContextMenuTsumokiri}>
   <!-- [2026-10-09 遊真 C2/A2] 対局中の帯: socket が切れている間の「つなぎ直し中」と、
        自分の席を CPU が代打ちしている間の「自分で打つ」。切れている間は盤面を暗くして触れなくする -->
   {#if onlineGameStarted && ((onlineWsDown && !onlineTerminalClose) || myCpuProxy)}
@@ -3053,7 +3075,7 @@
     </div>
   {/if}
   <!-- [2026-07-24 4人回し Phase6] rotation 部屋の room chip [4人分] と現在の抜け番 -->
-  {#if onlineGameStarted && onlineActiveMapping && onlineRoomChipLedger}
+  {#if onlineGameStarted && onlineActiveMapping && onlineRoomChipLedger && !$prefs.hideRoomChip}
     <div class="rotation-chip-bar" role="status">
       <span class="rc-title">部屋チップ</span>
       {#each onlineMembers as m (m.seat)}
@@ -3061,6 +3083,9 @@
           {m.seat === onlineActiveMapping.inactiveRoomSeat ? '[抜け番] ' : ''}{m.username}: {onlineRoomChipLedger[String(m.seat)] ?? 0}
         </span>
       {/each}
+      <!-- [2026-10-24 リョー「部屋チップって表示も消せるようにして」] 戻すのは ⚙️ 画面設定の「部屋チップを隠す」 -->
+      <button class="rc-hide" title="部屋チップを隠す [⚙️ 画面設定で戻せる]" aria-label="部屋チップを隠す"
+        on:click={() => prefs.update((p) => ({ ...p, hideRoomChip: true }))}>×</button>
     </div>
   {/if}
   <div class="orientation-notice" role="status">
@@ -3136,7 +3161,7 @@
           tingpai={$game.game.getTingpaiList(p as 0 | 1 | 2)}
           nukidora={$game.game.nukidora[p]}
           nukidoraGold={$game.game.nukidoraGold[p] ?? 0}
-          chip={$game.game.chipLedger[p]}
+          chip={($game.game.chipLedger[p] ?? 0) + chipOffsets[p]}
         />
       {/each}
     </div>
@@ -3604,7 +3629,7 @@
           </span>
         {/each}
       </div>
-      {#if onlineSpectator}
+      {#if watchOnly}
         {@render wallHand(sideTiles1, fulou1, 'l', lastZimoIndex($game.game.shoupai.get(srv1), shoupai1))}
         {@render wallHand(sideTiles2, fulou2, 'r', lastZimoIndex($game.game.shoupai.get(srv2), shoupai2))}
       {/if}
@@ -3652,7 +3677,7 @@
       <!-- [2026-10-09 shun2 見た目 b] 自分の札と、続けて効く設定 [ツモ切り] は手牌のすぐ上の 1 本に -->
       <div class="me-strip">
         {@render seatCard(srv0, 'me')}
-        {#if !onlineSpectator}
+        {#if !watchOnly}
           <!-- [2026-10-14 リョー「なきなしボタンをデカい所に出してほしい」] 鳴きなしを ⋯ の中 (オンラインだけ) から、ツモ切りの隣へ。CPU 戦でも効く。
                [2026-10-14 リョー「じどうほうらぼたんもつけて」] 自動和了も ⋯ の中から隣へ。縦持ちは 3 つを帯の上の 1 行に、狭い横持ちは札型に詰める -->
           <div class="me-toggles">
@@ -3739,7 +3764,7 @@
       nukidoraGold={$game.game.nukidoraGold[srv0] ?? 0}
       goldHandZ={$game.game.goldHand[srv0].z}
       he={he0}
-      revealHand={selfPlayer === srv0 || (!onlineGameStarted && revealAll) || onlineSpectator || pingjuShown($game, srv0) || $game.game.openLizhi.has(srv0) || $game.game.isFeverConfirmed(srv0)}
+      revealHand={selfPlayer === srv0 || (!onlineGameStarted && revealAll) || watchOnly || pingjuShown($game, srv0) || $game.game.openLizhi.has(srv0) || $game.game.isFeverConfirmed(srv0)}
       lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv0), shoupai0)}
       isLizhiCand={isLizhiCand}
       isNakiCand={isNakiCand}
@@ -3768,7 +3793,7 @@
         nukidoraGold={$game.game.nukidoraGold[srv1] ?? 0}
         goldHandZ={$game.game.goldHand[srv1].z}
         he={he1}
-        revealHand={selfPlayer === srv1 || (!onlineGameStarted && revealAll) || onlineSpectator || pingjuShown($game, srv1) || $game.game.openLizhi.has(srv1) || $game.game.isFeverConfirmed(srv1)}
+        revealHand={selfPlayer === srv1 || (!onlineGameStarted && revealAll) || watchOnly || pingjuShown($game, srv1) || $game.game.openLizhi.has(srv1) || $game.game.isFeverConfirmed(srv1)}
         lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv1), shoupai1)}
         isLizhiCand={isLizhiCand}
         lizhiPending={$game.lizhiPending === currentPlayer}
@@ -3795,7 +3820,7 @@
         nukidoraGold={$game.game.nukidoraGold[srv2] ?? 0}
         goldHandZ={$game.game.goldHand[srv2].z}
         he={he2}
-        revealHand={selfPlayer === srv2 || (!onlineGameStarted && revealAll) || onlineSpectator || pingjuShown($game, srv2) || $game.game.openLizhi.has(srv2) || $game.game.isFeverConfirmed(srv2)}
+        revealHand={selfPlayer === srv2 || (!onlineGameStarted && revealAll) || watchOnly || pingjuShown($game, srv2) || $game.game.openLizhi.has(srv2) || $game.game.isFeverConfirmed(srv2)}
         lastZimoIdx={lastZimoIndex($game.game.shoupai.get(srv2), shoupai2)}
         isLizhiCand={isLizhiCand}
         lizhiPending={$game.lizhiPending === currentPlayer}
@@ -3816,9 +3841,9 @@
       names={seatDisplayNames}
       ranking={$game.game.getRanking()}
       zifengZ={(p) => $game.game.zifengZ(p as any)}
-      chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)}
-      finalScore={$game.game.getFinalScore()}
-      matchStart={[0,1,2].map(p => matchStartChipLedger[p] ?? 0)}
+      chipLedger={[0,1,2].map(p => ($game.game.chipLedger[p as PlayerId] ?? 0) + chipOffsets[p])}
+      finalScore={withChipOffsets($game.game.getFinalScore(), chipOffsets)}
+      matchStart={[0,1,2].map(p => (matchStartChipLedger[p] ?? 0) + chipOffsets[p])}
       matchLabel={matchLabelOf($game.game.changshu)}
     />
   {/if}
@@ -3890,7 +3915,7 @@
       class:kinpei-only={!!$game.pendingKinpei && !$game.pendingKinpei.preview && !$game.lastHuleResult && !state.finished && !$game.pendingPingju}>
       <div class="agari-left" class:pingju-only={$game.pendingPingju && !$game.lastHuleResult && !state.finished}>
         {#if state.finished}
-          <GameEndPanel names={seatDisplayNames} ranking={$game.game.getRanking()} zifengZ={(p) => $game.game.zifengZ(p as any)} chipLedger={[0,1,2].map(p => $game.game.chipLedger[p as PlayerId] ?? 0)} finalScore={$game.game.getFinalScore()} matchStart={[0,1,2].map(p => matchStartChipLedger[p] ?? 0)} matchLabel={matchLabelOf($game.game.changshu)} />
+          <GameEndPanel names={seatDisplayNames} ranking={$game.game.getRanking()} zifengZ={(p) => $game.game.zifengZ(p as any)} chipLedger={[0,1,2].map(p => ($game.game.chipLedger[p as PlayerId] ?? 0) + chipOffsets[p])} finalScore={withChipOffsets($game.game.getFinalScore(), chipOffsets)} matchStart={[0,1,2].map(p => (matchStartChipLedger[p] ?? 0) + chipOffsets[p])} matchLabel={matchLabelOf($game.game.changshu)} />
         {/if}
         {#if $game.pendingPingju && !$game.lastHuleResult}
           <div class="pingju-head">
@@ -6347,6 +6372,18 @@
   }
   .rotation-chip-bar .rc-title { opacity: 0.75; }
   .rotation-chip-bar .rc-entry.rc-inactive { opacity: 0.65; font-style: italic; }
+  .rotation-chip-bar .rc-hide {
+    pointer-events: auto;
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.7;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0 0 0 2px;
+    cursor: pointer;
+  }
+  .rotation-chip-bar .rc-hide:hover { opacity: 1; }
 
   /* [2026-10-09 遊真 C1] 席の札の下端に残り時間の棒を重ねる足場 */
   main.online-game .score-box .score-side { position: relative; }

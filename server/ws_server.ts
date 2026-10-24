@@ -17,6 +17,7 @@ import { RoomPersistence } from './persistence';
 import { computeSpectatorNextDraws } from './next_draws';
 import {
   appendAcceptedCommand,
+  applyRoomChipCommand,
   createEmptyRoomSnapshot,
   validateCommandEnvelope,
   type AcceptedRoomCommand,
@@ -27,7 +28,7 @@ import {
   type RoomSeatMapping,
   type RoomStartSnapshot,
 } from './protocol';
-import { activeTrioForStart, computeRoomChipDelta, foldRoomState, gameToRoomSeat, initialRoomChipLedger, mappingFor, nextMappingForMatch, roomToGameSeat } from './rotation';
+import { activeTrioForStart, computeRoomChipDelta, finalizeRoomChipDelta, foldRoomState, gameLedgerFromRoom, gameToRoomSeat, initialRoomChipLedger, mappingFor, mergeRoomChipDelta, nextMappingForPresent, presentRoomSeats, roomToGameSeat } from './rotation';
 import { ANMIKA_RULE_VERSION } from '../src/lib/ruleVersion';
 
 const DEFAULT_PORT = 8791;
@@ -278,6 +279,17 @@ export function buildMatchResult(
   // rotation 部屋向けに、抜け番の dice 分を含む現試合の room ledger delta も同梱する
   const ledger = ledgerByUserId(snapshot, matchLedger ?? null);
   const roomDelta = currentMatchRoomDelta(snapshot, commands);
+  // [2026-10-24 リョー「部屋チップといまの所持チップを揃えるようにしてね」] 終わった試合の順位チップ等は
+  // 次の nextMatch の room delta に焼かれる [現試合分の fold には出ない] ので、記録にはここで足す
+  if (finished && snapshot.start.rotationEnabled === true) {
+    const finalize = finalizeRoomChipDelta(state.game, snapshot.activeMapping ?? null);
+    const roster = snapshot.start.roomMembers ?? snapshot.start.members;
+    for (const [seat, value] of Object.entries(finalize ?? {})) {
+      roomDelta.bySeat[seat] = (roomDelta.bySeat[seat] ?? 0) + value;
+      const member = roster.find((m) => m.seat === Number(seat));
+      if (member) roomDelta.byUser[member.user_id] = (roomDelta.byUser[member.user_id] ?? 0) + value;
+    }
+  }
   // [Sol最終レビュー P1-2] 現試合の active trio [user_id + game seat]。
   // live の room_members DB でなく start snapshot 由来 [対局中 leave/evict 後の
   // POST でも試合開始時点の参加者を保存できる]。python 側 members_json の SSoT
@@ -1506,6 +1518,15 @@ function cpuDriven(room: Room, member: Member | undefined | null): boolean {
   return member.is_cpu || (member.cpuProxy === true && hasPilot(room));
 }
 
+/** [2026-10-24 リョー「途中で誰か抜けて3人打ちも」] game seat 版の cpuDriven。
+ *  4人回しの対局中に抜けた人の席 [mapping 上は active なのに room.members に居ない] は、
+ *  見ている人間が居る間だけ CPU 代行と同じに打つ [抜けた後も試合を最後まで進める]。 */
+function cpuDrivenAt(room: Room, gameSeat: number): boolean {
+  const member = memberByGameSeat(room, gameSeat);
+  if (member) return cpuDriven(room, member);
+  return room.snapshot.activeMapping != null && hasPilot(room);
+}
+
 export function resolveActorSeat(room: Room, uid: string, seat: number, action: Record<string, unknown>) {
   // [2026-07-23 4人回し Phase3] client envelope の seat は room seat 契約。
   // canonical command の actorSeat は game seat 契約なのでここで写像する。
@@ -1742,6 +1763,15 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           connected: previous?.connected ?? false,
           cpuProxy: previous?.cpuProxy ?? false,
         });
+      }
+      // [2026-10-24 リョー「途中で誰か抜けて3人打ちも」] rotation 部屋は start.members [game seat 契約・
+      // 試合1の active trio] から種まきした分を API 名簿 [room seat 契約] で整える。名簿に居ない人
+      // [leave 済み] を start.members から復活させると、game seat 番号のまま room seat として居座る
+      if (roomInfo.rotationEnabled) {
+        const roster = new Set(roomInfo.members.map((member) => member.user_id));
+        for (const uid of [...room.members.keys()]) {
+          if (!roster.has(uid)) room.members.delete(uid);
+        }
       }
       // WSA: 復元した started room に deadline を再設定 [Node再起動後の自動進行停止を防ぐ]
       if (room.authority && room.snapshot.started) {
@@ -2003,6 +2033,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         // [2026-10-09 遊真 A3] 終わった試合を、新しい試合に置き換わる前に保存する
         maybeRecordMatch(room);
       }
+      // [2026-10-24 リョー「部屋チップといまの所持チップを揃えるようにしてね」] 4人回しの試合の終わりの
+      // 順位チップ等 [finalize が game ledger へ直に書く分] を、この nextMatch の room delta に足す
+      let finalizeDelta: Record<string, number> | null = null;
       if (action.type === 'nextMatch') {
         // [2026-07-23 リョー指示] チップリセットは全員の同意がないとできない。
         // host の checkbox 単独では発動せず、human 全席の同意 vote が揃った時だけ reset。
@@ -2019,7 +2052,17 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         // [2026-07-23 4人回し Phase4] rotation 部屋は次試合の mapping を server が算出して
         // action に焼く [appendAcceptedCommand の matchId 増加で交換される唯一の境界]。
         // 新試合の cpuSeats は新 mapping で投影する [旧 mapping だと席がズレる]
-        const nextMapping = previous.start ? nextMappingForMatch(previous.start, previous.matchId + 1) : null;
+        // [2026-10-24 リョー「途中で誰か抜けて3人打ちも」] start.roomMembers のうち今も居る人で決める:
+        // 4人居る = 通常の rotation、3人居る = 抜け番なしの3人打ち [inactiveRoomSeat -1]、2人以下は reject
+        const presentSeats = previous.start?.rotationEnabled
+          ? presentRoomSeats(previous.start, (userId) => room.members.has(userId))
+          : [];
+        if (previous.start?.rotationEnabled && presentSeats.length < 3) {
+          return { reason: 'fewer than 3 players remain; cannot advance match' };
+        }
+        const nextMapping = previous.start
+          ? nextMappingForPresent(previous.start, presentSeats, previous.matchId + 1)
+          : null;
         // [Sol Phase4/5 P1] rotation 部屋で mapping を作れない [roster 破損等] のに
         // match だけ進めると旧 mapping のまま公平 rotation が黙って止まる。明示 reject
         // [例外にせず reason で返す = queue を壊さない]
@@ -2033,6 +2076,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           .map((member) => roomToGameSeat(nextMatchMapping, member.seat))
           .filter((seat): seat is number => seat !== null);
         delete action.chipLedger;
+        if (previous.start?.rotationEnabled && action.finalize === true) {
+          finalizeDelta = finalizeRoomChipDelta(room.authority.canonicalState().game, previous.activeMapping ?? null);
+        }
       }
       const beforeEffects = captureBeforeAction(room.authority);
       // [2026-07-23 4人回し Phase4] nextMatch は新試合の member 投影で適用する
@@ -2066,8 +2112,20 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       // accept 時点の mapping で room 4-way delta を command に焼く。
       // fold 自体は appendAcceptedCommand [persist と同一 snapshot 遷移] が行う。
       const chipEffects = room.authority.takeCanonicalChipEffects();
-      const roomChipDelta = computeRoomChipDelta(chipEffects, previous.activeMapping ?? null);
+      const roomChipDelta = mergeRoomChipDelta(
+        computeRoomChipDelta(chipEffects, previous.activeMapping ?? null),
+        finalizeDelta,
+      );
       if (roomChipDelta) action._roomChipDelta = roomChipDelta;
+      // [2026-10-24] 新しい試合の 3 席の chip は部屋チップから置き直す [席番号のまま持ち越すと別の人の
+      // チップになっていた、ZOGE 試合 2]。区切りからの復元に使う _startChipLedger も同じ値にする
+      if (action.type === 'nextMatch' && previous.start?.rotationEnabled && action.resetChip !== true
+        && action._nextMapping && previous.roomChipLedger) {
+        const folded = applyRoomChipCommand(previous.roomChipLedger, previous.activeMapping ?? null, action).ledger ?? {};
+        const seeded = gameLedgerFromRoom(folded, action._nextMapping as RoomSeatMapping);
+        room.authority.rebaseChipLedger(seeded);
+        action._startChipLedger = { ...seeded };
+      }
     }
 
     const appended = appendAcceptedCommand(previous, {
@@ -2357,7 +2415,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         : 1500;
       const humanPostWinTimeoutMs = Number(process.env.ANMIKA_POST_WIN_TIMEOUT_MS || 180_000);
       // [2026-10-09 遊真 A2] CPU 代行中の人間 owner も CPU の刻みで進める [180 秒待たない]
-      const armedCpu = cpuDriven(room, owner);
+      const armedCpu = cpuDrivenAt(room, postWinOwner);
       const delay = armedCpu ? cpuStepDelay : humanPostWinTimeoutMs;
       announceDeadline(armedCpu ? 'none' : 'postWin', [postWinOwner], delay);
       room.deadlineTimer = setTimeout(() => {
@@ -2365,7 +2423,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           const live = room.authority;
           if (!live) return;
           // 待っている間に代行が解けた / 付いた [戻った・host が切替・見る人が居なくなった] なら張り直す
-          if (cpuDriven(room, memberByGameSeat(room, postWinOwner!)) !== armedCpu) {
+          if (cpuDrivenAt(room, postWinOwner!) !== armedCpu) {
             scheduleRoomDeadline(room);
             return;
           }
@@ -2467,14 +2525,14 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       // [2026-10-09 遊真 A2] 反応する人間席が全員 CPU 代行なら 750ms で済ませる
       // [人間席が 1 つでも本人操作なら従来の reactionTimeoutMs]。待たれているのは代行でない席だけ
       const humanReactionSeats = [...reactionSeats].filter((seat) => !memberByGameSeat(room, seat)?.is_cpu);
-      const waitedSeats = humanReactionSeats.filter((seat) => !cpuDriven(room, memberByGameSeat(room, seat)));
+      const waitedSeats = humanReactionSeats.filter((seat) => !cpuDrivenAt(room, seat));
       const armedShort = humanReactionSeats.length > 0 && waitedSeats.length === 0;
       const reactionDelay = armedShort ? CPU_PROXY_STEP_MS : reactionTimeoutMs;
       announceDeadline('reaction', waitedSeats, reactionDelay);
       room.deadlineTimer = setTimeout(() => {
         room.queue = room.queue.then(async () => {
           // 750ms で張った後に誰かが戻った等で代行でない席が出たら、その人を待つ形に張り直す
-          if (armedShort && humanReactionSeats.some((seat) => !cpuDriven(room, memberByGameSeat(room, seat)))) {
+          if (armedShort && humanReactionSeats.some((seat) => !cpuDrivenAt(room, seat))) {
             scheduleRoomDeadline(room);
             return;
           }
@@ -2484,7 +2542,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
             const liveAuthority = room.authority!;
             const uid = member?.user_id ?? `deadline-seat-${seat}`;
             // CPU 代行席は、合法なロンがあれば必ず取る [CPU と同じ]。それ以外は従来の timeout 動作 [pass / 強制ロン]
-            const proxyRon = cpuDriven(room, member) && (liveAuthority.ronCandidates as number[]).includes(seat);
+            const proxyRon = cpuDrivenAt(room, seat) && (liveAuthority.ronCandidates as number[]).includes(seat);
             let result = acceptAction(
               room,
               seat,
@@ -2513,7 +2571,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     const current = authority.currentPlayer();
     const member = memberByGameSeat(room, current); // [Phase3] currentPlayer は game seat
     // [2026-10-09 遊真 A2] CPU 席に加え、CPU 代行中の人間席も 750ms / CPU ロジックで打つ
-    const armedCpu = cpuDriven(room, member);
+    const armedCpu = cpuDrivenAt(room, current);
     // [2026-07-21 監査 D-15 fix] この timer を張った時点の接続世代を控える。
     // 発火までに切断→再接続で generation が上がっていたら、この timer は旧世代の
     // 期限なので無効化し、再接続時に張り直した新 timer に任せる
@@ -2541,7 +2599,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         if (liveMember && !liveMember.is_cpu && liveMember.generation !== scheduledGeneration) return;
         // [A2] 待っている間に代行が解けた / 付いた [戻った・host が切替・見る人が居なくなった] なら、
         // 古い期限のまま打たず現状に合わせて張り直す
-        const liveCpu = cpuDriven(room, liveMember);
+        const liveCpu = cpuDrivenAt(room, current);
         if (liveCpu !== armedCpu) {
           scheduleRoomDeadline(room);
           return;
@@ -2939,7 +2997,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           if (!live || !pending || room.cpuSaiFast) return;
           const chance = pending.chances?.[pending.currentIdx];
           const owner = chance?.winner ?? pending.winner;
-          if (!cpuDriven(room, memberByGameSeat(room, owner))) return;
+          if (!cpuDrivenAt(room, owner)) return;
           room.cpuSaiFast = true;
           broadcast(room, { type: 'cpuSaiFast' });
           scheduleRoomDeadline(room);
@@ -3104,6 +3162,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         if (room) {
           const member = room.members.get(user_id);
           const evictedSeat = member?.seat;
+          // [2026-10-24 リョー「途中で誰か抜けて3人打ちも」] 対局中の active 席の人か [抜け番が抜けても卓は触らない]
+          const evictedActive = member !== undefined && room.snapshot.activeMapping != null
+            && roomToGameSeat(room.snapshot.activeMapping, member.seat) !== null;
           if (member?.ws) {
             try { member.ws.close(4410, 'evicted'); } catch (_) { /* noop */ }
           }
@@ -3123,6 +3184,9 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
             }
           }
           broadcast(room, lobbyPayload(room));
+          // [2026-10-24 リョー「途中で誰か抜けて3人打ちも」] 対局中に active の人が抜けたら、その席を
+          // 見ている人間が居る間 CPU 代行と同じに打たせる [cpuDrivenAt] ので期限を張り直す
+          if (evictedActive && room.snapshot.started && room.authority) scheduleRoomDeadline(room);
         }
         res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}');
       } catch (_) { res.writeHead(400); res.end('bad request'); }

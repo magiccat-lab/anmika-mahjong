@@ -156,6 +156,19 @@ export class RoomAuthority {
     this.canonicalStore.setCpuSeats([...this.cpuSeats]);
   }
 
+  /** [2026-10-24 リョー「部屋チップといまの所持チップを揃えるようにしてね」] 4人回しの nextMatch の直後に、
+   *  新しい試合の 3 席の chip を部屋チップに置き直す [前の試合の席番号のまま持ち越すと別の人のチップになる]。
+   *  _startChipLedger に同じ値を焼くので、試合の区切りからの復元 [seedMatchStart] と食い違わない */
+  rebaseChipLedger(chipLedger: Record<PlayerId, number>): void {
+    const canonicalGame = this.canonicalState().game;
+    for (const player of PLAYERS) {
+      const value = Number(chipLedger[player] ?? 0);
+      canonicalGame.chipLedger[player] = value;
+      this.game.chipLedger[player] = value;
+    }
+    this.matchStartChipLedger = { ...canonicalGame.chipLedger };
+  }
+
   resetMatch(init: RoomAuthorityInit): void {
     this.game = new Game3({
       qijia: asPlayerId(init.qijia) ?? 0,

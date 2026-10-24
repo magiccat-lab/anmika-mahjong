@@ -79,6 +79,54 @@ export function nextMappingForMatch(
   return mappingFor(matchOrdinal, order, initialIdx);
 }
 
+/** [2026-10-24 リョー「途中で誰か抜けて3人打ちも」] start.roomMembers のうち今も部屋に居る人の room seat。
+ *  CPU は常に居る扱い、人間は isHumanPresent [room.members に user_id がある] で判定する。
+ *  並びは start.roomMembers の順 [mappingForPresent の game seat 順がこれに従う]。 */
+export function presentRoomSeats(
+  start: RoomStartSnapshot,
+  isHumanPresent: (userId: string) => boolean,
+): number[] {
+  return (start.roomMembers ?? [])
+    .filter((member) => member.is_cpu || isHumanPresent(member.user_id))
+    .map((member) => member.seat);
+}
+
+/** [2026-10-24 リョー「途中で誰か抜けて3人打ちも」] 4人のうち 1 人が抜けた後の次試合 mapping。
+ *  残り 3 人が start.roomMembers の並び順のまま game seat 0..2 に座り、抜け番は居ない
+ *  [inactiveRoomSeat = -1]。rotation 無効 / roster 不整合 / 居るのが 3 人でない時は null。 */
+export function mappingForPresent(
+  start: RoomStartSnapshot,
+  presentSeats: readonly number[],
+): RoomSeatMapping | null {
+  if (!start.rotationEnabled) return null;
+  const order = (start.roomMembers ?? []).map((member) => member.seat);
+  if (order.length !== 4 || new Set(order).size !== 4
+    || order.some((seat) => !Number.isInteger(seat) || seat < 0 || seat > 3)) return null;
+  const present = new Set(presentSeats);
+  const actives = order.filter((seat) => present.has(seat));
+  if (actives.length !== 3) return null;
+  return {
+    gameToRoom: [actives[0], actives[1], actives[2]] as [number, number, number],
+    inactiveRoomSeat: -1,
+  };
+}
+
+/** [2026-10-24 リョー「途中で誰か抜けて3人打ちも」] nextMatch 用の mapping 決定:
+ *  4 人居る → 通常の rotation [nextMappingForMatch]、3 人居る → 3 人打ち [mappingForPresent]、
+ *  それ以外 [2 人以下 / roster 不整合] は null [呼出側が nextMatch を reject する] */
+export function nextMappingForPresent(
+  start: RoomStartSnapshot,
+  presentSeats: readonly number[],
+  matchOrdinal: number,
+): RoomSeatMapping | null {
+  if (!start.rotationEnabled) return null;
+  const rosterSeats = new Set((start.roomMembers ?? []).map((member) => member.seat));
+  const present = new Set(presentSeats.filter((seat) => rosterSeats.has(seat)));
+  if (present.size >= 4) return nextMappingForMatch(start, matchOrdinal);
+  if (present.size === 3) return mappingForPresent(start, [...present]);
+  return null;
+}
+
 /** 精算 effect 列 → room seat キーの delta。
  *  - oall: 支払いは他 active 2 人 [+ kind='dice' かつ mapping ありなら抜け番も] が perPayer ずつ、
  *    winner は頭数分を受け取る [perPayer 負 = 逆ぽっちは符号ごと反転し、抜け番が受け取る側になる]
@@ -108,7 +156,8 @@ export function computeRoomChipDelta(
       if (gameSeat === effect.winner) continue;
       payers.push(gameToRoomSeat(mapping, gameSeat));
     }
-    if (effect.kind === 'dice' && mapping) payers.push(mapping.inactiveRoomSeat);
+    // [2026-10-24 リョー「途中で誰か抜けて3人打ちも」] inactiveRoomSeat -1 [3人打ち継続] は抜け番が居ないので課金しない
+    if (effect.kind === 'dice' && mapping && mapping.inactiveRoomSeat >= 0) payers.push(mapping.inactiveRoomSeat);
     for (const payer of payers) add(payer, -effect.perPayer);
     add(winnerRoom, effect.perPayer * payers.length);
   }
@@ -140,4 +189,52 @@ export function foldRoomState(
     mapping = next.mapping;
   }
   return { roomChipLedger: ledger ?? {}, activeMapping: mapping ?? null };
+}
+
+/** [2026-10-24 リョー「部屋チップといまの所持チップを揃えるようにしてね」] 試合の終わりの順位チップ
+ *  [ウマ ・ N万点トップ賞 ・ トビ賞 ・ トントンブー] は store.nextMatch の finalize が game ledger へ直に書き、
+ *  精算 effect を通らないので room ledger に入っていなかった。終わった試合の total - chipLedger を
+ *  その試合の mapping で room seat に写す。終わっていなければ null */
+export function finalizeRoomChipDelta(
+  game: {
+    state: { finished?: boolean };
+    chipLedger: Record<number, number>;
+    getFinalScore(): ReadonlyArray<{ player: number; total: number }>;
+  },
+  mapping: RoomSeatMapping | null | undefined,
+): Record<string, number> | null {
+  if (!game.state.finished) return null;
+  const delta: Record<string, number> = {};
+  for (const row of game.getFinalScore()) {
+    const value = row.total - (game.chipLedger[row.player] ?? 0);
+    if (value === 0) continue;
+    const roomSeat = String(gameToRoomSeat(mapping, row.player));
+    delta[roomSeat] = (delta[roomSeat] ?? 0) + value;
+  }
+  for (const seat of Object.keys(delta)) {
+    if (delta[seat] === 0) delete delta[seat];
+  }
+  return Object.keys(delta).length ? delta : null;
+}
+
+/** 2 つの room delta を足す [どちらも無ければ null] */
+export function mergeRoomChipDelta(
+  a: Record<string, number> | null | undefined,
+  b: Record<string, number> | null | undefined,
+): Record<string, number> | null {
+  const out: Record<string, number> = { ...(a ?? {}) };
+  for (const [seat, value] of Object.entries(b ?? {})) out[seat] = (out[seat] ?? 0) + value;
+  for (const seat of Object.keys(out)) {
+    if (out[seat] === 0) delete out[seat];
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** 新しい試合の game ledger を room ledger から引く [その試合に座る 3 人の部屋チップ] */
+export function gameLedgerFromRoom(
+  roomLedger: Record<string, number>,
+  mapping: RoomSeatMapping,
+): Record<0 | 1 | 2, number> {
+  const at = (gameSeat: number) => roomLedger[String(mapping.gameToRoom[gameSeat])] ?? 0;
+  return { 0: at(0), 1: at(1), 2: at(2) };
 }
