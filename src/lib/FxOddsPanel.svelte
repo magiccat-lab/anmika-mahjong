@@ -5,17 +5,22 @@
   // [2026-10-15 リョー「ページが見づらいから、ラフで画像とか入れてあげよう。文字サイズも小さいし。出る割合は～の1行目消そう」
   //  「必ず出る演出は別に画像つけなくていいや」] 行ごとに本物の卓で撮ったコマ (public/fx_odds/、tests/fx_odds_images.spec.ts で撮り直す)、
   //  サイコロの玉は玉の絵。字を大きくし、頭の説明の 1 行は消した。白ぽっちの数の前提 (当たり 50%) は表の下の注に移した
-  import { diceBallRows, diceReachRows, pct, pochiExtraRows, pochiOpeningRows, pochiStepRows, pochiTeaserGlowRows, type OddsRow } from './fxOdds';
+  import { diceBallRows, diceReachRows, pct, pochiCrackRows, pochiExtraRows, pochiGlowRows, pochiOpeningRows, pochiParticleRows, pochiPremiumRows, pochiPulseRows, pochiPushRows, type OddsRow } from './fxOdds';
   import { CUTIN_TIER_DURATION_MS } from './store';
 
   export let onClose: () => void = () => {};
 
   const sec = (ms: number) => `${(ms / 1000).toFixed(1)} 秒`;
   const sections: { title: string; lead: string; rows: OddsRow[]; hitLabel: string }[] = [
-    { title: '白ぽっち: 引いた瞬間', lead: 'リーチ中に自分で白ぽっちを引いた時に、どれか 1 つが出ます。何も出ない無演出でも当たる事があります', rows: pochiOpeningRows(), hitLabel: '当たり' },
-    { title: '白ぽっち: 引いた後', lead: '告知ランプと遅れは、引いた瞬間の演出とは別に決まります。当たりなら告知ランプが必ずどちらかで光ります', rows: pochiExtraRows(), hitLabel: '当たり' },
-    { title: '白ぽっち: 稲妻と決め台詞の光り', lead: '稲妻 ・ 決め台詞の光りの色は、絞りの光りが上がる所と同じです', rows: pochiTeaserGlowRows(), hitLabel: '当たり' },
-    { title: '白ぽっち: 絞りの光り (ステップアップ)', lead: '絞ると光りが白 → 青 → 緑 → 金 → 虹と上がります。どこで止まるか。白のままが無演出です', rows: pochiStepRows(), hitLabel: '当たり' },
+    // [2026-10-25 白ぽっちはムービー + PUSH] 絞りとステップアップは無くなり、①〜⑥ の表をそれぞれ当落で引く
+    { title: '白ぽっち: 引いた瞬間', lead: 'リーチ中に自分で白ぽっちを引いた時に、どれか 1 つが出ます。何も出ない無演出でも当たる事があります。牌の絵柄は PUSH を押すまで出ません', rows: pochiOpeningRows(), hitLabel: '当たり' },
+    { title: '白ぽっち: 光りの色', lead: '伏せた牌の光りが白 → 青 → 緑 → 赤 → 金 → 虹と上がります。どこで止まるか。見えている牌で決まっている時は正なら虹、逆なら白です', rows: pochiGlowRows(), hitLabel: '当たり' },
+    { title: '白ぽっち: 光りの脈打ち', lead: '止まった色でどう光るか', rows: pochiPulseRows(), hitLabel: '当たり' },
+    { title: '白ぽっち: 発展の粒子', lead: '光りが赤以上の時だけ暗転して粒が出ます (緑以下では引いても見えません)', rows: pochiParticleRows(), hitLabel: '当たり' },
+    { title: '白ぽっち: 溜めのひび', lead: '発展の後、光りが止まって牌にひびが入ります (赤以上の時だけ)', rows: pochiCrackRows(), hitLabel: '当たり' },
+    { title: '白ぽっち: PUSH ボタン', lead: '押すと牌がめくれます。ボタンの色', rows: pochiPushRows(), hitLabel: '当たり' },
+    { title: '白ぽっち: 引いた後', lead: '告知ランプと遅れは、他の演出とは別に決まります。当たりなら告知ランプが必ずどちらかで光ります', rows: pochiExtraRows(), hitLabel: '当たり' },
+    { title: '白ぽっち: プレミア (当たりだけ)', lead: '当たりの時だけ、他の演出に上乗せで出ます', rows: pochiPremiumRows(), hitLabel: '当たり' },
     { title: 'サイコロチャンス: 玉の色', lead: '1 振りごと。宣言した 2 つの目がそろえば当たり、ゾロ目はリプレイ', rows: diceBallRows(), hitLabel: '当たり' },
     { title: 'サイコロチャンス: リーチ', lead: '1 振りごと。宣言した目が 1 個目に出るとリーチ', rows: diceReachRows(), hitLabel: '当たり' },
   ];
@@ -33,8 +38,7 @@
     ['役満放銃 (声つき)', '役満に振り込んだ時 (煽りの代わり)', `中 ${sec(CUTIN_TIER_DURATION_MS.mid)}`],
     ['N 連続の札','フィーバー中に同じ人が続けて和了った時', '2 連続 金 ・ 3 連続 赤 ・ 4 連続から 虹'],
     ['良い牌の光', '自分が赤 5 ・ 金 ・ 虹 ・ 華を引いた時', '1.4 秒'],
-    ['溜め (暗くしてスロー)', '白ぽっちを点がのぞく手前まで絞った時', '毎回'],
-    ['確定の帯', '見えている牌で白ぽっちの正 ・ 逆が決まっている時', '1.1 秒'],
+    ['確定の帯', '見えている牌で白ぽっちの正 ・ 逆が決まっている時 (ムービーは短く、PUSH は出る)', '1.1 秒'],
   ];
 </script>
 

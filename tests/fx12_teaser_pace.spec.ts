@@ -12,7 +12,7 @@ async function solo(page: Page) {
 async function pochi(page: Page, teaser: 'bolt' | 'line' | 'mono') {
   await page.evaluate((teaser) => {
     const w = window as any;
-    w.__forceTeaser = teaser; w.__forceFreeze = null; w.__forcePremium = false; w.__forceLamp = null; w.__forceDelay = false;
+    w.__forcePlan = { opening: teaser, glow: 'white', pulse: 'slow', particle: 'none', crack: 'none', push: 'normal', premium: null, lamp: null, delay: false };
     const s = w.__game;
     s.game.lizhi.add(0);
     s.game.feverActive = [false, false, false];

@@ -21,14 +21,14 @@ async function pochi(page: Page, color = 'blue') {
   }, color);
   await expect(page.locator('.sq-tile')).toBeVisible();
 }
-// [2026-10-14] 白ぽっちは指で下から絞る (PochiSqueeze)。牌の下から上へ引いて一気にめくる
+// [2026-10-25] 白ぽっちは自動のムービーの最後に PUSH ボタン。試験は台本 (plan) を決め打ちして、画面を触って PUSH まで飛ばし、押す
+const QUIET_PLAN = { opening: 'none', glow: 'white', pulse: 'slow', particle: 'none', crack: 'none', push: 'normal', lamp: null, delay: false, premium: null };
+async function forcePlan(page: Page, plan: Record<string, unknown> = {}) {
+  await page.evaluate((p) => { (window as any).__forcePlan = p; }, { ...QUIET_PLAN, ...plan });
+}
 async function squeezeOpen(page: Page) {
-  // [2026-10-14 4 版の 2] 絞りの前に予告 (稲妻と「ぽっちチャンス」、1.6 秒) とプレミアが入る。その間は指で引けない
-  await expect(page.locator('.sq-band.teaser, .sq-premium, .fz')).toHaveCount(0, { timeout: 6000 }); // [10-15] 当たりの 9% はフリーズ (1.3 秒) が予告の代わり
-  const box = (await page.locator('.sq-tile').boundingBox())!;
-  const x = box.x + box.width / 2, y = box.y + box.height - 4;
-  await page.mouse.move(x, y); await page.mouse.down();
-  await page.mouse.move(x, y - box.height * 1.2, { steps: 10 }); await page.mouse.up();
+  await page.locator('[data-testid=pochi-skip]').click({ position: { x: 4, y: 4 } });
+  await page.locator('[data-testid=pochi-push]').click();
 }
 async function shot(page: Page, name: string) {
   if (!output) return;
@@ -66,8 +66,9 @@ test('FX02: all six words, three seats, three DOM, queue and heavy skip', async 
   await expect(page.locator('.fx')).toHaveCount(0);
 });
 
-test('FX02: unopened privacy, four colors, squeeze open and close', async ({ page }) => {
+test('FX02: unopened privacy, four colors, push open and close', async ({ page }) => {
   await solo(page);
+  await forcePlan(page);
   for (const color of ['blue', 'red', 'green', 'yellow']) {
     await pochi(page, color);
     const dialog = page.locator('.sq[role=dialog]');
@@ -83,22 +84,26 @@ test('FX02: unopened privacy, four colors, squeeze open and close', async ({ pag
   }
 });
 
-test('FX02: unattended squeeze opens by itself and closes', async ({ page }) => {
+test('FX02: unattended movie pushes by itself and closes', async ({ page }) => {
   await solo(page);
+  await forcePlan(page); // 光り 2.4 秒 → PUSH 待ち 20 秒 → 自動 PUSH → 結果 1.6 秒
   await page.clock.install();
   await pochi(page);
-  await page.clock.runFor(31050);
-  await expect(page.locator('.sq.revealed')).toHaveCount(1);
+  await page.clock.runFor(2400 + 500);
+  await expect(page.locator('[data-testid=pochi-push]')).toHaveCount(1);
+  await page.clock.runFor(20000 + 200);
+  await expect(page.locator('.sq-band.reveal')).toHaveCount(1);
   await page.clock.runFor(1700);
   await expect(page.locator('.sq')).toHaveCount(0);
 });
 
-// [2026-10-14 リョー「手牌のところにツモが見えてネタバレしてる」] 絞っている間は引いた牌 (でかぽっちの 2筒) を伏せる
-test('FX02: drawn tile stays face-down while squeezing', async ({ page }) => {
+// [2026-10-14 リョー「手牌のところにツモが見えてネタバレしてる」] PUSH の前は引いた牌 (でかぽっちの 2筒) を伏せる
+test('FX02: drawn tile stays face-down until push', async ({ page }) => {
   await page.setViewportSize({ width: 844, height: 390 });
   await page.goto('/');
   await page.locator('button.entry-btn.solo').click();
   await expect(page.locator('section.player').first()).toBeVisible();
+  await forcePlan(page);
   await page.waitForTimeout(1200);
   const before = await page.evaluate(() => {
     const g = (window as any).__game; const sp = g.game.shoupai.get(0);
@@ -124,10 +129,7 @@ test('FX02: drawn tile stays face-down while squeezing', async ({ page }) => {
   const during = await lastAlt();
   await shot(page, 'fx02-deka-during');
   expect(during.src).toContain('Back.svg');
-  await expect(page.locator('.sq-band.teaser, .sq-premium, .fz')).toHaveCount(0, { timeout: 6000 }); // [10-15] 当たりの 9% はフリーズ (1.3 秒) が予告の代わり
-  const box = (await page.locator('.sq-tile').boundingBox())!;
-  const x = box.x + box.width / 2, y = box.y + box.height - 4;
-  await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x, y - box.height * 1.2, { steps: 10 }); await page.mouse.up();
+  await squeezeOpen(page);
   await expect(page.locator('.sq-word')).toHaveText('でかぽっち');
   await expect(page.locator('.sq')).toHaveCount(0, { timeout: 4000 });
   const after = await lastAlt();

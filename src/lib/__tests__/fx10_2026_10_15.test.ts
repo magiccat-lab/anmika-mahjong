@@ -1,46 +1,21 @@
 // [2026-10-15 fx9 の答えの続き] 無演出 (B7 a) ・ NN金北のカットイン ・ 演出一覧の絵
 import { describe, expect, it } from 'vitest';
-import { render } from 'svelte/server';
 import fs from 'node:fs';
-import PochiSqueeze from '../PochiSqueeze.svelte';
-import { TEASER_NONE_RATE, teaserRoll } from '../pochiFx';
-import { pochiOpeningRows, pochiStepRows, pochiTeaserGlowRows, diceBallRows } from '../fxOdds';
+import { OPENING_TABLE } from '../pochiFx';
+import { pochiOpeningRows, pochiGlowRows, diceBallRows } from '../fxOdds';
 import { NO_SET, kinpeiPairLabels, setCutinFor, setFlags } from '../setCutin';
 import { CUTIN_TIER } from '../store';
 import { FX_LABELS } from '../fxArtwork';
-import { sanitizePochiFx } from '../../../server/ws_server';
 
-const grid = (n = 1000) => Array.from({ length: n }, (_, i) => (i + 0.5) / n);
-
-describe('無演出 (fx9 B7、先輩「無演出でもあたるように」)', () => {
-  it('当たりの 2%、外れの 38% が無演出', () => {
-    const rate = (good: boolean) => grid().filter((r) => teaserRoll(good, r, 0.25) === 'none').length / 1000;
-    expect(rate(true)).toBeCloseTo(TEASER_NONE_RATE.good, 3);
-    expect(rate(false)).toBeCloseTo(TEASER_NONE_RATE.bad, 3);
-  });
-  it('白黒の割合は前のまま (当たり 25% ・ 外れ 6%)', () => {
-    const mono = (good: boolean) => grid().filter((r) => teaserRoll(good, r, 0.25) === 'mono').length / 1000;
-    expect(mono(true)).toBeCloseTo(0.25, 3);
-    expect(mono(false)).toBeCloseTo(0.06, 3);
-  });
-  it('無演出の絞りは予告 (稲妻 ・ 決め台詞 ・ 白黒 ・ 帯) を出さない', () => {
-    const { body } = render(PochiSqueeze, { props: { color: 'blue', step: 2, teaser: 'none' } });
-    expect(body).not.toContain('sq-bolt');
-    expect(body).not.toContain('sq-ci');
-    expect(body).not.toContain('sq-mono');
-    expect(body).not.toContain('ぽっちチャンス');
-    expect(body).toContain('sq-tile');
-  });
-  it('他の席へも無演出のまま流れる', () => {
-    expect(sanitizePochiFx({ phase: 'open', teaser: 'none' })).toMatchObject({ teaser: 'none' });
+describe('無演出 (fx9 B7、先輩「無演出でもあたるように」) [2026-10-25 表の引きに直した]', () => {
+  it('無演出は当たりの 6%、外れの 50% (仕様 ①)', () => {
+    expect(OPENING_TABLE.none).toEqual([6, 50]);
   });
   it('演出一覧に無演出の行が出て、当たる事がある', () => {
     const row = pochiOpeningRows().find((r) => r.name.startsWith('無演出'))!;
     expect(row.none).toBe(true);
-    expect(row.rate).toBeGreaterThan(0.15);
-    expect(row.hit!).toBeGreaterThan(0.02);
-    expect(row.hit!).toBeLessThan(0.08);
-    // 引いた瞬間の演出の出る割合は足して 100%
+    expect(row.rate).toBeCloseTo(0.28, 9);
+    expect(row.hit!).toBeCloseTo(6 / 56, 9);
     expect(pochiOpeningRows().reduce((a, r) => a + r.rate, 0)).toBeCloseTo(1, 6);
   });
 });
@@ -74,9 +49,9 @@ describe('NN金北のカットイン (先輩「NN金北になったらカット�
 
 describe('演出一覧の絵 (先輩「ラフで画像とか入れてあげよう」)', () => {
   it('白ぽっちの表の行には本物の卓で撮った絵があり、サイコロの玉は玉の色', () => {
-    for (const r of [...pochiOpeningRows(), ...pochiTeaserGlowRows(), ...pochiStepRows()]) {
-      expect(r.img, r.name).toBeTruthy();
-      expect(fs.existsSync(`public/fx_odds/${r.img}.webp`), r.img).toBe(true);
+    for (const r of pochiOpeningRows()) expect(r.img, r.name).toBeTruthy();
+    for (const r of [...pochiOpeningRows(), ...pochiGlowRows()]) {
+      if (r.img) expect(fs.existsSync(`public/fx_odds/${r.img}.webp`), r.img).toBe(true);
     }
     expect(diceBallRows().map((r) => r.ball)).toEqual(['rainbow', 'gold', 'blue', 'white']);
   });

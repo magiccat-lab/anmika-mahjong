@@ -15,6 +15,10 @@ async function solo(page: Page) {
   await expect(page.locator('section.player').first()).toBeVisible();
   await page.evaluate(() => (window as any).__gameStore.setCpuSeats([]));
 }
+// [2026-10-25] 台本 (plan) を決め打ちする。何も言わない所は静かな既定 (無演出 ・ 白のまま)
+async function forcePlan(page: Page, plan: Record<string, unknown> = {}) {
+  await page.evaluate((p) => { (window as any).__forcePlan = p; }, { opening: 'none', glow: 'white', pulse: 'slow', particle: 'none', crack: 'none', push: 'normal', lamp: null, delay: false, premium: null, ...plan });
+}
 async function pochi(page: Page, color = 'blue') {
   await page.evaluate((color) => {
     const s = (window as any).__game;
@@ -35,11 +39,13 @@ test('FX8: 入口の演出一覧に割合と当たりが出る (無演出の行�
   await expect(dlg).toBeVisible();
   await expect(dlg).toContainText('フリーズ (暗転)');
   await expect(dlg).toContainText('白のまま (光りが上がらない)');
-  // 無演出の札: 予告なし (10-15 fx9 B7) ・ 光りが白のまま ・ 予告の光りが白 ・ 玉が白 ・ リーチ無し
-  await expect(dlg.locator('.tag')).toHaveCount(5);
-  // [10-15 先輩「ラフで画像とか入れてあげよう」「出る割合は～の1行目消そう」] 白ぽっちの行は絵 (15 枚が読める)、サイコロは玉、頭の 1 行は無い
-  // [10-15 fx10] 引いた後の告知ランプ (先 ・ 後) の絵 2 枚を足して 17 枚
-  await expect(dlg.locator('td.pic img')).toHaveCount(17);
+  // 無演出の札 [10-25 ムービー + PUSH の表]: 予告なし ・ 光りが白のまま ・ ゆっくり点滅 ・ 粒なし ・ ひびなし ・ PUSH 通常 ・ 玉が白 ・ リーチ無し
+  await expect(dlg.locator('.tag')).toHaveCount(8);
+  // [10-15 先輩「ラフで画像とか入れてあげよう」「出る割合は～の1行目消そう」] 白ぽっちの行は絵、サイコロは玉、頭の 1 行は無い
+  // [10-25] 引いた瞬間 7 枚 + 光りの色 5 枚 (赤は絵なし) + 告知ランプ 2 枚 = 14 枚
+  await expect(dlg.locator('td.pic img')).toHaveCount(14);
+  await expect(dlg).toContainText('PUSH 虹');
+  await expect(dlg).toContainText('キリン柄');
   await expect(dlg).toContainText('告知ランプ (先告知)');
   await expect(dlg).toContainText('遅れ (ピキーンが 0.3 秒遅れる)');
   // 絵は loading=lazy なので、画面の外の分は URL が読めるかで見る
@@ -64,9 +70,9 @@ test('FX8: 入口の演出一覧に割合と当たりが出る (無演出の行�
 });
 
 for (const kind of ['black', 'still'] as const) {
-  test(`FX8: 白ぽっちのフリーズ (${kind}) は予告の代わりに 1.3 秒止まり、明けは虹で絞れる`, async ({ page }) => {
+  test(`FX8: 白ぽっちのフリーズ (${kind}) は予告の代わりに 1.3 秒止まり、明けは虹まで光って PUSH で開く`, async ({ page }) => {
     await solo(page);
-    await page.evaluate((k) => { (window as any).__forceFreeze = k; }, kind);
+    await forcePlan(page, { opening: kind === 'black' ? 'freeze_black' : 'freeze_still' });
     await pochi(page, 'blue');
     await expect(page.locator(`.fz.fz-${kind}`)).toBeVisible();
     await expect(page.locator('.sq-band.teaser, .sq-premium')).toHaveCount(0);
@@ -74,11 +80,10 @@ for (const kind of ['black', 'still'] as const) {
     await shot(page, `fx8-freeze-${kind}`);
     await expect(page.locator('.fz')).toHaveCount(0, { timeout: 3000 });
     expect(await page.evaluate(() => document.body.classList.contains('fz-still-on'))).toBe(false);
-    await expect(page.locator('.sq-tile')).toHaveClass(/glow-rainbow/);
-    const box = (await page.locator('.sq-tile').boundingBox())!;
-    const x = box.x + box.width / 2, y = box.y + box.height - 4;
-    await page.mouse.move(x, y); await page.mouse.down();
-    await page.mouse.move(x, y - box.height * 1.2, { steps: 10 }); await page.mouse.up();
+    // 光りは白から 1 色ずつ虹 (番号 5) まで上がる
+    await expect(page.locator('.sq-tile')).toHaveClass(/gl-5/, { timeout: 4000 });
+    await page.locator('[data-testid=pochi-skip]').click({ position: { x: 4, y: 4 } });
+    await page.locator('[data-testid=pochi-push]').click();
     await expect(page.locator('.sq-word')).toHaveText('青ぽっち');
   });
 }
@@ -86,18 +91,20 @@ for (const kind of ['black', 'still'] as const) {
 test('FX8: フリーズを決め打ちしない時は予告が出る (外れの色でフリーズは出ない)', async ({ page }) => {
   await solo(page);
   // [10-15 fx9 B7] 外れの 38% は無演出 (予告なし) になったので、予告は決め打ちして見る
-  await page.evaluate(() => { (window as any).__forceTeaser = 'bolt'; });
+  await forcePlan(page, { opening: 'bolt' });
   await pochi(page, 'red');
   await expect(page.locator('.sq-band.teaser, .sq-premium')).toHaveCount(1);
   await expect(page.locator('.fz')).toHaveCount(0);
 });
 
-test('FX10: 無演出の引きは予告もフリーズも出さずに絞りに入る', async ({ page }) => {
+test('FX10: 無演出の引きは予告もフリーズも出さずに光りの段に入り、PUSH に着く', async ({ page }) => {
   await solo(page);
-  await page.evaluate(() => { (window as any).__forceTeaser = 'none'; });
+  await forcePlan(page, { opening: 'none' });
   await pochi(page, 'red');
-  await expect(page.locator('.sq-hint')).toBeVisible();
+  await expect(page.locator('.sq[data-stage=glow]')).toHaveCount(1);
   await expect(page.locator('.sq-band.teaser, .sq-premium, .sq-ci, .sq-bolt, .fz')).toHaveCount(0);
+  await page.locator('[data-testid=pochi-skip]').click({ position: { x: 4, y: 4 } });
+  await expect(page.locator('[data-testid=pochi-push]')).toBeVisible();
 });
 
 test('FX8: フィーバーの帯で紙吹雪が噴き上がり、3.4 秒で消える', async ({ page }) => {

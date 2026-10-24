@@ -1,107 +1,105 @@
 // 演出一覧のページ (2026-10-15 リョー「演出別の%とか出してほしい。トップページに演出一覧ってボタン押してそこから見れるように」
-// 「無演出でも出ると思うけどその確率も」) の数。手で書いた表にせず、本番の演出を決めている関数 (pochiFx ・ diceFx) に
-// 0〜1 の乱数を細かく順に入れて数える。演出の割合を変えたらこのページの数も一緒に変わる。
+// 「無演出でも出ると思うけどその確率も」) の数。手で書いた表にせず、本番の演出を決めている表と関数 (pochiFx ・ diceFx) から数える。
+// 演出の割合を変えたらこのページの数も一緒に変わる。
 //  - 出る割合: その演出が出る割合 (白ぽっちは 1 回引くごと、サイコロは 1 振りごと)
 //  - 当たり: その演出が出た時に当たりだった割合 (パチスロの「信頼度」)
-import { delayRoll, expectationStep, freezeRoll, lampRoll, premiumRoll, teaserRoll, type PochiFreeze } from './pochiFx';
+// [2026-10-25 白ぽっちはムービー + PUSH に作り直し] 白ぽっちの表は pochiFx の OPENING_TABLE 〜 PUSH_TABLE (当たり時 ・ 外れ時の %) をそのまま読む。
+//  出る割合 = 当たりの元の割合 × 当たり時の % + 外れの元の割合 × 外れ時の %。当たり = 当たりの分 ÷ 出る割合
+import {
+  CRACK_TABLE, DELAY_RATE, GLOW_TABLE, LAMP_PRE_RATE, OPENING_TABLE, PARTICLE_TABLE, PREMIUM_TABLE, PULSE_TABLE, PUSH_TABLE,
+  type Crack, type GlowColor, type OddsTable, type Opening, type Particle, type Pulse, type PushLook,
+} from './pochiFx';
 import { ballColor, planRoll, type BallColor } from './diceFx';
 
 // img: 演出一覧に出す絵 (public/fx_odds/<img>.webp、本物の卓で撮ったコマ)。ball: サイコロの玉の色 (絵の代わりに玉を描く)
 export type OddsRow = { name: string; rate: number; hit: number | null; note?: string; none?: boolean; img?: string; ball?: BallColor };
 
-/** 乱数の目の数。決まりの区切り (0.03 ・ 0.06 ・ 0.1 …) が割り切れる細かさ */
+/** 乱数の目の数 (サイコロの数え方で使う)。決まりの区切り (0.03 ・ 0.06 ・ 0.1 …) が割り切れる細かさ */
 const N = 1000;
 const grid = (): number[] => Array.from({ length: N }, (_, i) => (i + 0.5) / N);
 
-type PochiOutcome = { good: boolean; p: number; freeze: PochiFreeze | null; premium: boolean; teaser: 'bolt' | 'line' | 'mono' | 'none' | null; step: number };
-
-/** 白ぽっちを 1 回引いた時に起こり得る形と、その割合 (当たりの元の割合 pGood、見えている牌で決まっていない時) */
-export function pochiOutcomes(pGood = 0.5): PochiOutcome[] {
-  const out: PochiOutcome[] = [];
-  const g = grid();
-  for (const good of [true, false]) {
-    const base = good ? pGood : 1 - pGood;
-    for (const freeze of ['black', 'still', null] as const) {
-      const pf = g.filter((r) => freezeRoll(good, r) === freeze).length / N;
-      if (pf === 0) continue;
-      if (freeze) {
-        // フリーズは予告とプレミアの代わり。光りは虹まで
-        out.push({ good, p: base * pf, freeze, premium: false, teaser: null, step: 4 });
-        continue;
-      }
-      for (let step = 0; step <= 4; step += 1) {
-        const ps = g.filter((r) => expectationStep(good, r) === step).length / N;
-        if (ps === 0) continue;
-        const pPrem = g.filter((r) => premiumRoll(step, r)).length / N;
-        if (pPrem > 0) out.push({ good, p: base * pf * ps * pPrem, freeze: null, premium: true, teaser: null, step });
-        for (const teaser of ['mono', 'none', 'line', 'bolt'] as const) {
-          // 予告の乱数は 2 つ (白黒かどうか ・ 稲妻か決め台詞か)。2 つ目は半々の区切りだけなので 0.25 と 0.75 の 2 点で足りる
-          let n = 0;
-          for (const r1 of g) for (const r2 of [0.25, 0.75]) if (teaserRoll(good, r1, r2) === teaser) n += 1;
-          out.push({ good, p: base * pf * ps * (1 - pPrem) * (n / (N * 2)), freeze: null, premium: false, teaser, step });
-        }
-      }
-    }
-  }
-  return out;
+/** 当たり時 %・外れ時 % → 出る割合と当たり */
+function mkRow(name: string, goodPct: number, badPct: number, pGood: number, extra: Partial<OddsRow> = {}): OddsRow {
+  const rate = (pGood * goodPct + (1 - pGood) * badPct) / 100;
+  return { name, rate, hit: rate > 0 ? (pGood * goodPct) / 100 / rate : null, ...extra };
+}
+/** 表の全行 (order の順) */
+function tableRows<K extends string>(table: OddsTable<K>, order: readonly K[], label: Record<K, string | [string, Partial<OddsRow>]>, pGood: number): OddsRow[] {
+  return order.map((k) => {
+    const l = label[k];
+    const [name, extra] = typeof l === 'string' ? [l, {}] : l;
+    return mkRow(name, table[k][0], table[k][1], pGood, extra);
+  });
 }
 
-function row(name: string, outs: PochiOutcome[], pick: (o: PochiOutcome) => boolean, extra: Partial<OddsRow> = {}): OddsRow {
-  const hitP = outs.filter((o) => pick(o) && o.good).reduce((a, o) => a + o.p, 0);
-  const all = outs.filter(pick).reduce((a, o) => a + o.p, 0);
-  return { name, rate: all, hit: all > 0 ? hitP / all : null, ...extra };
-}
-
-/** 引いた瞬間の演出 (どれか 1 つが必ず出る) */
+/** ① 引いた瞬間の演出 (どれか 1 つが必ず出る) */
 export function pochiOpeningRows(pGood = 0.5): OddsRow[] {
-  const o = pochiOutcomes(pGood);
-  return [
-    row('フリーズ (暗転)', o, (x) => x.freeze === 'black', { note: '画面と音が止まって真っ暗、明けにキュイン', img: 'freeze_black' }),
-    row('フリーズ (止め絵)', o, (x) => x.freeze === 'still', { note: '卓が止まって白黒、明けにキュイン', img: 'freeze_still' }),
-    row('プレミア (サビ)', o, (x) => x.premium, { note: '虹の光線とアンミカーニバルのサビ', img: 'premium' }),
-    row('予告「白黒」', o, (x) => x.teaser === 'mono', { note: '外れでも出るガセあり', img: 'teaser_mono' }),
-    row('予告「白って 200 色あんねん」', o, (x) => x.teaser === 'line', { img: 'teaser_line' }),
-    row('予告「稲妻」', o, (x) => x.teaser === 'bolt', { img: 'teaser_bolt' }),
-    row('無演出 (予告なし)', o, (x) => x.teaser === 'none', { none: true, note: '予告が何も出ないまま絞りに入る', img: 'teaser_none' }),
-  ];
+  const order: Opening[] = ['freeze_black', 'freeze_still', 'premium', 'mono', 'bolt', 'line', 'none'];
+  return tableRows(OPENING_TABLE, order, {
+    freeze_black: ['フリーズ (暗転)', { note: '画面と音が止まって真っ暗、明けにキュイン', img: 'freeze_black' }],
+    freeze_still: ['フリーズ (止め絵)', { note: '卓が止まって白黒、明けにキュイン', img: 'freeze_still' }],
+    premium: ['プレミア (サビ)', { note: '虹の光線とアンミカーニバルのサビ', img: 'premium' }],
+    mono: ['予告「白黒」', { note: '外れでも出るガセあり', img: 'teaser_mono' }],
+    bolt: ['予告「稲妻」', { img: 'teaser_bolt' }],
+    line: ['予告「白って 200 色あんねん」', { img: 'teaser_line' }],
+    none: ['無演出 (予告なし)', { none: true, note: '予告が何も出ないまま光りの段階に入る', img: 'teaser_none' }],
+  }, pGood);
 }
 
-/** [2026-10-15 fx10] 引いた後の演出 (告知ランプ ・ 遅れ)。引いた瞬間の演出とは別に決まる。
+/** ② 牌の光りがどの色まで上がるか (白 → 青 → 緑 → 赤 → 金 → 虹) */
+export function pochiGlowRows(pGood = 0.5): OddsRow[] {
+  const order: GlowColor[] = ['rainbow', 'gold', 'red', 'green', 'blue', 'white'];
+  return tableRows(GLOW_TABLE, order, {
+    rainbow: ['虹まで', { img: 'step4' }], gold: ['金まで', { img: 'step3' }], red: ['赤まで', { note: '赤から上は発展 (暗転 ・ 粒子 ・ ひび) に入る' }],
+    green: ['緑まで', { img: 'step2' }], blue: ['青まで', { img: 'step1' }], white: ['白のまま (光りが上がらない)', { none: true, img: 'step0' }],
+  }, pGood);
+}
+/** ③ 光りの脈打ち */
+export function pochiPulseRows(pGood = 0.5): OddsRow[] {
+  const order: Pulse[] = ['blink', 'hold', 'fast', 'slow'];
+  return tableRows(PULSE_TABLE, order, {
+    blink: '一瞬消えて虹で再点灯', hold: '止まって光りっぱなし', fast: '速い鼓動', slow: ['ゆっくり点滅', { none: true }],
+  }, pGood);
+}
+/** ④ 発展の粒子 (光りが赤以上の時だけ見える) */
+export function pochiParticleRows(pGood = 0.5): OddsRow[] {
+  const order: Particle[] = ['rainbow', 'suck', 'float', 'none'];
+  return tableRows(PARTICLE_TABLE, order, {
+    rainbow: '虹色の粒', suck: '粒が牌に吸い込まれる', float: '光の粒が舞う', none: ['粒なし', { none: true }],
+  }, pGood);
+}
+/** ⑤ 溜めのひび (光りが赤以上の時だけ見える) */
+export function pochiCrackRows(pGood = 0.5): OddsRow[] {
+  const order: Crack[] = ['all', 'two', 'one', 'none'];
+  return tableRows(CRACK_TABLE, order, {
+    all: '牌全体にひび', two: 'ひび 2 本', one: 'ひび 1 本', none: ['ひびなし', { none: true }],
+  }, pGood);
+}
+/** ⑥ PUSH ボタンの色 */
+export function pochiPushRows(pGood = 0.5): OddsRow[] {
+  const order: PushLook[] = ['rainbow', 'gold', 'red', 'normal'];
+  return tableRows(PUSH_TABLE, order, {
+    rainbow: 'PUSH 虹', gold: 'PUSH 金', red: 'PUSH 赤', normal: ['PUSH 通常', { none: true }],
+  }, pGood);
+}
+
+/** [2026-10-15 fx10] ⑦ 引いた後の演出 (告知ランプ ・ 遅れ)。引いた瞬間の演出とは別に決まる。
  *  遅れはフリーズの時は出ない (引いた音が鳴らない) ので、フリーズの分を除いて数える */
 export function pochiExtraRows(pGood = 0.5): OddsRow[] {
-  const g = grid();
-  const share = (good: boolean, pick: (r: number) => boolean): number => {
-    const noFreeze = g.filter((r) => freezeRoll(good, r) === null).length / N;
-    return noFreeze * (g.filter(pick).length / N);
-  };
-  const mk = (name: string, good: number, bad: number, extra: Partial<OddsRow> = {}): OddsRow => {
-    const rate = pGood * good + (1 - pGood) * bad;
-    return { name, rate, hit: rate > 0 ? (pGood * good) / rate : null, ...extra };
-  };
-  const lamp = (good: boolean, t: 'pre' | 'post'): number => g.filter((r) => lampRoll(good, r) === t).length / N;
+  const freezeGood = (OPENING_TABLE.freeze_black[0] + OPENING_TABLE.freeze_still[0]) / 100;
+  const freezeBad = (OPENING_TABLE.freeze_black[1] + OPENING_TABLE.freeze_still[1]) / 100;
   return [
-    mk('告知ランプ (先告知)', lamp(true, 'pre'), lamp(false, 'pre'), { note: '引いた瞬間に画面の外周が金に光る', img: 'lamp_pre' }),
-    mk('告知ランプ (後告知)', lamp(true, 'post'), lamp(false, 'post'), { note: 'めくれた後に画面の外周が金に光る', img: 'lamp_post' }),
-    mk('遅れ (ピキーンが 0.3 秒遅れる)', share(true, (r) => delayRoll(true, r)), share(false, (r) => delayRoll(false, r)), { note: '音だけの演出。牌と画面は普通に動く' }),
+    mkRow('告知ランプ (先告知)', LAMP_PRE_RATE * 100, 0, pGood, { note: '引いた瞬間に画面の外周が金に光る', img: 'lamp_pre' }),
+    mkRow('告知ランプ (後告知)', (1 - LAMP_PRE_RATE) * 100, 0, pGood, { note: 'めくれた後に画面の外周が金に光る', img: 'lamp_post' }),
+    mkRow('遅れ (ピキーンが 0.3 秒遅れる)', (1 - freezeGood) * DELAY_RATE.good * 100, (1 - freezeBad) * DELAY_RATE.bad * 100, pGood, { note: '音だけの演出。牌と画面は普通に動く' }),
   ];
 }
-
-const STEP_NAME = ['白のまま (光りが上がらない)', '青まで', '緑まで', '金まで', '虹まで'];
-/** 絞りの光り (ステップアップ) がどこまで上がるか。白のままが無演出 */
-export function pochiStepRows(pGood = 0.5): OddsRow[] {
-  const o = pochiOutcomes(pGood);
-  return [4, 3, 2, 1, 0].map((k) => row(STEP_NAME[k], o, (x) => x.step === k, { img: `step${k}`, ...(k === 0 ? { none: true } : {}) }));
-}
-
-/** 稲妻と決め台詞の光りの色 (虹 = 最高段が虹、金 = 金、白 = それより下) */
-export function pochiTeaserGlowRows(pGood = 0.5): OddsRow[] {
-  const o = pochiOutcomes(pGood).filter((x) => x.teaser === 'line' || x.teaser === 'bolt');
-  const total = o.reduce((a, x) => a + x.p, 0);
+/** ⑧ プレミア (当たりの時だけ、他の演出に上乗せ) */
+export function pochiPremiumRows(pGood = 0.5): OddsRow[] {
   return [
-    row('虹', o, (x) => x.step >= 4, { img: 'bolt_rainbow' }),
-    row('金', o, (x) => x.step === 3, { img: 'bolt_gold' }),
-    row('白', o, (x) => x.step <= 2, { none: true, img: 'bolt_white' }),
-  ].map((r) => ({ ...r, rate: r.rate / total }));
+    mkRow('キリン柄', PREMIUM_TABLE.kirin, 0, pGood, { note: '光りの段階で牌の裏がキリン柄になる' }),
+    mkRow('復活', PREMIUM_TABLE.revive, 0, pGood, { note: '外れの帯の後に「まだや！」で当たりに変わる' }),
+  ];
 }
 
 type DiceOutcome = { p: number; reach: boolean; ball: BallColor; outcome: 'hit' | 'zoro' | 'miss' };

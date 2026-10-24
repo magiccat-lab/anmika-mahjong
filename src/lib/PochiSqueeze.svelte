@@ -1,309 +1,417 @@
 <script lang="ts">
-  // 白ぽっち ・ でかぽっちの絞り (2026-10-14 リョー、演出のラフ 1〜3 版の答え)。前の PochiRevealModal (タップでめくる) の置き換え。
-  //  - 裏向きの牌を、指で下から上へ引いた分だけめくる。速さは指のまま (2 版 Q1 a)。キーボードは Enter で一気にめくる
-  //  - 白ぽっちの点は小さく (半分近く絞るまで色が見えない)、でかぽっちは筒子の模様を 7 割に縮める (2 版 S3)
-  //  - 絞りの途中で枠が光る (期待度)。正の時ほど強く、虹は正の確定 (pochiFx.expectationGlow)
-  //  - 見えている牌で正 ・ 逆が決まっている時は、絞りの前に「確定」の帯 (pochiFx.kakuteiOf)
-  //  - めくれたら、ツモ ・ ロンと同じ金と黒の帯に色の名前と効果 (3 版 T1 a)。逆は灰色の帯とヒビ
-  //  - readOnly は他の人の画面: 引いた人の進み (progress) を外から受けて同じ様にめくる
-  //  - 4 版の答え (同じ日「ポッチの演出もうちょっと強化したい」): 光りは 5 段のステップアップ (目盛りと字、3 段目から揺れる)、
-  //    点がのぞく手前の溜め (暗くして寄り、半分の速さでしかめくれない、心臓の音が速く)、虹の確定のまれなプレミア (虹の光線とサビ 3 秒)
-  //  - 予告 (4 版の 2 の答え): 引いた瞬間に画面の上から牌へ稲妻が落ち、「ぽっちチャンス」の帯。稲妻の光りが期待度 (白 ・ 金 ・ 虹)。
-  //    プレミアの時はプレミアが予告を兼ねる
-  //  - フリーズ (10-15 fx7「これぽっちの演出に入れたい」): 当たりのまれな確定で、予告の代わりに画面と音が 1.3 秒止まる (暗転 / 止め絵)。
-  //    明けにキュインが鳴り、光りは最初から虹 (FreezeFx、割合は pochiFx の FREEZE_RATE)
-  //  - 告知ランプ (10-15 fx10 L1 a): 当たりなら画面の外周が金に光ってキュイン。引いた瞬間 (先告知) か、めくれた後 (後告知)
-  //  - 遅れ (10-15 fx10 B1 a): 引いた時のピキーンだけが 0.3 秒遅れる。割合はどちらも pochiFx (LAMP_PRE_RATE ・ DELAY_RATE)
-  // 閉じ方は前と同じ 3 重 (めくれて 1.6 秒 ・ めくれた後のタップ ・ 触られないまま 30 秒で自動でめくる)
+  // 白ぽっち ・ でかぽっちのムービー (2026-10-25 リョーの仕様「白ぽっち演出の作り直し」)。前の絞り (指で下から上へ) は廃止。
+  // 牌は PUSH を押すまで伏せたまま。尺と中身は plan (pochiFx.rollPlan) と kakutei だけで決まり、当落そのものでは変えない。
+  //  ① 引いた瞬間 (plan.opening): フリーズ (FreezeFx) ・ プレミア ・ 予告 3 種 ・ 無し    確定の帯 (kakutei があれば)
+  //  ② 光りの段階: 白から 1 色ずつ上がって着いた色で脈打つ (plan.glow ・ pulse)。キリン柄 (plan.premium = kirin)
+  //  ③ 発展 (光りが赤以上の時だけ): 暗転して牌が浮かび粒子 (plan.particle)    ④ 溜め: 光りが止まりひび (plan.crack)
+  //  ⑤ PUSH を待つ (plan.push の見た目)。自分は押す ・ 20 秒で自動 PUSH。他の席は「待ち」(引いた人の reveal で結果へ)
+  //  ⑥ 結果: 牌がめくれて色の帯。復活 (plan.premium = revive) は外れの帯 → 「まだや！」→ 本当の帯
+  // 色 (color / revealColor) を読むのは ⑥ の結果の段だけ。それまでは DOM ・ class ・ style のどこにも色由来の物を出さない。
+  // 何もしない画面を触れば PUSH まで飛ぶ (フリーズとプレミアの間は飛ばせない)。
   import { onMount, onDestroy } from 'svelte';
   import { playSound } from './prefs';
   import FreezeFx from './FreezeFx.svelte';
-  import { DELAY_MS, FREEZE_MS, TEASER_MS, POCHI_DOT, POCHI_GOOD, STEP_GLOW, STEP_WORD, TAME_BEATS, TAME_FROM, TAME_TO, pochiRevealText, pochiTopStep, stepAt,
-    type Glow, type LampTiming, type PochiColor, type PochiFreeze, type Teaser } from './pochiFx';
+  import { DEFAULT_PLAN, DELAY_MS, FREEZE_MS, GLOW_ORDER, GLOW_STAGE_MS, KAKUTEI_MS, POCHI_DOT, POCHI_GOOD, PREMIUM_MS, PUSH_IDLE_MS, REMOTE_IDLE_MS,
+    RESULT_MS, REVIVE_MISS_MS, REVIVE_WORD_MS, TEASER_MS, DEVELOP_MS, TAME_MS, develops, glowSteps, movieTimeline, pochiRevealText, shownGlow,
+    type PochiColor, type PochiPlan } from './pochiFx';
 
-  export let color: PochiColor;
+  /** 引いた人の画面だけが持つ色。PUSH の後の結果の段でしか読まない */
+  export let color: PochiColor | null = null;
+  /** 他の人の画面に引いた人の reveal で届く色。届くまで null */
+  export let revealColor: PochiColor | null = null;
+  /** 引いた人が PUSH を押した (App 側の旗)。押す前は色を使わない */
+  export let pushed = false;
   /** でかぽっちなら 'p1' / 'p2' */
   export let deka: 'p1' | 'p2' | null = null;
   export let who = '';
   export let kakutei: 'good' | 'bad' | null = null;
-  /** 期待度: 光りが何段まで上がるか (0〜4)。他の人の画面は引いた人の物を受け取る。無ければここで決める */
-  export let step: number | null = null;
-  /** プレミア (虹の確定のまれな演出)。引いた人が決めて他の席へ流す */
-  export let premium = false;
-  /** 予告の種類: 稲妻か、決め台詞「白って 200 色あんねん」のカットイン (4 版の 3 の答え)。引いた人が決めて他の席へ流す */
-  export let teaser: Teaser = 'bolt';
-  /** 告知ランプ: 当たりの時に画面の外周が光る (pre = 引いた瞬間、post = めくれた後)。引いた人が決めて他の席へ流す */
-  export let lamp: LampTiming | null = null;
-  /** 遅れ: 引いた時のピキーンが 0.3 秒遅れる。引いた人が決めて他の席へ流す */
-  export let delay = false;
-  /** フリーズ (当たりの確定)。引いた人が決めて他の席へ流す。出る時は予告とプレミアは出さない */
-  export let freeze: PochiFreeze | null = null;
-  /** 前の型の光り 2 段 (古い端末から届いた時だけ使う) */
-  export let glow: [Glow, Glow] | null = null;
+  export let plan: PochiPlan = DEFAULT_PLAN;
   export let readOnly = false;
-  /** readOnly の時の進み (0〜1) */
-  export let progress = 0;
-  /** 他の人の画面で、色がまだ届いていない間は点を描かない */
-  export let colorKnown = true;
-  export let onProgress: (p: number) => void = () => {};
-  /** 引いた人の画面が開いた時 (他の席へ「絞り始めた」を流す) */
+  /** 引いた人の画面が開いた時 (他の席へ「引いた」と plan を流す) */
   export let onOpen: () => void = () => {};
+  /** 引いた人が PUSH を押した時 (他の席へ色を流す) */
+  export let onPush: () => void = () => {};
   export let onClose: () => void = () => {};
 
-  // 他の人の画面は色が後から届くので、色から出す物は全部 $: にする
-  $: good = POCHI_GOOD[color];
-  $: text = pochiRevealText(color, !!deka);
-  const topStep: number = step ?? (glow ? (glow[1] === 'rainbow' ? 4 : glow[1] === 'gold' ? 3 : 0)
-    : pochiTopStep(POCHI_GOOD[color], kakutei, Math.random()));
-  const REVEAL_AT = 0.9;
+  type Stage = 'opening' | 'kakutei' | 'glow' | 'develop' | 'tame' | 'push' | 'result';
+  type RPhase = 'burst' | 'miss' | 'word' | 'reveal';
+  // 光りの色 (番号は GLOW_ORDER の順。class 名には色の言葉を使わない)
+  const GLOW_CSS = ['#ffffff', '#3a78ff', '#2ecc71', '#ff3b3b', '#f2c23a', 'conic-gradient(#ff3b3b, #ffd23b, #3bff8a, #3bb8ff, #c63bff, #ff3b3b)'];
+  const PUSH_LOOK: Record<PochiPlan['push'], number> = { normal: 0, red: 1, gold: 2, rainbow: 3 };
+  const tl = movieTimeline(plan, kakutei);
+  const target = GLOW_ORDER.indexOf(shownGlow(plan, kakutei));
+  const dev = develops(plan, kakutei);
+  const isFreeze = plan.opening === 'freeze_black' || plan.opening === 'freeze_still';
+  const isTeaser = plan.opening === 'bolt' || plan.opening === 'line' || plan.opening === 'mono';
 
-  let peel = 0;          // 0〜1。下からめくれた割合
-  let revealed = false;
-  let closing = false;
-  let tileEl: HTMLDivElement | null = null;
-  let startY: number | null = null;
-  let startPeel = 0;
-  let lastTouch = Date.now();
-  let lastY = 0;
-  const beats = new Set<number>();
-  let freezeShowing = !!freeze;
-  let afterFreeze = false;
-  let premiumShowing = premium && !freeze;
-  // 無演出 (teaser 'none') は予告を出さない
-  let teaserShowing = !premium && !freeze && teaser !== 'none';
+  let stage: Stage = tl.openingMs > 0 ? 'opening' : kakutei ? 'kakutei' : 'glow';
+  let rphase: RPhase = 'burst';
+  let gl = -1;              // 光りの色の番号。-1 = まだ光らない
+  let pulsing = false;
+  let dark = false;         // blink: 一瞬消える
+  let devSeen = false;      // 発展に入った (暗転 ・ 浮遊 ・ 溜め ・ ひび)
   let lampOn = false;
-  let kakuteiShowing = false;
-  const teaserGlow = topStep >= 4 ? 'rainbow' : topStep >= 3 ? 'gold' : 'white';
-  let stepNow = -1;
-  let shakeKey = 0;
-
-  $: tame = !revealed && peel >= TAME_FROM && peel < TAME_TO;
-  $: glowNow = revealed ? (good ? (topStep >= 4 ? 'rainbow' : 'gold') : 'none')
-    : stepNow >= 0 ? STEP_GLOW[stepNow] : teaserShowing ? teaserGlow : (kakutei === 'good' || afterFreeze) ? 'rainbow' : 'none';
-  $: if (readOnly) setPeel(progress);
+  let closing = false;
+  let mounted = false;
+  let localPushed = false;
+  let resultColor: PochiColor | null = null;
+  let resultGlow = -1;
+  let flipped = false;      // 牌がめくれて顔が見える
+  let fakeMiss = false;     // 復活の「外れに見せる」間
+  let timers: ReturnType<typeof setTimeout>[] = [];
+  let lampTimer: ReturnType<typeof setTimeout> | undefined;
+  let delayTimer: ReturnType<typeof setTimeout> | undefined;
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let resultTimers: ReturnType<typeof setTimeout>[] = [];
+  let audios: HTMLAudioElement[] = [];
 
   // 試験 (Playwright) は録画に音が入らないので、鳴らした音と時刻を window.__seLog に残す (遅れの試験と録画の音入れ)
   function snd(path: string, vol: number): void {
-    playSound(path, vol);
+    const a = playSound(path, vol);
+    if (a) audios.push(a);
     if (typeof navigator !== 'undefined' && (navigator as any).webdriver) ((window as any).__seLog ??= []).push({ path, vol, at: Date.now() });
   }
   function se(name: string, vol = 0.6): void { snd(`/sounds/fx/${name}.mp3`, vol); }
-  function lightLamp(): void { if (lampOn || closing) return; lampOn = true; se('kyuin', 0.7); }
-  function setPeel(p: number): void {
-    if (revealed || closing) return;
-    const v = Math.max(0, Math.min(1, p));
-    for (const t of [0.18, 0.3, ...TAME_BEATS]) {
-      if (v >= t && !beats.has(t)) { beats.add(t); se('heart', t >= TAME_FROM ? 0.65 : 0.5); }
-    }
-    const k = stepAt(v, topStep);
-    if (k > stepNow) {
-      stepNow = k;
-      se(k >= 3 ? 'kyuin' : 'pikiin', k >= 3 ? 0.6 : 0.5);
-      if (k >= 2) shakeKey += 1;
-    }
-    peel = v;
-    if (!readOnly) onProgress(v);
-    if (v >= REVEAL_AT) reveal();
+  function stopSounds(): void {
+    for (const a of audios) { try { a.pause(); } catch { /* 止まらなくても進める */ } }
+    audios = [];
   }
-  function reveal(): void {
-    if (revealed || closing) return;
-    revealed = true;
-    peel = 1;
-    if (!readOnly) onProgress(1);
+  function lightLamp(): void { if (lampOn || closing) return; lampOn = true; se('kyuin', 0.7); }
+  function later(fn: () => void, ms: number): void { timers.push(setTimeout(fn, ms)); }
+  function clearStageTimers(): void { for (const t of timers) clearTimeout(t); timers = []; }
+  function laterResult(fn: () => void, ms: number): void { resultTimers.push(setTimeout(fn, ms)); }
+
+  // ---- ① 〜 ④ ----
+  function enterStage(s: Stage): void {
+    stage = s;
+    if (s === 'kakutei') se('kyuin', 0.5);
+    if (s === 'glow') startGlow();
+    if (s === 'develop') devSeen = true;
+    if (s === 'tame') { devSeen = true; se('heart', 0.65); }
+  }
+  function startGlow(): void {
+    gl = 0;
+    pulsing = false;
+    const steps = glowSteps(GLOW_ORDER[target]);
+    for (const st of steps) {
+      later(() => { gl = GLOW_ORDER.indexOf(st.color); if (gl >= 4) se('kira', 0.5); }, st.at);
+    }
+    const stepsEnd = steps.length ? steps[steps.length - 1].at : 0;
+    later(() => { pulsing = true; }, stepsEnd + 120);
+    if (plan.pulse === 'blink') {
+      // 脈打ちの代わりに、一瞬消えて虹で点け直す
+      const darkAt = Math.min(stepsEnd + 500, GLOW_STAGE_MS - 700);
+      later(() => { dark = true; }, darkAt);
+      later(() => { dark = false; gl = 5; se('kira', 0.6); }, darkAt + 250);
+    }
+  }
+  function startMovie(): void {
+    // 引いた瞬間の音。フリーズは引いた音も鳴らさず、いきなり止まる (明けのキュインは FreezeFx が鳴らす)
+    if (!isFreeze) {
+      if (plan.delay) delayTimer = setTimeout(() => se('pikiin', 0.4), DELAY_MS);
+      else se('pikiin', 0.4);
+    }
+    if (plan.opening === 'premium') snd('/sounds/bgm/premium_sabi.mp3', 0.55);
+    else if (plan.opening === 'line') { se('kira', 0.6); se('gyuiin', 0.5); }
+    else if (plan.opening === 'mono') { se('gashan', 0.4); se('kira', 0.7); }
+    else if (plan.opening === 'bolt') { se('gashan', 0.6); se('gyuiin', 0.5); }
+    // 先告知のランプは引いた直後 (フリーズの時は明けてから)
+    if (plan.lamp === 'pre') lampTimer = setTimeout(lightLamp, isFreeze ? FREEZE_MS + 100 : 250);
+    // 段の並び。尺 0 の段は飛ばす
+    const seq: { s: Stage; ms: number }[] = [
+      { s: 'opening', ms: tl.openingMs }, { s: 'kakutei', ms: tl.kakuteiMs }, { s: 'glow', ms: tl.glowMs },
+      { s: 'develop', ms: tl.developMs }, { s: 'tame', ms: tl.tameMs },
+    ];
+    let at = 0;
+    let first = true;
+    for (const { s, ms } of seq) {
+      if (ms <= 0) continue;
+      if (first) { enterStage(s); first = false; } else { const t = at; later(() => enterStage(s), t); }
+      at += ms;
+    }
+    later(enterPush, at);
+  }
+
+  // ---- ⑤ PUSH ----
+  function enterPush(): void {
+    if (stage === 'push' || stage === 'result') return;
+    clearStageTimers();
+    stage = 'push';
+    if (gl < 0) gl = target;
+    pulsing = true;
+    clearTimeout(idleTimer);
+    // 押されないままなら、自分は自動 PUSH (他の人を待たせない)。他の席は引いた人の reveal を待ち、来なければ閉じる
+    idleTimer = setTimeout(() => { if (readOnly) close(); else doPush(); }, readOnly ? REMOTE_IDLE_MS : PUSH_IDLE_MS);
+  }
+  function skip(): void {
+    if (plan.lamp === 'pre') lightLamp();
+    clearStageTimers();
+    clearTimeout(delayTimer);
+    stopSounds();
+    devSeen = false;
+    dark = false;
+    gl = target;
+    enterPush();
+  }
+  function doPush(): void {
+    if (readOnly || localPushed || stage === 'result' || closing) return;
+    localPushed = true;
+    se('push', 0.6);
+    onPush();
+    startResult(color);
+  }
+
+  // ---- ⑥ 結果 (ここで初めて色を読む) ----
+  function startResult(c: PochiColor | null): void {
+    if (!c || stage === 'result' || closing) return;
+    clearStageTimers();
+    clearTimeout(idleTimer);
+    clearTimeout(delayTimer);
+    resultColor = c;
+    const good = POCHI_GOOD[c];
+    stage = 'result';
+    pulsing = false;
+    dark = false;
+    devSeen = false;
+    resultGlow = good ? 4 : -1;
+    if (good && plan.premium === 'revive') {
+      // 復活: まず外れに見せて、「まだや！」で本当の当たり
+      rphase = 'miss'; flipped = true; fakeMiss = true;
+      se('hazure', 0.6);
+      laterResult(() => { rphase = 'word'; fakeMiss = false; se('gyuiin', 0.6); }, REVIVE_MISS_MS);
+      laterResult(() => revealFinal(good), REVIVE_MISS_MS + REVIVE_WORD_MS);
+    } else {
+      revealFinal(good);
+    }
+  }
+  function revealFinal(good: boolean): void {
+    rphase = 'reveal'; flipped = true; fakeMiss = false;
     if (good) { se('kyuin', 0.6); snd('/sounds/se_a.mp3', 0.6); } else { se('hazure', 0.6); snd('/sounds/se_b.mp3', 0.6); }
-    if (lamp === 'post' && good) lampTimer = setTimeout(lightLamp, 350);
-    closeTimer = setTimeout(close, 1600);
+    if (plan.lamp === 'post' && good) lampTimer = setTimeout(lightLamp, 350);
+    closeTimer = setTimeout(close, RESULT_MS);
   }
   function close(): void {
     if (closing) return;
     closing = true;
     onClose();
   }
-  function onDown(e: PointerEvent): void {
-    lastTouch = Date.now();
-    if (revealed) { close(); return; }
-    if (readOnly || kakuteiShowing || premiumShowing || teaserShowing || freezeShowing) return;
-    startY = e.clientY;
-    lastY = e.clientY;
-    startPeel = peel;
-    (e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId);
+
+  $: if (mounted && !readOnly && pushed) startResult(color);
+  $: if (mounted && readOnly && revealColor) startResult(revealColor);
+  $: text = resultColor ? pochiRevealText(resultColor, !!deka) : null;
+  $: fakeText = pochiRevealText('red', !!deka);
+  $: good = resultColor ? POCHI_GOOD[resultColor] : false;
+  $: skippable = (stage === 'opening' && !isFreeze && plan.opening !== 'premium') || stage === 'kakutei' || stage === 'glow' || stage === 'develop' || stage === 'tame';
+  $: halo = stage === 'result' ? resultGlow : gl;
+  $: label = stage === 'result' && rphase === 'reveal' && text ? `${text.word} ${text.tag}` : `${who} ${deka ? 'でかぽっち' : '白ぽっち'}`;
+
+  function onDown(): void {
+    if (stage === 'result') { if (rphase === 'reveal') close(); return; }
+    if (skippable) skip();
   }
-  function onMove(e: PointerEvent): void {
-    if (startY === null || readOnly) return;
-    lastTouch = Date.now();
-    const h = tileEl?.offsetHeight ?? 260;
-    // 溜めの間は指の半分しかめくれない (スロー)。指の動いた分を足していく形にした
-    const d = (lastY - e.clientY) / (h * 1.1);
-    lastY = e.clientY;
-    setPeel(peel + (tame && d > 0 ? d * 0.5 : d));
-  }
-  function onUp(): void { startY = null; }
   function onKey(e: KeyboardEvent): void {
+    if (e.target !== e.currentTarget) return;
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
-    if (revealed) close(); else if (!readOnly) setPeel(1);
+    if (stage === 'result') { if (rphase === 'reveal') close(); } else if (stage === 'push') doPush(); else if (skippable) skip();
   }
 
-  let closeTimer: ReturnType<typeof setTimeout> | undefined;
-  let idleTimer: ReturnType<typeof setInterval> | undefined;
-  let kakuteiTimer: ReturnType<typeof setTimeout> | undefined;
-  let premiumTimer: ReturnType<typeof setTimeout> | undefined;
-  let teaserTimer: ReturnType<typeof setTimeout> | undefined;
-  let freezeTimer: ReturnType<typeof setTimeout> | undefined;
-  let lampTimer: ReturnType<typeof setTimeout> | undefined;
-  let delayTimer: ReturnType<typeof setTimeout> | undefined;
-  function startKakutei(): void {
-    if (!kakutei) return;
-    kakuteiShowing = true;
-    se('kyuin', 0.5);
-    kakuteiTimer = setTimeout(() => { kakuteiShowing = false; }, 1100);
-  }
-  onMount(() => {
-    if (!readOnly) onOpen();
-    if (freeze) {
-      // フリーズ: 引いた音も鳴らさず、いきなり止まる。明けのキュインは FreezeFx が鳴らす
-      freezeTimer = setTimeout(() => { freezeShowing = false; afterFreeze = true; startKakutei(); }, FREEZE_MS);
-    } else if (delay) {
-      // 遅れ: 牌と画面は普通に出して、ピキーンだけ 0.3 秒遅れる
-      delayTimer = setTimeout(() => se('pikiin', 0.4), DELAY_MS);
-    } else {
-      se('pikiin', 0.4);
-    }
-    // 先告知のランプは引いた直後 (フリーズの時は明けてから)
-    if (lamp === 'pre') lampTimer = setTimeout(lightLamp, freeze ? FREEZE_MS + 100 : 250);
-    if (freeze) {
-      // 予告とプレミアは出さない
-    } else if (premium) {
-      // プレミア: 虹の光線とアンミカーニバルのサビ 3 秒 (曲のファイルは git に入れない public/sounds/bgm/)。終わってから確定の帯と絞り
-      snd('/sounds/bgm/premium_sabi.mp3', 0.55);
-      premiumTimer = setTimeout(() => { premiumShowing = false; startKakutei(); }, 2800);
-    } else if (teaser === 'none') {
-      // [2026-10-15 fx9 B7] 無演出: 予告を出さずにそのまま (確定の帯があればそれから) 絞りに入る
-      startKakutei();
-    } else {
-      // 予告: 稲妻と「ぽっちチャンス」の帯、または決め台詞のカットインの後に帯。その後に確定の帯と絞り (尺は pochiFx の TEASER_MS)
-      // [2026-10-15 fx5 V3] 3 つ目の予告「白黒」: 卓の色が抜けて牌の光だけ残り、終わりに色が戻る
-      if (teaser === 'line') { se('kira', 0.6); se('gyuiin', 0.5); } else if (teaser === 'mono') { se('gashan', 0.4); se('kira', 0.7); } else { se('gashan', 0.6); se('gyuiin', 0.5); }
-      teaserTimer = setTimeout(() => { teaserShowing = false; startKakutei(); }, TEASER_MS[teaser]);
-    }
-    // 触られないまま 30 秒たったら一気にめくる (他の人を待たせ続けない)。他の人の画面は引いた人に合わせるので 60 秒
-    idleTimer = setInterval(() => {
-      if (revealed || closing) return;
-      if (Date.now() - lastTouch > (readOnly ? 60000 : 30000)) { if (readOnly) close(); else setPeel(1); }
-    }, 1000);
+  // 粒子 (発展の間だけ。位置は番号から決める)
+  const SPECKS = Array.from({ length: 16 }, (_, i) => {
+    const a = (i * 137.508 * Math.PI) / 180;
+    const r = 70 + ((i * 37) % 60);
+    return { x: Math.round(Math.cos(a) * r), y: Math.round(Math.sin(a) * r * 1.15), d: (i % 8) * 0.11, dur: 0.8 + (i % 5) * 0.12, s: 4 + (i % 4) * 2, h: (i * 23) % 360 };
   });
-  onDestroy(() => { clearTimeout(closeTimer); clearInterval(idleTimer); clearTimeout(kakuteiTimer); clearTimeout(premiumTimer); clearTimeout(teaserTimer); clearTimeout(freezeTimer); clearTimeout(lampTimer); clearTimeout(delayTimer); });
+  // ひび (牌の 100 x 133 の中)
+  const CRACK_A = 'M62 0 L55 22 L63 40 L50 62 L58 80 L47 105 L52 133';
+  const CRACK_B = 'M0 55 L20 60 L30 52 L48 66 L66 58 L84 70 L100 64';
+  const CRACK_ALL = [
+    'M50 66 L30 40 L34 18 L22 0', 'M50 66 L72 44 L70 22 L84 0', 'M50 66 L22 72 L10 60 L0 62', 'M50 66 L80 78 L92 70 L100 74',
+    'M50 66 L40 92 L28 108 L30 133', 'M50 66 L62 94 L74 112 L70 133', 'M30 40 L12 44 L0 36', 'M72 44 L90 40 L100 46', 'M40 92 L18 100 L8 118', 'M62 94 L86 100 L96 120',
+    'M22 72 L26 52 L36 46 L44 54 L50 66', 'M80 78 L70 98 L58 100',
+  ];
+  $: cracks = plan.crack === 'one' ? [CRACK_A] : plan.crack === 'two' ? [CRACK_A, CRACK_B] : plan.crack === 'all' ? [CRACK_A, CRACK_B, ...CRACK_ALL] : [];
+  $: showCracks = devSeen && (stage === 'tame' || stage === 'push');
+  $: zoomed = devSeen && (stage === 'tame' || stage === 'push');
+  $: frozen = devSeen && (stage === 'tame' || stage === 'push');
+
+  onMount(() => {
+    mounted = true;
+    if (!readOnly) onOpen();
+    if (readOnly && revealColor) { startResult(revealColor); return; }
+    startMovie();
+  });
+  onDestroy(() => {
+    clearStageTimers();
+    for (const t of resultTimers) clearTimeout(t);
+    clearTimeout(lampTimer); clearTimeout(delayTimer); clearTimeout(closeTimer); clearTimeout(idleTimer);
+  });
+  // 使わない定数を握っておく (尺の表は pochiFx が正)
+  void PREMIUM_MS; void TEASER_MS; void KAKUTEI_MS; void DEVELOP_MS; void TAME_MS;
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="sq" class:revealed class:bad={revealed && !good} class:tame class:mono={teaserShowing && teaser === 'mono'} role="dialog" aria-label={revealed ? `${text.word} ${text.tag}` : `${who} ${deka ? 'でかぽっち' : '白ぽっち'} 絞り中`}
-  tabindex="-1" on:pointerdown={onDown} on:pointermove={onMove} on:pointerup={onUp} on:pointercancel={onUp} on:keydown={onKey}>
-  {#if who}<div class="sq-who">{who}{readOnly ? ' が絞っています' : ''}</div>{/if}
-  {#if freezeShowing && freeze}<FreezeFx kind={freeze} durationMs={FREEZE_MS} />{/if}
+<div class="sq" class:dev={devSeen && stage !== 'result'} class:mono={stage === 'opening' && plan.opening === 'mono'} class:bad={stage === 'result' && rphase === 'reveal' && !good}
+  data-testid="pochi-skip" data-stage={stage} role="dialog" aria-label={label} tabindex="-1" on:pointerdown={onDown} on:keydown={onKey}>
+  {#if who}<div class="sq-who">{who}{readOnly ? ' が引いた' : ''}</div>{/if}
+  {#if stage === 'opening' && isFreeze}<FreezeFx kind={plan.opening === 'freeze_still' ? 'still' : 'black'} durationMs={FREEZE_MS} />{/if}
   {#if lampOn}<div class="sq-edge" aria-hidden="true"><div class="sq-edge-run"></div></div>{/if}
-  {#if premiumShowing}
+  {#if stage === 'opening' && plan.opening === 'premium'}
     <div class="sq-rays" aria-hidden="true"></div>
     <div class="sq-premium" aria-hidden="true">アンミカーニバル</div>
   {/if}
-  {#if teaserShowing && teaser === 'mono'}
+  {#if stage === 'opening' && plan.opening === 'mono'}
     <div class="sq-mono" aria-hidden="true"><div class="sq-mono-scan"></div></div>
     <div class="sq-band teaser mono" aria-hidden="true"><span class="sq-word">ぽっちチャンス</span></div>
-  {:else if teaserShowing && teaser === 'line'}
-    <div class="sq-ci glow-{teaserGlow}" aria-hidden="true"><div class="sq-ci-speed"></div><div class="sq-ci-line">白って 200 色あんねん</div><div class="sq-ci-sig">アン ミカ</div></div>
+  {:else if stage === 'opening' && plan.opening === 'line'}
+    <div class="sq-ci" aria-hidden="true"><div class="sq-ci-speed"></div><div class="sq-ci-line">白って 200 色あんねん</div><div class="sq-ci-sig">アン ミカ</div></div>
     <div class="sq-band teaser line" aria-hidden="true"><span class="sq-word">ぽっちチャンス</span></div>
-  {:else if teaserShowing}
-    <svg class="sq-bolt glow-{teaserGlow}" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M98 -2 L84 12 L89 15 L74 26 L79 29 L62 38 L66 40 L52 46" /></svg>
+  {:else if stage === 'opening' && plan.opening === 'bolt'}
+    <svg class="sq-bolt" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M98 -2 L84 12 L89 15 L74 26 L79 29 L62 38 L66 40 L52 46" /></svg>
     <div class="sq-flash" aria-hidden="true"></div>
     <div class="sq-band teaser" aria-hidden="true"><span class="sq-word">ぽっちチャンス</span></div>
   {/if}
-  {#key shakeKey}<div class="sq-shake" class:go={shakeKey > 0 || (teaserShowing && teaser === 'bolt')}>
-  <div class="sq-tile glow-{glowNow}" class:zoom={tame} bind:this={tileEl}>
-    {#if deka}
-      <img class="sq-pin" src={`/tiles/${deka === 'p1' ? 'Pin1' : 'Pin2'}.svg`} alt="" draggable="false" />
-    {:else}
-      <svg class="sq-face" viewBox="0 0 300 400" aria-hidden="true">{#if colorKnown}<circle cx="150" cy="200" r="24" fill={POCHI_DOT[color]} />{/if}</svg>
-    {/if}
-    <div class="sq-cover" style:clip-path={`inset(0 0 ${peel * 100}% 0)`}></div>
-  </div>
-  </div>{/key}
-  {#if !revealed && !premiumShowing && !kakuteiShowing && !teaserShowing && !freezeShowing}
-    <div class="sq-meter" aria-hidden="true">
-      {#each STEP_GLOW as g, i}<span class="sq-pip" class:on={i <= stepNow} data-glow={g}></span>{/each}
+  {#if stage === 'develop' && plan.particle !== 'none'}
+    <div class="sq-parts pt-{plan.particle}" aria-hidden="true">
+      {#each SPECKS as p}<i style="--x:{p.x}px;--y:{p.y}px;--d:{p.d}s;--dur:{p.dur}s;--s:{p.s}px;--h:{p.h}"></i>{/each}
     </div>
-    {#if stepNow >= 0}{#key stepNow}<div class="sq-step" class:hot={stepNow >= 2}>{STEP_WORD[stepNow]}</div>{/key}{/if}
   {/if}
-  {#if tame}<div class="sq-slow" aria-hidden="true">SLOW</div>{/if}
-  {#if !revealed && !readOnly && !kakuteiShowing && !premiumShowing && !teaserShowing && !freezeShowing && peel < 0.05}<div class="sq-hint">下から上へ指で絞る</div>{/if}
-  {#if kakuteiShowing}
+  <div class="sq-tile gl-{halo}" class:zoom={zoomed} class:float={stage === 'develop'} class:burst={stage === 'result' && rphase !== 'miss' && rphase !== 'word'} class:flipped
+    style="--gc:{halo >= 0 ? GLOW_CSS[halo] : 'transparent'};--ring:{halo >= 0 && halo < 5 ? GLOW_CSS[halo] : '#fff'}">
+    <div class="sq-halo" class:pu-slow={pulsing && stage !== 'result' && plan.pulse === 'slow'} class:pu-fast={pulsing && stage !== 'result' && plan.pulse === 'fast'}
+      class:pu-hold={pulsing && stage !== 'result' && (plan.pulse === 'hold' || plan.pulse === 'blink')} class:dark class:frozen class:rainbow={halo === 5}></div>
+    {#if !flipped}
+      <div class="sq-cover"></div>
+    {:else if resultColor}
+      {#if deka}
+        <img class="sq-pin" src={`/tiles/${deka === 'p1' ? 'Pin1' : 'Pin2'}.svg`} alt="" draggable="false" />
+      {:else}
+        <svg class="sq-face" viewBox="0 0 300 400" aria-hidden="true"><circle cx="150" cy="200" r="30" fill={POCHI_DOT[fakeMiss ? 'red' : resultColor]} /></svg>
+      {/if}
+    {/if}
+    {#if plan.premium === 'kirin' && stage === 'glow'}<div class="sq-kirin" aria-hidden="true"></div>{/if}
+    {#if showCracks && cracks.length}
+      <svg class="sq-cracks" viewBox="0 0 100 133" preserveAspectRatio="none" aria-hidden="true">
+        {#each cracks as d, i}<path {d} style="animation-delay:{i * 0.07}s" />{/each}
+      </svg>
+    {/if}
+    {#if stage === 'result' && rphase === 'burst'}<div class="sq-burst" aria-hidden="true"></div>{/if}
+  </div>
+  {#if stage === 'push'}
+    <div class="sq-pushwrap">
+      {#if readOnly}
+        <button type="button" class="sq-push pk-{PUSH_LOOK[plan.push]}" data-testid="pochi-push" disabled aria-label={`${who} を待っています`}>待ち</button>
+      {:else}
+        <button type="button" class="sq-push pk-{PUSH_LOOK[plan.push]}" data-testid="pochi-push" on:pointerdown|stopPropagation on:click|stopPropagation={doPush}>PUSH</button>
+      {/if}
+    </div>
+  {/if}
+  {#if stage === 'kakutei'}
     <div class="sq-band" class:grey={kakutei === 'bad'}><span class="sq-word">確定</span><span class="sq-tag">{kakutei === 'good' ? '正のぽっち' : '逆のぽっち'}</span></div>
   {/if}
-  {#if revealed}
-    {#if !good}<svg class="sq-crack" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M50 40 L38 22 L41 8 M50 40 L66 25 L70 6 M50 40 L30 48 L10 44 M50 40 L72 52 L94 50 M50 40 L44 64 L36 90 M50 40 L60 66 L68 92" /></svg>{/if}
-    <div class="sq-band reveal" class:grey={!good}><span class="sq-word">{text.word}</span><span class="sq-tag">{text.tag}</span></div>
+  {#if stage === 'result'}
+    {#if rphase === 'miss'}
+      <svg class="sq-crack" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M50 40 L38 22 L41 8 M50 40 L66 25 L70 6 M50 40 L30 48 L10 44 M50 40 L72 52 L94 50 M50 40 L44 64 L36 90 M50 40 L60 66 L68 92" /></svg>
+      <div class="sq-band reveal grey"><span class="sq-word">{fakeText.word}</span><span class="sq-tag">{fakeText.tag}</span></div>
+    {:else if rphase === 'word'}
+      <div class="sq-matada" aria-hidden="true">まだや！</div>
+    {:else if rphase === 'reveal' && text}
+      {#if !good}<svg class="sq-crack" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M50 40 L38 22 L41 8 M50 40 L66 25 L70 6 M50 40 L30 48 L10 44 M50 40 L72 52 L94 50 M50 40 L44 64 L36 90 M50 40 L60 66 L68 92" /></svg>{/if}
+      <div class="sq-band reveal" class:grey={!good}><span class="sq-word">{text.word}</span><span class="sq-tag">{text.tag}</span></div>
+    {/if}
   {/if}
 </div>
 
 <style>
-  .sq { position: fixed; inset: 0; z-index: 9999; background: rgba(4, 8, 6, 0.78); touch-action: none; user-select: none; outline: none; cursor: grab; overflow: hidden; }
+  .sq { position: fixed; inset: 0; z-index: 9999; background: rgba(4, 8, 6, 0.78); user-select: none; outline: none; overflow: hidden; transition: background 0.4s; }
+  .sq.dev { background: rgba(0, 0, 0, 0.94); }
   .sq.bad { background: rgba(0, 0, 0, 0.8); }
   /* 横持ちでは牌が上まで来るので、名前は牌の左に出す (上に置くと牌に隠れる) */
   .sq-who { position: absolute; z-index: 2; left: max(16px, 3vw); top: 42%; transform: translateY(-50%); max-width: calc(50% - min(23vw, 105px) - 24px); overflow: hidden; text-overflow: ellipsis; padding: 3px 14px; background: #111; color: #fff; font: 700 clamp(13px, 2vw, 18px) 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.08em; white-space: nowrap; }
   .sq-tile { position: absolute; left: 50%; top: 42%; width: min(46vw, 210px); aspect-ratio: 3 / 4; transform: translate(-50%, -50%); border-radius: 14px;
-    background: linear-gradient(#fffdf6, #efe8d2); border: 2px solid #d9cfae; box-shadow: 0 10px 0 #c9bf9f, 0 16px 34px rgba(0, 0, 0, 0.6); transition: box-shadow 0.3s; }
-  .sq-tile.glow-white { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 6px #fff, 0 0 50px 14px rgba(255, 255, 255, 0.75); }
-  .sq-tile.glow-gold { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #f2d27a, 0 0 70px 26px rgba(255, 200, 70, 0.95); }
-  .sq-tile.glow-rainbow { animation: sqRainbow 0.6s linear infinite; }
-  @keyframes sqRainbow {
-    0%, 100% { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #ff3b3b, 0 0 80px 30px rgba(255, 80, 80, 0.9); }
-    25% { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #ffd23b, 0 0 80px 30px rgba(255, 220, 80, 0.9); }
-    50% { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #3bff8a, 0 0 80px 30px rgba(80, 255, 140, 0.9); }
-    75% { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #3bb8ff, 0 0 80px 30px rgba(80, 180, 255, 0.9); }
-  }
-  .sq-tile.glow-blue { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #4a8cff, 0 0 70px 24px rgba(70, 140, 255, 0.9); }
-  .sq-tile.glow-green { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #3bd17a, 0 0 70px 24px rgba(60, 220, 120, 0.9); }
-  .sq-tile.zoom { transform: translate(-50%, -50%) scale(1.18); transition: transform 0.5s ease-out, box-shadow 0.3s; }
-  .sq.tame { background: rgba(0, 0, 0, 0.93); }
-  .sq-shake { position: absolute; inset: 0; pointer-events: none; }
-  .sq-shake .sq-tile { pointer-events: auto; }
-  .sq-shake.go { animation: sqShake 0.4s; }
-  @keyframes sqShake { 0%, 100% { transform: none; } 20% { transform: translate(-10px, 6px); } 40% { transform: translate(9px, -7px); } 60% { transform: translate(-6px, -4px); } 80% { transform: translate(4px, 3px); } }
-  /* 溜めで牌が 1.18 倍になっても重ならない様に、牌の半分の幅の 1.2 倍の外に置く */
-  .sq-meter { position: absolute; left: calc(50% + min(23vw, 105px) * 1.2 + 18px); top: 42%; transform: translateY(-50%); display: flex; flex-direction: column-reverse; gap: 8px; }
-  .sq-pip { width: clamp(18px, 3.6vw, 30px); height: clamp(18px, 3.6vw, 30px); border-radius: 7px; border: 2px solid rgba(255, 255, 255, 0.5); background: rgba(0, 0, 0, 0.4); }
-  .sq-pip.on[data-glow='white'] { background: #fff; } .sq-pip.on[data-glow='blue'] { background: #4a8cff; } .sq-pip.on[data-glow='green'] { background: #3bd17a; }
-  .sq-pip.on[data-glow='gold'] { background: #f2c23a; } .sq-pip.on[data-glow='rainbow'] { background: conic-gradient(#ff3b3b, #ffd23b, #3bff8a, #3bb8ff, #c63bff, #ff3b3b); }
-  .sq-step { position: absolute; left: calc(50% + min(23vw, 105px) * 1.2 + 18px + clamp(18px, 3.6vw, 30px) + 12px); top: 42%; transform: translateY(-50%); white-space: nowrap;
-    font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: clamp(26px, 6vw, 56px); color: #fff; -webkit-text-stroke: 4px #111; paint-order: stroke fill; animation: sqPop 0.3s cubic-bezier(0.2, 1.7, 0.4, 1) both; }
-  .sq-step.hot { color: #ffe27a; }
-  .sq-slow { position: absolute; left: max(16px, 3vw); top: max(16px, 4vh); font: 800 clamp(22px, 4vw, 40px) 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.2em; color: #fff; -webkit-text-stroke: 3px #000; paint-order: stroke fill; animation: sqBlink 0.5s steps(2) infinite; }
+    background: linear-gradient(#fffdf6, #efe8d2); border: 2px solid #d9cfae; box-shadow: 0 10px 0 #c9bf9f, 0 16px 34px rgba(0, 0, 0, 0.6); transition: transform 0.5s ease-out, box-shadow 0.3s; }
+  .sq-tile:not(.gl--1) { box-shadow: 0 10px 0 #c9bf9f, 0 0 0 6px var(--ring, #fff); }
+  .sq-tile.zoom { transform: translate(-50%, -50%) scale(1.18); }
+  .sq-tile.float { animation: sqFloat 1.6s ease-in-out infinite; }
+  @keyframes sqFloat { 0%, 100% { transform: translate(-50%, -50%) scale(1.08); } 50% { transform: translate(-50%, calc(-50% - 10px)) scale(1.1); } }
+  .sq-tile.burst { animation: sqBurst 0.5s cubic-bezier(0.2, 1.6, 0.4, 1); }
+  @keyframes sqBurst { 0% { transform: translate(-50%, -50%) scale(0.9); } 45% { transform: translate(-50%, -50%) scale(1.3); } 100% { transform: translate(-50%, -50%) scale(1); } }
+  .sq-burst { position: absolute; inset: -30%; border-radius: 50%; background: radial-gradient(circle, #fff 0, rgba(255, 255, 255, 0.7) 30%, transparent 70%); animation: sqBurstFlash 0.5s ease-out forwards; pointer-events: none; z-index: 3; }
+  @keyframes sqBurstFlash { from { opacity: 1; transform: scale(0.4); } to { opacity: 0; transform: scale(1.6); } }
+  /* 光り: 牌の後ろの層。色は --gc。動かすのは opacity と transform だけ */
+  .sq-halo { position: absolute; inset: -18px; border-radius: 30px; background: var(--gc, transparent); filter: blur(16px); opacity: 0.85; z-index: -1; pointer-events: none; transition: opacity 0.12s; }
+  .sq-tile.gl--1 .sq-halo { opacity: 0; }
+  .sq-halo.rainbow { animation: sqSpinHalo 2s linear infinite; }
+  @keyframes sqSpinHalo { to { transform: rotate(360deg); } }
+  .sq-halo.pu-slow { animation: sqPuSlow 1.8s ease-in-out infinite; }
+  .sq-halo.pu-fast { animation: sqPuFast 0.42s ease-in-out infinite; }
+  .sq-halo.pu-hold { opacity: 1; inset: -26px; }
+  .sq-halo.rainbow.pu-slow { animation: sqPuSlow 1.8s ease-in-out infinite, sqSpinHalo 2s linear infinite; }
+  .sq-halo.rainbow.pu-fast { animation: sqPuFast 0.42s ease-in-out infinite, sqSpinHalo 2s linear infinite; }
+  .sq-halo.dark { opacity: 0.04; transition: opacity 0.05s; }
+  .sq-halo.frozen, .sq-halo.frozen.rainbow { animation-play-state: paused; }
+  @keyframes sqPuSlow { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+  @keyframes sqPuFast { 0%, 100% { opacity: 0.5; scale: 1; } 35% { opacity: 1; scale: 1.1; } 55% { opacity: 0.7; scale: 1.02; } 75% { opacity: 1; scale: 1.08; } }
+  .sq-cover { position: absolute; inset: -2px; border-radius: 14px; background: url('/tiles/Back.svg') center / 100% 100%; pointer-events: none; }
+  .sq-face, .sq-pin { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .sq-pin { transform: scale(0.68); }
+  /* キリン柄: 牌の背に茶色の斑 (光りの段だけ) */
+  .sq-kirin { position: absolute; inset: -2px; border-radius: 14px; pointer-events: none; mix-blend-mode: multiply; opacity: 0.85;
+    background:
+      radial-gradient(ellipse 18% 13% at 22% 18%, #7a4a1a 92%, transparent 100%), radial-gradient(ellipse 14% 17% at 62% 12%, #8a5520 92%, transparent 100%),
+      radial-gradient(ellipse 17% 12% at 84% 30%, #7a4a1a 92%, transparent 100%), radial-gradient(ellipse 13% 16% at 38% 40%, #8a5520 92%, transparent 100%),
+      radial-gradient(ellipse 19% 13% at 72% 52%, #7a4a1a 92%, transparent 100%), radial-gradient(ellipse 14% 15% at 16% 62%, #8a5520 92%, transparent 100%),
+      radial-gradient(ellipse 16% 12% at 48% 70%, #7a4a1a 92%, transparent 100%), radial-gradient(ellipse 13% 15% at 84% 80%, #8a5520 92%, transparent 100%),
+      radial-gradient(ellipse 17% 11% at 26% 88%, #7a4a1a 92%, transparent 100%), radial-gradient(ellipse 12% 14% at 62% 90%, #8a5520 92%, transparent 100%),
+      #d9a85b; }
+  /* ひび: 白と金の細い線 (顔は隠れたまま) */
+  .sq-cracks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+  .sq-cracks path { fill: none; stroke: #fff6c8; stroke-width: 1.4px; vector-effect: non-scaling-stroke; stroke-dasharray: 400; stroke-dashoffset: 400; animation: sqDraw 0.45s ease-out forwards; filter: drop-shadow(0 0 3px #f2c23a); }
+  /* 粒子: 牌の真ん中 (42%) が原点 */
+  .sq-parts { position: absolute; left: 50%; top: 42%; width: 0; height: 0; pointer-events: none; z-index: 1; }
+  .sq-parts i { position: absolute; left: 0; top: 0; width: var(--s); height: var(--s); margin: calc(var(--s) / -2) 0 0 calc(var(--s) / -2); border-radius: 50%; background: #ffe9a0; box-shadow: 0 0 10px 3px rgba(255, 220, 120, 0.9); opacity: 0; animation-delay: var(--d); animation-duration: var(--dur); animation-iteration-count: infinite; animation-timing-function: ease-out; }
+  .pt-float i { animation-name: sqFloatUp; }
+  .pt-suck i { animation-name: sqSuck; background: #bfe6ff; box-shadow: 0 0 10px 3px rgba(140, 200, 255, 0.9); }
+  .pt-rainbow i { animation-name: sqFloatUp; background: hsl(var(--h) 100% 65%); box-shadow: 0 0 10px 3px hsl(var(--h) 100% 65%); }
+  @keyframes sqFloatUp { 0% { opacity: 0; transform: translate(var(--x), calc(var(--y) + 50px)); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--x), calc(var(--y) - 130px)); } }
+  @keyframes sqSuck { 0% { opacity: 0; transform: translate(calc(var(--x) * 1.5), calc(var(--y) * 1.5)) scale(1); } 20% { opacity: 1; } 100% { opacity: 0; transform: translate(0, 0) scale(0.2); } }
+  /* PUSH: 牌の右。名前は左 */
+  .sq-pushwrap { position: absolute; z-index: 8; left: calc(50% + min(23vw, 105px) * 1.2 + 22px); top: 42%; transform: translateY(-50%); }
+  .sq-push { width: clamp(84px, 19vmin, 132px); height: clamp(84px, 19vmin, 132px); border-radius: 50%; border: 4px solid #fff; cursor: pointer; font: 900 clamp(18px, 4.4vmin, 30px) 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.06em;
+    color: #333; background: radial-gradient(circle at 35% 30%, #fff, #c9ccd2 75%); box-shadow: 0 6px 0 #6d717a, 0 0 24px rgba(255, 255, 255, 0.5); animation: sqPushIn 0.35s cubic-bezier(0.2, 1.7, 0.4, 1) both, sqPushBeat 1.1s ease-in-out 0.4s infinite; }
+  .sq-push:active { transform: translateY(4px); box-shadow: 0 2px 0 #6d717a; }
+  .sq-push.pk-1 { color: #fff; background: radial-gradient(circle at 35% 30%, #ff8a8a, #e0262a 75%); box-shadow: 0 6px 0 #7d1114, 0 0 28px rgba(255, 60, 60, 0.8); -webkit-text-stroke: 2px #7d1114; paint-order: stroke fill; }
+  .sq-push.pk-2 { color: #fff; background: radial-gradient(circle at 35% 30%, #fff1a8, #e0a21c 75%); box-shadow: 0 6px 0 #7a5410, 0 0 30px rgba(255, 200, 70, 0.9); -webkit-text-stroke: 2px #7a5410; paint-order: stroke fill; }
+  .sq-push.pk-3 { color: #fff; background: conic-gradient(#ff3b3b, #ffd23b, #3bff8a, #3bb8ff, #c63bff, #ff3b3b); box-shadow: 0 6px 0 #3a2a5a, 0 0 32px rgba(180, 140, 255, 0.9); -webkit-text-stroke: 3px #3a2a5a; paint-order: stroke fill; }
+  .sq-push:disabled { cursor: default; opacity: 0.8; animation: sqPushIn 0.35s cubic-bezier(0.2, 1.7, 0.4, 1) both; font-size: clamp(16px, 3.6vmin, 24px); }
+  @keyframes sqPushIn { from { opacity: 0; scale: 0.3; } to { opacity: 1; scale: 1; } }
+  /* 鼓動は大きさでなく明るさで (大きさを動かすと押す瞬間に位置がずれる) */
+  @keyframes sqPushBeat { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.18) drop-shadow(0 0 10px rgba(255, 255, 255, 0.9)); } }
+  .sq-matada { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); z-index: 6; white-space: nowrap; font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: clamp(40px, 12vw, 130px); color: #ffe27a;
+    -webkit-text-stroke: 6px #111; paint-order: stroke fill; text-shadow: 0 0 24px rgba(255, 200, 70, 0.9); animation: sqPop 0.3s cubic-bezier(0.2, 1.7, 0.4, 1) both; }
   .sq-rays { position: absolute; left: 50%; top: 42%; width: 220vmax; height: 220vmax; margin: -110vmax 0 0 -110vmax; border-radius: 50%; pointer-events: none;
     background: repeating-conic-gradient(#ff3b3b 0 6deg, transparent 6deg 12deg, #ffd23b 12deg 18deg, transparent 18deg 24deg, #3bff8a 24deg 30deg, transparent 30deg 36deg, #3bb8ff 36deg 42deg, transparent 42deg 48deg, #c63bff 48deg 54deg, transparent 54deg 60deg);
     -webkit-mask: radial-gradient(circle, #000 6%, transparent 50%); mask: radial-gradient(circle, #000 6%, transparent 50%); animation: sqSpin 5s linear infinite; opacity: 0.9; }
   .sq-premium { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); white-space: nowrap; z-index: 3; font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: clamp(34px, 10vw, 120px);
     background: linear-gradient(90deg, #ff3b3b, #ffd23b, #3bff8a, #3bb8ff, #c63bff); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-stroke: 2px #fff;
     filter: drop-shadow(0 0 16px rgba(255, 255, 255, 0.8)); animation: sqPop 0.4s cubic-bezier(0.2, 1.7, 0.4, 1) both; }
-  @keyframes sqPop { 0% { opacity: 0; transform: translate(var(--px, 0), -50%) scale(2); } 100% { opacity: 1; transform: translate(var(--px, 0), -50%) scale(1); } }
-  .sq-premium { --px: -50%; }
+  @keyframes sqPop { 0% { opacity: 0; scale: 2; } 100% { opacity: 1; scale: 1; } }
   @keyframes sqSpin { to { transform: rotate(360deg); } }
-  /* 予告の稲妻 (上から牌の真ん中 = 42% へ)。光りの色が期待度 */
-  /* 牌の後ろに描く (上から牌に落ちて見える) */
+  /* 予告の稲妻 (上から牌の真ん中 = 42% へ) */
   .sq-bolt { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-  .sq-bolt path { fill: none; stroke: #fff; stroke-width: 0.9; vector-effect: non-scaling-stroke; stroke-width: 7px; stroke-linejoin: round;
+  .sq-bolt path { fill: none; stroke: #fff; stroke-width: 7px; stroke-linejoin: round; vector-effect: non-scaling-stroke;
     stroke-dasharray: 2000; stroke-dashoffset: 2000; animation: sqBoltDraw 0.3s linear forwards, sqBoltFade 0.5s ease-out 2s forwards;
     filter: drop-shadow(0 0 8px #8fd0ff) drop-shadow(0 0 20px #4a8cff); }
-  .sq-bolt.glow-gold path { filter: drop-shadow(0 0 8px #ffe27a) drop-shadow(0 0 22px #f2a43a); }
-  .sq-bolt.glow-rainbow path { filter: drop-shadow(0 0 8px #ff5ad1) drop-shadow(0 0 22px #5ad1ff); animation: sqBoltDraw 0.3s linear forwards, sqHue 0.6s linear infinite, sqBoltFade 0.5s ease-out 2s forwards; }
   .sq-flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 5; pointer-events: none; animation: sqFlash 0.45s ease-out 0.25s; }
   /* [10-15「出てくるのが高速すぎて」] 予告の帯は稲妻が落ちきってから 0.5 秒かけて入り、字も 0.6 秒で座る */
   .sq-band.teaser { top: 70%; --h: clamp(60px, 13vh, 110px); --fs: calc(min(8vw, 76px, var(--h) * 0.6)); z-index: 6; animation-delay: 0.5s; animation-duration: 0.5s; }
   .sq-band.teaser .sq-word { animation-delay: 0.6s; animation-duration: 0.6s; }
-  /* 決め台詞のカットイン: ピンクの斜めの帯が右から入り、1.8 秒で左へ抜ける。字は Dela Gothic One (CI Line)。帯の縁の光りが期待度 */
+  /* 決め台詞のカットイン: ピンクの斜めの帯が右から入り、1.8 秒で左へ抜ける。字は Dela Gothic One (CI Line) */
   .sq-ci { position: absolute; left: -10%; right: -10%; top: 42%; height: clamp(90px, 24vh, 200px); margin-top: calc(clamp(90px, 24vh, 200px) / -2); z-index: 6; overflow: hidden;
     display: flex; align-items: center; justify-content: center; transform: rotate(-6deg); pointer-events: none;
     background: repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.07) 0 3px, transparent 3px 42px), linear-gradient(180deg, #120612 0 6%, #c2185b 6% 50%, #7b0e3c 50% 94%, #120612 94%);
     box-shadow: 0 0 0 4px #fff inset, 0 12px 34px rgba(0, 0, 0, 0.6); animation: sqCiIn 0.35s cubic-bezier(0.2, 0.9, 0.2, 1) both, sqCiOut 0.3s ease-in 1.8s forwards; }
-  .sq-ci.glow-gold { box-shadow: 0 0 0 4px #f2d27a inset, 0 0 40px 10px rgba(255, 200, 70, 0.8); }
-  .sq-ci.glow-rainbow { box-shadow: 0 0 0 4px #fff inset, 0 0 46px 12px rgba(120, 220, 255, 0.85); }
   .sq-ci-speed { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, transparent 0 18px, rgba(255, 255, 255, 0.16) 18px 20px); }
   .sq-ci-line { position: relative; font-family: 'CI Line', 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: clamp(30px, 8.4vw, 96px); color: #fff; white-space: nowrap;
     -webkit-text-stroke: clamp(4px, 0.6vw, 7px) #120612; paint-order: stroke fill; text-shadow: 5px 5px 0 #3a0820; transform: skewX(-8deg); animation: sqCiWord 0.45s cubic-bezier(0.2, 1.6, 0.4, 1) 0.2s both; }
@@ -315,12 +423,6 @@
   @keyframes sqBoltDraw { to { stroke-dashoffset: 0; } }
   @keyframes sqBoltFade { to { opacity: 0; } }
   @keyframes sqFlash { 0% { opacity: 0.9; } 100% { opacity: 0; } }
-  @keyframes sqHue { to { filter: hue-rotate(360deg) drop-shadow(0 0 8px #ff5ad1); } }
-  @keyframes sqBlink { 50% { opacity: 0.3; } }
-  .sq-face, .sq-pin { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-  .sq-pin { transform: scale(0.68); }
-  .sq-cover { position: absolute; inset: -2px; border-radius: 14px; background: url('/tiles/Back.svg') center / 100% 100%; pointer-events: none; }
-  .sq-hint { position: absolute; left: 50%; top: calc(42% + min(31vw, 150px)); transform: translateX(-50%); color: #fff; font: 700 15px 'Zen Kaku Gothic New', sans-serif; background: rgba(0, 0, 0, 0.55); padding: 4px 14px; border-radius: 4px; white-space: nowrap; }
   /* 帯はアプリのツモ ・ ロン (App.svelte の .dr-band) と同じ見た目 */
   .sq-band { --pink: #f2d27a; --pink2: #b8862b; --sh: #6b4a12; --h: clamp(90px, 20vh, 170px); --fs: calc(min(12vw, 120px, var(--h) * 0.6));
     position: absolute; left: -10%; right: -10%; top: 74%; height: var(--h); margin-top: calc(var(--h) / -2); display: flex; align-items: center; justify-content: center;
@@ -337,7 +439,10 @@
   @keyframes sqBandIn { from { transform: rotate(-7deg) translateX(-120%); } to { transform: rotate(-7deg) translateX(0); } }
   @keyframes sqWord { 0% { opacity: 0; transform: skewX(-12deg) scale(2.4); } 60% { opacity: 1; transform: skewX(-12deg) scale(0.94); } 100% { opacity: 1; transform: skewX(-12deg) scale(1); } }
   @keyframes sqDraw { to { stroke-dashoffset: 0; } }
-  @media (prefers-reduced-motion: reduce) { .sq-band, .sq-word, .sq-crack path, .sq-shake.go, .sq-rays, .sq-slow, .sq-ci-line { animation: none; } .sq-crack path { stroke-dashoffset: 0; } .sq-tile.glow-rainbow { animation: none; box-shadow: 0 10px 0 #c9bf9f, 0 0 0 7px #ff5ad1, 0 0 80px 30px rgba(120, 220, 255, 0.9); } }
+  @media (prefers-reduced-motion: reduce) {
+    .sq-band, .sq-word, .sq-crack path, .sq-cracks path, .sq-rays, .sq-ci-line, .sq-push, .sq-halo, .sq-tile.float, .sq-tile.burst, .sq-parts i, .sq-matada { animation: none; }
+    .sq-crack path, .sq-cracks path { stroke-dashoffset: 0; }
+  }
   /* [2026-10-15 fx10 L1] 告知ランプ = 画面の外周。点いた瞬間に白く光り、金の縁が脈打つ。
      影の大きさは動かさず、重ねた 2 枚の opacity だけを動かす (影を毎こま描き直すと録画もスマホも重い) */
   .sq-edge { position: absolute; inset: 0; z-index: 7; pointer-events: none;

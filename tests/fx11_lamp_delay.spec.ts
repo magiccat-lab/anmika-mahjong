@@ -18,8 +18,7 @@ async function solo(page: Page) {
 async function pochi(page: Page, color: string, force: { lamp: 'pre' | 'post' | null; delay: boolean }) {
   await page.evaluate(({ color, force }) => {
     const w = window as any;
-    w.__forceTeaser = 'none'; w.__forceFreeze = null; w.__forcePremium = false;
-    w.__forceLamp = force.lamp; w.__forceDelay = force.delay;
+    w.__forcePlan = { opening: 'none', glow: 'white', pulse: 'slow', particle: 'none', crack: 'none', push: 'normal', premium: null, lamp: force.lamp, delay: force.delay };
     w.__seLog = [];
     const s = w.__game;
     s.game.lizhi.add(0);
@@ -29,12 +28,10 @@ async function pochi(page: Page, color: string, force: { lamp: 'pre' | 'post' | 
   }, { color, force });
   await expect(page.locator('.sq-tile')).toBeVisible();
 }
+// [2026-10-25] 画面を触って PUSH まで飛ばし、PUSH を押す
 async function pull(page: Page) {
-  const box = (await page.locator('.sq-tile').boundingBox())!;
-  const x = box.x + box.width / 2, y0 = box.y + box.height - 4;
-  await page.mouse.move(x, y0); await page.mouse.down();
-  for (let i = 1; i <= 30; i += 1) { await page.mouse.move(x, y0 - box.height * 1.1 * 1.05 * (i / 30)); await page.waitForTimeout(20); }
-  await page.mouse.up();
+  await page.locator('[data-testid=pochi-skip]').click({ position: { x: 4, y: 4 } });
+  await page.locator('[data-testid=pochi-push]').click();
 }
 const log = (page: Page) => page.evaluate(() => ((window as any).__seLog ?? []) as { path: string; at: number }[]);
 
@@ -44,12 +41,12 @@ test('FX11: 先告知のランプは引いた直後に画面の外周が光る',
   await expect(page.locator('.sq-edge')).toHaveCount(1, { timeout: 1500 });
   await expect(page.locator('.sq-edge')).toHaveCSS('pointer-events', 'none');
   await shot(page, 'fx11-lamp-pre');
-  // 光っている間も指で絞れる
+  // 光っている間も PUSH で開く
   await pull(page);
-  await expect(page.locator('.sq.revealed')).toHaveCount(1);
+  await expect(page.locator('.sq-band.reveal')).toHaveCount(1);
 });
 
-test('FX11: 後告知のランプはめくれた後に光り、絞っている間は光らない', async ({ page }) => {
+test('FX11: 後告知のランプはPUSH の後に光り、その前は光らない', async ({ page }) => {
   await solo(page);
   await pochi(page, 'blue', { lamp: 'post', delay: false });
   await page.waitForTimeout(700);
