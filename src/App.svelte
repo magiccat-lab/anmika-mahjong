@@ -40,6 +40,7 @@
   import RoundEndPanel from './lib/RoundEndPanel.svelte';
   import NextDrawsPanel from './lib/NextDrawsPanel.svelte';
   import { kinpeiOptions } from './lib/kinpeiLabel';
+  import { kanButtonLabel, kanTileName } from './lib/kanLabel';
   import KinpeiPeekBar from './lib/KinpeiPeekBar.svelte';
   // [2026-10-22 リョー「金北選択時に盤面に戻って情報見れるように」] 金北の選択の板をたたんで盤面を見る。選択 [pendingKinpei] は pending のまま
   let kinpeiPeek = false;
@@ -3188,7 +3189,7 @@
         {/if}
         {#if !$game.awaitingFulou}
           {#each $game.game.getKanCandidates(currentPlayer) as km}
-            <button class="kan-btn" on:click={() => game.declareKan(km)}>{km === whiteKanCandidate ? '🤍 白暗カン' : `カン [${km}]`}</button>
+            <button class="kan-btn" on:click={() => game.declareKan(km)}>{km === whiteKanCandidate ? '🤍 白暗カン' : `${kanButtonLabel(km)} [${km}]`}</button>
           {/each}
         {/if}
       </div>
@@ -3214,7 +3215,7 @@
         {/each}
         {#each $game.kanCandidates.filter((c) => c.player === actorSeat) as cand}
           {#each cand.mianzi as m}
-            <button class="kan-btn" on:click={() => game.damingang(cand.player, m)}>p{cand.player} 大明槓 [{m}]</button>
+            <button class="kan-btn" on:click={() => game.damingang(cand.player, m)}>p{cand.player} 大明槓 {kanTileName(m)} [{m}]</button>
           {/each}
         {/each}
         {#if !onlineGameStarted || $game.ponCandidates.some((c) => c.player === actorSeat) || $game.kanCandidates.some((c) => c.player === actorSeat)}
@@ -3670,7 +3671,7 @@
           {/if}
           {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou}
             {#each $game.game.getKanCandidates(currentPlayer) as km}
-              <div class="tb-row"><button class="kan-btn" on:click={() => game.declareKan(km)}>{km === whiteKanCandidate ? '白暗カン' : 'カン'}</button></div>
+              <div class="tb-row"><button class="kan-btn" on:click={() => game.declareKan(km)}>{km === whiteKanCandidate ? '白暗カン' : kanButtonLabel(km)}</button></div>
             {/each}
           {/if}
           <!-- ロン+スキップ は ron-choice-panel に移動 [center overlay 白 bg]、 toolbar 側は出さない -->
@@ -3686,7 +3687,7 @@
             {/each}
             {#each ($game.kanCandidates ?? []).filter(c => c.player === actorSeat) as cand}
               {#each cand.mianzi as m}
-                <div class="tb-row hot"><button class="kan-btn" on:click={() => game.damingang(cand.player, m)}>カン</button></div>
+                <div class="tb-row hot"><button class="kan-btn" on:click={() => game.damingang(cand.player, m)}>{kanButtonLabel(m)}</button></div>
               {/each}
             {/each}
             <div class="tb-row"><button on:click={() => game.pass()}>見送る</button></div>
