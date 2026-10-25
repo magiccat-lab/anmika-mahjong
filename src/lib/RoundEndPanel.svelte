@@ -2,7 +2,7 @@
 <script lang="ts">
   import Tile from './Tile.svelte';
   import { BASE_POINT_TIER, natsuBasePoint } from './helpers';
-  import type { FulouMianzi } from './fulouDisplay';
+  import { fulouTileFaceDown, type FulouMianzi } from './fulouDisplay';
   export let lastWinner: number | null;
   export let huleResult: any;
   export let baopai: string[];
@@ -115,11 +115,15 @@
         {#each winnerFulou as m}
           <span class="fulou-mianzi">
             {#each m.tiles as t, i}
-              {#if i === m.rotateIdx}
+              {#if i === m.rotateIdx && m.kakanTile}
+                <span class="kakan-col">
+                  <span class="rot-tile"><Tile pai={m.kakanTile} size="sm" /></span>
+                  <span class="rot-tile"><Tile pai={t} size="sm" /></span>
+                </span>
+              {:else if i === m.rotateIdx}
                 <span class="rot-tile"><Tile pai={t} size="sm" /></span>
-                {#if m.kakanTile}<span class="rot-tile kakan-stack"><Tile pai={m.kakanTile} size="sm" /></span>{/if}
               {:else}
-                <Tile pai={t} size="sm" />
+                <Tile pai={t} size="sm" face={fulouTileFaceDown(m, i) ? 'down' : 'up'} />
               {/if}
             {/each}
           </span>
@@ -275,7 +279,8 @@
   .winner-hand-label { font-size: 14px; color: #333; font-weight: 700; margin-right: 8px; }
   .fulou-mianzi { display: inline-flex; gap: 1px; padding: 0 4px; border-left: 1px dashed #aaa; align-items: flex-end; }
   .fulou-mianzi .rot-tile { display: inline-block; transform: rotate(90deg); transform-origin: center; margin: 0 4px; }
-  .fulou-mianzi .rot-tile.kakan-stack { margin-top: -14px; }
+  .fulou-mianzi .kakan-col { display: inline-flex; flex-direction: column; align-items: center; }
+  .fulou-mianzi .kakan-col .rot-tile { margin: -4px 4px; }
   .winner-hua { display: inline-flex; gap: 1px; padding: 0 4px; border-left: 1px solid #c8a020; }
   .section-divider {
     border-top: 2px solid #c0a040;

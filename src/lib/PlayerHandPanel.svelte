@@ -2,7 +2,7 @@
 <script lang="ts">
   // 1 player の 手牌 + 副露 + 抜き華 + 抜きドラ + 河
   import Tile from './Tile.svelte';
-  import type { FulouMianzi } from './fulouDisplay';
+  import { fulouTileFaceDown, type FulouMianzi } from './fulouDisplay';
   import { lizhiPaiLabel } from './lizhiUi';
   export let player: number;
   export let label: string;
@@ -72,13 +72,16 @@
     {#each fulou as m}
       <span class="fulou-group">
         {#each m.tiles as t, i}
-          {#if i === m.rotateIdx}
-            <span class="rot-tile" data-testid="naki-rot-tile"><Tile pai={t} /></span>
-            {#if m.kakanTile}
+          {#if i === m.rotateIdx && m.kakanTile}
+            <!-- 加槓は足した 1 枚を横倒しの牌の上に積む [2026-10-25 リョー「かかんも形変」] -->
+            <span class="kakan-col">
               <span class="rot-tile kakan-stack" data-testid="kakan-tile"><Tile pai={m.kakanTile} /></span>
-            {/if}
+              <span class="rot-tile" data-testid="naki-rot-tile"><Tile pai={t} /></span>
+            </span>
+          {:else if i === m.rotateIdx}
+            <span class="rot-tile" data-testid="naki-rot-tile"><Tile pai={t} /></span>
           {:else}
-            <Tile pai={t} />
+            <Tile pai={t} face={fulouTileFaceDown(m, i) ? 'down' : 'up'} />
           {/if}
         {/each}
       </span>
@@ -208,11 +211,12 @@
     line-height: 1.1;
     pointer-events: none;
   }
-  .fulou-group { display: inline-flex; gap: 1px; padding: 0 3px; border-left: 1px dashed #ccc; margin-left: 16px; align-items: flex-end; }
-  /* F2 [2026-05-15]: 鳴き先方向で 横倒し 表示 */
-  .fulou-group .rot-tile { display: inline-block; transform: rotate(90deg); transform-origin: center; margin: 0 6px; }
-  /* 加槓 4 枚目は 横倒し tile に重ねて 上に積む */
-  .fulou-group .rot-tile.kakan-stack { margin-left: -22px; margin-top: -16px; }
+  .fulou-group { --rot-pad: 6px; display: inline-flex; gap: 1px; padding: 0 3px; border-left: 1px dashed #ccc; margin-left: 16px; align-items: flex-end; }
+  /* F2 [2026-05-15]: 鳴き先方向で 横倒し 表示。 --rot-pad = [牌の高さ - 幅] / 2 */
+  .fulou-group .rot-tile { display: inline-block; transform: rotate(90deg); transform-origin: center; margin: 0 var(--rot-pad); }
+  /* 加槓 4 枚目は 横倒しの牌の上に積む [縦の余りを詰めて 2 枚を牌の幅ずつ重ねる] */
+  .fulou-group .kakan-col { display: inline-flex; flex-direction: column; align-items: center; }
+  .fulou-group .kakan-col .rot-tile { margin: calc(-1 * var(--rot-pad)) var(--rot-pad); }
   .hua-group { display: inline-flex; gap: 1px; padding: 0 3px; border-left: 1px solid #c8a020; margin-left: 16px; }
   .shuvari-badge {
     display: inline-block;

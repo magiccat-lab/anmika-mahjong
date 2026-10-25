@@ -60,7 +60,7 @@
   // フィーバー中の 1 巡の刻み [人の強制ツモ切り ・ CPU]。オンラインは ws_server の FEVER_STEP_MS と合わせる
   const FEVER_TSUMOGIRI_MS = 1000;
   import type { FeverCheck } from './lib/game3/feverLizhi';
-  import { parseFulouList, fulouPhysicalFlatTiles, applyAnmikaFulouIdentity } from './lib/fulouDisplay';
+  import { parseFulouList, fulouPhysicalFlatTiles, applyAnmikaFulouIdentity, fulouTileFaceDown } from './lib/fulouDisplay';
   import { isLizhiDeclareEntry } from './lib/riverMarks';
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
   import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint, buildDiagnosticDump } from './lib/store/paifuIo';
@@ -2898,8 +2898,13 @@
     <div class="vfulou">
       {#each fulou as m}
         <span class="vfulou-group">
-          {#each m.tiles as t, ti}<span class="vft" class:vclaimed={ti === m.rotateIdx}><Tile pai={t} size="sm" /></span>{/each}
-          {#if m.kakanTile}<span class="vft vclaimed"><Tile pai={m.kakanTile} size="sm" /></span>{/if}
+          {#each m.tiles as t, ti}
+            {#if ti === m.rotateIdx && m.kakanTile}
+              <span class="vkakan-col"><span class="vft vclaimed"><Tile pai={m.kakanTile} size="sm" /></span><span class="vft vclaimed"><Tile pai={t} size="sm" /></span></span>
+            {:else}
+              <span class="vft" class:vclaimed={ti === m.rotateIdx}><Tile pai={t} size="sm" face={fulouTileFaceDown(m, ti) ? 'down' : 'up'} /></span>
+            {/if}
+          {/each}
         </span>
       {/each}
     </div>
@@ -2918,8 +2923,11 @@
     {/each}
     {#each fulou as m}
       <span class="wall-meld">
-        {#each m.tiles as t, ti}<span class="wall-tile" class:wall-claimed={ti === m.rotateIdx}><Tile pai={t} size="md" /></span>{/each}
-        {#if m.kakanTile}<span class="wall-tile wall-claimed"><Tile pai={m.kakanTile} size="md" /></span>{/if}
+        {#each m.tiles as t, ti}
+          <span class="wall-tile" class:wall-claimed={ti === m.rotateIdx}><Tile pai={t} size="md" face={fulouTileFaceDown(m, ti) ? 'down' : 'up'} /></span>
+          <!-- 加槓の 1 枚は取った牌の隣に [2026-10-25 末尾に離れて出ていた] -->
+          {#if ti === m.rotateIdx && m.kakanTile}<span class="wall-tile wall-claimed"><Tile pai={m.kakanTile} size="md" /></span>{/if}
+        {/each}
       </span>
     {/each}
   </div>
@@ -5947,7 +5955,7 @@
     }
     /* 鳴きの区切りの隙間を詰める (16px → 8px、横向きの牌の脇 6px → 4px) */
     main.mode-single.ui-board-v2 .seat-bottom :global(.hand .fulou-group) { margin-left: 8px; padding: 0 2px; }
-    main.mode-single.ui-board-v2 .seat-bottom :global(.hand .fulou-group .rot-tile) { margin: 0 calc(var(--hand-tile-w) * 0.19 + 1px); }
+    main.mode-single.ui-board-v2 .seat-bottom :global(.hand .fulou-group) { --rot-pad: calc(var(--hand-tile-w) * 0.19 + 1px); }
   }
   /* 手順D-2: 操作 dock [リーチ/カン/次局へ] を v2 の側柱幅 + safe-area 基準に
      アンカーし、リーチ選択帯は右寄せで折り返して盤面中央を塞がない */
@@ -6948,6 +6956,9 @@
   main.mode-single.ui-board-v2 .vfulou-group { flex-direction: row; align-items: flex-end; gap: 1px; margin: 0; padding: 0; border: 0; }
   main.mode-single.ui-board-v2 .vft :global(.tile.size-sm) { width: 20px; height: 28px; min-width: 0; min-height: 0; margin: 0; }
   .vft.vclaimed { display: inline-block; transform: rotate(90deg); margin: 0 4px; }
+  /* 加槓は足した 1 枚を横倒しの牌の上に積む [2026-10-25 リョー「かかんも形変」] */
+  .vkakan-col { display: inline-flex; flex-direction: column; align-items: center; }
+  .vkakan-col .vft.vclaimed { margin: -4px 4px; }
 
   /* ---- 観戦: 左右の人の手牌を卓の辺に縦に並べる [2026-10-13 リョー「三方壁に沿うように」] ----
      卓の枠 [center-board] の左右の端に置く。牌の大きさは枠の高さから決め、河と得点の箱はその分だけ内に寄せる */

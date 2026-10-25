@@ -182,7 +182,29 @@ export function applyAnmikaFulouIdentity(
     }
   }
 
-  return { ...parsed, tiles, kakanTile, rotateIdx };
+  return { ...parsed, tiles: isAnkanDisplay({ ...parsed, rotateIdx, kakanTile }) ? ankanOrder(tiles) : tiles, kakanTile, rotateIdx };
+}
+
+/** 横倒しも加槓も無い 4 枚 = 暗槓 */
+export function isAnkanDisplay(m: FulouMianzi): boolean {
+  return m.rotateIdx === null && !m.kakanTile && m.tiles.length === 4;
+}
+
+/**
+ * [2026-10-25 リョー「カンの時の牌の表示の形変だよね。あんかんもかかんも」]
+ * 暗槓は両端の 2 枚を伏せる [裏表表裏]。 赤 ・ 金 ・ ぽっち等の特別な牌は伏せる端に来ないよう真ん中へ寄せる。
+ */
+export function fulouTileFaceDown(m: FulouMianzi, i: number): boolean {
+  return isAnkanDisplay(m) && (i === 0 || i === 3);
+}
+
+function ankanOrder(tiles: string[]): string[] {
+  const plain = tiles.filter((t) => /^[mpsz][1-9]$/.test(t));
+  const special = tiles.filter((t) => !/^[mpsz][1-9]$/.test(t));
+  if (special.length === 0 || special.length === 4) return tiles;
+  const middle = [...special, ...plain].slice(0, 2);
+  const ends = [...special, ...plain].slice(2);
+  return [ends[0], middle[0], middle[1], ends[1]];
 }
 
 /**
