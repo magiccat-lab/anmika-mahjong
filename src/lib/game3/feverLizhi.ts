@@ -300,7 +300,11 @@ export function isFeverWaitExhausted(
     // [2026-09-14: 向こうはぽっちでも続けていたが、ルールブックはうちの側]
     // ただし白単騎 (待ちが z5 そのもの) は山の白をそのまま待ちとして数える
     // [2026-10-22 リョー「白単騎待ちとして見るから3枚残り扱いになるよ、これはただの白単騎待ちだから」]
-    if (liveWall.some((p) => waits.has(normalizedWaitCore(p)))) return false;
+    // 嵌八萬 [m8] は山に m8 が無く、正ぽっち [青 z5b ・ 緑 z5g] が待ち (feverWaitInfoFromLiveWall と同じ数え方)。
+    // [2026-10-26 通報「間8マンフィーバーが強制流局」: 宣言時に緑ぽっちが山に 1 枚あったのに流局した]
+    const hits = (p: string) => waits.has(normalizedWaitCore(p))
+      || (waits.has('m8') && /^z5[bg]/.test(String(p).replace(/[\+=\-_*]/g, '')));
+    if (liveWall.some(hits)) return false;
     // [2026-09-14] 山に華が残っていると、引いた時に王牌から補充される。
     // その補充牌に待ちかぽっちがあれば、まだ待ちは切れていない。
     // 補充牌自身が華ならさらにもう 1 枚めくれるので、その分も辿る
@@ -311,7 +315,7 @@ export function isFeverWaitExhausted(
         const p = reserve[i];
         pulls -= 1;
         if (String(p).startsWith('f')) { pulls += 1; continue; }   // 華の補充でもう 1 枚
-        if (waits.has(normalizedWaitCore(p))) return false;        // 白は白単騎の時だけ当たる
+        if (hits(p)) return false;                                 // 白は白単騎と嵌八萬の時だけ当たる
       }
     }
     return true;

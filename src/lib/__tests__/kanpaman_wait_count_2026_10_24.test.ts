@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { Game3, buildShoupai } from '../game3';
 import { getTingpaiList } from '../game3/tingpai';
-import { feverWaitInfoFromLiveWall } from '../game3/feverLizhi';
+import { feverWaitInfoFromLiveWall, isFeverWaitExhausted } from '../game3/feverLizhi';
 import type { PlayerId } from '../types';
 import { kanpamanUnseen, riichiWaitSuggestions } from '../riichiWaitSuggest';
 
@@ -48,5 +48,18 @@ describe('嵌八萬の待ちは正ぽっち 2 枚', () => {
     expect(rows).toEqual([expect.objectContaining({ tile: 'm8', remain: 1 })]);
     const both = feverWaitInfoFromLiveWall(['m8'], ['z5b', 'z5g']);
     expect(both[0].remain).toBe(2);
+  });
+
+  // [2026-10-26 通報「間8マンフィーバーが強制流局」T6BF rev 3131: 山に緑ぽっちが 1 枚あった]
+  it('フィーバーの待ち枯れは山の正ぽっちが残っていれば続ける', () => {
+    const none = new Map();
+    expect(isFeverWaitExhausted(['m8'], none, none, [], ['p1', 'z5g', 's9'])).toBe(false);
+    expect(isFeverWaitExhausted(['m8'], none, none, [], ['p1', 'z5r', 'z5y', 'z5'])).toBe(true);
+  });
+
+  it('山の華の補充で正ぽっちを引けるなら続ける', () => {
+    const none = new Map();
+    expect(isFeverWaitExhausted(['m8'], none, none, [], ['f1', 'p1'], ['z5b'])).toBe(false);
+    expect(isFeverWaitExhausted(['m8'], none, none, [], ['p1'], ['z5b'])).toBe(true);
   });
 });
