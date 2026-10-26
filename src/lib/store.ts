@@ -2014,7 +2014,9 @@ export function createGameStore() {
         }
         // この snapshot を以後の神ぽっち / 高目 / 冬再計算の基準にする。
         // 選択前 snapshot のままだと restore 時に金北 target が消えてしまう。
+        // ダブロン判断待ち [snapshotLocked] では save が no-op なので、選択だけ snapshot に写す。
         saveHuleSnapshot(s.game);
+        s.game.recordKinpeiChoiceInLockedSnapshot(winner as PlayerId);
         clearKinpeiStage(s);
         // 再 hule
         let result: any;

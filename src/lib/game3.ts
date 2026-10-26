@@ -756,6 +756,16 @@ export class Game3 {
     this.kinpeiTarget[player] = null;
   }
 
+  /** 金北の選択を lock 中の preHuleSnapshot にも書く [2026-10-26 通報 20261026_0]
+   *  ダブロンで 2 人目の判断待ちの間は snapshotLocked で saveSnapshot が no-op になり、
+   *  selectKinpei の選択が snapshot に残らない。2 人目のロンが restoreSnapshot すると
+   *  先に選んだ金北の先が消え、冬冬金北が冬冬 [上段だけ] でめくられていた。
+   *  盤面は pre-discard のまま、選んだ人の kinpeiTarget だけを写す */
+  recordKinpeiChoiceInLockedSnapshot(player: PlayerId): void {
+    if (!this.snapshotLocked || !this.preHuleSnapshot) return;
+    this.preHuleSnapshot.kinpeiTarget[player] = this.kinpeiTarget[player];
+  }
+
   /** 和了時に「抜いた扱い」となる華牌。
    *  自分で抜いた華に、表ドラ表示の華と、リーチ和了時だけ裏ドラ表示の華を加える。
    *  秋効果で追加表示された華も shan の表示列に残るため同じ経路で含まれる。 */
