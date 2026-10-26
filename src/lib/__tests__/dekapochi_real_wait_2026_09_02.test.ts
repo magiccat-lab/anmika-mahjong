@@ -201,7 +201,7 @@ describe('でかぽっち 本待ち裁定 [2026-09-02 / 10-09 / 10-13]: 待ち�
 
     // zimo(): 黄扱い + 黄倍率 [defen -1 = 逆払い] + 金北自動確定の呼出
     expect(game.shan.lastZimoPochi).toBe('yellow');
-    expect(game.lastZimoInfo).toEqual({ player, pai: 'p2', pochi: 'yellow', gold: false });
+    expect(game.lastZimoInfo).toMatchObject({ player, pai: 'p2', pochi: 'yellow', gold: false });
     expect(game.pochiMultiplier[player]).toEqual(YELLOW);
     expect(game.pochiPaymentMode[player]).toBe(true);
     expect(kinpeiAuto).toHaveBeenCalledTimes(1);

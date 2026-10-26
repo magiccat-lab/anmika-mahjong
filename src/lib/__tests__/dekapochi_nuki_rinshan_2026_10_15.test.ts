@@ -74,7 +74,7 @@ describe('でかぽっち: 北抜きの補充で引いた 1p ・ 2p も通常ツ
     expect(game.getTingpaiListBeforeZimo(player)).not.toContain('p2');
 
     expect(game.shan.lastZimoPochi).toBe('yellow');
-    expect(game.lastZimoInfo).toEqual({ player, pai: 'p2', pochi: 'yellow', gold: false });
+    expect(game.lastZimoInfo).toMatchObject({ player, pai: 'p2', pochi: 'yellow', gold: false });
     expect(game.pochiMultiplier[player]).toEqual(YELLOW);
     expect(game.pochiPaymentMode[player]).toBe(true);
     expect(kinpeiAuto).toHaveBeenCalledTimes(1);

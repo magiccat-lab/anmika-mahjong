@@ -194,6 +194,7 @@ export interface Game3Init {
 export type PochiMultiplier = { defen: number; chip: number };
 type PochiColor = 'blue' | 'red' | 'green' | 'yellow';
 
+export type PochiUndo = { multiplier: PochiMultiplier; kinpeiTarget: 'haru' | 'natsu' | 'aki' | 'fuyu' | null };
 export const NEUTRAL_POCHI_MULTIPLIER: PochiMultiplier = { defen: 1, chip: 1 };
 
 export function normalizePochiMultiplier(v: unknown): PochiMultiplier {
@@ -550,8 +551,9 @@ export class Game3 {
     2: { blue: 0, red: 0, green: 0, yellow: 0 },
   };
 
-  /** 直前のツモ牌情報 [player, pai, pochiColor]、 ツモ切りの色判定用 */
-  lastZimoInfo: { player: PlayerId | null; pai: string | null; pochi: string | null; gold: boolean } = {
+  /** 直前のツモ牌情報 [player, pai, pochiColor]、 ツモ切りの色判定用。
+   *  pochiUndo: このツモでぽっち倍率が付いた時の、付く前の倍率と金ペー。そのぽっちを暗槓したら戻す */
+  lastZimoInfo: { player: PlayerId | null; pai: string | null; pochi: string | null; gold: boolean; pochiUndo?: PochiUndo | null } = {
     player: null, pai: null, pochi: null, gold: false,
   };
 
@@ -937,6 +939,19 @@ export class Game3 {
       // [2026-07-23 4人回し Phase1] 精算 effect の sink [参照渡し。helper が発行を積む]
       chipEffects: this.chipEffects,
     };
+  }
+
+  private capturePochiUndo(player: PlayerId): PochiUndo {
+    return {
+      multiplier: normalizePochiMultiplier(this.pochiMultiplier[player]),
+      kinpeiTarget: this.kinpeiTarget[player],
+    };
+  }
+
+  private pochiChangedSince(player: PlayerId, before: PochiUndo): boolean {
+    const now = normalizePochiMultiplier(this.pochiMultiplier[player]);
+    return now.defen !== before.multiplier.defen || now.chip !== before.multiplier.chip
+      || this.kinpeiTarget[player] !== before.kinpeiTarget;
   }
 
   private setPochiMultiplier(player: PlayerId, value: unknown): void {
@@ -1402,6 +1417,7 @@ export class Game3 {
       else if (pai === 'gs') this.goldHand[player].s += 1;
       else if (pai === 'gN') this.goldHand[player].z += 1;
     }
+    const pochiBefore = this.capturePochiUndo(player);
     const rawColor = pochiColorFromPai(rawPai);
     if (rawColor && corePai === 'z5') {
       this.pochiHand[player][rawColor] += 1;
@@ -1445,6 +1461,7 @@ export class Game3 {
         : isDekapochi ? (this.shan.lastZimoPochi ?? null)
         : null,
       gold: this.shan.lastZimoGold && (pai === 'gp' || pai === 'gs' || pai === 'gN'),
+      ...(this.pochiChangedSince(player, pochiBefore) ? { pochiUndo: pochiBefore } : {}),
     };
     this.events.push({ type: 'zimo', player, pai });
     markFirstTurnDraw(this.firstTurnState, player);
@@ -1458,6 +1475,7 @@ export class Game3 {
    *  共通 helper。 pochi 倍率効果 + lastZimoInfo + 華牌 push [重複保持] を まとめる */
   applyRinshanZimoEffects(player: PlayerId, pai: string, rawPai: any): void {
     const corePai = toCorePai(pai);
+    const pochiBefore = this.capturePochiUndo(player);
     // ぽっち効果 [白ぽっち z5]
     const rawColor = pochiColorFromPai(rawPai);
     if (rawColor && corePai === 'z5') {
@@ -1492,6 +1510,7 @@ export class Game3 {
       pai,
       pochi: corePai === 'z5' || isDekapochi ? (this.shan.lastZimoPochi ?? null) : null,
       gold: this.shan.lastZimoGold && (pai === 'gp' || pai === 'gs' || pai === 'gN'),
+      ...(this.pochiChangedSince(player, pochiBefore) ? { pochiUndo: pochiBefore } : {}),
     };
     this.events.push({ type: 'zimo', player, pai });
   }
@@ -5109,6 +5128,14 @@ export class Game3 {
     const _shanBaopai = [...(shanReadAny._baopai ?? [])];
     const _shanFubaopai = shanReadAny._fubaopai ? [...shanReadAny._fubaopai] : null;
     const _shanWeikaigang = shanReadAny._weikaigang;
+    // [2026-10-26 リョー通報「白アンカンしたせいで祝儀逆」T6BF rev 4346] リーチ後に引いた白ぽっち
+    // [一発のでかぽっち 1p/2p も] は和了に使わず暗槓したら、そのツモで付いた倍率と自動の金ペーを戻す。
+    // 戻さないと赤 [打点 -1 ・ 祝儀 -2] が残ったまま後のロンまで逆払いになる
+    const _origPochi = this.capturePochiUndo(player);
+    const _drawnUndo = this.lastZimoInfo.player === player ? this.lastZimoInfo.pochiUndo ?? null : null;
+    const _drawnCore = this.lastZimoInfo.pai ? toCorePai(this.lastZimoInfo.pai) : null;
+    const pochiUndoOnKan = _drawnUndo && _drawnCore && /^[mpsz]\d{4}$/.test(mianzi)
+      && mianzi.slice(0, 2) === _drawnCore ? _drawnUndo : null;
     try {
       sp.gang(mianzi);
     } catch {
@@ -5133,6 +5160,11 @@ export class Game3 {
       const pochiColor = pochiColorFromPai(rawReplacement);
       if (pochiColor && coreReplacement === 'z5') {
         this.pochiHand[player][pochiColor] += 1;
+      }
+      // 嶺上のぽっちは戻した倍率の上に重ねる
+      if (pochiUndoOnKan) {
+        this.setPochiMultiplier(player, pochiUndoOnKan.multiplier);
+        this.kinpeiTarget[player] = pochiUndoOnKan.kinpeiTarget;
       }
       // R10 P0 #5 #6 fix: 暗槓 / 加槓 嶺上 でも ぽっち効果 + lastZimoInfo 反映
       this.applyRinshanZimoEffects(player, replacement, rawReplacement);
@@ -5164,6 +5196,8 @@ export class Game3 {
       sp._bingpai.s = _origBingpai.s; sp._bingpai.z = _origBingpai.z;
       sp._fulou = _origFulou; sp._zimo = _origZimo;
       restorePhysicalHandState(sp, _origPhysicalHand);
+      this.setPochiMultiplier(player, _origPochi.multiplier);
+      this.kinpeiTarget[player] = _origPochi.kinpeiTarget;
       const shanRestoreAny = this.shan as any;
       // R24 P1 #3 fix: Shan3.restore で完全 rollback、 失敗時 fallback で個別 field 復元
       if (_shanSnap && typeof shanRestoreAny.restore === 'function') {

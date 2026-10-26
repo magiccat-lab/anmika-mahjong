@@ -2415,7 +2415,10 @@
         && !(($game.ronDeclaredPlayers ?? []) as number[]).includes(actorSeat)) {
       if (k !== _autoWinSentKey) { _autoWinSentKey = k; game.ron(actorSeat); }
     } else if (!progressControlsBlocked && currentPlayer === actorSeat && canTsumo && !choosing && !mySqueezeShowing
-        && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.lastDapai && !$game.pendingSaiKoro) {
+        && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.lastDapai && !$game.pendingSaiKoro
+        // [2026-10-26 リョー「白アンカンがカン出来ずに逆ツモ」T6BF rev 4282] リーチ中のぽっちツモで
+        // 暗槓できる時は自動で和了らない (カンするかは本人が選ぶ。逆ツモにもなり得る)
+        && !($game.game.isLizhiPochiDraw(actorSeat) && $game.game.getKanCandidates(actorSeat).length > 0)) {
       if (k !== _autoWinSentKey) { _autoWinSentKey = k; game.tsumo(); }
     }
   }
