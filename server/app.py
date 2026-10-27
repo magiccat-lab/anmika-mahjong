@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import html
 import json
 import logging
@@ -2397,6 +2398,52 @@ async def get_match_paifu(match_id: int, request: Request):
             except Exception:
                 d[dst] = None
     return d
+
+
+@app.get("/api/matches/{match_id}/replay-screen")
+async def get_match_replay_screen(match_id: int, request: Request, seat: int = 0):
+    """[2026-10-27 修] 対局画面のままの牌譜再生。その試合の command を WS サーバーで流し直し、
+    席 seat [-1 = 観戦] に対局中に届いたはずの sync / action を順に返す。読める人は /paifu と同じ。
+    部屋を作り直して command が残っていない試合は 409"""
+    u = current_user(request)
+    if seat not in (-1, 0, 1, 2, 3):
+        raise HTTPException(status_code=400, detail="bad seat")
+    with db_conn() as c:
+        row = c.execute(
+            "SELECT room_id, match_no, finished_at, is_public FROM matches WHERE match_id=?", (match_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="match not found")
+    if not u and not row["is_public"]:
+        raise HTTPException(status_code=401, detail="login required")
+    if not row["room_id"] or not row["match_no"]:
+        raise HTTPException(status_code=409, detail="no commands for this match")
+    try:
+        async with httpx.AsyncClient(timeout=30) as cli:
+            resp = await cli.post(
+                f"{WS_INTERNAL_BASE}/internal/match-replay",
+                json={"room_id": row["room_id"], "match_no": int(row["match_no"]), "seat": seat},
+                headers={"x-anmika-internal-secret": INTERNAL_API_SECRET},
+            )
+    except Exception:
+        log.warning("match replay relay failed match=%s", match_id)
+        raise HTTPException(status_code=502, detail="ws server unreachable")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="ws server rejected replay")
+    result = resp.json()
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=f"cannot replay: {result.get('reason')}")
+    # 同じ部屋 ID で作り直された部屋の別の試合を出さない [試合の保存は最後の command の時刻]
+    try:
+        finished = datetime.datetime.strptime(row["finished_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+        last = datetime.datetime.fromisoformat(str(result["lastAcceptedAt"]).replace("Z", "+00:00"))
+        if abs((finished - last).total_seconds()) > 300:
+            raise HTTPException(status_code=409, detail="commands do not match this match")
+    except (TypeError, ValueError, KeyError):
+        pass
+    result["match_id"] = match_id
+    result["seat"] = seat
+    return JSONResponse(result)
 
 
 @app.post("/api/matches/{match_id}/public")

@@ -29,6 +29,7 @@
   import StatsPanel from './lib/StatsPanel.svelte';
   import AnalysisPanel from './lib/AnalysisPanel.svelte';
   import ReplayPanel from './lib/ReplayPanel.svelte';
+  import { ReplaySocket, replayRounds, type ReplayRound, type ReplayStatus } from './lib/replaySocket';
   import RulesPanel from './lib/RulesPanel.svelte';
   import FxOddsPanel from './lib/FxOddsPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
@@ -204,7 +205,7 @@
   // [cutin → 白ぽっち開示 → 選択モーダル → サイコロ]。
   // 主因は PochiReveal が独立キュー + z-index 9999 で他演出を覆っていた事
   $: fxCutinBusy = !!$game.cutin || (($game.cutinQueue?.length ?? 0) > 0);
-  $: fxPochiRevealShowing = (!!pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat)) || (onlineGameStarted && !!remotePochi);
+  $: fxPochiRevealShowing = (!!pochiReveal && (!onlineGameStarted || pochiReveal.player === actorSeat || !!screenReplay)) || (onlineGameStarted && !!remotePochi);
   // [2026-10-15 リョー ○ anmika-fuyu1 の 3] 冬冬金北の冬めくりは伏せた牌を自分でめくる (FuyuFlip)。
   // 和了の帯が終わってから出し、めくり終わって OK を押すまで和了の板 ・ サイコロ ・ CPU の自動の次局送りを待たせる。
   // 出し直さない印は局と和了の中身から作る (オンラインは投影が来るたびに和了の物が作り直されるので、物では覚えられない)
@@ -1553,7 +1554,8 @@
   // [2026-09-14] ?replay=<id> で開かれたら、メニューではなく牌譜を直接出す。
   // 公開牌譜のリンクを踏んだ人が 3 手たどらずに局面へ着く
   if (typeof window !== 'undefined'
-      && new URLSearchParams(window.location.search).has('replay')) {
+      && new URLSearchParams(window.location.search).has('replay')
+      && new URLSearchParams(window.location.search).get('screen') !== '1') {
     replayPanelOpen = true;
   }
   // [2026-07-23 リョー要望] 観戦モード: seat=-1 の閲覧専用接続。
@@ -1944,6 +1946,104 @@
     }, delay);
   }
 
+  // [2026-10-27 修] 受け口を onmessage から出した。対局画面の牌譜再生 [ReplaySocket] も同じ所を通す
+  function handleOnlineMessage(ws: WebSocket, msg: any): void {
+    if (msg.type === 'start') {
+      absorbSeatContract(msg); // [Phase3] selfPlayer 決定前に game seat を確定させる
+      const initialized = initializeOnlineFromStart(ws, msg, {
+        revision: msg.revision ?? 0,
+        matchId: msg.matchId ?? 1,
+        roundId: msg.roundId ?? 1,
+      });
+      if (!initialized) requestOnlineResync(ws, 0);
+      else markOnlineSyncHealthy();
+    } else if (msg.type === 'sync') {
+      absorbSeatContract(msg); // [Phase3] sync top-level に recipient seat 契約
+      absorbSeatContract(msg.snapshot); // activeMapping / roomChipLedger は snapshot 側
+      // [2026-10-09 遊真 C1] 巻き戻し [rewind] で revision が戻った時は、持っている待ち時間を捨てる
+      // [古い revision として無視され続けて、巻き戻し前の表示が残らないように]
+      if (onlineDeadline && typeof msg.snapshot?.revision === 'number' && msg.snapshot.revision < onlineDeadline.revision) {
+        clearOnlineDeadline();
+      }
+      applyCanonicalSync(ws, msg.snapshot);
+    } else if (msg.type === 'lobby') {
+      onlineMembers = msg.members ?? [];
+    } else if (msg.type === 'deadline') {
+      // [2026-10-09 遊真 C1] 誰待ちか ・ 残り何秒か
+      onOnlineDeadline(msg);
+    } else if (msg.type === 'action') {
+      // [Phase3 Sol P1-1] seat 契約の吸収は applyRevisionedAction 内の revision 検証後
+      applyRevisionedAction(ws, msg);
+    } else if (msg.type === 'reject') {
+      console.warn('[online] command rejected', msg.reason, msg.commandId);
+      // [2026-10-15 リョー「何かツモボタン押してもつもれなくてリロードしたらつ漏れる感じだった」]
+      // 版のずれ以外で断られた時 (画面とサーバの局面がずれている) も、読み直さずに済むよう同期し直す。
+      // server は resync を間引くので連打にはならない
+      if (msg.reason !== 'version conflict') {
+        try { if (onlineWs && onlineWs.readyState === WebSocket.OPEN) onlineWs.send(JSON.stringify({ type: 'resync' })); } catch { /* 次の再接続で戻る */ }
+      }
+      // [2026-07-23 総点検 P1] roll 送信が reject された時に awaitingRollAck が
+      // 永久に残らないよう、SaiKoroModal へ復旧シグナルを送る
+      saiKoroRecoveryNonce += 1;
+    } else if (msg.type === 'readyNextRoundNack') {
+      // [2026-07-23 総点検 P2] 楽観押下のロールバック [押せるのに全員待ち表示で固まる対策]
+      nextRoundPressedLocal = false;
+    } else if (msg.type === 'nextRoundReady') {
+      // [2026-07-22 リョー要望] 全員ready制の進捗 [server broadcast]
+      nextRoundReadySeats = Array.isArray(msg.seats) ? msg.seats : [];
+      if (typeof msg.total === 'number' && msg.total > 0) nextRoundReadyTotal = msg.total;
+      // [2026-07-23 Sol R2で露出] 自分の押下が server 側の revision reset で消えていたら
+      // 楽観「全員待ち」表示を戻して再押下できるようにする [nack 補完の保険]
+      {
+        // [Phase3] ready 集約は room seat 契約 [4人部屋は seat 3 もあり得る]
+        const own = onlineRoomMeta?.mySeat;
+        if (nextRoundPressedLocal && typeof own === 'number' && own >= 0 && own <= 3
+          && !nextRoundReadySeats.includes(own)) {
+          nextRoundPressedLocal = false;
+        }
+      }
+    } else if (msg.type === 'cpuSaiFast') {
+      // [2026-10-09 shun] 卓の誰かが CPU のサイコロをスキップした。server が刻みを詰めるので、演出も止める
+      cpuSaiFast = true;
+    } else if (msg.type === 'fuyuFx') {
+      // [2026-10-15] 他の人の冬冬金北のめくり。めくった枚数だけが届く
+      const roomSeat = typeof msg.seat === 'number' ? msg.seat : -1;
+      if (roomSeat !== (onlineRoomMeta?.mySeat ?? -2)) {
+        const gameSeat = clientRoomToGameSeat(onlineActiveMapping, roomSeat);
+        if (gameSeat !== null && gameSeat !== actorSeat) onRemoteFuyuFx(gameSeat, msg);
+      }
+    } else if (msg.type === 'pochiFx') {
+      // [2026-10-14] 他の人の白ぽっちの絞り。自分の分は自分の画面で出している
+      const roomSeat = typeof msg.seat === 'number' ? msg.seat : -1;
+      if (roomSeat !== (onlineRoomMeta?.mySeat ?? -2)) {
+        const gameSeat = clientRoomToGameSeat(onlineActiveMapping, roomSeat);
+        if (gameSeat !== null && gameSeat !== actorSeat) onRemotePochiFx(gameSeat, msg);
+      }
+    } else if (msg.type === 'stamp') {
+      // [2026-10-09 shun2 R2] 他の人のスタンプ。server は room seat で送ってくる。
+      // 受け口が無く、他の人の画面に出ていなかった。盤面の game seat に直して出す [自分の分は押した時に出している]
+      const roomSeat = typeof msg.seat === 'number' ? msg.seat : -1;
+      if (roomSeat !== (onlineRoomMeta?.mySeat ?? -2)) {
+        const gameSeat = clientRoomToGameSeat(onlineActiveMapping, roomSeat);
+        if (gameSeat !== null) game.applyOnlineRemoteAction(gameSeat, { type: 'stamp', stampId: msg.stampId });
+      }
+    } else if (msg.type === 'chipResetVote') {
+      // [2026-07-23 リョー指示] チップリセット同意の進捗 [server broadcast]
+      chipResetVoteSeats = Array.isArray(msg.seats) ? msg.seats : [];
+      if (typeof msg.total === 'number' && msg.total > 0) chipResetVoteTotal = msg.total;
+      // [2026-07-23 Sol 4周目 P1] checkbox は server 票の鏡にする。reconnect で
+      // 旧 true 票が server に残ったまま unchecked 表示だと、host の通常
+      // 「次の試合へ」で予告なくリセットが発動し得た
+      if (onlineGameStarted && !onlineSpectator) {
+        // [Phase3] チップリセット同意も room seat 契約
+        const own = onlineRoomMeta?.mySeat;
+        if (typeof own === 'number' && own >= 0 && own <= 3) {
+          resetChipOnNextMatch = chipResetVoteSeats.includes(own);
+        }
+      }
+    }
+  }
+
   async function connectOnlineWs(_isRetry = false) {
     if (!currentRoomId || !onlineMe || !onlineRoomMeta) return;
     onlineShouldReconnect = true;
@@ -1988,100 +2088,7 @@
     ws.onmessage = (event) => {
       if (generation !== onlineSocketGeneration) return;
       let msg: any; try { msg = JSON.parse(event.data); } catch { return; }
-      if (msg.type === 'start') {
-        absorbSeatContract(msg); // [Phase3] selfPlayer 決定前に game seat を確定させる
-        const initialized = initializeOnlineFromStart(ws, msg, {
-          revision: msg.revision ?? 0,
-          matchId: msg.matchId ?? 1,
-          roundId: msg.roundId ?? 1,
-        });
-        if (!initialized) requestOnlineResync(ws, 0);
-        else markOnlineSyncHealthy();
-      } else if (msg.type === 'sync') {
-        absorbSeatContract(msg); // [Phase3] sync top-level に recipient seat 契約
-        absorbSeatContract(msg.snapshot); // activeMapping / roomChipLedger は snapshot 側
-        // [2026-10-09 遊真 C1] 巻き戻し [rewind] で revision が戻った時は、持っている待ち時間を捨てる
-        // [古い revision として無視され続けて、巻き戻し前の表示が残らないように]
-        if (onlineDeadline && typeof msg.snapshot?.revision === 'number' && msg.snapshot.revision < onlineDeadline.revision) {
-          clearOnlineDeadline();
-        }
-        applyCanonicalSync(ws, msg.snapshot);
-      } else if (msg.type === 'lobby') {
-        onlineMembers = msg.members ?? [];
-      } else if (msg.type === 'deadline') {
-        // [2026-10-09 遊真 C1] 誰待ちか ・ 残り何秒か
-        onOnlineDeadline(msg);
-      } else if (msg.type === 'action') {
-        // [Phase3 Sol P1-1] seat 契約の吸収は applyRevisionedAction 内の revision 検証後
-        applyRevisionedAction(ws, msg);
-      } else if (msg.type === 'reject') {
-        console.warn('[online] command rejected', msg.reason, msg.commandId);
-        // [2026-10-15 リョー「何かツモボタン押してもつもれなくてリロードしたらつ漏れる感じだった」]
-        // 版のずれ以外で断られた時 (画面とサーバの局面がずれている) も、読み直さずに済むよう同期し直す。
-        // server は resync を間引くので連打にはならない
-        if (msg.reason !== 'version conflict') {
-          try { if (onlineWs && onlineWs.readyState === WebSocket.OPEN) onlineWs.send(JSON.stringify({ type: 'resync' })); } catch { /* 次の再接続で戻る */ }
-        }
-        // [2026-07-23 総点検 P1] roll 送信が reject された時に awaitingRollAck が
-        // 永久に残らないよう、SaiKoroModal へ復旧シグナルを送る
-        saiKoroRecoveryNonce += 1;
-      } else if (msg.type === 'readyNextRoundNack') {
-        // [2026-07-23 総点検 P2] 楽観押下のロールバック [押せるのに全員待ち表示で固まる対策]
-        nextRoundPressedLocal = false;
-      } else if (msg.type === 'nextRoundReady') {
-        // [2026-07-22 リョー要望] 全員ready制の進捗 [server broadcast]
-        nextRoundReadySeats = Array.isArray(msg.seats) ? msg.seats : [];
-        if (typeof msg.total === 'number' && msg.total > 0) nextRoundReadyTotal = msg.total;
-        // [2026-07-23 Sol R2で露出] 自分の押下が server 側の revision reset で消えていたら
-        // 楽観「全員待ち」表示を戻して再押下できるようにする [nack 補完の保険]
-        {
-          // [Phase3] ready 集約は room seat 契約 [4人部屋は seat 3 もあり得る]
-          const own = onlineRoomMeta?.mySeat;
-          if (nextRoundPressedLocal && typeof own === 'number' && own >= 0 && own <= 3
-            && !nextRoundReadySeats.includes(own)) {
-            nextRoundPressedLocal = false;
-          }
-        }
-      } else if (msg.type === 'cpuSaiFast') {
-        // [2026-10-09 shun] 卓の誰かが CPU のサイコロをスキップした。server が刻みを詰めるので、演出も止める
-        cpuSaiFast = true;
-      } else if (msg.type === 'fuyuFx') {
-        // [2026-10-15] 他の人の冬冬金北のめくり。めくった枚数だけが届く
-        const roomSeat = typeof msg.seat === 'number' ? msg.seat : -1;
-        if (roomSeat !== (onlineRoomMeta?.mySeat ?? -2)) {
-          const gameSeat = clientRoomToGameSeat(onlineActiveMapping, roomSeat);
-          if (gameSeat !== null && gameSeat !== actorSeat) onRemoteFuyuFx(gameSeat, msg);
-        }
-      } else if (msg.type === 'pochiFx') {
-        // [2026-10-14] 他の人の白ぽっちの絞り。自分の分は自分の画面で出している
-        const roomSeat = typeof msg.seat === 'number' ? msg.seat : -1;
-        if (roomSeat !== (onlineRoomMeta?.mySeat ?? -2)) {
-          const gameSeat = clientRoomToGameSeat(onlineActiveMapping, roomSeat);
-          if (gameSeat !== null && gameSeat !== actorSeat) onRemotePochiFx(gameSeat, msg);
-        }
-      } else if (msg.type === 'stamp') {
-        // [2026-10-09 shun2 R2] 他の人のスタンプ。server は room seat で送ってくる。
-        // 受け口が無く、他の人の画面に出ていなかった。盤面の game seat に直して出す [自分の分は押した時に出している]
-        const roomSeat = typeof msg.seat === 'number' ? msg.seat : -1;
-        if (roomSeat !== (onlineRoomMeta?.mySeat ?? -2)) {
-          const gameSeat = clientRoomToGameSeat(onlineActiveMapping, roomSeat);
-          if (gameSeat !== null) game.applyOnlineRemoteAction(gameSeat, { type: 'stamp', stampId: msg.stampId });
-        }
-      } else if (msg.type === 'chipResetVote') {
-        // [2026-07-23 リョー指示] チップリセット同意の進捗 [server broadcast]
-        chipResetVoteSeats = Array.isArray(msg.seats) ? msg.seats : [];
-        if (typeof msg.total === 'number' && msg.total > 0) chipResetVoteTotal = msg.total;
-        // [2026-07-23 Sol 4周目 P1] checkbox は server 票の鏡にする。reconnect で
-        // 旧 true 票が server に残ったまま unchecked 表示だと、host の通常
-        // 「次の試合へ」で予告なくリセットが発動し得た
-        if (onlineGameStarted && !onlineSpectator) {
-          // [Phase3] チップリセット同意も room seat 契約
-          const own = onlineRoomMeta?.mySeat;
-          if (typeof own === 'number' && own >= 0 && own <= 3) {
-            resetChipOnNextMatch = chipResetVoteSeats.includes(own);
-          }
-        }
-      }
+      handleOnlineMessage(ws, msg);
     };
     ws.onclose = (event) => {
       if (generation !== onlineSocketGeneration) return;
@@ -2129,7 +2136,91 @@
     onlineSeatInfoReceived = false;
     onlineActiveMapping = null;
     onlineRoomChipLedger = null;
+    replaySocket = null;
+    screenReplay = null;
   }
+
+  // [2026-10-27 修] 対局画面のままの牌譜再生 [?replay=<試合>&screen=1&seat=<席>]。リョー「おんみかの牌譜再生も
+  // 普通にオンミカ画面のままで牌譜見たい…視点も変えられるように」。server が流し直した sync / action を
+  // ReplaySocket が対局中と同じ受け口 [handleOnlineMessage] へ流す。席を替えたら同じ手の所から取り直す。
+  // rec=1 は録画用 [操作の帯を出さない]
+  let replaySocket: ReplaySocket | null = null;
+  let screenReplay: { matchId: number; seat: number; members: Array<{ seat: number; username: string }>; rounds: ReplayRound[] } | null = null;
+  let screenReplayStatus: ReplayStatus = { index: 0, total: 0, playing: false, speed: 1 };
+  let screenReplayError: string | null = null;
+  let screenReplayLoading = false;
+  const screenReplayRec = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('rec') === '1';
+  async function startScreenReplay(matchId: number, seat: number, startIndex = 0, autoplay = true, stopAt?: number): Promise<void> {
+    if (screenReplayLoading) return;
+    screenReplayLoading = true;
+    screenReplayError = null;
+    const speed = screenReplayStatus.speed;
+    try {
+      const res = await fetch(`/api/matches/${matchId}/replay-screen?seat=${seat}`, { credentials: 'include' });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d?.detail).catch(() => null);
+        throw new Error(res.status === 401 ? 'ログインすると見られます' : (detail ?? `読めなかった (${res.status})`));
+      }
+      const data = await res.json();
+      const frames = Array.isArray(data?.frames) ? data.frames : [];
+      if (frames.length === 0) throw new Error('この試合の記録が無い');
+      disconnectOnline();
+      const base = frames[0].msg;
+      const members = (base?.snapshot?.currentMembers ?? base?.snapshot?.start?.members ?? []) as Array<{ seat: number; user_id: string; username: string }>;
+      const me = members.find((m) => m.seat === seat);
+      onlineMe = { user_id: me?.user_id ?? '', username: me?.username ?? '' };
+      onlineRoomMeta = { isHost: false, hostUserId: '', mySeat: seat };
+      onlineSpectator = seat < 0;
+      appMode = 'started';
+      viewMode = 'online';
+      const socket = new ReplaySocket(frames, {
+        busy: () => fxPresentationBusy || !!pochiReveal || !!remotePochi,
+        onStatus: (status) => {
+          if (replaySocket !== socket) return;
+          screenReplayStatus = status;
+          // 録画の道具が終わりを知る所
+          if (screenReplayRec) (window as any).__screenReplayStatus = status;
+        },
+        startIndex,
+        autoplay,
+        stopAt,
+      });
+      socket.setSpeed(speed);
+      socket.onopen = () => { if (replaySocket === socket) onlineSocketOpen = true; };
+      socket.onmessage = (event) => {
+        if (replaySocket !== socket) return;
+        let msg: any; try { msg = JSON.parse(event.data); } catch { return; }
+        if (msg?.type === 'sync') {
+          // 飛んだ先までのぽっちは演出しない [対局中の読み直しと同じく、その時の盤面から数え直す]
+          pochiScanBootstrapped = false;
+          pochiRevealQueue = [];
+          pochiReveal = null;
+          remotePochi = null;
+        }
+        handleOnlineMessage(socket as unknown as WebSocket, msg);
+      };
+      replaySocket = socket;
+      onlineWs = socket as unknown as WebSocket;
+      screenReplay = { matchId, seat, members, rounds: replayRounds(frames) };
+    } catch (error: any) {
+      screenReplayError = String(error?.message ?? error);
+    } finally {
+      screenReplayLoading = false;
+    }
+  }
+  function switchScreenReplaySeat(seat: number): void {
+    if (!screenReplay || seat === screenReplay.seat) return;
+    void startScreenReplay(screenReplay.matchId, seat, Math.max(0, screenReplayStatus.index - 1), screenReplayStatus.playing);
+  }
+  function closeScreenReplay(): void {
+    const matchId = screenReplay?.matchId;
+    disconnectOnline();
+    window.location.href = matchId ? `/?replay=${matchId}` : '/';
+  }
+  $: screenReplayRoundIdx = screenReplay
+    ? Math.max(0, screenReplay.rounds.findLastIndex((r) => r.index <= screenReplayStatus.index - 1))
+    : 0;
+
   // [2026-10-09 遊真 C1] タブ / アプリに戻った時の即復帰。スマホは裏に回すと socket が死ぬが close の
   // 通知も遅れ、backoff [最大 10 秒] も待たされる。閉じていれば今つなぎ直し [attempt は 0 に戻す]、
   // 生きていれば resync で盤面を取り直す。終端 close [4001 等] と、接続し直し中は触らない
@@ -2229,6 +2320,20 @@
     // [2026-10-09 遊真 B2] 部屋の中にいる間は ?room= が URL に残る [syncRoomUrl]ので、再読み込みも同じ道を通る:
     //   join は既存 member なら対局中でも冪等に成功 → RoomPanel が status=playing を見て onStart →
     //   connectOnlineWs → server の sync で盤面を復元
+    {
+      const params = new URLSearchParams(window.location.search);
+      const replayId = Number(params.get('replay'));
+      if (params.get('screen') === '1' && Number.isInteger(replayId) && replayId > 0) {
+        const seat = Number(params.get('seat') ?? 0);
+        const speed = Number(params.get('speed'));
+        if ([0.5, 1, 2, 4].includes(speed)) screenReplayStatus = { ...screenReplayStatus, speed };
+        appMode = 'started';
+        const until = Number(params.get('until'));
+        void startScreenReplay(replayId, [-1, 0, 1, 2, 3].includes(seat) ? seat : 0, Math.max(0, Number(params.get('at') ?? 0) || 0),
+          params.get('pause') !== '1', Number.isInteger(until) && until > 0 ? until : undefined);
+        return;
+      }
+    }
     try {
       const params = new URLSearchParams(window.location.search);
       const rid = params.get('room');
@@ -3029,11 +3134,48 @@
     </div>
   {/if}
   <!-- [2026-07-23 リョー要望 観戦モード] 閲覧専用の明示バナー -->
-  {#if onlineSpectator && onlineGameStarted}
+  {#if onlineSpectator && onlineGameStarted && !screenReplay}
     <div class="spectator-banner">
       <span>観戦中 [部屋 {currentRoomId}]</span>
       <button on:click={() => { disconnectOnline(); currentRoomId = null; viewMode = 'online'; }}>退出</button>
     </div>
+  {/if}
+  <!-- [2026-10-27 修] 対局画面のままの牌譜再生の操作。盤面は触れない様に覆う [押しても送らないが、出しかけの操作で画面が変わるため] -->
+  {#if screenReplay || screenReplayError || screenReplayLoading}
+    {#if screenReplay}<div class="screen-replay-shield" aria-hidden="true"></div>{/if}
+    {#if !screenReplayRec}
+      <div class="screen-replay-bar" role="toolbar" aria-label="牌譜再生">
+        {#if screenReplayError}
+          <span class="srb-error">{screenReplayError}</span>
+          <button type="button" on:click={closeScreenReplay}>戻る</button>
+        {:else if !screenReplay}
+          <span>読み込み中…</span>
+        {:else}
+          <span class="srb-title">牌譜 {screenReplay.matchId}</span>
+          <select aria-label="局" value={screenReplayRoundIdx}
+            on:change={(e) => { const r = screenReplay?.rounds[Number(e.currentTarget.value)]; if (r) replaySocket?.seek(r.index); }}>
+            {#each screenReplay.rounds as r, i}<option value={i}>{r.label}</option>{/each}
+          </select>
+          <button type="button" on:click={() => { const r = screenReplay?.rounds[screenReplayRoundIdx]; if (r) replaySocket?.seek(r.index); }}>局の頭</button>
+          {#if screenReplayStatus.playing}
+            <button type="button" on:click={() => replaySocket?.pause()}>止める</button>
+          {:else}
+            <button type="button" disabled={screenReplayStatus.index >= screenReplayStatus.total} on:click={() => replaySocket?.play()}>▶ 再生</button>
+          {/if}
+          <button type="button" disabled={screenReplayStatus.playing || screenReplayStatus.index >= screenReplayStatus.total} on:click={() => replaySocket?.step()}>1手</button>
+          <input type="range" aria-label="位置" min="0" max={Math.max(0, screenReplayStatus.total - 1)} value={Math.max(0, screenReplayStatus.index - 1)}
+            on:change={(e) => replaySocket?.seek(Number(e.currentTarget.value))} />
+          <select aria-label="速さ" value={screenReplayStatus.speed} on:change={(e) => replaySocket?.setSpeed(Number(e.currentTarget.value))}>
+            {#each [0.5, 1, 2, 4] as v}<option value={v}>{v}倍</option>{/each}
+          </select>
+          <select aria-label="視点" value={screenReplay.seat} disabled={screenReplayLoading} on:change={(e) => switchScreenReplaySeat(Number(e.currentTarget.value))}>
+            {#each screenReplay.members as m (m.seat)}<option value={m.seat}>{m.username}</option>{/each}
+            <option value={-1}>観戦 [全員の手]</option>
+          </select>
+          <button type="button" aria-label="閉じる" on:click={closeScreenReplay}>×</button>
+        {/if}
+      </div>
+    {/if}
   {/if}
   <!-- [2026-07-24 4人回し Phase6] 抜け番バナー [観戦投影 + サイコロ精算だけ参加。次試合で復帰] -->
   {#if onlineInactive}
@@ -3061,7 +3203,7 @@
     <span>対局画面は横向きで全体を確認できます</span>
   </div>
   <header>
-    <h1>ONLINE ANMIKA [{onlineGameStarted ? `オンライン [部屋 ${currentRoomId}]` : (viewMode === 'single' ? '一人回しモード' : 'phase 1 dev')}]
+    <h1>ONLINE ANMIKA [{onlineGameStarted ? (screenReplay ? `牌譜 [試合 ${screenReplay.matchId}]` : `オンライン [部屋 ${currentRoomId}]`) : (viewMode === 'single' ? '一人回しモード' : 'phase 1 dev')}]
       <button class="mode-toggle" on:click={() => { appMode = 'menu'; viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>
         🏠 メニューに戻る
       </button>
@@ -3256,7 +3398,15 @@
       {#key pochiReveal}
         <PochiSqueeze color={pochiReveal.color} pushed={pochiPushed} deka={pochiReveal.deka ?? null} kakutei={pochiReveal.kakutei ?? null}
           plan={pochiReveal.plan} who={onlineGameStarted ? seatDisplayNames[pochiReveal.player as 0 | 1 | 2] : ''}
+          pushIdleMs={screenReplay ? 1500 : null}
           onOpen={onPochiOpen} onPush={onPochiPush} onClose={closePochiReveal} />
+      {/key}
+    {:else if screenReplay && pochiReveal && !fxCutinBusy}
+      <!-- [2026-10-27 修] 牌譜再生で他の人が引いた分。対局中は引いた人の画面から流れて来た物を、記録の色で同じ様に出す -->
+      {#key pochiReveal}
+        <PochiSqueeze readOnly autoColor={pochiReveal.color} pushIdleMs={1500}
+          deka={pochiReveal.deka ?? null} kakutei={pochiReveal.kakutei ?? null} plan={pochiReveal.plan}
+          who={seatDisplayNames[pochiReveal.player as 0 | 1 | 2]} onClose={closePochiReveal} />
       {/key}
     {:else if onlineGameStarted && remotePochi && !fxCutinBusy}
       <!-- [2026-10-25] 他の人のムービー。引いた人の plan と PUSH の色を流す (観戦も同じ) -->
@@ -6288,6 +6438,42 @@
     color: #eef7ef;
     text-align: center;
   }
+  .screen-replay-shield {
+    position: fixed;
+    inset: 0;
+    z-index: 390;
+  }
+  .screen-replay-bar {
+    position: fixed;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: calc(100vw - 16px);
+    background: rgba(20, 40, 28, 0.92);
+    border: 1px solid rgba(255, 224, 128, 0.5);
+    color: #ffe9ad;
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 13px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+  }
+  .screen-replay-bar button,
+  .screen-replay-bar select {
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.1);
+    color: inherit;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .screen-replay-bar select option { color: #111; }
+  .screen-replay-bar input[type='range'] { width: 160px; }
+  .srb-error { color: #ffb4a8; }
   .spectator-banner {
     position: fixed;
     top: 6px;

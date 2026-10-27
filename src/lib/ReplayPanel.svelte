@@ -254,6 +254,8 @@
             {/if}
           {/if}
           <button class="flat-btn" on:click={copyShareLink}>🔗 この局面のリンク</button>
+          <!-- [2026-10-27 修] 対局と同じ画面で見る [視点はそちらで替えられる] -->
+          <a class="flat-btn screen-link" href={`/?replay=${viewing.match_id}&screen=1&seat=0`}>🎬 対局画面で見る</a>
           {#if shareNote}<span class="share-note">{shareNote}</span>{/if}
         </div>
         <div class="viewer-controls">
@@ -367,6 +369,7 @@
   }
 
 
+  .screen-link { text-decoration: none; }
   .flat-btn {
     border: 1px solid rgba(255, 255, 255, 0.25);
     background: rgba(255, 255, 255, 0.08);

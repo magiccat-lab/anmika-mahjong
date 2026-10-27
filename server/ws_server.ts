@@ -1284,6 +1284,83 @@ function actionRelay(
   };
 }
 
+export type MatchReplayFrame = { at: string; msg: Record<string, unknown> };
+
+/** [2026-10-27 修] 対局画面の牌譜再生。リョー「おんみかの牌譜再生も普通にオンミカ画面のままで牌譜見たい
+ *  …視点も変えられるように…白ポッチの色とか、上がり枚数の画面とか、サイコロとかも同じように再現」。
+ *  記録した command を試合の区切りから authority に流し直し、その時に席 recipientRoomSeat へ送ったはずの
+ *  sync と action [actionRelay と同じ形 ・ 同じ伏せ方] を順に返す。client は対局中と同じ受け口で再生する。
+ *  stamp は対局中と同じ { type: 'stamp' } にする。at は受理した時刻 [間合い用] */
+export function buildMatchReplay(
+  snapshot: CanonicalRoomSnapshot,
+  commands: AcceptedRoomCommand[],
+  matchNo: number,
+  recipientRoomSeat: number,
+): { matchNo: number; firstRevision: number; lastRevision: number; lastAcceptedAt: string; frames: MatchReplayFrame[] } {
+  if (!snapshot.started || !snapshot.start) throw new Error('room not started');
+  const start = snapshot.start;
+  const boundaries = commands.flatMap((command, index) => (command.action.type === 'nextMatch' ? [index] : []));
+  if (!Number.isInteger(matchNo) || matchNo < 1 || matchNo > boundaries.length + 1) throw new Error(`no match ${matchNo}`);
+  const from = matchNo === 1 ? 0 : boundaries[matchNo - 2] + 1;
+  const end = matchNo <= boundaries.length ? boundaries[matchNo - 1] : commands.length;
+  const members = start.members.map((member) => ({ seat: member.seat, is_cpu: member.is_cpu }));
+  const roomMembers = start.roomMembers ?? start.members;
+  let authority: RoomAuthority;
+  if (matchNo === 1) {
+    authority = createRoomAuthority({ preShuffledPool: start.preShuffledPool, qijia: start.qijia, changshu: start.changshu });
+  } else {
+    const nextMatch = commands[from - 1].action as Record<string, any>;
+    if (!Array.isArray(nextMatch.preShuffledPool) || !nextMatch._startChipLedger) {
+      throw new Error(`match ${matchNo} has no replayable start`);
+    }
+    authority = createRoomAuthority({ preShuffledPool: nextMatch.preShuffledPool, qijia: nextMatch.qijia, changshu: start.changshu });
+    authority.seedMatchStart(nextMatch._startChipLedger, members);
+  }
+  authority.takePendingCutins();
+  const folded = foldRoomState(start, commands.slice(0, from));
+  let state: CanonicalRoomSnapshot = {
+    ...snapshot,
+    matchId: matchNo,
+    roundId: 1,
+    revision: from === 0 ? 0 : commands[from - 1].revision,
+    commands: [],
+    updatedAt: from === 0 ? snapshot.updatedAt : commands[from - 1].acceptedAt,
+    activeMapping: folded.activeMapping,
+    roomChipLedger: folded.roomChipLedger,
+  };
+  const currentMembers = roomMembers.map((member) => ({ ...member, connected: true }));
+  const frames: MatchReplayFrame[] = [
+    { at: state.updatedAt, msg: syncPayload(state, recipientRoomSeat, authority, currentMembers) },
+  ];
+  for (const command of commands.slice(from, end)) {
+    if (command.action.type === 'stamp') {
+      frames.push({ at: command.acceptedAt, msg: { type: 'stamp', seat: command.actorSeat, stampId: command.action.stampId } });
+      continue;
+    }
+    const reason = authority.validateAndApply(command.actorSeat, command.action, members);
+    if (reason) throw new Error(`cannot replay revision ${command.revision}: ${reason}`);
+    authority.takeCanonicalChipEffects();
+    const actorRoomSeat = gameToRoomSeat(state.activeMapping ?? null, command.actorSeat);
+    const appended = appendAcceptedCommand(state, {
+      commandId: command.commandId,
+      actorSeat: command.actorSeat,
+      actorRoomSeat,
+      fromUserId: roomMembers.find((member) => member.seat === actorRoomSeat)?.user_id ?? '',
+      action: command.action,
+    }, new Date(command.acceptedAt));
+    state = appended.snapshot;
+    frames.push({ at: command.acceptedAt, msg: actionRelay(appended.command, state, recipientRoomSeat, authority) });
+    authority.takePendingCutins();
+  }
+  return {
+    matchNo,
+    firstRevision: commands[from]?.revision ?? state.revision,
+    lastRevision: state.revision,
+    lastAcceptedAt: state.updatedAt,
+    frames,
+  };
+}
+
 // [2026-07-23 Sol 7周目 P0] rewind の局頭境界計算。nextRound だけでなく nextMatch も
 // 境界にし [2試合目第1局で前試合へ戻る事故]、matchId/roundId は kept 列から
 // appendAcceptedCommand と同じ遷移則で再算出する [旧実装は現 snapshot の ID を据え置き、
@@ -1422,13 +1499,25 @@ function blindStartFor(start: NonNullable<CanonicalRoomSnapshot['start']>): Blin
   return data;
 }
 
+type SyncMember = { seat: number; user_id: string; username: string; is_cpu: boolean; connected?: boolean; cpu_proxy?: boolean };
+
 function sendSync(
   ws: WebSocket | null,
   snapshot: CanonicalRoomSnapshot,
   recipientRoomSeat: number,
   authority: RoomAuthority | null,
-  currentMembers?: Array<{ seat: number; user_id: string; username: string; is_cpu: boolean; connected?: boolean; cpu_proxy?: boolean }> | null,
+  currentMembers?: SyncMember[] | null,
 ): void {
+  sendJson(ws, syncPayload(snapshot, recipientRoomSeat, authority, currentMembers));
+}
+
+// [2026-10-27 修] 対局画面の牌譜再生 [buildMatchReplay] も同じ sync を作るので、送る所と分けた
+function syncPayload(
+  snapshot: CanonicalRoomSnapshot,
+  recipientRoomSeat: number,
+  authority: RoomAuthority | null,
+  currentMembers?: SyncMember[] | null,
+) {
   // [2026-07-23 4人回し Phase3] 受信者 room seat → game seat 変換 [抜け番は観戦投影]
   const mapping = snapshot.activeMapping ?? null;
   const recipientGameSeat = recipientRoomSeat === SPECTATOR_SEAT
@@ -1452,7 +1541,7 @@ function sendSync(
     ...command,
     action: sanitizeActionForSeat(command.action, projectionSeat),
   }));
-  sendJson(ws, {
+  return {
     type: 'sync',
     // [2026-07-23 4人回し Phase3] client の actorGameSeat 分離用 [snapshot 内の
     // activeMapping / roomChipLedger は spread でそのまま同梱される]
@@ -1467,7 +1556,7 @@ function sendSync(
       currentMembers: currentMembers ?? null,
       state: authority ? captureSeatProjection(authority, projectionSeat) : null,
     },
-  });
+  };
 }
 
 function lobbyPayload(room: Room) {
@@ -3319,6 +3408,29 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     // room は snapshot + 受理コマンド列で保持されているので、現局のコマンドを捨てて
     // replay し直せば局頭へ戻せる。局の境目は最後の nextRound コマンドで判る
     // [受理コマンドテーブルに roundId 列が無いため、action.type で辿る]。
+    // [2026-10-27 修] 対局画面の牌譜再生 [buildMatchReplay]。app.py の /api/matches/{id}/replay-screen が呼ぶ
+    if (req.method === 'POST' && req.url === '/internal/match-replay') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      try {
+        const { room_id, match_no, seat } = JSON.parse(Buffer.concat(chunks).toString());
+        if (typeof room_id !== 'string' || !Number.isInteger(match_no) || !Number.isInteger(seat)) {
+          res.end(JSON.stringify({ ok: false, reason: 'bad request' }));
+          return;
+        }
+        const snapshot = rooms.get(room_id)?.snapshot ?? persistence.loadSnapshot(room_id);
+        if (!snapshot?.started) {
+          res.end(JSON.stringify({ ok: false, reason: 'room not started' }));
+          return;
+        }
+        const replay = buildMatchReplay(snapshot, persistence.loadCommands(room_id), match_no, seat);
+        res.end(JSON.stringify({ ok: true, ...replay }));
+      } catch (error: any) {
+        res.end(JSON.stringify({ ok: false, reason: String(error?.message ?? error) }));
+      }
+      return;
+    }
     if (req.method === 'POST' && req.url === '/internal/rewind-room') {
       const chunks: Buffer[] = [];
       for await (const chunk of req) chunks.push(chunk as Buffer);

@@ -27,6 +27,10 @@
   export let kakutei: 'good' | 'bad' | null = null;
   export let plan: PochiPlan = DEFAULT_PLAN;
   export let readOnly = false;
+  /** [牌譜再生] PUSH の段で待つ ms (null ならいつもの PUSH_IDLE_MS / REMOTE_IDLE_MS) */
+  export let pushIdleMs: number | null = null;
+  /** [牌譜再生] 他の席の分。reveal は記録に無いので、PUSH の段が過ぎたら記録の色で結果を出す */
+  export let autoColor: PochiColor | null = null;
   /** 引いた人の画面が開いた時 (他の席へ「引いた」と plan を流す) */
   export let onOpen: () => void = () => {};
   /** 引いた人が PUSH を押した時 (他の席へ色を流す) */
@@ -142,7 +146,9 @@
     pulsing = true;
     clearTimeout(idleTimer);
     // 押されないままなら、自分は自動 PUSH (他の人を待たせない)。他の席は引いた人の reveal を待ち、来なければ閉じる
-    idleTimer = setTimeout(() => { if (readOnly) close(); else doPush(); }, readOnly ? REMOTE_IDLE_MS : PUSH_IDLE_MS);
+    idleTimer = setTimeout(() => {
+      if (readOnly) { if (autoColor) startResult(autoColor); else close(); } else doPush();
+    }, pushIdleMs ?? (readOnly ? REMOTE_IDLE_MS : PUSH_IDLE_MS));
   }
   function skip(): void {
     if (plan.lamp === 'pre') lightLamp();
