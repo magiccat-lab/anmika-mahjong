@@ -3426,6 +3426,9 @@
         winner={$game.pendingFuyu.winner}
         waitRemain={remainW}
         shanRemain={paishu}
+        preview={$game.pendingFuyu.preview ?? null}
+        baopai={$game.pendingFuyu.previewBaopai ?? []}
+        shownBaopai={$game.pendingFuyu.previewShownBaopai ?? 0}
         onSelect={(use) => game.selectFuyu(use)}
       />
     {/if}

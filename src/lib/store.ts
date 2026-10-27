@@ -27,6 +27,7 @@ import {
   continueRonDecisionStage,
   enterFulouStage,
   enterFuyuStage,
+  fuyuPreview,
   enterKinpeiStage,
   enterQianggangStage,
   enterRonDecisionStage,
@@ -1453,42 +1454,23 @@ export function createGameStore() {
           s.game.cancelFeverDeclaration(fdp);
           dlog('[fever undone] 宣言牌 ron、 player=', fdp);
         }
-        // フィーバー中 + 冬持ち + 自家 → 冬使う / 保留 modal
+        // フィーバー中 + 冬持ち: 待ち残山 0 は自動で使う。それ以外の 使う / 保留 は和了処理
+        // [秋のめくり ・ ぽっちの選択] の後に聞く [下の hule 後。2026-10-27 リョー「フィーバー中に
+        // 冬でやめるかどうかは他の処理が終わってから決めたい。秋の新ドラで正ぽっちがめくれて正転
+        // なくなったから冬使ってやめるとかある」]
         const reversePochiDecisionRon = !!(s.game.feverActive[player as 0|1|2]
           && s.game.pochiPaymentMode[player as 0|1|2]);
         const reverseRonHasHumanOwner = reversePochiDecisionRon
           && ([0, 1, 2] as const).some((p) => p !== player && !s.cpu[p]);
         if (s.game.feverActive[player as 0|1|2]
           && s.game.effectiveHuapaiAtHule(player as PlayerId).includes('f4')
-          && (!s.cpu[player as 0|1|2] || reverseRonHasHumanOwner)) {
+          && (!s.cpu[player as 0|1|2] || reverseRonHasHumanOwner)
           // [2026-05-15 機能 11] 待ち残山 0 → modal skip で 自動冬使用 [user 選択不要]
-          if (s.game.isFeverWaitExhausted(player as 0|1|2) && !reversePochiDecisionRon) {
-            s.game.fuyuConsumed[player as 0|1|2] = true;
-            // [2026-07-21 監査 D-08 fix] ここで endFever すると hule/applyHule 前に
-            // FEVER 倍率が消え、今回の和了の点数・祝儀が非 FEVER 扱いになっていた。
-            // 終了は settleAfterWin [精算完了後] が担当する
-            // fall through で 通常 ron path に
-          } else {
-            // 2026-05-14 codex review P1 fix: pendingFuyu 化前に saveSnapshot
-            saveHuleSnapshot(s.game);
-            // R7 P0 #3 fix: 冬 modal 経由でも human ダブロン候補 を保持して selectFuyu で 救済
-            const _ld = s.lastDapai;
-            const humanOthers = ([0,1,2] as const).filter(p =>
-              p !== player && p !== _ld.player && !s.cpu[p as 0|1|2]
-              && !(s.ronDeclaredPlayers ?? []).includes(p)
-              && s.game.canRon(p as any, _ld.pai, _ld.player as any)
-            );
-            enterFuyuStage(s, {
-              winner: player,
-              isRon: true,
-              ronfrom: s.lastDapai.player,
-              availableHuapai: s.game.effectiveHuapaiAtHule(player as PlayerId),
-              humanOthers,
-            });
-            s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), player];
-            s.message = `❄️ フィーバー中、 冬を使う？ [使う = アリス発動 + フィーバー終了 / 保留 = 継続]`;
-            return { ...s };
-          }
+          && s.game.isFeverWaitExhausted(player as 0|1|2) && !reversePochiDecisionRon) {
+          s.game.fuyuConsumed[player as 0|1|2] = true;
+          // [2026-07-21 監査 D-08 fix] ここで endFever すると hule/applyHule 前に
+          // FEVER 倍率が消え、今回の和了の点数・祝儀が非 FEVER 扱いになっていた。
+          // 終了は settleAfterWin [精算完了後] が担当する
         }
         // フィーバー + 払い状態 [pochiPaymentMode] では 金北 強化先 modal をスキップ、 自動確定
         // [リョー仕様 2026-05-12: 赤/黄ツモ後 青/緑ツモまでの間は player 任意選択ナシ]
@@ -1529,11 +1511,12 @@ export function createGameStore() {
             return { ...s };
           }
         }
-        // 秋効果で新たに冬が表示された場合も、和了時に抜いた扱いとして冬選択へ戻す。
+        // 冬の 使う / 保留 は秋のめくり ・ ぽっちの選択の後に聞く [秋で新たに表示された冬も同じ]。
+        // 保留時の暫定和了とドラ表を見せてから表示前へ戻し、selectFuyu が同じ和了を再計算する
         if (s.game.feverActive[player as 0|1|2]
           && !s.game.fuyuConsumed[player as 0|1|2]
           && s.game.effectiveHuapaiAtHule(player as PlayerId).includes('f4')
-          && !s.cpu[player as 0|1|2]) {
+          && (!s.cpu[player as 0|1|2] || reverseRonHasHumanOwner)) {
           const ld = s.lastDapai!;
           const humanOthers = ([0,1,2] as const).filter(p =>
             p !== player && p !== ld.player && !s.cpu[p as 0|1|2]
@@ -1541,10 +1524,11 @@ export function createGameStore() {
             && s.game.canRon(p as any, ld.pai, ld.player as any)
           );
           const availableHuapai = s.game.effectiveHuapaiAtHule(player as PlayerId);
+          const preview = fuyuPreview(s.game, result);
           s.game.restoreSnapshot();
-          enterFuyuStage(s, { winner: player, isRon: true, ronfrom: ld.player, availableHuapai, humanOthers });
+          enterFuyuStage(s, { winner: player, isRon: true, ronfrom: ld.player, availableHuapai, humanOthers, ...preview });
           s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), player];
-          s.message = `❄️ 秋ドラ表示で冬、冬を使う？ [使う = アリス発動 + フィーバー終了 / 保留 = 継続]`;
+          s.message = `❄️ フィーバー中、冬を使う？ [使う = アリス発動 + フィーバー終了 / 保留 = 継続]`;
           return { ...s };
         }
         // CPU / フィーバー払い中の自動選択も、秋で新たに表示された華を候補に含めて再計算する。
@@ -2783,30 +2767,18 @@ export function createGameStore() {
         const reversePochiDecisionTsumo = !!(s.game.feverActive[player] && s.game.pochiPaymentMode[player]);
         const reverseTsumoHasHumanOwner = reversePochiDecisionTsumo
           && ([0, 1, 2] as const).some((p) => p !== player && !s.cpu[p]);
+        // フィーバー中 + 冬持ち: 待ち残山 0 は自動で使う。それ以外の 使う / 保留 は秋のめくり ・
+        // ぽっちの選択の後に聞く [下の hule 後。2026-10-27 リョー「フィーバー中に冬でやめるかどうかは
+        // 他の処理が終わってから決めたい」]
         if (s.game.feverActive[player]
           && s.game.effectiveHuapaiAtHule(player).includes('f4')
-          && (!s.cpu[player] || reverseTsumoHasHumanOwner)) {
-          // [2026-05-15 機能 11] フィーバー中 + 冬持ち + 待ち残山 0 → modal skip で 自動冬使用
-          // [user confirm 不要、 「使う以外 ありえない」 局面なので 自動 applyFuyu(true)]
-          if (s.game.isFeverWaitExhausted(player) && !reversePochiDecisionTsumo) {
-            s.game.fuyuConsumed[player] = true;
-            // [2026-07-21 監査 D-08 fix] endFever は精算完了後 [settleAfterWin] に遅延。
-            // hule/applyHule 前に終了すると今回の和了から FEVER 倍率が消えていた
-            s.message = `❄️ フィーバー中 + 待ち残山 0、 冬 自動使用 [機能 11]`;
-            // fall through で 通常 tsumo path に [pendingFuyu set しない]
-          } else {
-            // 2026-05-14 codex review P1 fix: pendingFuyu 化前に saveSnapshot、
-            // selectFuyu / selectKinpei の restoreSnapshot が stale snapshot を復元するのを防ぐ
-            saveHuleSnapshot(s.game);
-            enterFuyuStage(s, {
-              winner: player,
-              isRon: false,
-              ronfrom: null,
-              availableHuapai: s.game.effectiveHuapaiAtHule(player),
-            });
-            s.message = `❄️ フィーバー中、 冬を使う？ [使う = アリス発動 + フィーバー終了 / 保留 = 継続]`;
-            return { ...s };
-          }
+          && (!s.cpu[player] || reverseTsumoHasHumanOwner)
+          // [2026-05-15 機能 11] 待ち残山 0 は「使う以外 ありえない」 局面なので自動で使う
+          && s.game.isFeverWaitExhausted(player) && !reversePochiDecisionTsumo) {
+          s.game.fuyuConsumed[player] = true;
+          // [2026-07-21 監査 D-08 fix] endFever は精算完了後 [settleAfterWin] に遅延。
+          // hule/applyHule 前に終了すると今回の和了から FEVER 倍率が消えていた
+          s.message = `❄️ フィーバー中 + 待ち残山 0、 冬 自動使用 [機能 11]`;
         }
         // フィーバー + 払い state 自動: modal スキップ、秋の表示結果を見て priority で自動確定
         // 冬選択時は 局終了 [リョー仕様 2026-05-12]
@@ -2833,15 +2805,17 @@ export function createGameStore() {
             return { ...s };
           }
         }
-        // 秋効果で新たに冬が表示された場合も、表示前へ戻して冬選択後に同じ和了を再計算する。
+        // 冬の 使う / 保留 は秋のめくり ・ ぽっちの選択の後に聞く [秋で新たに表示された冬も同じ]。
+        // 保留時の暫定和了とドラ表を見せてから表示前へ戻し、selectFuyu が同じ和了を再計算する
         if (s.game.feverActive[player]
           && !s.game.fuyuConsumed[player]
           && s.game.effectiveHuapaiAtHule(player).includes('f4')
-          && !s.cpu[player]) {
+          && (!s.cpu[player] || reverseTsumoHasHumanOwner)) {
           const availableHuapai = s.game.effectiveHuapaiAtHule(player);
+          const preview = fuyuPreview(s.game, result);
           s.game.restoreSnapshot();
-          enterFuyuStage(s, { winner: player, isRon: false, ronfrom: null, availableHuapai });
-          s.message = `❄️ 秋ドラ表示で冬、冬を使う？ [使う = アリス発動 + フィーバー終了 / 保留 = 継続]`;
+          enterFuyuStage(s, { winner: player, isRon: false, ronfrom: null, availableHuapai, ...preview });
+          s.message = `❄️ フィーバー中、冬を使う？ [使う = アリス発動 + フィーバー終了 / 保留 = 継続]`;
           return { ...s };
         }
         const resolvedHuapai = s.game.effectiveHuapaiAtHule(player);

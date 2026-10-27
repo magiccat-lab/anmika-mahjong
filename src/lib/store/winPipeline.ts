@@ -53,6 +53,15 @@ export function kinpeiPreview(result: any): KinpeiPreview | null {
   };
 }
 
+/** 冬の選択を和了処理の後に出す時の暫定表示。restoreSnapshot の前 [秋のめくりが残っている間] に呼ぶ */
+export function fuyuPreview(game: { shan: { baopai: string[]; displayBaopai: string[] } }, result: any): Pick<PendingFuyu, 'preview' | 'previewBaopai' | 'previewShownBaopai'> {
+  return {
+    preview: kinpeiPreview(result),
+    previewBaopai: [...game.shan.baopai],
+    previewShownBaopai: game.shan.displayBaopai.length,
+  };
+}
+
 export type PendingFuyu = {
   winner: number;
   /** Positive pochi: winner. Reverse pochi: every other player may submit the table's decision. */
@@ -62,6 +71,12 @@ export type PendingFuyu = {
   ronfrom: number | null;
   /** 秋効果で表示された冬を、snapshot 復元後の冬・金北選択へ引き継ぐ。 */
   availableHuapai?: string[];
+  /** [2026-10-27 リョー「フィーバー中に冬でやめるかどうかは他の処理が終わってから決めたい」]
+   *  秋のめくり ・ ぽっちの選択まで済ませた保留時の暫定和了と、その時のドラ表 [baopai 全量]。
+   *  previewShownBaopai は和了前から見えていた枚数 [それより後ろが今回めくれた分] */
+  preview?: KinpeiPreview | null;
+  previewBaopai?: string[];
+  previewShownBaopai?: number;
   otherWinners?: number[];
   humanOthers?: number[];
   cutinQueued?: boolean;
