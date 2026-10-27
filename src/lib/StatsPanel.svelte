@@ -3,6 +3,7 @@
   // 率の定義はここに集約 [server は生カウントのみ返す]
   import { onMount } from 'svelte';
   import { utcToJst } from './jstTime';
+  import ProfileTables from './ProfileTables.svelte';
 
   export let onClose: () => void = () => {};
 
@@ -38,6 +39,7 @@
   let effectiveSince = '';
   let showCpu = false;
   let showAll = false; // stats_since 設定後に「全期間」も見たい時用
+  let tab: 'stats' | 'profile' = 'stats'; // [2026-10-27] 人別の運と腕 [対人戦] の表
 
   async function load() {
     loading = true;
@@ -78,6 +80,13 @@
       <h2>📊 戦績</h2>
       <button class="close-btn" on:click={onClose}>✕ 閉じる</button>
     </div>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected={tab === 'stats'} class:on={tab === 'stats'} on:click={() => (tab = 'stats')}>人ごと</button>
+      <button role="tab" aria-selected={tab === 'profile'} class:on={tab === 'profile'} on:click={() => (tab = 'profile')}>運と腕 (対人戦)</button>
+    </div>
+    {#if tab === 'profile'}
+      <ProfileTables />
+    {:else}
     <div class="stats-meta">
       {#if effectiveSince}
         <span>集計対象: {utcToJst(effectiveSince)} 以降</span>
@@ -131,6 +140,7 @@
         {/each}
       </div>
     {/if}
+    {/if}
   </div>
 </div>
 
@@ -183,6 +193,17 @@
     opacity: 0.92;
     margin: 6px 0 10px;
   }
+  .tabs { display: flex; gap: 6px; margin: 6px 0 2px; }
+  .tabs button {
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    border-radius: 8px;
+    padding: 5px 12px;
+    cursor: pointer;
+    font-size: 0.88rem;
+  }
+  .tabs button.on { background: rgba(255, 233, 173, 0.18); border-color: #ffe9ad; color: #ffe9ad; font-weight: 700; }
   .toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
   .caveat { color: #ffcf7d; }
   .stats-note { padding: 12px 4px; opacity: 0.9; }

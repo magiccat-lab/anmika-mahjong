@@ -38,6 +38,11 @@ try:
     from . import stats as match_stats
 except ImportError:  # `uvicorn app:app` を server/ から直接起動した場合
     import stats as match_stats  # type: ignore
+# [2026-10-27 リョー「人別分析をオンミカのサイト上で見れるように」] 人別の運と腕 [読むだけ]
+try:
+    from . import player_profile
+except ImportError:
+    import player_profile  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -2192,6 +2197,27 @@ async def stats_summary(request: Request):
         "stats_version": match_stats.STATS_VERSION,
         "players": players,
     }
+
+
+# ws の部屋の記録 [サイコロの収支]。ws_server は repo の頭で起動して data/anmika.sqlite3 を使う
+WS_DB_PATH = Path(os.environ.get("ANMIKA_WS_DB_PATH", str(Path(__file__).resolve().parent.parent / "data" / "anmika.sqlite3")))
+_profile_cache: dict[str, Any] = {"t": 0.0, "body": None}
+
+
+@app.get("/api/stats/profile")
+async def stats_profile(request: Request):
+    """人別の運と腕。対人戦 [3 席とも人] の生カウントだけを、対人戦の試合が多い順に返す。全期間。
+    全部の記録を読み直すので 60 秒は前の答えを返す"""
+    if not current_user(request):
+        raise HTTPException(status_code=401, detail="login required")
+    now = _time.time()
+    if _profile_cache["body"] is None or now - _profile_cache["t"] > 60:
+        out = await asyncio.to_thread(player_profile.compute, DB_PATH, WS_DB_PATH, SUMMARY_DIR)
+        players = [{"name": name, **kinds["pvp"]} for name, kinds in out["players"].items() if kinds["pvp"].get("matches")]
+        players.sort(key=lambda p: -p["matches"])
+        at = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).isoformat(timespec="seconds")
+        _profile_cache.update(t=now, body={"players": players, "at": at})
+    return _profile_cache["body"]
 
 
 @app.post("/api/stats/since")

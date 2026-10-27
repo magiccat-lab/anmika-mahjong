@@ -752,3 +752,67 @@ def test_session_cookie_secure_and_hsts_on_https(env):
     assert "strict-transport-security" not in r.headers
     r = plain.get("/api/me", headers={"x-forwarded-proto": "https"})
     assert r.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
+
+
+# ---- 人別の運と腕 [2026-10-27] ----
+
+def add_match(room_id, members, chips, stats, match_no=1):
+    """members = [(user_id, seat)]、stats = {user_id: (rounds, wins, deal_ins, placement)}"""
+    add_room(room_id, members[0][0], status="finished", members=members)
+    with appmod.db_conn() as c:
+        cur = c.execute(
+            "INSERT INTO matches(room_id, match_no, members_json, paifu_json, chip_delta_json) VALUES(?,?,?,?,?)",
+            (room_id, match_no, json.dumps([{"user_id": u, "seat": s} for u, s in members]), "{}", json.dumps(chips)),
+        )
+        for u, s in members:
+            rounds, wins, deal_ins, place = stats[u]
+            c.execute(
+                "INSERT INTO match_player_stats(match_id, user_id, seat, stats_version, rounds, wins, deal_ins, placement)"
+                " VALUES(?,?,?,?,?,?,?,?)",
+                (cur.lastrowid, u, s, 1, rounds, wins, deal_ins, place),
+            )
+        c.commit()
+
+
+def make_ws_db(path, rows):
+    """rows = [(room_id, revision, actor_seat, action)]。部屋の開始時の席は 0-2 のまま"""
+    c = sqlite3.connect(path)
+    c.execute("CREATE TABLE room_state_snapshots(room_id TEXT, snapshot_json TEXT)")
+    c.execute("CREATE TABLE room_accepted_commands(room_id TEXT, revision INTEGER, actor_seat INTEGER, action_json TEXT)")
+    c.executemany("INSERT INTO room_accepted_commands VALUES(?,?,?,?)", [(r, n, s, json.dumps(a)) for r, n, s, a in rows])
+    c.commit()
+    c.close()
+
+
+def test_stats_profile_needs_login(env):
+    assert env.client.get("/api/stats/profile").status_code == 401
+
+
+def test_stats_profile_pvp_only_and_dice_sum_zero(env, tmp_path, monkeypatch):
+    ws = tmp_path / "ws.sqlite3"
+    # 対人戦の部屋 P1 で a がサイコロを振って 1 回当てる (b と c から 5 ずつ)。CPU 戦の部屋 C1 の分は出さない
+    make_ws_db(ws, [
+        ("P1", 1, 0, {"type": "selectSaiKoroCombo", "small": 2, "large": 5}),
+        ("P1", 2, 0, {"type": "rollSaiKoroDice", "override": [5, 2], "_roomChipDelta": {"0": 10, "1": -5, "2": -5}}),
+        ("P1", 3, 0, {"type": "advanceSaiKoro"}),
+        ("C1", 1, 0, {"type": "selectSaiKoroCombo", "small": 1, "large": 6}),
+        ("C1", 2, 0, {"type": "rollSaiKoroDice", "override": [6, 1], "_roomChipDelta": {"0": 20, "1": -10, "2": -10}}),
+        ("C1", 3, 0, {"type": "advanceSaiKoro"}),
+    ])
+    monkeypatch.setattr(appmod, "WS_DB_PATH", ws)
+    monkeypatch.setattr(appmod, "SUMMARY_DIR", tmp_path / "summaries")
+    monkeypatch.setattr(appmod, "_profile_cache", {"t": 0.0, "body": None})
+    add_match("P1", [("a", 0), ("b", 1), ("c", 2)], {"a": 30, "b": -10, "c": -20},
+              {"a": (8, 2, 0, 1), "b": (8, 1, 1, 2), "c": (8, 0, 2, 3)})
+    add_match("C1", [("a", 0), ("CPU_1", 1), ("CPU_2", 2)], {"a": 40, "CPU_1": -20, "CPU_2": -20},
+              {"a": (8, 3, 0, 1), "CPU_1": (8, 0, 1, 2), "CPU_2": (8, 0, 2, 3)})
+    login(env.client, "a")
+    r = env.client.get("/api/stats/profile")
+    assert r.status_code == 200, r.text
+    players = {p["name"]: p for p in r.json()["players"]}
+    assert set(players) == {"a", "b", "c"}
+    assert players["a"]["matches"] == 1 and players["a"]["wins"] == 2 and players["a"]["chip"] == 30
+    assert players["a"]["dice_chip"] == 10 and players["a"]["dice_own"] == 10 and players["a"]["dice_hits"] == 1
+    assert players["b"]["dice_others"] == -5
+    assert sum(p["chip"] for p in players.values()) == 0
+    assert sum(p.get("dice_chip", 0) for p in players.values()) == 0
