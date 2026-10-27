@@ -2,6 +2,7 @@
   // [2026-07-23 リョー要望] 戦績パネル: /api/stats/summary の生カウントから率を出して表示。
   // 率の定義はここに集約 [server は生カウントのみ返す]
   import { onMount } from 'svelte';
+  import { utcToJst } from './jstTime';
 
   export let onClose: () => void = () => {};
 
@@ -79,7 +80,7 @@
     </div>
     <div class="stats-meta">
       {#if effectiveSince}
-        <span>集計対象: {effectiveSince} 以降</span>
+        <span>集計対象: {utcToJst(effectiveSince)} 以降</span>
       {:else}
         <span>集計対象: 全期間</span>
         {#if !statsSince}<span class="caveat">[デバッグ中データ込み。採用開始は後で切替可]</span>{/if}

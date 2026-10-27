@@ -3,6 +3,7 @@
   import { onDestroy, onMount } from 'svelte';
   import Tile from './Tile.svelte';
   import { foldPaifu, type ReplayRound } from './replay';
+  import { utcToJst } from './jstTime';
 
   export let onClose: () => void = () => {};
 
@@ -227,7 +228,7 @@
               <button class="match-row" on:click={() => openMatch(m)}>
                 <span class="m-id">{m.starred ? '⭐' : '・'} 部屋{m.room_id} 第{m.match_no}試合</span>
                 <span class="m-title">{m.title || m.members.map((x) => x.name).join(' / ')}</span>
-                <span class="m-date">{m.finished_at}{m.paifu_source === 'authority' ? '' : ' [簡易]'}</span>
+                <span class="m-date">{utcToJst(m.finished_at)}{m.paifu_source === 'authority' ? '' : ' [簡易]'}</span>
               </button>
             </li>
           {/each}
