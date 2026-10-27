@@ -1984,6 +1984,12 @@ export function createGameStore() {
             // pendingKinpei は維持、 再選択させる
             return { ...s };
           }
+          // [2026-10-27 リョー「冬保留→強化で冬冬金北触ったら多分適用に失敗してる。冬冬金北使って
+          // １回目で辞める気だった」] フィーバー中の冬は使わない限り効かない [huleChip] ので、冬を
+          // 強化先に選んだら冬を使う。自動選択 [isFeverPayAuto] の「冬冬 / 冬 → 直ちに冬実行」と同じ
+          if (target === 'fuyu' && s.game.feverActive[winner as 0|1|2]) {
+            s.game.fuyuConsumed[winner as 0|1|2] = true;
+          }
         } else {
           // R7 P2 #9 fix: target=null [保留] は フィーバー中のみ許可
           // 2026-05-14 fix [user 報告]: 華牌なし [強化対象なし] でも null 許可、

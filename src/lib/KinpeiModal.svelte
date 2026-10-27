@@ -10,6 +10,8 @@
   export let allowHold: boolean = false;
   /** [2026-10-24 先輩] 強化先を選ぶ時に山の残り枚数も見たい */
   export let shanRemain: number | null = null;
+  /** フィーバー中で冬が未使用: 冬を強化先に選ぶと冬を使う [フィーバー終了] */
+  export let fuyuEndsFever: boolean = false;
 
   // 2026-08-13 手順F: shell を Sheet へ統合 [寸法・色は従来値をそのまま渡す]
   import Sheet from './Sheet.svelte';
@@ -40,7 +42,7 @@
   {/if}
   <div class="actions">
     {#each kinpeiOptions(huapai) as opt (opt.target)}
-      <button class={opt.target} data-kinpei-option={opt.target} title={`${opt.label} [${opt.count}枚] を強化先にする`} on:click={() => onSelect(opt.target)}>{opt.label}</button>
+      <button class={opt.target} data-kinpei-option={opt.target} title={`${opt.label} [${opt.count}枚] を強化先にする`} on:click={() => onSelect(opt.target)}>{opt.label}{fuyuEndsFever && opt.target === 'fuyu' ? ' [冬を使う]' : ''}</button>
     {/each}
     {#if allowHold}
       <button class="hold" on:click={() => onSelect(null)}>保留 [今局のみ]</button>
