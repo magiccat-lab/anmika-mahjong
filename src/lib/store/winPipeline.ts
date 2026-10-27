@@ -64,7 +64,7 @@ export function fuyuPreview(game: { shan: { baopai: string[]; displayBaopai: str
 
 export type PendingFuyu = {
   winner: number;
-  /** Positive pochi: winner. Reverse pochi: every other player may submit the table's decision. */
+  /** 立直者だけ [逆ぽっちでも。フィーバーを続けるかの選択なので]。 */
   decisionOwners?: number[];
   decisionOwnerIndex?: number;
   isRon: boolean;
@@ -322,11 +322,9 @@ export function clearQianggangStage(s: WinPipelineLike): PendingQianggang | null
 }
 
 export function enterFuyuStage(s: WinPipelineLike, pending: PendingFuyu): void {
-  pending.decisionOwners = pending.decisionOwners?.length
-    ? [...pending.decisionOwners]
-    : (s.game.pochiPaymentMode[pending.winner as PlayerId]
-      ? ([0, 1, 2] as PlayerId[]).filter((p) => p !== pending.winner)
-      : [pending.winner]);
+  // 冬の 使う / 保留 はフィーバーをやめるか続けるかなので、逆ぽっちでも立直者が決める
+  // [ルール 5-5。同卓者が選ぶのは逆ぽっちツモ時の金北の強化先だけ。2026-10-27 isg. 通報 room 5YMV]
+  pending.decisionOwners = [pending.winner];
   s.pendingFuyu = pending;
   s.roundEnded = false;
 }

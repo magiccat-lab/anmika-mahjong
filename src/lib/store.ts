@@ -1464,9 +1464,9 @@ export function createGameStore() {
           && ([0, 1, 2] as const).some((p) => p !== player && !s.cpu[p]);
         if (s.game.feverActive[player as 0|1|2]
           && s.game.effectiveHuapaiAtHule(player as PlayerId).includes('f4')
-          && (!s.cpu[player as 0|1|2] || reverseRonHasHumanOwner)
+          && !s.cpu[player as 0|1|2]
           // [2026-05-15 機能 11] 待ち残山 0 → modal skip で 自動冬使用 [user 選択不要]
-          && s.game.isFeverWaitExhausted(player as 0|1|2) && !reversePochiDecisionRon) {
+          && s.game.isFeverWaitExhausted(player as 0|1|2)) {
           s.game.fuyuConsumed[player as 0|1|2] = true;
           // [2026-07-21 監査 D-08 fix] ここで endFever すると hule/applyHule 前に
           // FEVER 倍率が消え、今回の和了の点数・祝儀が非 FEVER 扱いになっていた。
@@ -1516,7 +1516,7 @@ export function createGameStore() {
         if (s.game.feverActive[player as 0|1|2]
           && !s.game.fuyuConsumed[player as 0|1|2]
           && s.game.effectiveHuapaiAtHule(player as PlayerId).includes('f4')
-          && (!s.cpu[player as 0|1|2] || reverseRonHasHumanOwner)) {
+          && !s.cpu[player as 0|1|2]) {
           const ld = s.lastDapai!;
           const humanOthers = ([0,1,2] as const).filter(p =>
             p !== player && p !== ld.player && !s.cpu[p as 0|1|2]
@@ -1733,7 +1733,7 @@ export function createGameStore() {
     },
     /** フィーバー中 冬使う / 保留 選択 */
     selectFuyu(use: boolean) {
-      // 正ぽっちはwinner、逆ぽっちは同卓者側が決定する。
+      // 冬 [フィーバーを続けるか] は逆ぽっちでも winner が決める [enterFuyuStage]。
       if (onlineMode && !isApplyingRemote && myOnlineSeat !== null) {
         const s = get(store) as StoreState;
         const owners = s.pendingFuyu?.decisionOwners ?? (s.pendingFuyu ? [s.pendingFuyu.winner] : []);
@@ -2778,9 +2778,9 @@ export function createGameStore() {
         // 他の処理が終わってから決めたい」]
         if (s.game.feverActive[player]
           && s.game.effectiveHuapaiAtHule(player).includes('f4')
-          && (!s.cpu[player] || reverseTsumoHasHumanOwner)
+          && !s.cpu[player]
           // [2026-05-15 機能 11] 待ち残山 0 は「使う以外 ありえない」 局面なので自動で使う
-          && s.game.isFeverWaitExhausted(player) && !reversePochiDecisionTsumo) {
+          && s.game.isFeverWaitExhausted(player)) {
           s.game.fuyuConsumed[player] = true;
           // [2026-07-21 監査 D-08 fix] endFever は精算完了後 [settleAfterWin] に遅延。
           // hule/applyHule 前に終了すると今回の和了から FEVER 倍率が消えていた
@@ -2816,7 +2816,7 @@ export function createGameStore() {
         if (s.game.feverActive[player]
           && !s.game.fuyuConsumed[player]
           && s.game.effectiveHuapaiAtHule(player).includes('f4')
-          && (!s.cpu[player] || reverseTsumoHasHumanOwner)) {
+          && !s.cpu[player]) {
           const availableHuapai = s.game.effectiveHuapaiAtHule(player);
           const preview = fuyuPreview(s.game, result);
           s.game.restoreSnapshot();
