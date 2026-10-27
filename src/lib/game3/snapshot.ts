@@ -41,6 +41,16 @@ export type PreHuleSnapshot = {
   /** [2026-10-24] drain 済みも含めた effect の通し番号 [Game3.chipEffectsSeq]。あれば chipEffectsLen より優先 */
   chipEffectsSeq?: number;
   fuyuRevealState: any;
+  /** [2026-10-27 通報 20261027_1] リーチの持ち主。applyHule の宣言牌返金が lizhi から外すので、
+   *  戻さないと再 hule [金北の選び直し等] で返金されず、巻き戻った供託が winner へ渡る。旧 snapshot 互換で optional */
+  lizhiState?: {
+    lizhi: PlayerId[];
+    openLizhi: PlayerId[];
+    doubleLizhi: PlayerId[];
+    yifaActive: Record<PlayerId, boolean>;
+    shuvariActive: Record<PlayerId, boolean>;
+    shuvariUsed: Record<PlayerId, boolean>;
+  };
 };
 
 export type SnapshotRefs = {
@@ -143,7 +153,23 @@ export function saveSnapshot(refs: SnapshotRefs): PreHuleSnapshot {
     fuyuRevealState: refs.game?.fuyuRevealState
       ? JSON.parse(JSON.stringify(refs.game.fuyuRevealState))
       : { 0: null, 1: null, 2: null },
+    lizhiState: refs.game?.lizhi instanceof Set
+      ? {
+        lizhi: [...refs.game.lizhi],
+        openLizhi: [...(refs.game.openLizhi ?? [])],
+        doubleLizhi: [...(refs.game.doubleLizhi ?? [])],
+        yifaActive: { ...refs.game.yifaActive },
+        shuvariActive: { ...refs.game.shuvariActive },
+        shuvariUsed: { ...refs.game.shuvariUsed },
+      }
+      : undefined,
   };
+}
+
+function resetSet<T>(target: Set<T> | undefined, values: T[]): void {
+  if (!target) return;
+  target.clear();
+  for (const v of values) target.add(v);
 }
 
 /** snap を refs に書き戻し [shan の baopai / fubaopai 末尾を pop して、
@@ -221,5 +247,14 @@ export function restoreSnapshot(refs: SnapshotRefs, snap: PreHuleSnapshot | null
     refs.game.fuyuRevealState = snap.fuyuRevealState
       ? JSON.parse(JSON.stringify(snap.fuyuRevealState))
       : { 0: null, 1: null, 2: null };
+    // [2026-10-27] 宣言牌返金で外したリーチを戻し、再 hule でも同じ返金をさせる
+    if (snap.lizhiState) {
+      resetSet(refs.game.lizhi, snap.lizhiState.lizhi);
+      resetSet(refs.game.openLizhi, snap.lizhiState.openLizhi);
+      resetSet(refs.game.doubleLizhi, snap.lizhiState.doubleLizhi);
+      Object.assign(refs.game.yifaActive, snap.lizhiState.yifaActive);
+      Object.assign(refs.game.shuvariActive, snap.lizhiState.shuvariActive);
+      Object.assign(refs.game.shuvariUsed, snap.lizhiState.shuvariUsed);
+    }
   }
 }
