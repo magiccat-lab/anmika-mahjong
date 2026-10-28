@@ -59,3 +59,10 @@ NN金北のカットイン (春春金北 ・ 夏夏金北 ・ 秋秋金北 ・ �
 
 冬冬金北の冬めくり (src/lib/FuyuFlip.svelte) の字だけのサブセット。`'FX Fuyu'` で使う (app.css)。
 字は「冬金北めくりタップでラストチャンス終了合計枚+×0123456789ヒット!」。取り方は上と同じ (`css2?family=Mochiy+Pop+One&text=<字>` を Chrome の UA で取り、返る woff2 をそのまま保存)。6.5KB
+
+# cyber/ (2026-10-29)
+
+サイバー B 案 (金と黒) の字。Orbitron (点 ・ 数) と Chakra Petch (ラベル)、どちらも SIL OFL 1.1。latin だけの woff2 を `public/fonts/cyber/` に置き、`src/cyber.css` の `@font-face` で読む (実行時に Google Fonts へは取りに行かない)。
+- `orbitron-latin-wght.woff2`: 可変 (600〜800 を 1 本で持つ)。`css2?family=Orbitron:wght@600;800` を Chrome の UA で取り、返る latin の woff2 をそのまま保存
+- `chakrapetch-600-latin.woff2` ・ `chakrapetch-700-latin.woff2`: `css2?family=Chakra+Petch:wght@600;700` の latin
+- 取り直す時は同じ URL を Chrome の UA で取り、`/* latin */` の url を落とす。URL に付けた `?v=` は中身を替えた時に上げる

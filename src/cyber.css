@@ -1,0 +1,178 @@
+/* [2026-10-29 リョー ○ 見た目 B「金と黒」] サイバー HUD の見た目。一人回し ・ 対戦で同じ物を使う。
+   app.css の --jz-* (面と字の色) を --cy-* の値に差し替え、枠 ・ 点数の字 ・ ボタンの形だけをここで足す。
+   main.ts で app.css と App.svelte の後に読む (同じ強さなら後ろが勝つ)。
+   P1 残り山の目盛り = WallMeter.svelte、P2 入口 = EntryMenu.svelte、P4 打点と祝儀の枠 = RoundEndPanel.svelte、
+   P3 動き (手番の枠 ・ 走査線) はこの下の末尾。字 (Orbitron ・ Chakra Petch) は SIL OFL 1.1 を public/fonts/cyber に置いて配る */
+
+/* Orbitron は可変 (600〜800 を 1 ファイルで)。latin だけで、日本語と → は本文の字に落ちる */
+@font-face {
+  font-family: 'Orbitron';
+  src: url('/fonts/cyber/orbitron-latin-wght.woff2?v=20261029') format('woff2');
+  font-weight: 600 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Chakra Petch';
+  src: url('/fonts/cyber/chakrapetch-600-latin.woff2?v=20261029') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Chakra Petch';
+  src: url('/fonts/cyber/chakrapetch-700-latin.woff2?v=20261029') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --cy-bg: #060506;
+  --cy-bg2: #1a1408;
+  --cy-grid: rgba(229, 194, 106, 0.06);
+  --cy-line: #f0c95c;
+  --cy-hot: #ff4b5c;
+  --cy-pt: #ffd96a;
+  --cy-ink: #fbf4e2;
+  --cy-sub-ink: #b9a77c;
+  --cy-panel: rgba(14, 11, 6, 0.86);
+  --cy-panel-solid: #120e07;
+  --cy-on-line: #1a1002;
+  --cy-dim: color-mix(in srgb, var(--cy-line) 42%, transparent);
+  --cy-faint: color-mix(in srgb, var(--cy-line) 14%, transparent);
+  --cy-font-num: 'Orbitron', ui-monospace, monospace;
+  --cy-font-label: 'Chakra Petch', var(--sans);
+
+  /* app.css の面と字を差し替える */
+  --jz-page: var(--cy-bg);
+  --jz-felt: var(--cy-bg2);
+  --jz-felt2: var(--cy-bg);
+  --jz-wood: var(--cy-bg);
+  --jz-ink: var(--cy-ink);
+  --jz-sub: var(--cy-sub-ink);
+  --jz-panel: var(--cy-panel);
+  --jz-panel-solid: var(--cy-panel-solid);
+  --jz-panel-bd: var(--cy-dim);
+  --jz-gold: var(--cy-line);
+  --jz-accent: linear-gradient(180deg, var(--cy-line), color-mix(in srgb, var(--cy-line) 70%, #000));
+  --jz-accent-flat: var(--cy-line);
+  --jz-on-accent: var(--cy-on-line);
+  --jz-sec: var(--cy-faint);
+  --jz-sec-bd: var(--cy-dim);
+  --jz-sel: color-mix(in srgb, var(--cy-line) 24%, transparent);
+  --jz-back: var(--cy-panel-solid);
+  --jz-back-edge: var(--cy-line);
+  --jz-rad: 0px;
+  --jz-shadow: 0 0 14px color-mix(in srgb, var(--cy-line) 18%, transparent);
+
+  /* 方眼 + 中央が少し明るい */
+  --cy-grid-bg:
+    linear-gradient(var(--cy-grid) 1px, transparent 1px) 0 0 / 36px 36px,
+    linear-gradient(90deg, var(--cy-grid) 1px, transparent 1px) 0 0 / 36px 36px,
+    radial-gradient(ellipse at 50% 42%, var(--cy-bg2) 0%, var(--cy-bg) 78%);
+  --jz-felt-bg: var(--cy-grid-bg);
+
+  /* 角の括弧 (枠の 4 隅に 14px のL字) */
+  --cy-corner:
+    linear-gradient(var(--cy-line), var(--cy-line)) top left / 14px 2px no-repeat,
+    linear-gradient(var(--cy-line), var(--cy-line)) top left / 2px 14px no-repeat,
+    linear-gradient(var(--cy-line), var(--cy-line)) top right / 14px 2px no-repeat,
+    linear-gradient(var(--cy-line), var(--cy-line)) top right / 2px 14px no-repeat,
+    linear-gradient(var(--cy-line), var(--cy-line)) bottom left / 14px 2px no-repeat,
+    linear-gradient(var(--cy-line), var(--cy-line)) bottom left / 2px 14px no-repeat,
+    linear-gradient(var(--cy-line), var(--cy-line)) bottom right / 14px 2px no-repeat,
+    linear-gradient(var(--cy-line), var(--cy-line)) bottom right / 2px 14px no-repeat;
+  /* 角を斜めに落とす (ボタン ・ 小札 / 大きいボタン) */
+  --cy-cut-s: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  --cy-cut-m: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+
+body { background: var(--cy-bg); }
+main.ui-board-v2 {
+  background: var(--cy-grid-bg);
+  box-shadow: inset 0 0 0 1px var(--cy-dim), inset 0 0 80px color-mix(in srgb, var(--cy-line) 10%, transparent);
+}
+
+/* 枠 = 角の括弧 + 細い線 */
+main.ui-board-v2 :is(.seat-card, .hua-panel, .cb-panel) {
+  background: var(--cy-corner), var(--cy-panel);
+  border: 1px solid var(--cy-dim);
+  border-radius: 0;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--cy-line) 14%, transparent);
+}
+main.ui-board-v2 .hua-panel.hp-me {
+  border-color: var(--cy-line);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--cy-line) 35%, transparent), inset 0 0 0 1px var(--cy-line);
+}
+.hp-title, .cb-label, .sc-sub, .dora-label {
+  font-family: var(--cy-font-label);
+  letter-spacing: 0.06em;
+}
+.hp-me .hp-title { color: var(--cy-line); }
+
+/* 点数はデジタルの字で光らせる */
+.sc-pt, .pm-after, .pm-delta, .defen, .payment-after, .payment-delta {
+  font-family: var(--cy-font-num);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--cy-pt);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--cy-pt) 70%, transparent);
+}
+
+/* Orbitron は幅が広いので、席の札の点は一回り小さくして 1 行に収める */
+main.ui-board-v2 .seat-card .sc-pt .sval {
+  font-size: 18px;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+main.ui-board-v2 .seat-card.sc-me .sc-pt .sval { font-size: 16px; }
+main.ui-board-v2 .seat-card.sc-me :is(.sc-sub, .sc-name) { white-space: nowrap; }
+@media (max-width: 600px) {
+  main.ui-board-v2 .seat-card .sc-pt .sval { font-size: 14px; }
+  main.ui-board-v2 .seat-card.sc-me .sc-pt .sval { font-size: 13px; }
+}
+
+/* 手番の席の札 (動きは末尾の P3) */
+main.ui-board-v2 .seat-card.turn {
+  border-color: var(--cy-hot);
+  box-shadow: 0 0 0 1px var(--cy-hot), 0 0 22px color-mix(in srgb, var(--cy-hot) 55%, transparent);
+}
+main.ui-board-v2 .seat-card.oya .sc-wind, main.ui-board-v2 .sc-tag {
+  background: var(--cy-line);
+  color: var(--cy-on-line);
+}
+main.ui-board-v2 .sc-wind { border-radius: 0; }
+
+/* 手牌の帯 */
+main.ui-board-v2 section.player.active {
+  border: 1px solid var(--cy-hot);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--cy-panel-solid) 80%, transparent);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--cy-hot) 40%, transparent), inset 0 0 24px color-mix(in srgb, var(--cy-hot) 10%, transparent);
+}
+
+/* トグルと小さなボタン: 角を斜めに落とす */
+main.ui-board-v2 :is(.tm-toggle, .stamp-open-btn, .bgm-btn, .table-menu-wrap button, .nuki-btn, .turn-status) {
+  border-radius: 0;
+  border: 1px solid var(--cy-dim);
+  background: color-mix(in srgb, var(--cy-panel-solid) 85%, transparent);
+  color: var(--cy-ink);
+  clip-path: var(--cy-cut-s);
+}
+main.ui-board-v2 .tm-toggle:has(input:checked) {
+  border-color: var(--cy-line);
+  box-shadow: inset 0 0 12px color-mix(in srgb, var(--cy-line) 30%, transparent);
+}
+
+/* 押す物 (次局へ ・ 北抜きなど) は金の板に暗い字 */
+main.ui-board-v2 .next-btn {
+  border-radius: 0;
+  clip-path: var(--cy-cut-m);
+  background: var(--cy-line);
+  color: var(--cy-on-line);
+  border: 0;
+  box-shadow: none;
+  font-family: var(--cy-font-label);
+  letter-spacing: 0.12em;
+}
