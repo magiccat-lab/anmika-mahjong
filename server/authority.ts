@@ -1219,8 +1219,9 @@ export class RoomAuthority {
     const core = toCorePai(pai);
     // 判断本体は src/lib/store/cpuCall.ts [single store.ts と共有]。
     // online は従来フィーバー権保護の見送り [七対子 / 全虹の芽] を通していないので
-    // feverSkip: false で挙動を保つ [single は true。揃えるかは別判断]
-    const callOpts = { feverSkip: false };
+    // 2026-10-28 single に揃えた。07-20 リョー「7 対子の時に他の部分をポンしてもフィーバー権消えるから、そこも加味して」
+    // [a8fcee7] は single にしか入っておらず、online の CPU は 7 対子 / 全虹の芽の手でも役牌をポンしていた
+    const callOpts = { feverSkip: true };
 
     // Fever gate: non-fever CPU players must not call during fever.
     const someoneFever = PLAYERS.some((p) => this.game.feverActive[p]);

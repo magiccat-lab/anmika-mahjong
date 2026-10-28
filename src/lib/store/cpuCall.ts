@@ -13,7 +13,7 @@
 //   - 大明槓は三元牌 + 役牌風だけ
 //   - 暗槓 / 加槓は三元牌の 4 枚揃いだけ
 //   - 七対子 / 全虹の芽がある手は見送る [shouldSkipPonForFever]。
-//     ※ online はこの見送りを今まで通していない。差分は opts.feverSkip で保つ
+//     single も online も feverSkip: true [10-28 に online を揃えた]
 import { toCorePai } from '../helpers';
 import { shouldSkipPonForFever } from './cpuFever';
 import type { Game3 } from '../game3';
@@ -22,8 +22,7 @@ import type { PlayerId } from '../types';
 export interface CpuCallOptions {
   /**
    * 七対子 / 全虹の芽がある手のポン・大明槓を見送るか。
-   * single は true。online [authority.ts] は従来これを通していないので false を渡す。
-   * 2 つを揃えるかどうかは別判断なのでここでは既定値を置かない。
+   * single も online も true を渡す [10-28 に揃えた。前は online だけ false]。
    */
   feverSkip: boolean;
 }

@@ -146,8 +146,8 @@ const SCENARIOS: Scenario[] = [
   { name: '副露後の進む数牌ポン', hand: ADVANCE_HAND, fulou: ['z666+'], tile: 'p5', expect: 'pon' },
   { name: '7 は鳴かない', hand: ['m1', 'm2', 'm3', 's4', 's5', 's6', 'p7', 'p7', 's9', 'z1'], fulou: ['z666+'], tile: 'p7', expect: 'none' },
   { name: '發を 3 枚持ちでもポンが先 [CPU の大明槓は実質ここでは出ない]', hand: ['z6', 'z6', 'z6', ...PLAIN, 'm1'], tile: 'z6', expect: 'pon' },
-  // 差分の固定: 7 対子の芽がある手の發ポン。single は見送り、online は鳴く [現状どおり]
-  { name: '7 対子の芽 + 發', hand: ['m7', 'm7', 'z6', 'z6', ...PLAIN], tile: 'z6', expect: 'none', online: 'pon' },
+  // 7 対子の芽がある手の發ポンは両方見送る [10-28 に online を single に揃えた。前は online だけ鳴いていた]
+  { name: '7 対子の芽 + 發', hand: ['m7', 'm7', 'z6', 'z6', ...PLAIN], tile: 'z6', expect: 'none' },
 ];
 
 function singleResult(sc: Scenario): 'pon' | 'kan' | 'none' {
@@ -215,17 +215,18 @@ describe('single と online で CPU の鳴きが一致する', () => {
   }
 });
 
-describe('配線: 両経路が cpuCall を使い、feverSkip の差を明示している', () => {
+describe('配線: 両経路が cpuCall を使い、feverSkip を揃えている', () => {
   const root = new URL('../../../', import.meta.url);
   const read = (rel: string) => readFileSync(new URL(rel, root), 'utf8');
 
-  it('store.ts [single] は feverSkip: true、authority.ts [online] は false', () => {
+  it('store.ts [single] も authority.ts [online] も feverSkip: true', () => {
     const single = read('src/lib/store.ts');
     const online = read('server/authority.ts');
     expect(single).toMatch(/from '\.\/store\/cpuCall'/);
     expect(single).toMatch(/feverSkip: true/);
     expect(online).toMatch(/from '\.\.\/src\/lib\/store\/cpuCall'/);
-    expect(online).toMatch(/feverSkip: false/);
+    expect(online).toMatch(/feverSkip: true/);
+    expect(online).not.toMatch(/feverSkip: false/);
   });
 
   it('暗槓 / 加槓の三元牌選びは single [cpuActions] と online [ws_server] で filterCpuAutoKan を共有', () => {
