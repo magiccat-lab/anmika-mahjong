@@ -160,6 +160,7 @@ import { canFeverLizhi as canFeverLizhiHelper, isFeverWaitExhausted as isFeverWa
 import { isKanpaman as isKanpamanHelper, doraIndicatorOf as doraIndicatorOfHelper } from './game3/yaku';
 import { correctedFuForM7 } from './game3/fu7m';
 import { tulipNeighbors } from './game3/tulip';
+import { anmikaHuleRule, chipEnvOf, swapM7, swapKind, unswapKind, unswapM1, tenpaiWinValue, type TenpaiWait } from './game3/cpuValue';
 import { computeChipMultiplier as computeChipMultiplierHelper, applyChipOall as applyChipOallHelper, applyChipFromLoser as applyChipFromLoserHelper, type ChipState as ChipStateT, type ChipApplyOpts as ChipApplyOptsT, type ChipBreakdownEntry, type ChipSettlementEffect } from './game3/chip';
 import { getTingpaiList as getTingpaiListHelper, getTingpaiListBeforeZimo as getTingpaiListBeforeZimoHelper, canTsumoWithPochiSwap as canTsumoWithPochiSwapHelper, americanChitoiXiangting, americanChitoiComplete, countAmericanChitoiQuads } from './game3/tingpai';
 import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotHelper, type PreHuleSnapshot } from './game3/snapshot';
@@ -1742,7 +1743,7 @@ export class Game3 {
     const evaluated = this.evaluateDiscardRows_(player);
     if (!evaluated) return null;
     if (evaluated.forced) return evaluated.rows[0]?.pai as Pai ?? null;
-    return this.selectBestFromRows_(evaluated.rows, evaluated.foldMode) as Pai | null;
+    return this.selectBestFromRows_(evaluated.rows, evaluated.foldMode, evaluated.valueOf) as Pai | null;
   }
 
   /** 打牌候補の共通評価 [pickBestDiscard と adviseDiscard の単一の物差し]。
@@ -1754,6 +1755,8 @@ export class Game3 {
     rows: DiscardAdviceRow[];
     foldMode: boolean;
     forced: 'fever' | 'lizhi' | null;
+    /** テンパイ候補の手の価値 (同シャンテン ・ 同受け入れの同点崩し用、遅延評価 ・ 候補ごとに 1 回) */
+    valueOf: (row: DiscardAdviceRow) => number;
   } | null {
     const sp = this.shoupai.get(player);
     if (!sp) return null;
@@ -1785,6 +1788,7 @@ export class Game3 {
           rows: [this.buildForcedTsumogiriRow_(sp, z)],
           foldMode: false,
           forced: isFeverForced ? 'fever' : 'lizhi',
+          valueOf: () => 0,
         };
       }
     }
@@ -1995,55 +1999,124 @@ export class Game3 {
       });
     }
     if (rows.length === 0) return null;
-    return { rows, foldMode, forced: null };
+    const valueCache = new Map<string, number>();
+    const valueOf = (row: DiscardAdviceRow): number => {
+      if (row.xiangting !== 0) return 0;
+      const hit = valueCache.get(row.pai);
+      if (hit !== undefined) return hit;
+      let v = 0;
+      try { v = this.tenpaiDiscardValue_(player, sp, row.pai, visibleElsewhere, baseTile); } catch { v = 0; }
+      valueCache.set(row.pai, v);
+      return v;
+    };
+    return { rows, foldMode, forced: null, valueOf };
+  }
+
+  /** テンパイになる打牌 pai の手の価値 [チップ枚、アガりの期待値の合計]。公開情報だけ [残り枚数は受け入れと同じ 4 - 自分の手 - 見えている牌]。
+   *  待ち牌ごとの有効なアガり [役 ・ フリテン ・ 北単騎] とチップ [赤 ・ 金 ・ 虹 ・ 北 ・ 裏 ・ 冬] は cpuValue.tenpaiWinValue。
+   *  閉じた手はダマ禁止なので立直する前提 [立直の翻を含める]、鳴いた手は役が無ければ 0 */
+  private tenpaiDiscardValue_(
+    player: PlayerId,
+    sp: any,
+    pai: string,
+    visibleElsewhere: (s: string, n: number) => number,
+    baseTile: (p: string) => string,
+  ): number {
+    const after = sp.clone();
+    after.dapai(pai);
+    const closed = isMenzenHand(after);
+    const discarded = baseTile(pai.replace(/[_*]$/, ''));
+    const own = (s: string, n: number): number => Number(after._bingpai?.[s]?.[n] ?? 0);
+    // 受け入れ [computeUkeire] と同じ牌の並びで、アガり牌とその残り枚数 [打った牌も場に出る分として引く]
+    const waits: TenpaiWait[] = [];
+    const waitCores: string[] = [];
+    for (let n = 1; n <= 9; n++) {
+      for (const s of ['m', 'p', 's']) {
+        if (s === 'm' && n !== 7 && n !== 9) continue;
+        this.collectTenpaiWait_(after, s, n, own, visibleElsewhere, discarded, waits, waitCores);
+      }
+    }
+    for (let n = 1; n <= 7; n++) this.collectTenpaiWait_(after, 'z', n, own, visibleElsewhere, discarded, waits, waitCores);
+    if (waits.length === 0) return 0;
+    // フリテン: 待ち牌のどれかが自分の河 [打つ牌を含む] にある、または見逃し [リーチ後は永久]。フィーバー中は無し
+    const river = new Set<string>([discarded, ...((this.he.get(player)?._pai ?? []) as string[]).map(baseTile)].map(swapKind));
+    const furiten = !this.feverActive[player]
+      && (waitCores.some((w) => river.has(swapKind(w))) || this.missedRonTemp[player] || this.missedRonPermanent[player]);
+    const sw = swapM7(after.clone());
+    const param = Majiang.Util.hule_param({
+      rule: anmikaHuleRule(),
+      zhuangfeng: this.changfengZ - 1,
+      menfeng: this.zifengZ(player) - 1,
+      lizhi: closed ? 1 : 0,
+      baopai: (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f') && !isPositiveZ5(p)).map(normalizeBaopaiForMajiang),
+      fubaopai: null,
+      changbang: this.state.benbang,
+      lizhibang: this.state.lizhibang,
+    });
+    let feverTier = 0;
+    if (closed) {
+      try { const f = canFeverLizhiHelper(unswapM1(sw.clone())); if (f.ok) feverTier = f.tier; } catch { feverTier = 0; }
+    }
+    const unseen = (k: string): number => {
+      const core = unswapKind(k);
+      return Math.max(0, 4 - own(core[0], Number(core[1])) - visibleElsewhere(core[0], Number(core[1])));
+    };
+    return tenpaiWinValue(sw, waits, { param, env: chipEnvOf(this, player), unseen, feverTier, furiten });
+  }
+
+  private collectTenpaiWait_(
+    after: any, s: string, n: number,
+    own: (s: string, n: number) => number,
+    visibleElsewhere: (s: string, n: number) => number,
+    discarded: string,
+    waits: TenpaiWait[], waitCores: string[],
+  ): void {
+    const cur = own(s, n);
+    if (cur >= 4) return;
+    const test = after.clone();
+    test._bingpai[s][n] += 1;
+    test._zimo = `${s}${n}`;
+    if (lizhiXiangting(test) >= 0) return;
+    const remaining = Math.max(0, 4 - cur - visibleElsewhere(s, n) - (discarded === `${s}${n}` ? 1 : 0));
+    waits.push({ tile: swapKind(`${s}${n}`), remaining });
+    waitCores.push(`${s}${n}`);
   }
 
   /** rows から CPU の1位打牌を選ぶ [挙動保存: 同点は候補順の先勝ち]。
    *  通常は xt 最小 > ukeire 最大 > priority 最大。
    *  ベタオリ中は safety [純粋な安全度] を最優先し、同安全度の中で手を進める */
-  private selectBestFromRows_(rows: DiscardAdviceRow[], foldMode: boolean): string | null {
-    let bestPai: string | null = null;
-    let bestShanten = 99;
-    let bestUkeire = -1;
-    let bestPriority = -1;
-    let bestSafety = -99;
-    let bestDropsNiji = false;
-    let keepPai: string | null = null;
-    let keepShanten = 99;
-    let keepUkeire = -1;
-    let keepPriority = -1;
-    let keepSafety = -99;
+  private selectBestFromRows_(rows: DiscardAdviceRow[], foldMode: boolean, valueOf?: (row: DiscardAdviceRow) => number): string | null {
+    // テンパイ候補だけ手の価値 [チップ] を見る。同シャンテン ・ 同受け入れの時だけ、prio より前の同点崩し [受け入れは落とさない]
+    const val = (r: DiscardAdviceRow): number => (valueOf && r.xiangting === 0 ? valueOf(r) : 0);
+    let best: DiscardAdviceRow | null = null;
+    let keep: DiscardAdviceRow | null = null;
     for (const row of rows) {
       const { xiangting: xt, ukeire, prio, safety, dropsNiji } = row;
-      const isBetter = (bs: number, bu: number, bp: number, bsf: number) => foldMode
-        ? (safety > bsf
-          || (safety === bsf && xt < bs)
-          || (safety === bsf && xt === bs && ukeire > bu))
-        : (xt < bs
-          || (xt === bs && ukeire > bu)
-          || (xt === bs && ukeire === bu && prio > bp));
-      if (isBetter(bestShanten, bestUkeire, bestPriority, bestSafety)) {
-        bestShanten = xt;
-        bestUkeire = ukeire;
-        bestPriority = prio;
-        bestSafety = safety;
-        bestPai = row.pai;
-        bestDropsNiji = dropsNiji;
-      }
-      if (!dropsNiji && isBetter(keepShanten, keepUkeire, keepPriority, keepSafety)) {
-        keepShanten = xt;
-        keepUkeire = ukeire;
-        keepPriority = prio;
-        keepSafety = safety;
-        keepPai = row.pai;
-      }
+      const isBetter = (cur: DiscardAdviceRow | null) => {
+        if (!cur) return true;
+        if (foldMode) {
+          return safety > cur.safety
+            || (safety === cur.safety && xt < cur.xiangting)
+            || (safety === cur.safety && xt === cur.xiangting && ukeire > cur.ukeire);
+        }
+        if (xt !== cur.xiangting) return xt < cur.xiangting;
+        if (ukeire !== cur.ukeire) return ukeire > cur.ukeire;
+        if (xt === 0) {
+          const v = val(row);
+          const cv = val(cur);
+          if (Math.abs(v - cv) > 1e-6) return v > cv;
+        }
+        return prio > cur.prio;
+      };
+      if (isBetter(best)) best = row;
+      if (!dropsNiji && isBetter(keep)) keep = row;
     }
     // 押し引き平常時: 同シャンテンで虹を守れる代替打があるなら、受け入れ損は
     // 呑んで虹 [7 枚] を引っ張る。シャンテンが戻る場合だけ手なりで虹を放す
-    if (!foldMode && bestDropsNiji && keepPai && keepShanten === bestShanten) {
-      return keepPai;
+    if (!foldMode && best?.dropsNiji && keep && keep.xiangting === best.xiangting) {
+      return keep.pai;
     }
-    return bestPai;
+    return best ? best.pai : null;
   }
 
   /** 強制ツモ切り時の advise 表示用行。metrics は取れる範囲で埋める [失敗時 0]。 */
@@ -2076,11 +2149,11 @@ export class Game3 {
   adviseDiscard(player: PlayerId, topN = 5): DiscardAdviceRow[] {
     const evaluated = this.evaluateDiscardRows_(player);
     if (!evaluated) return [];
-    const { rows, foldMode, forced } = evaluated;
+    const { rows, foldMode, forced, valueOf } = evaluated;
     if (forced) {
       return [{ ...rows[0], forced, recommended: true }];
     }
-    const bestPai = this.selectBestFromRows_(rows, foldMode);
+    const bestPai = this.selectBestFromRows_(rows, foldMode, valueOf);
     const sorted = [...rows].sort((a, b) => {
       if (foldMode) {
         if (a.safety !== b.safety) return b.safety - a.safety;
@@ -2089,6 +2162,10 @@ export class Game3 {
       }
       if (a.xiangting !== b.xiangting) return a.xiangting - b.xiangting;
       if (a.ukeire !== b.ukeire) return b.ukeire - a.ukeire;
+      if (a.xiangting === 0) {
+        const dv = valueOf(b) - valueOf(a);
+        if (Math.abs(dv) > 1e-6) return dv;
+      }
       return b.prio - a.prio;
     });
     return sorted.slice(0, topN).map((row) => ({
