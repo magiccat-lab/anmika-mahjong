@@ -5,10 +5,10 @@
 // ws server の起動時に sha256 を取る [server は src/ を直接 import して動くため、
 // 起動中のコードとこのハッシュは必ず同じソースを指す]。ブラウザ側には出さない。
 //
-// 対象: src/lib/game3.ts と src/lib/store/cpu*.ts [cpuCall.ts を含む]。
+// 対象: src/lib/game3.ts と src/lib/game3/cpuValue.ts [テンパイの手の価値、10-28] と src/lib/store/cpu*.ts [cpuCall.ts を含む]。
 // 並びはパス昇順、パス名も一緒にハッシュに入れる [ファイル名の入れ替えも版が変わる]。
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
@@ -19,7 +19,8 @@ export function cpuSourceFiles(libDir: string = LIB_DIR): string[] {
   const store = readdirSync(join(libDir, 'store'))
     .filter((name) => /^cpu.*\.ts$/.test(name))
     .map((name) => `store/${name}`);
-  return ['game3.ts', ...store].sort();
+  const value = existsSync(join(libDir, 'game3/cpuValue.ts')) ? ['game3/cpuValue.ts'] : [];
+  return ['game3.ts', ...value, ...store].sort();
 }
 
 /** sha256 の先頭 12 桁 [hex]。読めない時は null [記録を落とさないため呼び出し側は null を許す] */

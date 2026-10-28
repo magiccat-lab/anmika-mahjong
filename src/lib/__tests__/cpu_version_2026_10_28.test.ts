@@ -16,6 +16,7 @@ describe('cpuVersion', () => {
   it('実ソースでは game3.ts / cpu*.ts [cpuCall.ts を含む] を昇順に拾う', () => {
     const files = cpuSourceFiles();
     expect(files[0]).toBe('game3.ts');
+    expect(files).toContain('game3/cpuValue.ts');
     expect(files).toContain('store/cpuCall.ts');
     expect(files).toContain('store/cpuFever.ts');
     expect([...files].sort()).toEqual(files);
