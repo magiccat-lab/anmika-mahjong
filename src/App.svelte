@@ -39,6 +39,7 @@
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
   import HeaderInfo from './lib/HeaderInfo.svelte';
   import RoundEndPanel from './lib/RoundEndPanel.svelte';
+  import WallMeter from './lib/WallMeter.svelte';
   import NextDrawsPanel from './lib/NextDrawsPanel.svelte';
   import { kinpeiOptions } from './lib/kinpeiLabel';
   import { kanButtonLabel, kanTileName } from './lib/kanLabel';
@@ -451,6 +452,15 @@
   $: he1 = handHe($game.game.he.get(srvSeat(1)), srvSeat(1));
   $: he2 = handHe($game.game.he.get(srvSeat(2)), srvSeat(2));
   $: paishu = $game.game.shan.paishu;
+  // [2026-10-29 見た目 B / P1] 山の目盛りの数 = その局で見えた残り山の最大枚数 [山 (shan) が替わったら数え直す]。
+  // 局の途中から繋いでも、その時の残りより小さくはならない
+  let wallShan: unknown = null;
+  let wallTotal = 0;
+  $: {
+    const _shan = $game.game.shan;
+    if (_shan !== wallShan) { wallShan = _shan; wallTotal = paishu; }
+    else if (paishu > wallTotal) wallTotal = paishu;
+  }
   $: baopai = $game.game.shan.displayBaopai;
   $: lastZimo = $game.lastZimo;
   $: currentPlayer = $game.game.lunbanToPlayerId(state.lunban);
@@ -3721,8 +3731,8 @@
           <div class="score-center">
             <span class="benbang">{state.benbang} 本場</span>
             <span class="kyotaku">供託 {state.lizhibang}</span>
-            <span class="paishu">残り {paishu}</span>
           </div>
+          <WallMeter remaining={paishu} total={wallTotal} />
         </div>
       </div>
       <!-- 4 方向 河ゾーン [雀魂風、 6 牌/行で wrap]、 各 player の向きに合わせて回転 -->
@@ -4952,7 +4962,6 @@
     gap: 6px;
   }
   main.mode-single .score-box .benbang { font-size: 18px; color: #ffd060; font-weight: bold; }
-  main.mode-single .score-box .paishu { font-size: 22px; color: #e8e8e8; font-weight: 700; letter-spacing: 0.5px; }
   /* リーチ / シュバ / フィバの side 色付け */
   main.mode-single .score-box .score-side.lizhi-true { background: rgba(80, 160, 255, 0.25); border-radius: 4px; }
   main.mode-single .score-box .score-side.shuvari { background: rgba(255, 80, 80, 0.25); }
@@ -6174,7 +6183,6 @@
   main.mode-single.ui-board-v2 .score-box .ssub { font-size: clamp(7px, calc(var(--score-side) * 0.06), 10px); line-height: 1.15; margin-top: 0; }
   main.mode-single.ui-board-v2 .score-box .score-side.score-top { font-size: clamp(11px, calc(var(--score-side) * 0.085), 14px); padding: 2px 0; }
   main.mode-single.ui-board-v2 .score-box .benbang { font-size: clamp(9px, calc(var(--score-side) * 0.08), 13px); }
-  main.mode-single.ui-board-v2 .score-box .paishu { font-size: clamp(10px, calc(var(--score-side) * 0.10), 16px); }
   main.mode-single.ui-board-v2 .score-box .score-side.score-left,
   main.mode-single.ui-board-v2 .score-box .score-side.score-right { padding: 1px; overflow: hidden; }
   main.mode-single.ui-board-v2 .score-box .score-side.score-bottom { padding: 1px 3px; overflow: hidden; }
@@ -7033,7 +7041,6 @@
     main.mode-single.ui-board-v2 .cb-panel .score-center { flex-wrap: wrap; justify-content: center; gap: 0 6px; white-space: normal; }
     main.mode-single.ui-board-v2 .cb-panel .benbang,
     main.mode-single.ui-board-v2 .cb-panel .kyotaku,
-    main.mode-single.ui-board-v2 .cb-panel .paishu { font-size: 11px; }
   }
   .cb-dora { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--jz-sub); white-space: nowrap; }
   main.mode-single.ui-board-v2 .cb-dora :global(.tile.size-sm) {
@@ -7054,7 +7061,6 @@
   }
   main.mode-single.ui-board-v2 .cb-panel .benbang,
   main.mode-single.ui-board-v2 .cb-panel .kyotaku { font-size: 12px; color: var(--jz-sub); font-weight: 500; }
-  main.mode-single.ui-board-v2 .cb-panel .paishu { font-size: 12px; color: var(--jz-ink); font-weight: 700; letter-spacing: 0; }
 
   /* ---- 左右の列: 席の札 + 小さな伏せ牌 + 鳴いた牌 ---- */
   main.mode-single.ui-board-v2 .seat-left,
