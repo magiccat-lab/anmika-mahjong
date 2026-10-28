@@ -42,8 +42,8 @@
   .u { white-space: nowrap; }
   .label { color: var(--cy-line); font-weight: 700; }
   .base { color: var(--cy-ink); }
-  .mul { color: var(--cy-hot); cursor: help; border-bottom: 1px dotted var(--cy-hot); }
+  .mul { color: var(--cy-ink); cursor: help; border-bottom: 1px dotted var(--cy-dim); }
   .parts { color: var(--cy-sub-ink); }
-  .total { color: var(--cy-pt); font-family: var(--cy-font-num); font-variant-numeric: tabular-nums; }
+  .total { color: var(--cy-pt); font-family: var(--cy-font-num); font-variant-numeric: normal; }
   .mode { color: var(--cy-sub-ink); }
 </style>

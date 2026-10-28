@@ -35,7 +35,7 @@
     line-height: 1;
   }
   .n {
-    font: 800 clamp(16px, 2.2vmin + 6px, 24px) / 1 var(--cy-font-num);
+    font: 700 clamp(16px, 2.2vmin + 6px, 24px) / 1 var(--cy-font-num);
     letter-spacing: 0.06em;
     color: var(--cy-pt);
     text-shadow: 0 0 10px color-mix(in srgb, var(--cy-pt) 70%, transparent);

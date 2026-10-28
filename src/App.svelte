@@ -4051,7 +4051,7 @@
         {#if $game.pendingPingju && !$game.lastHuleResult}
           <div class="pingju-head">
             <h2 class="pingju-title">流局</h2>
-            <span class="pingju-note">{$game.message ?? '🌀 山切れ'}</span>
+            <span class="pingju-note">{#each ($game.message ?? '🌀 山切れ').split(/(p[\d,]+ [+-]\d+\]?)/) as part, pi}{#if pi % 2 === 1}<span class="keep">{part}</span>{:else}{part}{/if}{/each}</span>
           </div>
           {#if $game.game.preHuleSnapshot}
             {@const pdelta = [0,1,2].map(p => state.defen[p as PlayerId] - (($game.game.preHuleSnapshot as any).defen[p] ?? 0))}
@@ -5837,6 +5837,12 @@
     max-height: none !important;
     overflow: visible !important;
   }
+  main.mode-single .agari-unified-panel :global(.game-end-panel) {
+    justify-self: stretch;
+    width: 100%;
+    box-sizing: border-box;
+    max-width: none;
+  }
   main.mode-single .agari-unified-panel :global(.chip-breakdown) {
     justify-self: stretch;
     max-width: none;
@@ -7547,6 +7553,7 @@
   }
   main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small .agari-left.pingju-only { gap: 10px; }
   main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small .pingju-title { font-size: 28px; letter-spacing: 0.3em; }
+  .pingju-note .keep { white-space: nowrap; }
   main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small .pingju-note { font-size: 15px; color: var(--cy-sub-ink); }
   .pingju-moves { display: grid; gap: 4px; width: 100%; }
   .pm-row {

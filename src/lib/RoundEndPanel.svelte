@@ -312,8 +312,9 @@
   .fuyu-sum { font-size: clamp(12px, 3.4vw, 16px); color: var(--cy-line); font-weight: 700; margin-left: 8px; white-space: nowrap; }
 
   .payment-row { display: flex; gap: 8px 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; font-size: 15px; }
-  .payment-label { color: var(--cy-sub-ink); font-size: clamp(12px, 3.4vw, 16px); font-weight: 700; white-space: nowrap; }
+  .payment-label { flex: 0 0 100%; text-align: left; color: var(--cy-sub-ink); font-size: clamp(12px, 3.4vw, 16px); font-weight: 700; white-space: nowrap; }
   .payment-cell {
+    flex: 1 1 190px;
     display: inline-flex;
     align-items: baseline;
     gap: 6px;
@@ -322,7 +323,7 @@
     border: 1px solid var(--cy-dim);
     font-weight: 700;
     white-space: nowrap;
-    font-variant-numeric: tabular-nums;
+    font-variant-numeric: normal;
   }
   .payment-cell .payment-player { font-size: 12px; color: var(--cy-sub-ink); font-weight: 800; }
   .payment-cell .payment-delta { font-size: clamp(14px, 4vw, 18px); }

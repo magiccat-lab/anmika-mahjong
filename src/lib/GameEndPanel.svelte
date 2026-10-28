@@ -25,9 +25,10 @@
       含む chip: アガリ祝儀 / 抜きドラ / 8万点+トップ (2n-10) / トビ賞 +5 [or 倍 +10] / トントンブー +6
     </div>
   {/if}
+  <div class="table-wrap">
   <table class="ranking">
     <thead>
-      <tr><th>順位</th><th>player</th><th>点数</th><th>チップ収支</th><th>順位チップ</th><th>N万点トップ賞</th><th>トビ賞</th><th>トントンブー</th><th>この{matchLabel}</th>{#if carried}<th>通算</th>{/if}</tr>
+      <tr><th class="pos">順位</th><th class="who">player</th><th>点数</th><th>チップ収支</th><th>順位チップ</th><th>N万点トップ賞</th><th>トビ賞</th><th>トントンブー</th><th class="fin-h">この{matchLabel}</th>{#if carried}<th>通算</th>{/if}</tr>
     </thead>
     <tbody>
       {#each (finalScore ?? ranking.map(r => ({ ...r, chipBase: chipLedger?.[r.player] ?? 0, uma: 0, topNBonus: 0, tobiBonus: 0, tontonbuBonus: 0, chip: chipLedger?.[r.player] ?? 0, total: chipLedger?.[r.player] ?? 0 }))) as r}
@@ -48,6 +49,7 @@
       {/each}
     </tbody>
   </table>
+  </div>
 </section>
 
 <style>
@@ -60,7 +62,8 @@
     color: var(--cy-ink);
   }
   h2 { font-size: 14px; margin: 0 0 8px; color: var(--cy-line); font-family: var(--cy-font-label); letter-spacing: 0.12em; white-space: nowrap; }
-  .rule-note { font-size: 12px; color: var(--cy-sub-ink); margin: 8px 0; line-height: 1.5; }
+  .rule-note { font-size: 12px; color: var(--cy-sub-ink); margin: 8px 0; line-height: 1.5; word-break: auto-phrase; overflow-wrap: anywhere; }
+  .table-wrap { overflow-x: auto; }
   .ranking { width: 100%; border-collapse: collapse; font-family: var(--sans); font-variant-numeric: tabular-nums; font-size: clamp(13px, 3.6vw, 18px); }
   .ranking th, .ranking td { padding: 10px clamp(6px, 2vw, 14px); text-align: right; border-bottom: 1px solid var(--cy-faint); white-space: nowrap; }
   .ranking th { background: var(--cy-faint); font-weight: 700; font-size: clamp(12px, 3.4vw, 17px); color: var(--cy-sub-ink); }
@@ -71,4 +74,9 @@
   .ranking .cumulative { font-size: clamp(13px, 3.6vw, 18px); color: var(--cy-sub-ink); }
   .ranking .raw-defen { font-size: clamp(13px, 3.6vw, 18px); font-variant-numeric: tabular-nums; }
   .ranking .ledger, .ranking .uma, .ranking .topn, .ranking .tonton { font-size: clamp(13px, 3.6vw, 18px); }
+  /* 順位と名前は横にスクロールしても左に残す [狭い画面で表が 9 列まで広がるため] */
+  .ranking th.pos, .ranking td.pos { position: sticky; left: 0; z-index: 1; min-width: 3.2em; background: var(--cy-panel-solid); }
+  .ranking th.who, .ranking td.who { position: sticky; left: 3.2em; z-index: 1; background: var(--cy-panel-solid); }
+  .ranking th.fin-h, .ranking td.final { position: sticky; right: 0; z-index: 1; background: var(--cy-panel-solid); box-shadow: -8px 0 8px -6px rgba(0, 0, 0, 0.6); }
+  .ranking th.pos, .ranking th.who, .ranking th.fin-h { background: color-mix(in srgb, var(--cy-line) 8%, var(--cy-panel-solid)); }
 </style>

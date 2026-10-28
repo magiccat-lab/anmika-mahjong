@@ -99,7 +99,7 @@
   .entry-brand { display: flex; justify-content: center; margin-bottom: 14px; }
   .entry-menu h1 {
     margin: 0;
-    font: 800 clamp(22px, 6.4vw, 54px) / 1.1 var(--cy-font-num);
+    font: 800 clamp(22px, 6.4vw, 54px) / 1.1 var(--cy-font-head);
     letter-spacing: 0.06em;
     white-space: nowrap;
     color: var(--cy-ink);
@@ -122,7 +122,7 @@
   }
   .entry-btn.online { --tone: var(--cy-hot); }
   .entry-btn .btn-main { white-space: nowrap; font-weight: 700; line-height: 1.25; }
-  .entry-btn .btn-en { white-space: nowrap; font-family: var(--cy-font-num); font-weight: 800; letter-spacing: 0.08em; }
+  .entry-btn .btn-en { white-space: nowrap; font-family: var(--cy-font-head); font-weight: 800; letter-spacing: 0.08em; }
   .entry-btn:hover { filter: brightness(1.12); }
   .entry-btn:focus-visible { outline: 3px solid var(--cy-line); outline-offset: 3px; }
 
