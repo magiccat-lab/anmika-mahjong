@@ -176,3 +176,56 @@ main.ui-board-v2 .next-btn {
   font-family: var(--cy-font-label);
   letter-spacing: 0.12em;
 }
+
+/* ---- P3 動き ----
+   手番の席の枠を光が一周する (conic の角度だけを動かす。同時に光るのは手番の 1 枠だけ)。
+   卓の上を細い光の帯がゆっくり流れる (transform だけ)。
+   動きを減らす設定では両方とも止めて、枠は静止した光にする */
+@property --cy-a {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes cy-spin { to { --cy-a: 360deg; } }
+@keyframes cy-pulse { 50% { opacity: 0.72; } }
+@keyframes cy-scan { from { transform: translateY(-110%); } to { transform: translateY(420%); } }
+
+main.ui-board-v2 :is(section.player.active, .seat-card.turn) { position: relative; }
+main.ui-board-v2 :is(section.player.active, .seat-card.turn)::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  padding: 2px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--cy-a),
+    color-mix(in srgb, var(--cy-hot) 30%, var(--cy-panel-solid)) 0 62%,
+    var(--cy-hot) 80%,
+    #fff 86%,
+    var(--cy-hot) 90%,
+    color-mix(in srgb, var(--cy-hot) 30%, var(--cy-panel-solid)) 100%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: cy-spin 2.2s linear infinite, cy-pulse 1.1s ease-in-out infinite;
+}
+
+main.ui-board-v2::after {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 26vh;
+  z-index: 5;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--cy-line) 9%, transparent) 50%, transparent);
+  will-change: transform;
+  animation: cy-scan 3.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  main.ui-board-v2 :is(section.player.active, .seat-card.turn)::before { animation: none; }
+  main.ui-board-v2::after { animation: none; display: none; }
+}
