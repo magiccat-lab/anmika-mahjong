@@ -6985,7 +6985,7 @@
     .cb-dora .cb-label { display: none; }
     main.mode-single.ui-board-v2 .cb-panel .score-center { flex-wrap: wrap; justify-content: center; gap: 0 6px; white-space: normal; }
     main.mode-single.ui-board-v2 .cb-panel .benbang,
-    main.mode-single.ui-board-v2 .cb-panel .kyotaku,
+    main.mode-single.ui-board-v2 .cb-panel .kyotaku { font-size: 11px; }
   }
   .cb-dora { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--jz-sub); white-space: nowrap; }
   main.mode-single.ui-board-v2 .cb-dora :global(.tile.size-sm) {
