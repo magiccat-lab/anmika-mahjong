@@ -225,6 +225,10 @@ def init_db() -> None:
         # [2026-09-14] どのルール版で打たれた牌譜か。公開リンクを配るので要る
         if "rule_version" not in cols:
             c.execute("ALTER TABLE matches ADD COLUMN rule_version TEXT NOT NULL DEFAULT ''")
+        # [2026-10-28] CPU の席がある試合に、その時の CPU 判断ソースの版 [sha256 先頭 12 桁] を残す。
+        # NULL = CPU 無し、または版が不明 [この列を足す前の既存行を含む]。既存行は書き換えない
+        if "cpu_version" not in cols:
+            c.execute("ALTER TABLE matches ADD COLUMN cpu_version TEXT")
         room_cols = [r[1] for r in c.execute("PRAGMA table_info(rooms)").fetchall()]
         if "instance_id" not in room_cols:
             c.execute("ALTER TABLE rooms ADD COLUMN instance_id TEXT NOT NULL DEFAULT ''")
@@ -1655,6 +1659,7 @@ def _insert_match_record(
     duration: Any,
     paifu_source: str,
     rule_version: str,
+    cpu_version: str | None = None,
 ) -> int:
     """matches INSERT + users.chip_total/games_played 更新 + 戦績 stats [SAVEPOINT] の共通本体。
     [2026-10-09 遊真 A3] 旧 finish_match [POST /api/matches] の末尾をそのまま切り出した。
@@ -1668,7 +1673,7 @@ def _insert_match_record(
     next_match_no = int(max_no["m"]) + 1
     try:
         c.execute(
-            "INSERT INTO matches(room_id, match_no, match_uuid, members_json, paifu_json, chip_delta_json, duration_sec, paifu_source, rule_version) VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO matches(room_id, match_no, match_uuid, members_json, paifu_json, chip_delta_json, duration_sec, paifu_source, rule_version, cpu_version) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
                 room_id,
                 next_match_no,
@@ -1679,6 +1684,7 @@ def _insert_match_record(
                 duration,
                 paifu_source,
                 rule_version,
+                cpu_version,
             ),
         )
     except sqlite3.IntegrityError as e:
@@ -1996,6 +2002,14 @@ async def finish_match(request: Request):
     return {"ok": True, "match_no": next_match_no}
 
 
+def _clean_cpu_version(raw: Any) -> str | None:
+    """cpu_version [CPU 判断ソースの版] の検証。英数字だけ 12 桁まで、空・不正は None [記録は落とさない]"""
+    if not isinstance(raw, str):
+        return None
+    v = raw.strip()[:12]
+    return v if v and v.isalnum() else None
+
+
 def _validated_chip_delta(raw: Any, label: str) -> dict[str, int]:
     """内部 API 用の chip delta 検証: 非空 dict・key は str・値は int [bool 不可]・|d| <= 999_999・合計 0"""
     if not isinstance(raw, dict) or not raw:
@@ -2044,6 +2058,7 @@ async def record_match_internal(request: Request):
         raise HTTPException(status_code=400, detail="match_uuid required")
     match_uuid = match_uuid.strip()
     rule_version = str(body.get("rule_version") or "").strip()[:40]
+    cpu_version = _clean_cpu_version(body.get("cpu_version"))
     with db_conn() as c:
         room = c.execute("SELECT status FROM rooms WHERE room_id=?", (room_id,)).fetchone()
         if not room:
@@ -2101,6 +2116,7 @@ async def record_match_internal(request: Request):
                 None,
                 "authority",
                 rule_version,
+                cpu_version,
             )
         except HTTPException:
             # 同じ uuid の並行 POST [ws の再送と client 経路など] は UNIQUE 違反 → 重複扱いに倒す
@@ -2408,7 +2424,7 @@ async def get_match_paifu(match_id: int, request: Request):
     with db_conn() as c:
         row = c.execute(
             """SELECT match_id, room_id, match_no, members_json, chip_delta_json, paifu_json,
-                      finished_at, starred, title, paifu_source, is_public, rule_version
+                      finished_at, starred, title, paifu_source, is_public, rule_version, cpu_version
                       FROM matches WHERE match_id=?""",
             (match_id,),
         ).fetchone()

@@ -20,6 +20,7 @@ import {
 import { dlog, toCorePai } from '../helpers';
 import { settleAfterWin } from './winPipeline';
 import { decideCpuShuvari } from './cpuShuvari';
+import { filterCpuAutoKan } from './cpuCall';
 import { pickLizhiDapai, decideFever } from './cpuLizhi';
 
 function hasBlockingDecision(s: StoreState): boolean {
@@ -267,27 +268,25 @@ export function cpuStepImpl(initial: StoreState): StoreState {
     if (declaredLizhiDapai === null && _zimoLen > 0 && _zimoLen <= 3) {
       try {
         const kanMianzis = s.game.getKanCandidates(cur);
-        for (const m of kanMianzis) {
-          // m is a core mianzi string, not an expanded physical tile name.
-          const head = `${m[0]}${m[1]}`;
-          if (head === 'z5' || head === 'z6' || head === 'z7') {
-            // [2026-07-21 監査 D-04 fix] CPU の加槓も human と同じ槍槓反応窓を通す。
-            // 旧実装は game.declareKan 直呼びで pendingQianggang/awaitingRonDecision を
-            // 作らず嶺上まで取得し、他家が槍槓できなかった
-            const kakan = processKakanQianggangWindow(s, m);
-            s = kakan.s;
-            if (kakan.handled) {
-              kanReactionOpened = true;
-              break;
-            }
-            const repl = s.game.declareKan(cur, m);
-            if (repl) {
-              s = enqueueCutinState(s, 'kan', cur as 0 | 1 | 2);
-              s.lastZimo = repl;
-              s.message = `[CPU 自動カン] player ${cur} 暗槓 [${m}]`;
-              didKan = true;
-              break;
-            }
+        // m is a core mianzi string, not an expanded physical tile name.
+        // 三元牌だけ選ぶ規則は cpuCall.ts [online ws_server.ts と共有]
+        for (const m of filterCpuAutoKan(kanMianzis)) {
+          // [2026-07-21 監査 D-04 fix] CPU の加槓も human と同じ槍槓反応窓を通す。
+          // 旧実装は game.declareKan 直呼びで pendingQianggang/awaitingRonDecision を
+          // 作らず嶺上まで取得し、他家が槍槓できなかった
+          const kakan = processKakanQianggangWindow(s, m);
+          s = kakan.s;
+          if (kakan.handled) {
+            kanReactionOpened = true;
+            break;
+          }
+          const repl = s.game.declareKan(cur, m);
+          if (repl) {
+            s = enqueueCutinState(s, 'kan', cur as 0 | 1 | 2);
+            s.lastZimo = repl;
+            s.message = `[CPU 自動カン] player ${cur} 暗槓 [${m}]`;
+            didKan = true;
+            break;
           }
         }
       } catch { /* skip kan, fall through to discard */ }

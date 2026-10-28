@@ -170,6 +170,63 @@ def test_record_happy_path(env, room):
     assert n == 3
 
 
+def test_record_cpu_version_is_stored_when_given(env, room):
+    assert record(env, record_body(cpu_version="0123456789ab")).status_code == 200
+    assert matches_of("ROOM")[0]["cpu_version"] == "0123456789ab"
+
+
+@pytest.mark.parametrize("raw", [None, "", "   ", "bad value!", 123, ["x"]])
+def test_record_cpu_version_missing_or_junk_is_null(env, room, raw):
+    body = record_body()
+    if raw is not None:
+        body["cpu_version"] = raw
+    assert record(env, body).status_code == 200  # 版が不正でも記録は落とさない
+    assert matches_of("ROOM")[0]["cpu_version"] is None
+
+
+def test_record_cpu_version_is_cut_to_12_chars(env, room):
+    assert record(env, record_body(cpu_version="0123456789abcdef")).status_code == 200
+    assert matches_of("ROOM")[0]["cpu_version"] == "0123456789ab"
+
+
+def test_init_db_adds_cpu_version_to_legacy_db_without_touching_rows(tmp_path, monkeypatch):
+    """cpu_version 列が無い既存 DB [本番のコピー相当] に init_db を当てても行は書き換わらない"""
+    legacy = tmp_path / "legacy.sqlite3"
+    c = sqlite3.connect(legacy)
+    c.executescript(
+        """
+        CREATE TABLE users (user_id TEXT PRIMARY KEY, username TEXT, chip_total INTEGER DEFAULT 0, games_played INTEGER DEFAULT 0);
+        CREATE TABLE rooms (room_id TEXT PRIMARY KEY, host_user_id TEXT, status TEXT DEFAULT 'open');
+        CREATE TABLE matches (
+            match_id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL,
+            match_no INTEGER NOT NULL DEFAULT 1, match_uuid TEXT NOT NULL DEFAULT '',
+            members_json TEXT NOT NULL DEFAULT '[]', paifu_json TEXT NOT NULL,
+            chip_delta_json TEXT NOT NULL, duration_sec INTEGER,
+            finished_at TEXT NOT NULL DEFAULT (datetime('now')),
+            starred INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT '',
+            paifu_source TEXT NOT NULL DEFAULT 'client', is_public INTEGER NOT NULL DEFAULT 0,
+            rule_version TEXT NOT NULL DEFAULT ''
+        );
+        INSERT INTO matches(room_id, match_no, match_uuid, paifu_json, chip_delta_json, rule_version)
+            VALUES('OLD', 1, 'u-old', '[]', '{}', 'anmika-1.0.0');
+        """
+    )
+    c.commit()
+    before = c.execute("SELECT * FROM matches").fetchall()
+    c.close()
+    monkeypatch.setattr(appmod, "DB_PATH", legacy)
+    appmod.init_db()
+    appmod.init_db()  # 2 回目も通る [冪等]
+    c = sqlite3.connect(legacy)
+    cols = [r[1] for r in c.execute("PRAGMA table_info(matches)")]
+    assert "cpu_version" in cols
+    after = c.execute("SELECT * FROM matches").fetchall()
+    assert len(after) == 1
+    assert after[0][: len(before[0])] == before[0]  # 既存の列は 1 つも変わらない
+    assert c.execute("SELECT cpu_version FROM matches").fetchone()[0] is None
+    c.close()
+
+
 def test_record_second_match_gets_next_match_no(env, room):
     assert record(env).json()["match_no"] == 1
     r = record(env, record_body(match_uuid="srv:inst-ROOM:2"))

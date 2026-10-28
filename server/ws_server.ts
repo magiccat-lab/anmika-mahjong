@@ -30,6 +30,8 @@ import {
 } from './protocol';
 import { activeTrioForStart, computeRoomChipDelta, finalizeRoomChipDelta, foldRoomState, gameLedgerFromRoom, gameToRoomSeat, initialRoomChipLedger, mappingFor, mergeRoomChipDelta, nextMappingForPresent, presentRoomSeats, roomToGameSeat } from './rotation';
 import { ANMIKA_RULE_VERSION } from '../src/lib/ruleVersion';
+import { filterCpuAutoKan } from '../src/lib/store/cpuCall';
+import { getCpuVersion } from './cpuVersion';
 
 const DEFAULT_PORT = 8791;
 const DEFAULT_REACTION_TIMEOUT_MS = 15_000;
@@ -398,10 +400,7 @@ export function turnTimeoutAction(
     const zimoLen = typeof spKan?._zimo === 'string' ? spKan._zimo.length : 0;
     if (zimoLen > 0 && zimoLen <= 3) {
       const kanMianzis = game.getKanCandidates(current);
-      const sanyuanKan = kanMianzis.find((m) => {
-        const head = `${m[0]}${m[1]}`;
-        return head === 'z5' || head === 'z6' || head === 'z7';
-      });
+      const sanyuanKan = filterCpuAutoKan(kanMianzis)[0];
       if (sanyuanKan) return { type: 'declareKan', mianzi: sanyuanKan };
     }
   }
@@ -2020,6 +2019,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
         room_id: room.roomId,
         match_uuid: `srv:${key}`,
         rule_version: ANMIKA_RULE_VERSION,
+        // CPU の席がある試合だけ、その時動いていた CPU 判断ソースの版を付ける [人間だけの試合は null]
+        cpu_version: authority.hasCpuSeats() ? getCpuVersion() : null,
         finished: true,
         ledger: result.ledger,
         rotationEnabled: result.rotationEnabled,

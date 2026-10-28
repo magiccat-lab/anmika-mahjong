@@ -9,7 +9,7 @@ import { resolveNukiBeiMeta } from './game3/bei';
 import { buildStateFromPaifu } from './store/paifuIo';
 import { buildDebugState } from './store/debug';
 import { cpuStepImpl, autoAdvanceImpl } from './store/cpuActions';
-import { shouldSkipPonForFever } from './store/cpuFever';
+import { decideCpuDaiminkan, decideCpuPon } from './store/cpuCall';
 import { Shan3, generateTilePool, defaultSanmaRule } from './shan3';
 import { declareKanImpl, ponImpl, damingangImpl } from './store/fulouActions';
 import { hasGoldKita } from './game3/gold';
@@ -3778,45 +3778,17 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
   //   - それ以外は見送り
   if (ronCandidates.length === 0) {
     const committedCore = toCorePai(committedPai);
-    const isSanyuanpai = committedCore[0] === 'z' && (committedCore[1] === '5' || committedCore[1] === '6' || committedCore[1] === '7');
-    const isFengpai = committedCore[0] === 'z' && (committedCore[1] === '1' || committedCore[1] === '2' || committedCore[1] === '3');
-    const paiN = isFengpai ? parseInt(committedCore[1]) : -1;
-    const changfengZ = s.game.changfengZ;
-    // ポン後 シャンテン推定 [簡易]: estimateXiangtingWithExtra で +1 zimo 相当 評価
-    // [リョー指示 2026-05-21 自走 CPU 教育: ポン判定にシャンテン進化チェック追加]
-    const ponAdvancesShanten = (p: 0|1|2): boolean => {
-      try {
-        const { base, withExtra } = s.game.estimateXiangtingWithExtra(p, committedCore);
-        return base <= 2 && withExtra < base;
-      } catch { return false; }
-    };
+    // 判断本体は store/cpuCall.ts [online server/authority.ts と共有]
+    const callOpts = { feverSkip: true };
     for (const cand of ponCands) {
       if (!s.cpu[cand.player as 0 | 1 | 2] || cand.mianzi.length === 0) continue;
-      // [2026-07-20 リョー指摘] フィーバー成立条件は「暗槓以外の副露ゼロ」で牌種を問わない。
-      // 7 のポンを禁じるだけでは足りず、7 対子や全虹の芽がある手では
-      // 役牌ポンでもフィーバー権が飛ぶ。芽が残っている間は丸ごと見送る
-      if (shouldSkipPonForFever(s.game, cand.player as 0|1|2)) {
+      const decision = decideCpuPon(s.game, cand.player as 0|1|2, committedCore, callOpts);
+      // [2026-07-20 リョー指摘] フィーバー権保護の見送り [理由は cpuCall.ts / cpuFever.ts]
+      if (decision.reason === 'fever-skip') {
         dlog('[cpu pon skip] フィーバー権保護', { player: cand.player, pai: committedCore });
         continue;
       }
-      let shouldPon = false;
-      if (isSanyuanpai) shouldPon = true;
-      else if (isFengpai) {
-        const zifeng = s.game.zifengZ(cand.player as any);
-        if (paiN === changfengZ || paiN === zifeng) shouldPon = true;
-      } else {
-        // 数牌 / オタ風: 副露 1+ かつ baseXt<=2 で pon 後 進化する時のみ [役なし リスク回避]
-        // 7 [m7/p7/s7] は ポン全面禁止: 明刻化すると feverLizhi の nonAnkanFulou check で
-        // フィーバーリーチ権利が消える [2026-05-21 リョー指摘 fix]。
-        const sp = s.game.shoupai.get(cand.player as 0|1|2);
-        const fulouCount = sp?._fulou?.length ?? 0;
-        const isSeven = (committedCore[0] === 'm' || committedCore[0] === 'p' || committedCore[0] === 's') && committedCore[1] === '7';
-        if (isSeven) {
-          shouldPon = false;
-        } else if (fulouCount >= 1 && ponAdvancesShanten(cand.player as 0|1|2)) {
-          shouldPon = true;
-        }
-      }
+      const shouldPon = decision.call;
       if (shouldPon) {
         s.game.declarePon(cand.player as any, cand.mianzi[0], player as any);
         s.lastZimo = null;
@@ -3832,16 +3804,12 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
     for (const cand of kanCands) {
       if (!s.cpu[cand.player as 0 | 1 | 2] || cand.mianzi.length === 0) continue;
       // 大明槓も暗槓ではない副露なので、ポンと同じくフィーバー権を潰す
-      if (shouldSkipPonForFever(s.game, cand.player as 0|1|2)) {
+      const kanDecision = decideCpuDaiminkan(s.game, cand.player as 0|1|2, committedCore, callOpts);
+      if (kanDecision.reason === 'fever-skip') {
         dlog('[cpu damingang skip] フィーバー権保護', { player: cand.player, pai: committedCore });
         continue;
       }
-      let shouldKan = false;
-      if (isSanyuanpai) shouldKan = true;
-      else if (isFengpai) {
-        const zifeng = s.game.zifengZ(cand.player as any);
-        if (paiN === changfengZ || paiN === zifeng) shouldKan = true;
-      }
+      const shouldKan = kanDecision.call;
       if (shouldKan) {
         // R9 P1 #6 fix: 大明槓 は declareDamingang(player, mianzi, fromPlayer)。 declareKan は
         // 暗槓 / 加槓用で 河 marker / fromPlayer / lunban / 嶺上 同期されない = state 破壊

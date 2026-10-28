@@ -3,6 +3,7 @@ import type { ChipSettlementEffect } from '../src/lib/game3/chip';
 import { createGameStore, type StoreState } from '../src/lib/store';
 import { get } from 'svelte/store';
 import { toCorePai } from '../src/lib/helpers';
+import { decideCpuDaiminkan, decideCpuPon } from '../src/lib/store/cpuCall';
 import type { Pai, PlayerId } from '../src/lib/types';
 
 export type AuthorityMember = {
@@ -106,6 +107,8 @@ export class RoomAuthority {
   roundEnded = false;
   lastWinner: PlayerId | null = null;
   private cpuSeats = new Set<PlayerId>();
+  /** この試合に CPU の席があるか [matches.cpu_version を付けるかの判定] */
+  hasCpuSeats(): boolean { return this.cpuSeats.size > 0; }
   private deferredCpuRon: PlayerId[] = [];
   /** commandId 導入前のWSA-A7暫定冪等窓。次局開始後、最初の非nextRound操作まで有効。 */
   /** Cumulative ledger at the beginning of the current match. */
@@ -1214,13 +1217,10 @@ export class RoomAuthority {
 
   private applyAutomaticCpuFulou(discarder: PlayerId, pai: Pai): boolean {
     const core = toCorePai(pai);
-    const isSanyuanpai = core[0] === 'z' && (core[1] === '5' || core[1] === '6' || core[1] === '7');
-    const isFengpai = core[0] === 'z' && (core[1] === '1' || core[1] === '2' || core[1] === '3');
-    const paiN = isFengpai ? Number(core[1]) : -1;
-    const shouldCallHonor = (player: PlayerId): boolean => {
-      if (isSanyuanpai) return true;
-      return isFengpai && (paiN === this.game.changfengZ || paiN === this.game.zifengZ(player));
-    };
+    // 判断本体は src/lib/store/cpuCall.ts [single store.ts と共有]。
+    // online は従来フィーバー権保護の見送り [七対子 / 全虹の芽] を通していないので
+    // feverSkip: false で挙動を保つ [single は true。揃えるかは別判断]
+    const callOpts = { feverSkip: false };
 
     // Fever gate: non-fever CPU players must not call during fever.
     const someoneFever = PLAYERS.some((p) => this.game.feverActive[p]);
@@ -1228,17 +1228,7 @@ export class RoomAuthority {
     for (const candidate of this.ponCandidates) {
       if (!this.cpuSeats.has(candidate.player) || candidate.mianzi.length === 0) continue;
       if (someoneFever && !this.game.feverActive[candidate.player]) continue;
-      let shouldPon = shouldCallHonor(candidate.player);
-      if (!isSanyuanpai && !isFengpai) {
-        const isSeven = (core[0] === 'm' || core[0] === 'p' || core[0] === 's') && core[1] === '7';
-        const fulouCount = this.game.shoupai.get(candidate.player)?._fulou?.length ?? 0;
-        if (!isSeven && fulouCount >= 1) {
-          try {
-            const estimate = this.game.estimateXiangtingWithExtra(candidate.player, core);
-            shouldPon = estimate.base <= 2 && estimate.withExtra < estimate.base;
-          } catch { /* pass */ }
-        }
-      }
+      const shouldPon = decideCpuPon(this.game, candidate.player, core, callOpts).call;
       if (shouldPon && this.game.declarePon(candidate.player, candidate.mianzi[0], discarder)) {
         this.lastZimo = null;
         this.clearPending();
@@ -1249,7 +1239,7 @@ export class RoomAuthority {
     for (const candidate of this.kanCandidates) {
       if (!this.cpuSeats.has(candidate.player) || candidate.mianzi.length === 0) continue;
       if (someoneFever && !this.game.feverActive[candidate.player]) continue;
-      if (!shouldCallHonor(candidate.player)) continue;
+      if (!decideCpuDaiminkan(this.game, candidate.player, core, callOpts).call) continue;
       const replacement = this.game.declareDamingang(candidate.player, candidate.mianzi[0], discarder);
       if (replacement !== null) {
         this.lastZimo = replacement;
