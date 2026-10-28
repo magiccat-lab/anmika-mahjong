@@ -52,22 +52,23 @@
 
 <style>
   section.game-end-panel {
-    border: 2px solid #2080d0;
-    background: #f0f8ff;
+    border: 1px solid var(--cy-line);
+    background: var(--cy-panel-solid);
     padding: 10px 14px;
-    border-radius: 6px;
+    border-radius: 0;
     margin: 12px 0;
+    color: var(--cy-ink);
   }
-  h2 { font-size: 14px; margin: 0 0 8px; color: #2080d0; }
-  .rule-note { font-size: 12px; color: #555; margin: 8px 0; line-height: 1.5; }
-  .ranking { width: 100%; border-collapse: collapse; font-family: var(--sans); font-variant-numeric: tabular-nums; font-size: 18px; }
-  .ranking th, .ranking td { padding: 10px 14px; text-align: right; border-bottom: 1px solid rgba(0,0,0,0.1); }
-  .ranking th { background: rgba(0,0,0,0.05); font-weight: 700; font-size: 17px; }
+  h2 { font-size: 14px; margin: 0 0 8px; color: var(--cy-line); font-family: var(--cy-font-label); letter-spacing: 0.12em; white-space: nowrap; }
+  .rule-note { font-size: 12px; color: var(--cy-sub-ink); margin: 8px 0; line-height: 1.5; }
+  .ranking { width: 100%; border-collapse: collapse; font-family: var(--sans); font-variant-numeric: tabular-nums; font-size: clamp(13px, 3.6vw, 18px); }
+  .ranking th, .ranking td { padding: 10px clamp(6px, 2vw, 14px); text-align: right; border-bottom: 1px solid var(--cy-faint); white-space: nowrap; }
+  .ranking th { background: var(--cy-faint); font-weight: 700; font-size: clamp(12px, 3.4vw, 17px); color: var(--cy-sub-ink); }
   .ranking td.who { text-align: left; }
-  .ranking .rank-1 { font-weight: bold; color: #c08000; }
-  .ranking .final { color: #208040; font-size: 22px; font-weight: 700; }
-  .ranking .final.lose { color: #c03030; }
-  .ranking .cumulative { font-size: 18px; color: #555; }
-  .ranking .raw-defen { font-size: 18px; font-variant-numeric: tabular-nums; }
-  .ranking .ledger, .ranking .uma, .ranking .topn, .ranking .tonton { font-size: 18px; }
+  .ranking .rank-1 { font-weight: bold; color: var(--cy-pt); }
+  .ranking .final { color: var(--cy-pt); font-size: clamp(15px, 4.4vw, 22px); font-weight: 700; }
+  .ranking .final.lose { color: var(--cy-hot); }
+  .ranking .cumulative { font-size: clamp(13px, 3.6vw, 18px); color: var(--cy-sub-ink); }
+  .ranking .raw-defen { font-size: clamp(13px, 3.6vw, 18px); font-variant-numeric: tabular-nums; }
+  .ranking .ledger, .ranking .uma, .ranking .topn, .ranking .tonton { font-size: clamp(13px, 3.6vw, 18px); }
 </style>

@@ -112,7 +112,7 @@ main.ui-board-v2 .hua-panel.hp-me {
 .hp-me .hp-title { color: var(--cy-line); }
 
 /* 点数はデジタルの字で光らせる */
-.sc-pt, .pm-after, .pm-delta, .defen, .payment-after, .payment-delta {
+.sc-pt, .pm-after, .defen, .payment-after {
   font-family: var(--cy-font-num);
   font-weight: 800;
   letter-spacing: 0.04em;

@@ -9,33 +9,41 @@
 <div class="chip-breakdown">
   {#each breakdown as b}
     <div class="row">
-      <span class="label">{b.label}</span>:
-      <span class="base">base {b.base}</span>
-      × 倍率 <span class="mul" title={b.multiplierParts?.length ? b.multiplierParts.join(' × ') : '倍率 1 [素点]'}>{b.multiplier}</span>
+      <span class="u label">{b.label}:</span>
+      <span class="u base">base {b.base}</span>
+      <span class="u">× 倍率 <span class="mul" title={b.multiplierParts?.length ? b.multiplierParts.join(' × ') : '倍率 1 [素点]'}>{b.multiplier}</span></span>
       {#if b.multiplierParts && b.multiplierParts.length > 0}
-        <span class="parts">[{b.multiplierParts.join(' × ')}]</span>
+        <span class="u parts">[{b.multiplierParts.join(' × ')}]</span>
       {/if}
-      = <strong class="total">{b.total}</strong>
-      <span class="mode">[{b.mode === 'oall' ? 'オール' : 'ロン放銃'}]</span>
+      <span class="u">= <strong class="total">{b.total}</strong></span>
+      <span class="u mode">[{b.mode === 'oall' ? 'オール' : 'ロン放銃'}]</span>
     </div>
   {/each}
 </div>
 
 <style>
+  /* [2026-10-29 サイバー B / P4] 暗い板に合わせた色。1 行は意味のかたまり [u] ごとに折り、
+     「[ロン放\n銃]」のように字の途中では折らない。広ければ 2 列 */
   .chip-breakdown {
-    background: #fef9e7;
-    padding: 6px 8px;
-    margin-top: 6px;
-    border: 1px solid #c8a020;
-    border-radius: 4px;
-    font-family: 'Menlo', 'Consolas', monospace;
-    font-size: 11px;
+    color: var(--cy-ink);
+    font-family: var(--cy-font-label);
+    font-size: clamp(13px, 3.6vw, 17px);
+    line-height: 1.7;
+    column-width: 440px;
+    column-gap: 32px;
   }
-  .row { line-height: 1.6; }
-  .label { color: #806020; }
-  .base { color: #404040; }
-  .mul { color: #a04020; cursor: help; border-bottom: 1px dotted #a04020; }
-  .parts { color: #608030; font-size: 10px; margin-left: 2px; }
-  .total { color: #208040; font-variant-numeric: tabular-nums; }
-  .mode { color: #888; }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 0.4em;
+    padding: 2px 0;
+    break-inside: avoid;
+  }
+  .u { white-space: nowrap; }
+  .label { color: var(--cy-line); font-weight: 700; }
+  .base { color: var(--cy-ink); }
+  .mul { color: var(--cy-hot); cursor: help; border-bottom: 1px dotted var(--cy-hot); }
+  .parts { color: var(--cy-sub-ink); }
+  .total { color: var(--cy-pt); font-family: var(--cy-font-num); font-variant-numeric: tabular-nums; }
+  .mode { color: var(--cy-sub-ink); }
 </style>

@@ -5509,15 +5509,14 @@
     grid-template-columns: 1fr auto;
     gap: 16px;
     overflow: auto;
-    background:
-      linear-gradient(160deg, rgba(255, 253, 246, 0.99), rgba(243, 235, 213, 0.99));
-    border: 2px solid #c0a040;
+    background: var(--cy-corner), var(--cy-panel-solid);
+    border: 1px solid var(--cy-line);
     box-shadow:
-      0 0 0 4px rgba(212, 175, 55, 0.22),
-      0 24px 60px rgba(0, 0, 0, 0.5);
-    border-radius: 12px;
+      0 0 0 1px color-mix(in srgb, var(--cy-line) 30%, transparent),
+      0 24px 60px rgba(0, 0, 0, 0.6);
+    border-radius: 0;
     padding: 22px;
-    color: #1a1820;
+    color: var(--cy-ink);
     animation: agariPanelIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
   /* 和了時はロン/ツモ cutin [1.85s] を先に見せ、被って濁らないよう遅らせて登場 */
@@ -5533,7 +5532,7 @@
   main.mode-single .agari-unified-panel .kinpei-provisional-note {
     font-size: 14px;
     font-weight: 700;
-    color: #806000;
+    color: var(--cy-line);
   }
   /* 金北選択で暫定和了 [preview] も無い時は白い板を出さず、盤面の下側に選択の帯だけ置く [2026-10-08 リョー報告] */
   main.mode-single .agari-unified-panel.kinpei-only {
@@ -5550,9 +5549,9 @@
   }
   main.mode-single .agari-unified-panel.kinpei-only .kinpei-inline {
     grid-row: 1;
-    background: linear-gradient(160deg, rgba(255, 253, 246, 0.97), rgba(243, 235, 213, 0.97));
-    border: 2px solid #c0a040;
-    box-shadow: 0 0 0 4px rgba(212, 175, 55, 0.22), 0 12px 32px rgba(0, 0, 0, 0.45);
+    background: var(--cy-panel-solid);
+    border: 1px solid var(--cy-line);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cy-line) 30%, transparent), 0 12px 32px rgba(0, 0, 0, 0.55);
   }
   @keyframes agariPanelIn {
     0% { opacity: 0; transform: translateY(26px) scale(0.97); }
@@ -5572,12 +5571,12 @@
     font-size: 44px;
     font-weight: 900;
     letter-spacing: 10px;
-    color: #6c5200;
+    color: var(--cy-line);
     margin: 0;
   }
   main.mode-single .agari-unified-panel .agari-left.pingju-only .pingju-note {
     font-size: 18px;
-    color: #555;
+    color: var(--cy-sub-ink);
   }
   main.mode-single .agari-unified-panel .agari-left.pingju-only .pingju-head {
     display: flex;
@@ -5711,16 +5710,16 @@
   main.mode-single .agari-unified-panel .kinpei-inline {
     grid-row: 2;
     grid-column: 1 / -1;
-    background: rgba(212, 175, 55, 0.25);
-    border: 2px dashed #c0a040;
-    border-radius: 8px;
+    background: color-mix(in srgb, var(--cy-line) 10%, var(--cy-panel-solid));
+    border: 1px dashed var(--cy-line);
+    border-radius: 0;
     padding: 14px;
     text-align: center;
   }
   main.mode-single .agari-unified-panel .kinpei-title {
     font-size: 18px;
     font-weight: 700;
-    color: #806000;
+    color: var(--cy-line);
     margin-bottom: 10px;
   }
   /* 金北の選択の板をたたむ [盤面を見る]。消すだけで state は触らない */
@@ -5728,10 +5727,10 @@
   main.mode-single .agari-unified-panel .kinpei-peek-btn {
     margin-left: 10px;
     padding: 3px 10px;
-    border: 1px solid #c0a040;
-    border-radius: 4px;
+    border: 1px solid var(--cy-line);
+    border-radius: 0;
     background: transparent;
-    color: #806000;
+    color: var(--cy-line);
     font-size: 12px;
     font-weight: 700;
     cursor: pointer;
@@ -5740,7 +5739,7 @@
     margin-left: 10px;
     font-size: 13px;
     font-weight: 700;
-    color: #806000;
+    color: var(--cy-line);
     white-space: nowrap;
   }
   main.mode-single .agari-unified-panel .kinpei-btns {
@@ -5769,14 +5768,16 @@
     flex-direction: column;
     gap: 4px;
     margin-right: 16px;
-    font-size: 16px;
-    color: #1a1820;
+    font-size: clamp(14px, 3.8vw, 16px);
+    color: var(--cy-ink);
   }
   main.mode-single .agari-unified-panel .ct-row {
-    background: rgba(212, 175, 55, 0.2);
+    background: color-mix(in srgb, var(--cy-line) 12%, transparent);
+    border: 1px solid var(--cy-dim);
     padding: 4px 12px;
-    border-radius: 4px;
+    border-radius: 0;
     font-weight: 700;
+    white-space: nowrap;
   }
   main.mode-single .agari-unified-panel .agari-actions {
     grid-row: 2;
@@ -5805,26 +5806,26 @@
     justify-content: center;
     gap: 12px;
     padding-top: 8px;
-    border-top: 1px solid rgba(212, 175, 55, 0.4);
+    border-top: 1px solid var(--cy-dim);
   }
   main.mode-single .agari-unified-panel .agari-actions button {
     padding: 8px 24px;
     font-size: 14px;
     font-weight: bold;
-    border-radius: 6px;
+    border-radius: 0;
     cursor: pointer;
-    background: #d4af37;
-    color: #1a3a2a;
+    background: var(--cy-line);
+    color: var(--cy-on-line);
     border: 0;
   }
   main.mode-single .agari-unified-panel .agari-left {
     flex: 1.5 1 0;
     min-width: 400px;
   }
-  /* unified panel 内の section / chip-breakdown は ボーダー / 背景 撤去 で
-     入れ子 window 感を解消 [リョー指示 2026-05-12]、 内部 text 大きく */
-  main.mode-single .agari-unified-panel :global(section),
-  main.mode-single .agari-unified-panel :global(.chip-breakdown) {
+  /* unified panel 内の section は外側の板と二重にならないよう枠 ・ 背景を外す [リョー指示 2026-05-12]。
+     打点 ・ 祝儀の枠は RoundEndPanel の .split-box が持つ [2026-10-29 P4]。
+     字の色は各 component が cyber の値で持つので、全部の子を黒に塗る旧規則は外した */
+  main.mode-single .agari-unified-panel :global(section) {
     position: static !important;
     z-index: auto !important;
     background: transparent !important;
@@ -5834,86 +5835,30 @@
     margin: 0 !important;
     max-width: none !important;
     max-height: none !important;
-    color: #f8f8f8 !important;
+    overflow: visible !important;
   }
-  /* 局結果 / 祝儀 [リョー指示 2026-05-12: 全 text 黒で統一] */
-  main.mode-single .agari-unified-panel,
-  main.mode-single .agari-unified-panel :global(*) {
-    color: #1a1820 !important;
+  main.mode-single .agari-unified-panel :global(.chip-breakdown) {
+    justify-self: stretch;
+    max-width: none;
+    max-height: none;
+    overflow: visible;
   }
   main.mode-single .agari-unified-panel :global(h2) {
-    font-size: 26px !important;
-    margin: 0 !important;
+    font-size: 26px;
+    margin: 0;
   }
-  main.mode-single .agari-unified-panel :global(.winner) {
-    font-size: 26px !important;
-    font-weight: 700;
-  }
-  main.mode-single .agari-unified-panel :global(.defen) {
-    font-size: 24px !important;
-    font-weight: 700;
-  }
-  main.mode-single .agari-unified-panel :global(.score) {
-    font-size: 20px !important;
-  }
-  main.mode-single .agari-unified-panel :global(.yaku-list) {
-    margin: 10px 0 !important;
-    gap: 6px !important;
-  }
-  main.mode-single .agari-unified-panel :global(.yaku-chip) {
-    color: #503000 !important;
-    background: rgba(212, 175, 55, 0.2) !important;
-    border-color: rgba(180, 130, 30, 0.7) !important;
-    font-size: 17px !important;
-    padding: 5px 12px !important;
-  }
+  main.mode-single .agari-unified-panel :global(.yaku-list) { margin: 10px 0; gap: 6px; }
   main.mode-single .agari-unified-panel :global(.dora-row),
   main.mode-single .agari-unified-panel :global(.fuyu-row),
-  main.mode-single .agari-unified-panel :global(.payment-row) {
-    margin-top: 10px !important;
-  }
-  main.mode-single .agari-unified-panel :global(.dora-label),
-  main.mode-single .agari-unified-panel :global(.fuyu-label),
-  main.mode-single .agari-unified-panel :global(.payment-label) {
-    color: #444 !important;
-    font-size: 16px !important;
-    font-weight: 700;
-  }
-  main.mode-single .agari-unified-panel :global(.payment-cell) {
-    font-size: 18px !important;
-    padding: 5px 14px !important;
-    font-weight: 700;
-  }
-  main.mode-single .agari-unified-panel :global(.fuyu-sum) {
-    font-size: 16px !important;
-    font-weight: 700;
-    color: #2050a0 !important;
-  }
-  main.mode-single .agari-unified-panel :global(.fuyu-tile) {
-    font-size: 14px;
-  }
-  /* 祝儀 [chip-breakdown] 拡大 + 2 列 [リョー指示 2026-05-12] */
-  main.mode-single .agari-unified-panel :global(.chip-breakdown) {
-    font-size: 19px !important;
-    line-height: 1.8;
-    color: #1a1820 !important;
-    column-count: 2;
-    column-gap: 32px;
-    margin-top: 12px;
-  }
-  main.mode-single .agari-unified-panel :global(.chip-breakdown *) {
-    font-size: inherit !important;
-    color: #1a1820 !important;
-  }
-  main.mode-single .agari-unified-panel :global(.chip-breakdown .row) {
-    break-inside: avoid;
-    padding: 2px 0;
-  }
+  main.mode-single .agari-unified-panel :global(.payment-row) { margin-top: 10px; }
+  main.mode-single .agari-unified-panel :global(.payment-cell) { padding: 5px 14px; }
+  main.mode-single .agari-unified-panel :global(.fuyu-tile) { font-size: 14px; }
   /* 次局へ button 拡大 [リョー指示] */
   main.mode-single .agari-unified-panel .agari-actions button {
-    padding: 14px 36px !important;
-    font-size: 18px !important;
+    padding: 14px clamp(20px, 6vw, 36px) !important;
+    font-size: clamp(15px, 4.4vw, 18px) !important;
     font-weight: 700;
+    white-space: nowrap;
     width: auto !important;
     height: auto !important;
     min-width: 0 !important;
@@ -7579,7 +7524,14 @@
   }
 
   /* ---- 和了 ・ 流局の板 [V5]: 流局は中身の大きさ [幅 480px まで] で真ん中に。角は 4px ---- */
-  main.mode-single.ui-board-v2 .agari-unified-panel { border-radius: var(--jz-rad); border-width: 1px; }
+  main.mode-single.ui-board-v2 .agari-unified-panel { border-radius: 0; border-width: 1px; }
+  /* 打点 ・ 祝儀の 2 つの箱が両方見える高さまで広げる [P4 2026-10-29] */
+  main.mode-single.ui-board-v2 .agari-unified-panel:not(.pingju-small) {
+    top: 10px;
+    bottom: 10px;
+    left: max(10px, calc(50vw - 520px));
+    right: max(10px, calc(50vw - 520px));
+  }
   main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small {
     top: 0;
     bottom: 0;
@@ -7595,7 +7547,7 @@
   }
   main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small .agari-left.pingju-only { gap: 10px; }
   main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small .pingju-title { font-size: 28px; letter-spacing: 0.3em; }
-  main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small .pingju-note { font-size: 15px; color: #4a4030; }
+  main.mode-single.ui-board-v2 .agari-unified-panel.pingju-small .pingju-note { font-size: 15px; color: var(--cy-sub-ink); }
   .pingju-moves { display: grid; gap: 4px; width: 100%; }
   .pm-row {
     display: grid;
@@ -7604,14 +7556,14 @@
     align-items: baseline;
     padding: 6px 10px;
     border-radius: var(--jz-rad);
-    background: rgba(0, 0, 0, 0.05);
+    background: var(--cy-faint);
     font-variant-numeric: tabular-nums;
   }
-  .pm-name { font-size: 14px; font-weight: 700; color: #2a2418; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pm-delta { font-size: 16px; font-weight: 700; color: #777; min-width: 72px; text-align: right; }
-  .pm-row.up .pm-delta { color: #1e7a38; }
-  .pm-row.down .pm-delta { color: #b23030; }
-  .pm-after { font-size: 14px; color: #4a4030; min-width: 64px; text-align: right; }
+  .pm-name { font-size: 14px; font-weight: 700; color: var(--cy-ink); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pm-delta { font-size: 16px; font-weight: 700; color: var(--cy-sub-ink); white-space: nowrap; min-width: 72px; text-align: right; }
+  .pm-row.up .pm-delta { color: var(--cy-pt); }
+  .pm-row.down .pm-delta { color: var(--cy-hot); }
+  .pm-after { font-size: 14px; color: var(--cy-sub-ink); white-space: nowrap; min-width: 64px; text-align: right; }
   main.mode-single.ui-board-v2 .agari-unified-panel .agari-left { min-width: 0; }
   main.mode-single.ui-board-v2 .agari-unified-panel .agari-actions { flex-wrap: wrap; }
   main.mode-single.ui-board-v2 .agari-unified-panel .agari-actions button {
