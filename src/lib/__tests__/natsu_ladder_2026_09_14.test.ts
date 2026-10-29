@@ -12,6 +12,9 @@ function apply(fanshu: number, fu: number, hua: string[], kinpei = false): any {
   g.qipai();
   const p = 0 as PlayerId;
   g.huapai[p] = [...hua];
+  // 配牌のドラ表示が華だと、その華も抜いた物に数える (ルール 2-2)。乱数で夏が 1 枚増えて落ちていたので、表示の華は外す
+  // [2026-10-29 本番の deploy で 1/数回落ちた]
+  g.effectiveHuapaiAtHule = () => [...hua];
   if (kinpei) {
     g.kinpeiTarget[p] = 'natsu';
     g.goldHand[p] = { p: 0, s: 0, z: 1 };
