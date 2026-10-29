@@ -57,7 +57,7 @@
   import LizhiControls from './lib/LizhiControls.svelte';
   import RiichiWaitPanel from './lib/RiichiWaitPanel.svelte';
   import { riichiWaitSuggestions } from './lib/riichiWaitSuggest';
-  import { CUTIN_DURATION_MS, CUTIN_TIER, cutinDurationMs, game, isFeverForcedTsumogiri, type StampId, type StoreState } from './lib/store';
+  import { CUTIN_DURATION_MS, CUTIN_TIER, cutinDurationMs, game, isFeverForcedTsumogiri, shouldAutoNukiBei, type StampId, type StoreState } from './lib/store';
   import type { PlayerId } from './lib/types';
   // フィーバー中の 1 巡の刻み [人の強制ツモ切り ・ CPU]。オンラインは ws_server の FEVER_STEP_MS と合わせる
   const FEVER_TSUMOGIRI_MS = 1000;
@@ -708,7 +708,7 @@
       // 北ツモ時とオンライン時は手動が残る]
       if (isFeverForcedTsumogiri(snapshot, myself as PlayerId)) {
         return snapshot.game.canNukiBei(myself as PlayerId)
-          ? { text: 'フィーバー中: 北を抜くか、ツモ牌をタップ', tone: 'action' }
+          ? { text: 'フィーバー中: 北は自動で抜きます', tone: 'action' }
           : { text: 'フィーバー中: ツモ切りのみ [ツモ牌をタップ]', tone: 'action' };
       }
       return { text: '打牌を選んでください', tone: 'action' };
@@ -2594,15 +2594,14 @@
     const player = snap.game.lunbanToPlayerId(snap.game.state.lunban);
     const phaseReady = isAutoActionPhaseReady(snap, player as PlayerId)
       && !snap.game.canTsumo(player)
-      // [2026-09-14] 自動抜きが動く局面はそちらに譲る [抜いてから切る]
-      && !(autoNukiEnabled && snap.game.canNukiBei(player as PlayerId))
+      // [2026-09-14] 自動抜きが動く局面はそちらに譲る [抜いてから切る。フィーバー中は設定に関わらず抜く]
+      && !shouldAutoNukiBei(snap.game, player as PlayerId, autoNukiEnabled)
       // [2026-10-13 リョー「ポッチは選択できるよ」] リーチ中にカンできる時は自動で切らずに本人を待つ
       // (ぽっちのカンは選べる。強制のカンもボタンで押す)
       && !(snap.game.lizhi.has(player) && snap.game.getKanCandidates(player).length > 0);
     // [2026-07-21 リョー報告 stuck dump] フィーバー強制ツモ切りの人間手番は選択の
     // 余地が無いのに手動待ちで、進行が止まって見えた。リーチ中と同じ扱いで自動対象に
-    // 含める。北ツモ [canNukiBei] の時だけ抜き/ツモ切りの選択が残るため自動しない
-    // [status 行が操作を案内する]
+    // 含める。北ツモ [canNukiBei] は 2026-10-29 から自動抜きが先に抜く
     const feverForced = isFeverForcedTsumogiri(snap, player as PlayerId)
       && !snap.game.canNukiBei(player as PlayerId);
     const enabled = autoTsumoKiri || snap.game.lizhi.has(player) || feverForced;
@@ -2635,13 +2634,12 @@
   // 自動ツモ切りと同じ scheduler に載せて、modal・演出中は出さない。
   let autoNukiEnabled = false;
   $: autoNukiEnabled = $prefs.autoNuki;
+  // [2026-10-29 リョー] フィーバー中は設定が切でも抜く (shouldAutoNukiBei)
   function readAutoNukiToken(): AutoTsumokiriToken | null {
-    if (!autoNukiEnabled) return null;
     const snap = get(game);
     const player = snap.game.lunbanToPlayerId(snap.game.state.lunban);
     if (!isAutoActionPhaseReady(snap, player as PlayerId)) return null;
-    if (snap.game.canTsumo(player)) return null;      // 和了れる時は人に任せる
-    if (!snap.game.canNukiBei(player as PlayerId)) return null;
+    if (!shouldAutoNukiBei(snap.game, player as PlayerId, autoNukiEnabled)) return null;
     const stateNow = snap.game.state;
     const revision = [
       stateNow.changbang,

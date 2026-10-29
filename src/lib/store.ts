@@ -508,6 +508,15 @@ export function isFeverForcedTsumogiri(s: StoreState, player: PlayerId): boolean
   return someoneFever && !s.game.feverActive[player];
 }
 
+/** 自動で北を抜く局面か。画面設定「自動抜き」が切でも、誰かのフィーバー中は抜く
+ *  [2026-10-29 リョー「フィーバー中の北抜きをオートにしといて」]。和了れる時は本人に任せる。 */
+export function shouldAutoNukiBei(g: Game3, player: PlayerId, prefAutoNuki: boolean): boolean {
+  const someoneFever = ([0, 1, 2] as PlayerId[]).some((p) => g.feverActive[p]);
+  if (!prefAutoNuki && !someoneFever) return false;
+  if (g.canTsumo(player)) return false;
+  return g.canNukiBei(player);
+}
+
 function isLiveTurnActionBlocked(s: StoreState, allowLizhiDiscard = false): boolean {
   return s.roundEnded
     || s.pendingPingju
