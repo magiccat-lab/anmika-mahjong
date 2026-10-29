@@ -336,8 +336,7 @@ function rankChipBase(result: any): number {
   if (Number.isFinite(override) && override > 0) return override;
   const fanshu = Number(result?.fanshu ?? 0);
   const fu = Number(result?.fu ?? 30);
-  if (fanshu >= 24) return 12000;
-  if (fanshu >= 18) return 10000;
+  // [2026-10-30 通報「素で18はんになった時に5倍満」] 数え役満は 13 ハン以上で打ち止め [ルール表]。五倍満 ・ 六倍満は夏の段上げ [_basePointOverride] と複合役満だけ。
   if (fanshu >= 13) return 8000;
   if (fanshu >= 11) return 6000;
   if (fanshu >= 8) return 4000;

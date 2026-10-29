@@ -99,9 +99,9 @@ describe('fanshuLevel', () => {
     expect(fanshuLevel(12, 30)).toBe(7);
     expect(fanshuLevel(13, 30)).toBe(8);
     expect(fanshuLevel(17, 30)).toBe(8);
-    expect(fanshuLevel(18, 30)).toBe(9);
-    expect(fanshuLevel(23, 30)).toBe(9);
-    expect(fanshuLevel(24, 30)).toBe(10);
+    expect(fanshuLevel(18, 30)).toBe(8);
+    expect(fanshuLevel(23, 30)).toBe(8);
+    expect(fanshuLevel(24, 30)).toBe(8);
   });
   it('切上満貫: fu * 2^(fanshu+2) === 1920 → Lv4 [4 翻 30 符 等]', () => {
     // 1 翻 240 符は実在しないが式上は: 240 * 2^3 = 1920

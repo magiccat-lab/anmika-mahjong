@@ -299,11 +299,10 @@ export function isPositiveZ5(p: string): boolean { return p === 'z5g' || p === '
 export function isNegativeZ5(p: string): boolean { return p === 'z5r' || p === 'z5y'; }
 
 /** ハン数→打点段階 [Lv]、 LEVEL_TO_FANSHU と対応
- *  Lv4=4-5 翻 [マンガン]、 Lv5=6-7 翻 [ハネ]、 Lv6=8-10 [倍]、 Lv7=11-12 [三倍]、 Lv8=13+ [役満]、 Lv9=18+ [五倍]、 Lv10=24+ [六倍]
+ *  Lv4=4-5 翻 [マンガン]、 Lv5=6-7 翻 [ハネ]、 Lv6=8-10 [倍]、 Lv7=11-12 [三倍]、 Lv8=13+ [数え役満]。Lv9 [五倍] ・ Lv10 [六倍] は翻では届かず、夏の段上げだけ [effectiveLevel]
  */
 export function fanshuLevel(fanshu: number, fu: number): number {
-  if (fanshu >= 24) return 10;
-  if (fanshu >= 18) return 9;
+  // [2026-10-30 通報「素で18はんになった時に5倍満」] 数え役満は 13 ハン以上で打ち止め [ルール表]。五倍満 ・ 六倍満は夏の段上げ [_basePointOverride] と複合役満だけ。
   if (fanshu >= 13) return 8;
   if (fanshu >= 11) return 7;
   if (fanshu >= 8) return 6;
