@@ -3076,8 +3076,8 @@ export function createGameStore() {
     },
     /** 北抜き [現家]
      *  R12 P2 #5 fix: meta.gold で 金北 / 通常北 を区別、 旧 code は常に 金北優先 抜きで
-     *  通常北クリック時 表示と挙動 がズレる bug。 meta なし or gold=false なら 通常北
-     *  優先抜き [goldHand.z>0 でも 通常北 から消費] */
+     *  通常北クリック時 表示と挙動 がズレる bug。 gold=false なら通常北、 meta なし
+     *  [ボタン / 自動抜き] は金北から抜く [2026-10-31 通報 20261031_0] */
     nukiBei(meta?: { gold?: boolean }) {
       if (!checkOnlineGate({ type: 'nukiBei', meta }, 'currentPlayer')) return;
       if (sendOnlineAction({ type: 'nukiBei', meta })) return;

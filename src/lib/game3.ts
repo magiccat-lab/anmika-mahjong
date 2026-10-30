@@ -1060,7 +1060,9 @@ export class Game3 {
     const _origPhysicalHand = snapshotPhysicalHandState(sp);
     // 金北 / 通常 z4 区別 [リョー指示 2026-05-12 + R12 P2 #5 fix 2026-05-14]
     // 旧: goldHand.z>0 なら常に金北優先 → 通常北クリックでも金北が抜かれる bug
-    // 新: meta.gold で明示、 meta なしなら 通常北優先 [通常北ナシなら 金北 fallback]
+    // 新: meta.gold で明示する
+    // [2026-10-31 通報 20261031_0] meta なし [北抜きボタン / 自動抜き] は金北から抜く。
+    // 牌の直押しは App が meta.gold を必ず付けるので、通常北を押して金北が抜ける昔の bug には戻らない
     const goldZ4 = this.goldHand[player].z;
     const totalZ4 = _origZ4;
     const normalZ4 = totalZ4 - goldZ4;
@@ -1070,13 +1072,7 @@ export class Game3 {
     if (meta?.gold === false && normalZ4 <= 0) return null;
     sp._bingpai.z[4] -= 1;
     sp._zimo = null;
-    if (meta?.gold === true && goldZ4 > 0) {
-      this.goldHand[player].z -= 1;
-      addAnmikaPai(sp, 'gN', -1);
-      this.nukidoraGold[player] += 1;
-    } else if (normalZ4 > 0) {
-      this.nukidora[player] += 1;
-    } else if (goldZ4 > 0) {
+    if (meta?.gold !== false && goldZ4 > 0) {
       this.goldHand[player].z -= 1;
       addAnmikaPai(sp, 'gN', -1);
       this.nukidoraGold[player] += 1;
