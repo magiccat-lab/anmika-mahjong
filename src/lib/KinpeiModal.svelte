@@ -20,6 +20,7 @@
 
   // [2026-10-22 リョー] 選ぶ前に盤面 [河 ・ 手牌 ・ 点] を見たい。たたむだけで、選択は pending のまま
   let peeking = false;
+  $: options = kinpeiOptions(huapai);
 </script>
 
 {#if peeking}
@@ -41,10 +42,14 @@
     <div class="preview">現時点: {preview.fanshu !== undefined ? `${preview.fanshu}翻` : '役満'} / {(preview.hupai ?? []).map((h) => h.name).join('・')}</div>
   {/if}
   <div class="actions">
-    {#each kinpeiOptions(huapai) as opt (opt.target)}
+    {#each options as opt (opt.target)}
       <button class={opt.target} data-kinpei-option={opt.target} title={`${opt.label} [${opt.count}枚] を強化先にする`} on:click={() => onSelect(opt.target)}>{opt.label}{fuyuEndsFever && opt.target === 'fuyu' ? ' [冬を使う]' : ''}</button>
     {/each}
-    {#if allowHold}
+    <!-- [2026-10-31 先輩「灰色のボタンが押していいか分かりづらい」] 強化先が無い時は押す物の金の板で 1 つだけ出す
+         [保留不可の時もボタンが無くて止まらない]。保留は灰色の塗りをやめて金の枠 -->
+    {#if options.length === 0}
+      <button class="go" data-kinpei-option="none" on:click={() => onSelect(null)}>強化なしで次へ</button>
+    {:else if allowHold}
       <button class="hold" on:click={() => onSelect(null)}>保留 [今局のみ]</button>
     {/if}
   </div>
@@ -70,7 +75,8 @@
   .actions .natsu { background: #40a040; }
   .actions .aki { background: #c06040; }
   .actions .fuyu { background: #4080c0; }
-  .actions .hold { background: #888; font-weight: normal; }
+  .actions .hold { background: transparent; border: 2px solid #f0c95c; color: #f0c95c; font-weight: normal; }
+  .actions .go { background: #f0c95c; color: #1a1200; }
   .title .peek {
     margin-left: 8px;
     padding: 3px 10px;

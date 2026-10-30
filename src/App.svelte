@@ -4140,6 +4140,7 @@
       <!-- 2026-05-14 codex review #3 fix: inline Kinpei は winner 限定 -->
       {#if $game.pendingKinpei && viewMode === 'single' && (!onlineGameStarted || ($game.pendingKinpei.decisionOwners ?? [$game.pendingKinpei.winner]).includes(actorSeat)) && !fxPresentationBusy}
         {@const effectiveKinpeiHua = $game.pendingKinpei.availableHuapai ?? $game.game.effectiveHuapaiAtHule($game.pendingKinpei.winner as PlayerId)}
+        {@const kinpeiOpts = kinpeiOptions(effectiveKinpeiHua)}
         <div class="kinpei-inline">
           <div class="kinpei-title">金北 強化対象 [{seatDisplayNames[$game.pendingKinpei.winner as 0|1|2]} 選択]
             <button type="button" class="kinpei-peek-btn" on:click={() => { kinpeiPeek = true; }}>盤面を見る</button>
@@ -4155,15 +4156,16 @@
           {/if}
           <div class="kinpei-btns">
             <!-- [2026-10-22 リョー] 同じ季節を重ねて持っている時は枚数分の字で出す [春春 ・ 冬冬] -->
-            {#each kinpeiOptions(effectiveKinpeiHua) as opt (opt.target)}
+            {#each kinpeiOpts as opt (opt.target)}
               <button class="kinpei-btn {opt.target}" data-kinpei-option={opt.target} title={`${opt.label} [${opt.count}枚] を強化先にする`} on:click={() => game.selectKinpei(opt.target)}>{opt.label}</button>
             {/each}
-            {#if $game.game.feverActive[$game.pendingKinpei.winner as PlayerId]}
+            <!-- 2026-05-14 fix [user 報告]: 華牌なし時 button が無くて止まる対策、 「強化なし」 を常時表示。
+                 [2026-10-31 先輩「灰色のボタンが押していいか分かりづらい」] 押す物の金の板 [次局へと同じ] にし、
+                 同じ動き [null] の保留は重ねて出さない -->
+            {#if kinpeiOpts.length === 0}
+              <button class="kinpei-btn go" data-kinpei-option="none" on:click={() => game.selectKinpei(null)}>強化なしで次へ</button>
+            {:else if $game.game.feverActive[$game.pendingKinpei.winner as PlayerId]}
               <button class="kinpei-btn hold" on:click={() => game.selectKinpei(null)}>保留 [今局のみ]</button>
-            {/if}
-            <!-- 2026-05-14 fix [user 報告]: 華牌なし時 button が無くて止まる対策、 「強化なし」 を常時表示 -->
-            {#if !(effectiveKinpeiHua.some((p: string) => p === 'f1' || p === 'f2' || p === 'f3' || p === 'f4'))}
-              <button class="kinpei-btn hold" on:click={() => game.selectKinpei(null)}>強化対象なし [次へ]</button>
             {/if}
           </div>
         </div>
@@ -5761,7 +5763,9 @@
   main.mode-single .agari-unified-panel .kinpei-btn.natsu { background: #40a040; }
   main.mode-single .agari-unified-panel .kinpei-btn.aki { background: #c06040; }
   main.mode-single .agari-unified-panel .kinpei-btn.fuyu { background: #4080c0; }
-  main.mode-single .agari-unified-panel .kinpei-btn.hold { background: #888; }
+  /* 保留は押せる事が分かる金の枠 [灰色の塗りは押せない物に見えた]、強化なしは次局へと同じ金の板 */
+  main.mode-single .agari-unified-panel .kinpei-btn.hold { background: transparent; border: 2px solid var(--cy-line, #f0c95c); color: var(--cy-line, #f0c95c); }
+  main.mode-single .agari-unified-panel .kinpei-btn.go { background: var(--cy-line, #f0c95c); color: var(--cy-on-line, #1a1200); }
 
   main.mode-single .agari-unified-panel .chip-transfer {
     display: flex;
