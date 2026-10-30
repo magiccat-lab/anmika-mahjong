@@ -59,6 +59,8 @@ describe('canonical flow-rule regressions', () => {
     game.shoupai.set(player, sp);
     for (const other of otherPlayers) game.shoupai.set(other, buildShoupai(safeTiles));
     game.huapai = { 0: [], 1: [], 2: [] };
+    // [2026-10-31] 配牌の乱数で手番の人に金北が来ると、手牌を作り直しても goldHand が残って通常北が 0 枚扱いになる
+    game.goldHand = { 0: { p: 0, s: 0, z: 0 }, 1: { p: 0, s: 0, z: 0 }, 2: { p: 0, s: 0, z: 0 } };
     game.lastZimoInfo = { player, pai: 'z4', pochi: null, gold: false };
     (game.shan as any)._pai = [];
     (game.shan as any)._rinshan = ['s5'];
@@ -92,6 +94,8 @@ describe('canonical flow-rule regressions', () => {
       if (other !== player) game.shoupai.set(other, buildShoupai(safeTiles));
     }
     game.huapai = { 0: [], 1: [], 2: [] };
+    // [2026-10-31] 配牌の乱数で手番の人に金北が来ると、手牌を作り直しても goldHand が残って通常北が 0 枚扱いになる
+    game.goldHand = { 0: { p: 0, s: 0, z: 0 }, 1: { p: 0, s: 0, z: 0 }, 2: { p: 0, s: 0, z: 0 } };
     game.lastZimoInfo = { player, pai: 'z4', pochi: null, gold: false };
     (game.shan as any)._pai = [];
     (game.shan as any)._rinshan = [...reserve];
