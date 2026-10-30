@@ -13,6 +13,7 @@ import { decideCpuDaiminkan, decideCpuPon } from './store/cpuCall';
 import { Shan3, generateTilePool, defaultSanmaRule } from './shan3';
 import { declareKanImpl, ponImpl, damingangImpl } from './store/fulouActions';
 import { hasGoldKita } from './game3/gold';
+import { feverWaitInfoFromLiveWall } from './game3/feverLizhi';
 import { evaluateWinPoints } from './game3/settlement';
 import type { LizhiPendingFlags } from './lizhiUi';
 import {
@@ -399,12 +400,340 @@ export function autoConsumeFuyuIfFeverExhausted(s: StoreState, player: PlayerId)
 
 /** 冬のやめ権 [使う / 保留] を人間に聞く必要があるか。hule 後 [秋のめくりの後] に呼ぶ。
  *  冬が 1 枚でもあればやめ権があり、持ち主は正が立直者、逆が下家 [fuyuDecisionOwner]。
- *  持ち主が CPU なら聞かない: 立直者 CPU は今まで通り保留 [待ち 0 だけ自動で使う]、
- *  下家 CPU も保留 [逆払いは他家に有利なのでフィーバーを続ける。待ち 0 は autoConsume が使う] */
+ *  持ち主が CPU なら聞かない: 立直者 CPU は今まで通り保留 [待ち 0 だけ自動で使う]。
+ *  逆の下家 CPU は祝儀の見込みで自動判定する [cpuShimochaFuyuShouldUse / applyCpuShimochaFuyu。2026-10-30 リョー] */
 export function fuyuQuestionNeeded(s: StoreState, winner: PlayerId): boolean {
   if (!s.game.feverActive[winner] || s.game.fuyuConsumed[winner]) return false;
   if (!s.game.effectiveHuapaiAtHule(winner).includes('f4')) return false;
   return !s.cpu[fuyuDecisionOwner(s.game, winner)];
+}
+
+/** 逆ぽっちの下家 CPU が、まだ決めていない冬のやめ権を持っているか。
+ *  [2026-10-30 リョー「対人戦の下家CPUは祝儀効率良さそうな方で自動で判定してくれ」]
+ *  正の CPU 立直者は対象外 [今まで通り保留、待ち 0 だけ autoConsume が使う] */
+export function cpuShimochaFuyuPending(s: StoreState, winner: PlayerId): boolean {
+  if (!s.game.feverActive[winner] || s.game.fuyuConsumed[winner]) return false;
+  if (!s.game.pochiPaymentMode[winner]) return false;
+  if (!s.game.effectiveHuapaiAtHule(winner).includes('f4')) return false;
+  return !!s.cpu[fuyuDecisionOwner(s.game, winner)];
+}
+
+/** 冬を「使う」と「保留」にした時の、やめ権の持ち主 [逆の下家] のこの和了の祝儀の増減。
+ *  selectFuyu と同じ道 [fuyuConsumed を置く → hule → applyHule] を、局所 snapshot の中で試し打ちして
+ *  chipLedger の差を読む [祝儀の計算は applyHule 内の applyChipsOnHule だけ。別の計算機は作らない]。
+ *  終わったら captureSnapshot / applySnapshot で和了前に戻す [evaluateHuleDry と同じ型]。
+ *  計算できなければ null [役なし等]。ダブロンの他家 ・ 神ぽっちの選択待ち ・ 冬の正ぽっちの選択待ちは入らない */
+export function fuyuOwnerChipDelta(
+  s: StoreState,
+  winner: PlayerId,
+  ronfrom: PlayerId | null,
+  use: boolean,
+): number | null {
+  const g = s.game;
+  const owner = fuyuDecisionOwner(g, winner);
+  const snap = g.captureSnapshot();
+  const prevConsumed = g.fuyuConsumed[winner];
+  try {
+    g.fuyuConsumed[winner] = use;
+    const result = ronfrom !== null && s.lastDapai
+      ? g.hule(winner, s.lastDapai.pai, ronfrom)
+      : g.hule(winner);
+    if (!result) return null;
+    const before = g.chipLedger[owner];
+    g.applyHule(result, winner, ronfrom);
+    return g.chipLedger[owner] - before;
+  } catch {
+    return null;
+  } finally {
+    g.applySnapshot(snap);
+    g.fuyuConsumed[winner] = prevConsumed;
+  }
+}
+
+/** 勝者の待ち牌の残り枚数 [王牌の未公開分込み、白ぽっち待ちは数えない。FuyuModal の waitRemain と同じ数え方] */
+export function fuyuWaitRemainCount(game: Game3, winner: PlayerId): number {
+  const tings: string[] = game.feverDeclareTing?.[winner]?.length
+    ? game.feverDeclareTing[winner]
+    : game.getTingpaiList(winner);
+  const wall = [
+    ...(((game.shan as any)._pai ?? []) as string[]),
+    ...((((game.shan as any).concealedDeadWall) ?? []) as string[]),
+  ];
+  return feverWaitInfoFromLiveWall(tings, wall)
+    .filter((row) => row.tile !== 'z5')
+    .reduce((sum, row) => sum + row.remain, 0);
+}
+
+/** 逆の下家 CPU の 使う / 保留 の比べ方 [純関数。数字は呼び出し側が入れる]。
+ *  ・useNow  = 使った時の、持ち主のこの和了の祝儀の増減 [アリス / チューリップを含む]
+ *  ・holdNow = 保留した時の、同じ増減 [フィーバー倍率つき。逆なので普通は持ち主がもらう側で正]
+ *  ・pMore   = 保留して続けた時に、勝者がもう一度和了る見込み
+ *             = 1 - (1 - w / 山) ^ floor(山 / 3)   [w = 待ち牌の残り、山 = ツモ山の残り、3 人で回るので 1/3 が勝者の番]
+ *  ・continuation = holdNow * pMore [もう一度同じ額が動くとみなす]
+ *  使う = useNow > holdNow + continuation。同じなら保留 */
+export function shimochaFuyuDecision(input: {
+  useNow: number;
+  holdNow: number;
+  waitRemain: number;
+  shanRemain: number;
+}): { use: boolean; pMore: number; continuation: number } {
+  const w = Math.max(0, input.waitRemain);
+  const shan = Math.max(input.shanRemain, 1);
+  const draws = Math.floor(Math.max(0, input.shanRemain) / 3);
+  const pMore = w <= 0 ? 0 : 1 - Math.pow(1 - Math.min(1, w / shan), draws);
+  const continuation = input.holdNow * pMore;
+  return { use: input.useNow > input.holdNow + continuation, pMore, continuation };
+}
+
+/** 逆の下家 CPU が冬を使うか。和了前 [restoreSnapshot 後] の局面で呼ぶ。
+ *  useNow / holdNow は fuyuOwnerChipDelta、pMore は shimochaFuyuDecision。計算できなければ保留 */
+export function cpuShimochaFuyuShouldUse(s: StoreState, winner: PlayerId, ronfrom: PlayerId | null): boolean {
+  const useNow = fuyuOwnerChipDelta(s, winner, ronfrom, true);
+  const holdNow = fuyuOwnerChipDelta(s, winner, ronfrom, false);
+  if (useNow === null || holdNow === null) return false;
+  const d = shimochaFuyuDecision({
+    useNow,
+    holdNow,
+    waitRemain: fuyuWaitRemainCount(s.game, winner),
+    shanRemain: s.game.shan.paishu,
+  });
+  dlog('[cpu shimocha fuyu]', { winner, useNow, holdNow, ...d });
+  return d.use;
+}
+
+/** 金北の自動選択 [isFeverPayAuto] や CPU ロンの前に呼ぶ。下家 CPU の判定が出る場面なら
+ *  冬を使う [fuyuConsumed = true] / 保留 [何もしない] を決めて返す。対象外は null。
+ *  保留の時は金北の強化先から冬を外す [自動選択が冬を選んで fuyuConsumed を立て、保留を上書きしない] */
+export function decideCpuShimochaFuyuBeforeAuto(s: StoreState, winner: PlayerId, ronfrom: PlayerId | null): boolean | null {
+  if (!cpuShimochaFuyuPending(s, winner)) return null;
+  const use = cpuShimochaFuyuShouldUse(s, winner, ronfrom);
+  if (use) s.game.fuyuConsumed[winner] = true;
+  return use;
+}
+
+/** 下家 CPU が冬を判定し、そのまま selectFuyu と同じ再計算 [resolveFuyuSelection] で和了を進める。
+ *  人間に聞く経路と同じ引数で冬の段を作ってから確定する。和了前 [restoreSnapshot 後] に呼ぶ */
+export function applyCpuShimochaFuyu(
+  s: StoreState,
+  pending: PendingFuyu,
+): StoreState {
+  const use = cpuShimochaFuyuShouldUse(s, pending.winner as PlayerId, pending.ronfrom as PlayerId | null);
+  enterFuyuStage(s, pending);
+  const note = use
+    ? '❄️ 下家 CPU が冬を使う判定 [祝儀の見込み]'
+    : '❄️ 下家 CPU が冬を保留する判定 [祝儀の見込み]';
+  const out = resolveFuyuSelection(s, use);
+  out.message = out.message ? `${note} / ${out.message}` : note;
+  return out;
+}
+
+/** 冬の 使う / 保留 を確定して和了を再計算し、精算まで進める [store.selectFuyu の本体。
+ *  人間の選択も、下家 CPU の自動判定 [applyCpuShimochaFuyu] も同じ道を通す] */
+export function resolveFuyuSelection(s: StoreState, use: boolean): StoreState {
+    if (!s.pendingFuyu) return { ...s };
+    // R8 P0 #1 fix: pendingFuyu = null 前に humanOthers も const 退避、
+    // 旧 code は null 後に s.pendingFuyu?.humanOthers を読んでて 必ず [] になってた = R7 #3 dead
+    const {
+      winner,
+      isRon,
+      ronfrom,
+      otherWinners: fuyuOtherWinners = [],
+      humanOthers: fuyuHumanOthers = [],
+      cutinQueued: fuyuCutinQueued = false,
+    } = s.pendingFuyu;
+    s.game.fuyuConsumed[winner as 0|1|2] = use; // 使う = true、 保留 = false
+    clearFuyuStage(s);
+    // 続行: まず未強化で和了を試算し、秋で表示された華まで金北候補に含める。
+    let result: any;
+    if (isRon && ronfrom !== null) {
+      result = s.game.hule(winner as any, s.lastDapai!.pai, ronfrom as any);
+    } else {
+      result = s.game.hule(winner as any);
+    }
+    if (!result) {
+      s.message = `player ${winner} アガリ失敗 [役なし]`;
+      return { ...s };
+    }
+    {
+      const choice = resolvePreSettlementPochiChoices(
+        s,
+        result,
+        { winner: winner as PlayerId, isRon, ronfrom: ronfrom as PlayerId | null },
+        () => isRon && ronfrom !== null
+          ? s.game.hule(winner as PlayerId, s.lastDapai!.pai, ronfrom as PlayerId)
+          : s.game.hule(winner as PlayerId),
+      );
+      if (choice.pending) return { ...s };
+      result = choice.result;
+      if (!result) {
+        s.message = `player ${winner} 神ぽっち選択後の再計算失敗`;
+        return { ...s };
+      }
+    }
+    const resolvedHuapai = s.game.effectiveHuapaiAtHule(winner as PlayerId);
+    if (hasGoldKita(s.game, winner as PlayerId)
+      && s.game.kinpeiTarget[winner as 0|1|2] === null
+      && resolvedHuapai.length > 0
+      && !s.cpu[winner as 0|1|2]) {
+      // R6 P1 #4 fix: 冬 modal 経由でも otherWinners [ダブロン CPU 他候補] を保存する。
+      let otherWinners: number[] = [...fuyuOtherWinners];
+      if (otherWinners.length === 0 && isRon && ronfrom !== null && s.lastDapai) {
+        const ld = s.lastDapai;
+        otherWinners = ([0,1,2] as const).filter(p =>
+          p !== winner && p !== ld.player && s.cpu[p as 0|1|2] && s.game.canRon(p as any, ld.pai, ld.player as any)
+        );
+      }
+      // [2026-07-21 リョー報告] 冬選択後の再 hule で秋カスケードがめくった物理ドラ表を、
+      // 人間金北 modal を出す前に巻き戻す [tsumo 2673 / CPU 経路 1665 と同じ]。
+      // selectKinpei が選択後に再 hule でめくり直すので、上がり確定まで表示は増えない
+      s.game.restoreSnapshot();
+      s.lastWinner = winner;
+      enterKinpeiStage(s, {
+        winner,
+        isRon,
+        ronfrom,
+        availableHuapai: resolvedHuapai,
+        // [2026-10-08 リョー「強化先の選択は上がりとか一式の情報見て選ぶから先に出して」] 冬経路も暫定和了を見せる
+        preview: kinpeiPreview(result),
+        otherWinners,
+        humanOthers: fuyuHumanOthers,
+        cutinQueued: fuyuCutinQueued,
+        fuyuDecisionMade: true,
+      });
+      s.message = `🎁 金北 強化対象を選択してください [保留も可]`;
+      return { ...s };
+    }
+    if (s.cpu[winner as 0|1|2]
+      && hasGoldKita(s.game, winner as PlayerId)
+      && s.game.kinpeiTarget[winner as 0|1|2] === null
+      && resolvedHuapai.length > 0) {
+      s.game.restoreSnapshot();
+      s.game.autoResolveKinpei(winner as any, resolvedHuapai);
+      saveHuleSnapshot(s.game);
+      result = isRon && ronfrom !== null
+        ? s.game.hule(winner as any, s.lastDapai!.pai, ronfrom as any)
+        : s.game.hule(winner as any);
+      if (!result) {
+        s.message = `player ${winner} 金北自動選択後の再計算失敗`;
+        return { ...s };
+      }
+      const choice = resolvePreSettlementPochiChoices(
+        s,
+        result,
+        { winner: winner as PlayerId, isRon, ronfrom: ronfrom as PlayerId | null },
+        () => isRon && ronfrom !== null
+          ? s.game.hule(winner as PlayerId, s.lastDapai!.pai, ronfrom as PlayerId)
+          : s.game.hule(winner as PlayerId),
+      );
+      if (choice.pending) return { ...s };
+      result = choice.result;
+      if (!result) {
+        s.message = `player ${winner} 金北・神ぽっち選択後の再計算失敗`;
+        return { ...s };
+      }
+    }
+    // 冬 modal 経由でも全ロン候補を同じ pre-hule snapshot から評価する。
+    const ronResults: Array<{ player: number; result: any }> = [{ player: winner, result }];
+    if (isRon && ronfrom !== null && s.lastDapai) {
+      const ld = s.lastDapai;
+      const otherCands = ([0,1,2] as const).filter(p => p !== winner && p !== ld.player && s.game.canRon(p as any, ld.pai, ld.player as any));
+      for (const p of otherCands) {
+        if (s.cpu[p as 0|1|2]) {
+          s.game.restoreSnapshot();
+          // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
+          autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
+          // 逆の下家 CPU の冬の使う / 保留 [祝儀の見込み。2026-10-30 リョー]
+          decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, ld.player as PlayerId);
+          if (hasGoldKita(s.game, p as PlayerId)) {
+            s.game.autoResolveKinpei(p as any);
+            saveHuleSnapshot(s.game);
+          }
+          let r2 = s.game.hule(p as any, ld.pai, ld.player as any);
+          if (r2) {
+            const choice = resolvePreSettlementPochiChoices(
+              s,
+              r2,
+              { winner: p as PlayerId, isRon: true, ronfrom: ld.player as PlayerId },
+              () => s.game.hule(p as PlayerId, ld.pai, ld.player as PlayerId),
+            );
+            if (choice.pending) {
+              for (const prior of ronResults) prior.result._anmikaRonSettlementDeferred = true;
+              s.ronResults = sortRonResultsByKamicha(
+                ld.player as PlayerId,
+                mergeRonResults(s.ronResults, ronResults),
+              );
+              s.ronDeclaredPlayers = Array.from(new Set([
+                ...(s.ronDeclaredPlayers ?? []),
+                ...ronResults.map((entry) => entry.player),
+              ]));
+              s.lastWinner = winnerByOya(s.game, s.ronResults);
+              s.lastHuleResult = s.ronResults.at(-1)?.result ?? result;
+              return { ...s };
+            }
+            r2 = choice.result;
+          }
+          if (r2) {
+            ronResults.push({ player: p, result: r2 });
+          }
+        } else {
+          dlog('[selectFuyu ron] human 他候補 機会喪失 [冬 modal 経由 ダブロン]', { winner, p });
+        }
+      }
+    }
+    // R7 P0 #3 fix: pendingFuyu.humanOthers - ronPassedPlayers / ronDeclared でまだ残ってる
+    // human 候補が居る場合は awaitingRonDecision 維持、 finalize 据え置き
+    // R8 P0 #1: 退避済 fuyuHumanOthers を使う [pendingFuyu は null 化済]
+    const fuyuHumans = fuyuHumanOthers.filter(p =>
+      !(s.ronPassedPlayers ?? []).includes(p) && !(s.ronDeclaredPlayers ?? []).includes(p)
+    );
+    if (isRon && ronfrom !== null) {
+      const combined = sortRonResultsByKamicha(
+        ronfrom as PlayerId,
+        mergeRonResults(s.ronResults, ronResults),
+      );
+      if (fuyuHumans.length > 0) {
+        for (const entry of ronResults) entry.result._anmikaRonSettlementDeferred = true;
+        s.ronResults = combined;
+      } else {
+        s.ronResults = settleRonResultsInKamichaOrder(s.game, ronfrom as PlayerId, combined);
+      }
+    } else {
+      s.game.applyHule(result, winner as PlayerId, null);
+      s.ronResults = [];
+    }
+    s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), ...ronResults.map(r => r.player).filter(p => !(s.ronDeclaredPlayers ?? []).includes(p))];
+    const isFever = s.game.feverActive[winner as 0|1|2];
+    const feverNote = isFever && !s.game.isFeverWaitExhausted(winner as 0|1|2) ? '🔥 [フィーバー継続中]' : '';
+    s.message = s.ronResults.length > 1
+      ? `🎉🎉 ダブロン! ${formatRonResults(s.ronResults)} ${feverNote}`
+      : `🎉 player ${winner} ${isRon ? 'ロン' : 'ツモ'}和了！ ${formatHuleResult(result)} ${feverNote}`;
+    s.lastHuleResult = (s.ronResults.length > 0 ? s.ronResults[s.ronResults.length - 1].result : ronResults[ronResults.length - 1].result);
+    s.lastWinner = s.ronResults.length > 1 ? winnerByOya(s.game, s.ronResults) : winner;
+    if (fuyuHumans.length > 0) {
+      continueRonDecisionStage(s);
+      s.message += ` [他 human 候補 p${fuyuHumans.join('/')} 判断待ち]`;
+      return { ...s };
+    }
+    if (enterFuyuKamiPochiStage(s, {
+      winner: (s.lastWinner ?? winner) as PlayerId,
+      isRon,
+      ronfrom: ronfrom as PlayerId | null,
+    })) {
+      return { ...s };
+    }
+    finishRonDecisionStage(s);
+    // 2026-05-14 codex review P1 fix: 冬選択経由のアガリでもサイコロチャンス trigger を check
+    // R3 P1 #8: 全 winner ぶん triggerSaiKoroIfAny を 順に呼ぶ [後述 queue 化に依存]
+    if (fuyuCutinQueued && s.pendingSaiKoro) {
+      const winners = new Set(ronResults.map(r => r.player));
+      replaceSaiKoroChances(s, s.pendingSaiKoro.chances.filter((c: any) => !winners.has(c.winner)));
+    }
+    for (const rr of ronResults) {
+      if (!fuyuCutinQueued) s = enqueueCutinState(s, isRon ? 'ron' : 'tsumo', rr.player as PlayerId);
+      s = triggerSaiKoroIfAny(s, rr.result, rr.player);
+    }
+    settleAfterWin(s, { winner: (s.lastWinner ?? winner) as PlayerId, isRon, ronfrom });
+    return { ...s };
 }
 
 /**
@@ -441,6 +770,8 @@ export function processKakanQianggangWindow(
       s.game.restoreSnapshot();
       // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
       autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
+      // 逆の下家 CPU の冬の使う / 保留 [祝儀の見込み。2026-10-30 リョー]
+      decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, player as PlayerId);
       if (hasGoldKita(s.game, p as PlayerId)) {
         s.game.autoResolveKinpei(p as any);
         saveHuleSnapshot(s.game);
@@ -1531,6 +1862,19 @@ export function createGameStore() {
         }
         // 冬の 使う / 保留 は秋のめくり ・ ぽっちの選択の後に聞く [秋で新たに表示された冬も同じ]。
         // 保留時の暫定和了とドラ表を見せてから表示前へ戻し、selectFuyu が同じ和了を再計算する
+        // 逆の下家が CPU なら聞かず、祝儀の見込みで 使う / 保留 を決めて同じ再計算へ進む [2026-10-30]
+        if (cpuShimochaFuyuPending(s, player as PlayerId)) {
+          const ld = s.lastDapai!;
+          const humanOthers = ([0,1,2] as const).filter(p =>
+            p !== player && p !== ld.player && !s.cpu[p as 0|1|2]
+            && !(s.ronDeclaredPlayers ?? []).includes(p)
+            && s.game.canRon(p as any, ld.pai, ld.player as any)
+          );
+          const availableHuapai = s.game.effectiveHuapaiAtHule(player as PlayerId);
+          s.game.restoreSnapshot();
+          s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), player];
+          return applyCpuShimochaFuyu(s, { winner: player, isRon: true, ronfrom: ld.player, availableHuapai, humanOthers });
+        }
         if (fuyuQuestionNeeded(s, player as PlayerId)) {
           const ld = s.lastDapai!;
           const humanOthers = ([0,1,2] as const).filter(p =>
@@ -1553,7 +1897,12 @@ export function createGameStore() {
           const availableHuapai = s.game.effectiveHuapaiAtHule(player as PlayerId);
           if (availableHuapai.length > 0) {
             s.game.restoreSnapshot();
-            s.game.autoResolveKinpei(player as any, availableHuapai);
+            // 逆の時の下家 CPU が冬を保留すると判定したら、金北の強化先に冬を自動で選ばない
+            const holdFuyuRon = decideCpuShimochaFuyuBeforeAuto(s, player as PlayerId, s.lastDapai.player as PlayerId) === false;
+            s.game.autoResolveKinpei(
+              player as any,
+              holdFuyuRon ? availableHuapai.filter((h) => h !== 'f4') : availableHuapai,
+            );
             if (isFeverPayAuto_ron && s.game.kinpeiTarget[player as 0|1|2] === 'fuyu') {
               s.game.fuyuConsumed[player as 0|1|2] = true;
             }
@@ -1588,6 +1937,8 @@ export function createGameStore() {
             s.game.restoreSnapshot();
             // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
             autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
+            // 逆の下家 CPU の冬の使う / 保留 [祝儀の見込み。2026-10-30 リョー]
+            decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, ld.player as PlayerId);
             if (hasGoldKita(s.game, p as PlayerId)) {
               s.game.autoResolveKinpei(p as any);
               saveHuleSnapshot(s.game);
@@ -1755,210 +2106,7 @@ export function createGameStore() {
         if (s.pendingFuyu && !owners.includes(myOnlineSeat)) { dlog('[gate-block]', { type: 'selectFuyu', my: myOnlineSeat, owners }); return; }
       }
       if (sendOnlineAction({ type: 'selectFuyu', use })) return;
-      update((s) => {
-        if (!s.pendingFuyu) return { ...s };
-        // R8 P0 #1 fix: pendingFuyu = null 前に humanOthers も const 退避、
-        // 旧 code は null 後に s.pendingFuyu?.humanOthers を読んでて 必ず [] になってた = R7 #3 dead
-        const {
-          winner,
-          isRon,
-          ronfrom,
-          otherWinners: fuyuOtherWinners = [],
-          humanOthers: fuyuHumanOthers = [],
-          cutinQueued: fuyuCutinQueued = false,
-        } = s.pendingFuyu;
-        s.game.fuyuConsumed[winner as 0|1|2] = use; // 使う = true、 保留 = false
-        clearFuyuStage(s);
-        // 続行: まず未強化で和了を試算し、秋で表示された華まで金北候補に含める。
-        let result: any;
-        if (isRon && ronfrom !== null) {
-          result = s.game.hule(winner as any, s.lastDapai!.pai, ronfrom as any);
-        } else {
-          result = s.game.hule(winner as any);
-        }
-        if (!result) {
-          s.message = `player ${winner} アガリ失敗 [役なし]`;
-          return { ...s };
-        }
-        {
-          const choice = resolvePreSettlementPochiChoices(
-            s,
-            result,
-            { winner: winner as PlayerId, isRon, ronfrom: ronfrom as PlayerId | null },
-            () => isRon && ronfrom !== null
-              ? s.game.hule(winner as PlayerId, s.lastDapai!.pai, ronfrom as PlayerId)
-              : s.game.hule(winner as PlayerId),
-          );
-          if (choice.pending) return { ...s };
-          result = choice.result;
-          if (!result) {
-            s.message = `player ${winner} 神ぽっち選択後の再計算失敗`;
-            return { ...s };
-          }
-        }
-        const resolvedHuapai = s.game.effectiveHuapaiAtHule(winner as PlayerId);
-        if (hasGoldKita(s.game, winner as PlayerId)
-          && s.game.kinpeiTarget[winner as 0|1|2] === null
-          && resolvedHuapai.length > 0
-          && !s.cpu[winner as 0|1|2]) {
-          // R6 P1 #4 fix: 冬 modal 経由でも otherWinners [ダブロン CPU 他候補] を保存する。
-          let otherWinners: number[] = [...fuyuOtherWinners];
-          if (otherWinners.length === 0 && isRon && ronfrom !== null && s.lastDapai) {
-            const ld = s.lastDapai;
-            otherWinners = ([0,1,2] as const).filter(p =>
-              p !== winner && p !== ld.player && s.cpu[p as 0|1|2] && s.game.canRon(p as any, ld.pai, ld.player as any)
-            );
-          }
-          // [2026-07-21 リョー報告] 冬選択後の再 hule で秋カスケードがめくった物理ドラ表を、
-          // 人間金北 modal を出す前に巻き戻す [tsumo 2673 / CPU 経路 1665 と同じ]。
-          // selectKinpei が選択後に再 hule でめくり直すので、上がり確定まで表示は増えない
-          s.game.restoreSnapshot();
-          s.lastWinner = winner;
-          enterKinpeiStage(s, {
-            winner,
-            isRon,
-            ronfrom,
-            availableHuapai: resolvedHuapai,
-            // [2026-10-08 リョー「強化先の選択は上がりとか一式の情報見て選ぶから先に出して」] 冬経路も暫定和了を見せる
-            preview: kinpeiPreview(result),
-            otherWinners,
-            humanOthers: fuyuHumanOthers,
-            cutinQueued: fuyuCutinQueued,
-            fuyuDecisionMade: true,
-          });
-          s.message = `🎁 金北 強化対象を選択してください [保留も可]`;
-          return { ...s };
-        }
-        if (s.cpu[winner as 0|1|2]
-          && hasGoldKita(s.game, winner as PlayerId)
-          && s.game.kinpeiTarget[winner as 0|1|2] === null
-          && resolvedHuapai.length > 0) {
-          s.game.restoreSnapshot();
-          s.game.autoResolveKinpei(winner as any, resolvedHuapai);
-          saveHuleSnapshot(s.game);
-          result = isRon && ronfrom !== null
-            ? s.game.hule(winner as any, s.lastDapai!.pai, ronfrom as any)
-            : s.game.hule(winner as any);
-          if (!result) {
-            s.message = `player ${winner} 金北自動選択後の再計算失敗`;
-            return { ...s };
-          }
-          const choice = resolvePreSettlementPochiChoices(
-            s,
-            result,
-            { winner: winner as PlayerId, isRon, ronfrom: ronfrom as PlayerId | null },
-            () => isRon && ronfrom !== null
-              ? s.game.hule(winner as PlayerId, s.lastDapai!.pai, ronfrom as PlayerId)
-              : s.game.hule(winner as PlayerId),
-          );
-          if (choice.pending) return { ...s };
-          result = choice.result;
-          if (!result) {
-            s.message = `player ${winner} 金北・神ぽっち選択後の再計算失敗`;
-            return { ...s };
-          }
-        }
-        // 冬 modal 経由でも全ロン候補を同じ pre-hule snapshot から評価する。
-        const ronResults: Array<{ player: number; result: any }> = [{ player: winner, result }];
-        if (isRon && ronfrom !== null && s.lastDapai) {
-          const ld = s.lastDapai;
-          const otherCands = ([0,1,2] as const).filter(p => p !== winner && p !== ld.player && s.game.canRon(p as any, ld.pai, ld.player as any));
-          for (const p of otherCands) {
-            if (s.cpu[p as 0|1|2]) {
-              s.game.restoreSnapshot();
-              // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
-              autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
-              if (hasGoldKita(s.game, p as PlayerId)) {
-                s.game.autoResolveKinpei(p as any);
-                saveHuleSnapshot(s.game);
-              }
-              let r2 = s.game.hule(p as any, ld.pai, ld.player as any);
-              if (r2) {
-                const choice = resolvePreSettlementPochiChoices(
-                  s,
-                  r2,
-                  { winner: p as PlayerId, isRon: true, ronfrom: ld.player as PlayerId },
-                  () => s.game.hule(p as PlayerId, ld.pai, ld.player as PlayerId),
-                );
-                if (choice.pending) {
-                  for (const prior of ronResults) prior.result._anmikaRonSettlementDeferred = true;
-                  s.ronResults = sortRonResultsByKamicha(
-                    ld.player as PlayerId,
-                    mergeRonResults(s.ronResults, ronResults),
-                  );
-                  s.ronDeclaredPlayers = Array.from(new Set([
-                    ...(s.ronDeclaredPlayers ?? []),
-                    ...ronResults.map((entry) => entry.player),
-                  ]));
-                  s.lastWinner = winnerByOya(s.game, s.ronResults);
-                  s.lastHuleResult = s.ronResults.at(-1)?.result ?? result;
-                  return { ...s };
-                }
-                r2 = choice.result;
-              }
-              if (r2) {
-                ronResults.push({ player: p, result: r2 });
-              }
-            } else {
-              dlog('[selectFuyu ron] human 他候補 機会喪失 [冬 modal 経由 ダブロン]', { winner, p });
-            }
-          }
-        }
-        // R7 P0 #3 fix: pendingFuyu.humanOthers - ronPassedPlayers / ronDeclared でまだ残ってる
-        // human 候補が居る場合は awaitingRonDecision 維持、 finalize 据え置き
-        // R8 P0 #1: 退避済 fuyuHumanOthers を使う [pendingFuyu は null 化済]
-        const fuyuHumans = fuyuHumanOthers.filter(p =>
-          !(s.ronPassedPlayers ?? []).includes(p) && !(s.ronDeclaredPlayers ?? []).includes(p)
-        );
-        if (isRon && ronfrom !== null) {
-          const combined = sortRonResultsByKamicha(
-            ronfrom as PlayerId,
-            mergeRonResults(s.ronResults, ronResults),
-          );
-          if (fuyuHumans.length > 0) {
-            for (const entry of ronResults) entry.result._anmikaRonSettlementDeferred = true;
-            s.ronResults = combined;
-          } else {
-            s.ronResults = settleRonResultsInKamichaOrder(s.game, ronfrom as PlayerId, combined);
-          }
-        } else {
-          s.game.applyHule(result, winner as PlayerId, null);
-          s.ronResults = [];
-        }
-        s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), ...ronResults.map(r => r.player).filter(p => !(s.ronDeclaredPlayers ?? []).includes(p))];
-        const isFever = s.game.feverActive[winner as 0|1|2];
-        const feverNote = isFever && !s.game.isFeverWaitExhausted(winner as 0|1|2) ? '🔥 [フィーバー継続中]' : '';
-        s.message = s.ronResults.length > 1
-          ? `🎉🎉 ダブロン! ${formatRonResults(s.ronResults)} ${feverNote}`
-          : `🎉 player ${winner} ${isRon ? 'ロン' : 'ツモ'}和了！ ${formatHuleResult(result)} ${feverNote}`;
-        s.lastHuleResult = (s.ronResults.length > 0 ? s.ronResults[s.ronResults.length - 1].result : ronResults[ronResults.length - 1].result);
-        s.lastWinner = s.ronResults.length > 1 ? winnerByOya(s.game, s.ronResults) : winner;
-        if (fuyuHumans.length > 0) {
-          continueRonDecisionStage(s);
-          s.message += ` [他 human 候補 p${fuyuHumans.join('/')} 判断待ち]`;
-          return { ...s };
-        }
-        if (enterFuyuKamiPochiStage(s, {
-          winner: (s.lastWinner ?? winner) as PlayerId,
-          isRon,
-          ronfrom: ronfrom as PlayerId | null,
-        })) {
-          return { ...s };
-        }
-        finishRonDecisionStage(s);
-        // 2026-05-14 codex review P1 fix: 冬選択経由のアガリでもサイコロチャンス trigger を check
-        // R3 P1 #8: 全 winner ぶん triggerSaiKoroIfAny を 順に呼ぶ [後述 queue 化に依存]
-        if (fuyuCutinQueued && s.pendingSaiKoro) {
-          const winners = new Set(ronResults.map(r => r.player));
-          replaceSaiKoroChances(s, s.pendingSaiKoro.chances.filter((c: any) => !winners.has(c.winner)));
-        }
-        for (const rr of ronResults) {
-          if (!fuyuCutinQueued) s = enqueueCutinState(s, isRon ? 'ron' : 'tsumo', rr.player as PlayerId);
-          s = triggerSaiKoroIfAny(s, rr.result, rr.player);
-        }
-        settleAfterWin(s, { winner: (s.lastWinner ?? winner) as PlayerId, isRon, ronfrom });
-        return { ...s };
-      });
+      update((s) => resolveFuyuSelection(s, use));
     },
     /** 金北 modal で強化対象選択 [target=null は保留] */
     selectKinpei(target: 'haru' | 'natsu' | 'aki' | 'fuyu' | null) {
@@ -2059,6 +2207,21 @@ export function createGameStore() {
           }
         }
         // 秋金北の追加表示で初めて冬が出た場合も、冬選択を挟んで同じ和了を再計算する。
+        if (!fuyuDecisionMade && cpuShimochaFuyuPending(s, winner as PlayerId)) {
+          const availableAfterKinpei = s.game.effectiveHuapaiAtHule(winner as PlayerId);
+          const selectedTarget = s.game.kinpeiTarget[winner as 0|1|2];
+          s.game.restoreSnapshot();
+          s.game.kinpeiTarget[winner as 0|1|2] = selectedTarget;
+          return applyCpuShimochaFuyu(s, {
+            winner,
+            isRon,
+            ronfrom,
+            availableHuapai: availableAfterKinpei,
+            otherWinners,
+            humanOthers: kinpeiHumanOthers,
+            cutinQueued,
+          });
+        }
         if (!fuyuDecisionMade
           && fuyuQuestionNeeded(s, winner as PlayerId)) {
           const availableAfterKinpei = s.game.effectiveHuapaiAtHule(winner as PlayerId);
@@ -2617,6 +2780,8 @@ export function createGameStore() {
               s.game.restoreSnapshot();
               // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
               autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
+              // 逆の下家 CPU の冬の使う / 保留 [祝儀の見込み。2026-10-30 リョー]
+              decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, s.lastDapai.player as PlayerId);
               // R5 P1 #4 fix: human pass 後 CPU 後発ロン でも 金北 autoResolve、 通常 path と揃える
               if (hasGoldKita(s.game, p as PlayerId)) {
                 s.game.autoResolveKinpei(p as any);
@@ -2826,6 +2991,11 @@ export function createGameStore() {
         }
         // 冬の 使う / 保留 は秋のめくり ・ ぽっちの選択の後に聞く [秋で新たに表示された冬も同じ]。
         // 保留時の暫定和了とドラ表を見せてから表示前へ戻し、selectFuyu が同じ和了を再計算する
+        if (cpuShimochaFuyuPending(s, player)) {
+          const availableHuapai = s.game.effectiveHuapaiAtHule(player);
+          s.game.restoreSnapshot();
+          return applyCpuShimochaFuyu(s, { winner: player, isRon: false, ronfrom: null, availableHuapai });
+        }
         if (fuyuQuestionNeeded(s, player)) {
           const availableHuapai = s.game.effectiveHuapaiAtHule(player);
           const preview = fuyuPreview(s.game, result);
@@ -2864,7 +3034,12 @@ export function createGameStore() {
           && s.game.kinpeiTarget[player] === null
           && resolvedHuapai.length > 0) {
           s.game.restoreSnapshot();
-          s.game.autoResolveKinpei(player, resolvedHuapai);
+          // 逆の時の下家 CPU が冬を保留すると判定したら、金北の強化先に冬を自動で選ばない
+          const holdFuyuTsumo = decideCpuShimochaFuyuBeforeAuto(s, player as PlayerId, null) === false;
+          s.game.autoResolveKinpei(
+            player,
+            holdFuyuTsumo ? resolvedHuapai.filter((h) => h !== 'f4') : resolvedHuapai,
+          );
           if (isFeverPayAuto_tsumo && s.game.kinpeiTarget[player] === 'fuyu') {
             s.game.fuyuConsumed[player] = true;
           }
@@ -3697,6 +3872,8 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
       s.game.restoreSnapshot();
       // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
       autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
+      // 逆の下家 CPU の冬の判定 [2 人目以降の CPU ロン。先頭は下の冬の段で決める]
+      if (ronResults.length > 0) decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, player as PlayerId);
       // R7 P1 #6 fix: CPU 直ロン経路 [discard 直後] でも autoResolveKinpei、 通常 path と揃え
       if (hasGoldKita(s.game, p as PlayerId)) {
         s.game.autoResolveKinpei(p as any);
@@ -3716,6 +3893,12 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
       }
       // [2026-10-30 リョー] 逆ぽっちの CPU ロンも、やめ権を持つ下家が人間なら冬を聞く [先頭の 1 人だけ。
       // 同時に ron した他の CPU は selectFuyu の再計算が拾う]。CPU が下家なら聞かずに保留
+      if (result && ronResults.length === 0 && cpuShimochaFuyuPending(s, p as PlayerId)) {
+        const availableHuapai = s.game.effectiveHuapaiAtHule(p as PlayerId);
+        s.game.restoreSnapshot();
+        s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), p];
+        return applyCpuShimochaFuyu(s, { winner: p, isRon: true, ronfrom: player, availableHuapai, humanOthers: [] });
+      }
       if (result && ronResults.length === 0 && fuyuQuestionNeeded(s, p as PlayerId)) {
         const availableHuapai = s.game.effectiveHuapaiAtHule(p as PlayerId);
         const preview = fuyuPreview(s.game, result);

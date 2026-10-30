@@ -17,6 +17,8 @@ import {
   processKakanQianggangWindow,
   autoConsumeFuyuIfFeverExhausted,
   fuyuQuestionNeeded,
+  cpuShimochaFuyuPending,
+  applyCpuShimochaFuyu,
 } from '../store';
 import { dlog, toCorePai } from '../helpers';
 import { settleAfterWin, enterFuyuStage, fuyuPreview } from './winPipeline';
@@ -92,7 +94,17 @@ export function cpuStepImpl(initial: StoreState): StoreState {
           break;
         }
         // [2026-10-30 リョー] 逆ぽっちの CPU ツモは、やめ権を持つ下家が人間なら冬の 使う / 保留 を聞く。
-        // CPU が下家なら聞かずに保留 [待ち残山 0 は上の autoConsume が使う]
+        // 下家も CPU なら聞かず、祝儀の見込みで決めて同じ再計算へ進む [待ち残山 0 は上の autoConsume が使う]
+        if (cpuShimochaFuyuPending(s, cur)) {
+          const availableHuapai = s.game.effectiveHuapaiAtHule(cur);
+          const selectedTarget = s.game.kinpeiTarget[cur];
+          s.game.restoreSnapshot();
+          s.game.kinpeiTarget[cur] = selectedTarget;
+          s = applyCpuShimochaFuyu(s, { winner: cur, isRon: false, ronfrom: null, availableHuapai });
+          // CPU 和了のサイコロ ・ 局終了は人間の確認 [ackCpuWin] まで自動進行しない [下の通常経路と同じ]
+          if (s.pendingSaiKoro || s.roundEnded) s.cpuWinAck = false;
+          break;
+        }
         if (fuyuQuestionNeeded(s, cur)) {
           const availableHuapai = s.game.effectiveHuapaiAtHule(cur);
           const preview = fuyuPreview(s.game, result);
