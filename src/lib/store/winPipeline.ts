@@ -64,7 +64,7 @@ export function fuyuPreview(game: { shan: { baopai: string[]; displayBaopai: str
 
 export type PendingFuyu = {
   winner: number;
-  /** 立直者だけ [逆ぽっちでも。フィーバーを続けるかの選択なので]。 */
+  /** やめ権の持ち主 1 人 [正は立直者、逆は下家。2026-10-30 リョー]。 */
   decisionOwners?: number[];
   decisionOwnerIndex?: number;
   isRon: boolean;
@@ -321,10 +321,16 @@ export function clearQianggangStage(s: WinPipelineLike): PendingQianggang | null
   return pending;
 }
 
+/** やめ権 [冬の 使う / 保留] の持ち主。正ぽっちは立直者、逆ぽっちは下家
+ *  [2026-10-30 リョー「冬が1枚でもあればやめ権が存在し、正状態ではリーチ者に、逆状態では下家にやめ権がある」]。
+ *  下家 = 次に打牌する人 = (p + 2) % 3 [lunbanToPlayerId = (currentOya - lunban) mod 3 なので lunban が進むと player は 1 減る] */
+export function fuyuDecisionOwner(game: { pochiPaymentMode: Record<PlayerId, boolean> }, winner: number): PlayerId {
+  const w = winner as PlayerId;
+  return game.pochiPaymentMode[w] ? (((w + 2) % 3) as PlayerId) : w;
+}
+
 export function enterFuyuStage(s: WinPipelineLike, pending: PendingFuyu): void {
-  // 冬の 使う / 保留 はフィーバーをやめるか続けるかなので、逆ぽっちでも立直者が決める
-  // [ルール 5-5。同卓者が選ぶのは逆ぽっちツモ時の金北の強化先だけ。2026-10-27 isg. 通報 room 5YMV]
-  pending.decisionOwners = [pending.winner];
+  pending.decisionOwners = [fuyuDecisionOwner(s.game, pending.winner)];
   s.pendingFuyu = pending;
   s.roundEnded = false;
 }

@@ -28,8 +28,17 @@ describe('pochi multiplier spec 2026-05-21', () => {
   it('same direction keeps the higher absolute value', () => {
     expect(nextPochiMultiplier({ defen: 1, chip: 2 }, 'green')).toEqual({ defen: 1, chip: 2 });
     expect(nextPochiMultiplier({ defen: 1, chip: 1 }, 'blue')).toEqual({ defen: 1, chip: 2 });
-    expect(nextPochiMultiplier({ defen: -1, chip: -2 }, 'yellow')).toEqual({ defen: -1, chip: -2 });
-    expect(nextPochiMultiplier({ defen: -1, chip: -1 }, 'red')).toEqual({ defen: -1, chip: -2 });
+  });
+
+  // [2026-10-30 リョー] 逆引きで辞められなくなった事への救済: 逆の後に逆を引いたら 1 倍で正転 [一発 2p を含む]
+  it('negative to negative flips back to positive at 1x', () => {
+    const one = { defen: 1, chip: 1 };
+    expect(nextPochiMultiplier({ defen: -1, chip: -1 }, 'yellow')).toEqual(one);
+    expect(nextPochiMultiplier({ defen: -1, chip: -2 }, 'yellow')).toEqual(one);
+    expect(nextPochiMultiplier({ defen: -1, chip: -1 }, 'red')).toEqual(one);
+    expect(nextPochiMultiplier({ defen: -1, chip: -2 }, 'red')).toEqual(one);
+    // 正に戻った後にもう一度逆を引けば、また逆になる
+    expect(nextPochiMultiplier(one, 'yellow')).toEqual({ defen: -1, chip: -1 });
   });
 
   it('negative to positive applies the positive reversal bonus', () => {
@@ -79,7 +88,8 @@ describe('pochi multiplier spec 2026-05-21', () => {
     const p1 = nextPochiMultiplier({ defen: 1, chip: 1 }, 'blue');
     const p2 = nextPochiMultiplier({ defen: 1, chip: 1 }, 'red');
 
-    expect(p0).toEqual({ defen: 1, chip: 4 });
+    // yellow [逆] → red [逆を重ねて 1 倍正転] → green [中立の正]
+    expect(p0).toEqual({ defen: 1, chip: 1 });
     expect(p1).toEqual({ defen: 1, chip: 2 });
     expect(p2).toEqual({ defen: -1, chip: -2 });
   });

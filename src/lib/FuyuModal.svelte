@@ -3,6 +3,9 @@
   // フィーバー中 冬使う / 保留 modal
   export let winnerName: string | null = null;
   export let winner: number;
+  // [2026-10-30 リョー] やめ権は正が立直者、逆が下家。owner が winner と違う時は逆なので下家が決める
+  export let owner: number | null = null;
+  export let ownerName: string | null = null;
   export let waitRemain: number = 0;
   export let shanRemain: number = 0;
   export let onSelect: (use: boolean) => void;
@@ -20,6 +23,7 @@
   // [2026-10-24 先輩「冬冬金北とか選ぶか考える時に山の残り枚数とか川とか見れるように」]
   // 金北の選択と同じく板をたたんで盤面 [河 ・ 残り ・ ドラ] を見る。選択 [pendingFuyu] は pending のまま
   let peeking = false;
+  $: reverseOwner = owner !== null && owner !== winner;
 </script>
 
 {#if peeking}
@@ -34,6 +38,9 @@
   z={1010}
 >
   <div class="title">❄️ フィーバー中、 冬を使う？ [{winnerName ?? `player ${winner}`}] <button type="button" class="peek" on:click={() => (peeking = true)}>盤面を見る</button></div>
+  {#if reverseOwner}
+    <div class="owner">やめ権: {ownerName ?? `player ${owner}`} [逆なので下家]</div>
+  {/if}
   <div class="info">
     <div class="info-row">残り待ち牌: <strong>{waitRemain}</strong> 枚</div>
     <div class="info-row">残り山: <strong>{shanRemain}</strong> 枚</div>
@@ -53,6 +60,7 @@
 
 <style>
   .title { font-weight: bold; margin-bottom: 14px; font-size: 20px; }
+  .owner { font-size: 15px; color: #ffe9ad; margin: -6px 0 8px; }
   .info { margin: 10px 0 16px; display: flex; gap: 24px; }
   .info-row { font-size: 17px; }
   .info-row strong { color: #ffd060; font-size: 22px; font-variant-numeric: tabular-nums; }

@@ -49,6 +49,9 @@ export function nextPochiMultiplier(currentValue: unknown, color: PochiColor): P
 
   const currentPositive = current.defen > 0;
   const incomingPositive = incoming.defen > 0;
+  // [2026-10-30 リョー] 逆の後に逆を引いたら 1 倍正転 [一発 2p のでかぽっちも黄扱いで同じ]。
+  // 逆引きで辞められなくなった事への救済。赤 [-1/-2] でも黄でも 1/1 に戻す
+  if (!currentPositive && !incomingPositive) return { defen: 1, chip: 1 };
   if (currentPositive === incomingPositive) {
     const sign = currentPositive ? 1 : -1;
     return {

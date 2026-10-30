@@ -9,6 +9,7 @@ import {
 } from '../../../server/ws_server';
 import { toCorePai } from '../helpers';
 import { buildShoupai } from '../game3';
+import { fuyuDecisionOwner } from '../store/winPipeline';
 import { defaultSanmaRule, generateTilePool } from '../shan3';
 
 const members = [
@@ -565,7 +566,8 @@ describe('server RoomAuthority', () => {
   it('uses decisionOwners for reverse-pochi post-win choices', () => {
     const a = authority();
     const winner = a.currentPlayer();
-    const chooser = ((winner + 1) % 3) as 0 | 1 | 2;
+    // やめ権 [冬の 使う / 保留] は逆なら下家 [(winner + 2) % 3、2026-10-30 リョー]
+    const chooser = ((winner + 2) % 3) as 0 | 1 | 2;
     const state = a.canonicalState();
     state.pendingFuyu = {
       winner,
@@ -578,6 +580,35 @@ describe('server RoomAuthority', () => {
       .toContain('not a decision owner');
     expect(a.validateAndApply(chooser, { type: 'selectFuyu', use: false }, members))
       .toBeNull();
+  });
+
+  it('やめ権: 逆ぽっちの冬は下家だけ [和了者は却下]、正ぽっちは和了者だけ', () => {
+    for (const reverse of [true, false]) {
+      const a = authority();
+      const winner = a.currentPlayer();
+      const shimocha = ((winner + 2) % 3) as 0 | 1 | 2;
+      const other = ((winner + 1) % 3) as 0 | 1 | 2;
+      const state = a.canonicalState();
+      state.game.pochiPaymentMode[winner] = reverse;
+      // enterFuyuStage と同じ持ち主の決め方 [store が本番で作る pendingFuyu]
+      state.pendingFuyu = {
+        winner,
+        isRon: false,
+        ronfrom: null,
+        availableHuapai: ['f4'],
+        decisionOwners: [fuyuDecisionOwner(state.game, winner)],
+      } as any;
+      const owner = reverse ? shimocha : winner;
+      const nonOwners = [0, 1, 2].filter((p) => p !== owner);
+      expect(state.pendingFuyu!.decisionOwners).toEqual([owner]);
+      for (const p of nonOwners) {
+        expect(a.validateAndApply(p as 0 | 1 | 2, { type: 'selectFuyu', use: false }, members))
+          .toContain('not a decision owner');
+      }
+      expect(other).not.toBe(shimocha);
+      expect(a.validateAndApply(owner as 0 | 1 | 2, { type: 'selectFuyu', use: false }, members))
+        .toBeNull();
+    }
   });
 
   it('validates the owner, occurrence and target of a Kami-pochi choice', () => {

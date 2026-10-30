@@ -16,9 +16,10 @@ import {
   resolvePreSettlementPochiChoices,
   processKakanQianggangWindow,
   autoConsumeFuyuIfFeverExhausted,
+  fuyuQuestionNeeded,
 } from '../store';
 import { dlog, toCorePai } from '../helpers';
-import { settleAfterWin } from './winPipeline';
+import { settleAfterWin, enterFuyuStage, fuyuPreview } from './winPipeline';
 import { decideCpuShuvari } from './cpuShuvari';
 import { filterCpuAutoKan } from './cpuCall';
 import { pickLizhiDapai, decideFever } from './cpuLizhi';
@@ -88,6 +89,18 @@ export function cpuStepImpl(initial: StoreState): StoreState {
         result = choice.result;
         if (!result) {
           s.message = `[CPU] player ${cur} 神ぽっち選択後の再計算失敗`;
+          break;
+        }
+        // [2026-10-30 リョー] 逆ぽっちの CPU ツモは、やめ権を持つ下家が人間なら冬の 使う / 保留 を聞く。
+        // CPU が下家なら聞かずに保留 [待ち残山 0 は上の autoConsume が使う]
+        if (fuyuQuestionNeeded(s, cur)) {
+          const availableHuapai = s.game.effectiveHuapaiAtHule(cur);
+          const preview = fuyuPreview(s.game, result);
+          const selectedTarget = s.game.kinpeiTarget[cur];
+          s.game.restoreSnapshot();
+          s.game.kinpeiTarget[cur] = selectedTarget;
+          enterFuyuStage(s, { winner: cur, isRon: false, ronfrom: null, availableHuapai, ...preview });
+          s.message = `❄️ フィーバー中、冬を使う？ [使う = アリス発動 + フィーバー終了 / 保留 = 継続]`;
           break;
         }
         s.game.applyHule(result, cur, null);

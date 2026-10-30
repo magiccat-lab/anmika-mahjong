@@ -1107,7 +1107,7 @@ export class RoomAuthority {
       : type === 'selectKamiPochi' ? state.pendingKamiPochi
       : type === 'selectPochiSwap' ? state.pendingPochiSwap
       : null;
-    const owner = type === 'selectFuyu' ? state.pendingFuyu?.winner
+    const owner = type === 'selectFuyu' ? (state.pendingFuyu?.decisionOwners?.[0] ?? state.pendingFuyu?.winner)
       : type === 'selectKinpei' ? state.pendingKinpei?.winner
       : type === 'selectKamiPochi' ? state.pendingKamiPochi?.winner
       : type === 'selectPochiSwap' ? state.pendingPochiSwap?.winner

@@ -654,7 +654,7 @@
     if (snapshot.pendingFuyu) {
       return (snapshot.pendingFuyu.decisionOwners ?? [snapshot.pendingFuyu.winner]).includes(myself)
         ? { text: '冬の効果を選択', tone: 'action' }
-        : { text: `${seatDisplayNames[snapshot.pendingFuyu.winner as 0|1|2]} の冬選択待ち`, tone: 'waiting' };
+        : { text: `${seatDisplayNames[(snapshot.pendingFuyu.decisionOwners?.[0] ?? snapshot.pendingFuyu.winner) as 0|1|2]} の冬選択待ち`, tone: 'waiting' };
     }
     if (snapshot.pendingKinpei) {
       return (snapshot.pendingKinpei.decisionOwners ?? [snapshot.pendingKinpei.winner]).includes(myself)
@@ -3424,7 +3424,7 @@
           who={seatDisplayNames[remotePochi.seat as 0 | 1 | 2]} onClose={() => { remotePochi = null; }} />
       {/key}
     {/if}
-    <!-- 2026-05-14 ゆーま 自走 bug fix: FuyuModal も winner client のみ表示、
+    <!-- 2026-05-14 ゆーま 自走 bug fix: FuyuModal も やめ権の持ち主 [decisionOwners] の client のみ表示、
          非 winner が誤クリックで selectFuyu broadcast するのを防ぐ -->
     {#if $game.pendingFuyu && (!onlineGameStarted || ($game.pendingFuyu.decisionOwners ?? [$game.pendingFuyu.winner]).includes(actorSeat)) && !fxPresentationBusy}
       {@const tingW = $game.game.feverDeclareTing?.[$game.pendingFuyu.winner as 0|1|2] ?? $game.game.getTingpaiList($game.pendingFuyu.winner as 0|1|2)}
@@ -3432,6 +3432,8 @@
       <FuyuModal
         winnerName={onlineGameStarted ? seatDisplayNames[$game.pendingFuyu.winner] : null}
         winner={$game.pendingFuyu.winner}
+        owner={$game.pendingFuyu.decisionOwners?.[0] ?? $game.pendingFuyu.winner}
+        ownerName={onlineGameStarted ? seatDisplayNames[$game.pendingFuyu.decisionOwners?.[0] ?? $game.pendingFuyu.winner] : null}
         waitRemain={remainW}
         shanRemain={paishu}
         preview={$game.pendingFuyu.preview ?? null}
