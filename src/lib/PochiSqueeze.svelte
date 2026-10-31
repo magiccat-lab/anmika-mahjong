@@ -8,6 +8,9 @@
   //  ⑥ 結果: 牌がめくれて色の帯。復活 (plan.premium = revive) は外れの帯 → 「まだや！」→ 本当の帯
   // 色 (color / revealColor) を読むのは ⑥ の結果の段だけ。それまでは DOM ・ class ・ style のどこにも色由来の物を出さない。
   // 何もしない画面を触れば PUSH まで飛ぶ (フリーズとプレミアの間は飛ばせない)。
+  // [2026-11-01 リョー「やっぱめくりたい。1p2p だと早くわかるからそこだけ解消」] ⑤ の間は牌を指で下から絞ってもめくれる (9 割で PUSH と同じ)。
+  //  絞りの面は白ぽっちもでかぽっちも「白の面の真ん中に同じ大きさの点」。1p ・ 2p の大きい丸は下の方から見えてしまうので、めくれ切ってから大きくする。
+  //  色が DOM に出るのは指で絞り始めてから (自分の画面だけ。他の席は今まで通り PUSH の reveal で結果へ)
   import { onMount, onDestroy } from 'svelte';
   import { playSound } from './prefs';
   import FreezeFx from './FreezeFx.svelte';
@@ -62,6 +65,10 @@
   let resultGlow = -1;
   let flipped = false;      // 牌がめくれて顔が見える
   let fakeMiss = false;     // 復活の「外れに見せる」間
+  let peel = 0;             // 0〜1。⑤ の間に指で下からめくった割合
+  let peelY: number | null = null;
+  let tileEl: HTMLDivElement | null = null;
+  const PEEL_AT = 0.9;
   let timers: ReturnType<typeof setTimeout>[] = [];
   let lampTimer: ReturnType<typeof setTimeout> | undefined;
   let delayTimer: ReturnType<typeof setTimeout> | undefined;
@@ -160,6 +167,28 @@
     gl = target;
     enterPush();
   }
+  // ---- ⑤ の絞り ----
+  function onPeelDown(e: PointerEvent): void {
+    if (readOnly || stage !== 'push' || localPushed || closing) return;
+    e.stopPropagation();
+    peelY = e.clientY;
+    (e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId);
+  }
+  function onPeelMove(e: PointerEvent): void {
+    if (peelY === null || readOnly || stage !== 'push') return;
+    const h = tileEl?.offsetHeight ?? 260;
+    const d = (peelY - e.clientY) / (h * 1.1);
+    peelY = e.clientY;
+    const prev = peel;
+    peel = Math.max(0, Math.min(1, peel + d));
+    // 絞っている間は自動 PUSH を待たせる
+    if (peel !== prev) { clearTimeout(idleTimer); idleTimer = setTimeout(doPush, pushIdleMs ?? PUSH_IDLE_MS); }
+    if (prev < 0.3 && peel >= 0.3) se('heart', 0.5);
+    if (prev < 0.6 && peel >= 0.6) se('heart', 0.65);
+    if (peel >= PEEL_AT) { peelY = null; doPush(); }
+  }
+  function onPeelUp(): void { peelY = null; }
+
   function doPush(): void {
     if (readOnly || localPushed || stage === 'result' || closing) return;
     localPushed = true;
@@ -283,15 +312,22 @@
       {#each SPECKS as p}<i style="--x:{p.x}px;--y:{p.y}px;--d:{p.d}s;--dur:{p.dur}s;--s:{p.s}px;--h:{p.h}"></i>{/each}
     </div>
   {/if}
-  <div class="sq-tile gl-{halo}" class:zoom={zoomed} class:float={stage === 'develop'} class:burst={stage === 'result' && rphase !== 'miss' && rphase !== 'word'} class:flipped
-    style="--gc:{halo >= 0 ? GLOW_CSS[halo] : 'transparent'};--ring:{halo >= 0 && halo < 5 ? GLOW_CSS[halo] : '#fff'}">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="sq-tile gl-{halo}" bind:this={tileEl} class:peelable={stage === 'push' && !readOnly} class:zoom={zoomed} class:float={stage === 'develop'} class:burst={stage === 'result' && rphase !== 'miss' && rphase !== 'word'} class:flipped
+    style="--gc:{halo >= 0 ? GLOW_CSS[halo] : 'transparent'};--ring:{halo >= 0 && halo < 5 ? GLOW_CSS[halo] : '#fff'}"
+    on:pointerdown={onPeelDown} on:pointermove={onPeelMove} on:pointerup={onPeelUp} on:pointercancel={onPeelUp}>
     <div class="sq-halo" class:pu-slow={pulsing && stage !== 'result' && plan.pulse === 'slow'} class:pu-fast={pulsing && stage !== 'result' && plan.pulse === 'fast'}
       class:pu-hold={pulsing && stage !== 'result' && (plan.pulse === 'hold' || plan.pulse === 'blink')} class:dark class:frozen class:rainbow={halo === 5}></div>
     {#if !flipped}
-      <div class="sq-cover"></div>
+      {#if stage === 'push' && !readOnly && peel > 0 && color}
+        <!-- 絞りの面: でかぽっちも白ぽっちと同じ大きさの点だけ (1p ・ 2p の絵はめくれ切ってから) -->
+        <svg class="sq-face" viewBox="0 0 300 400" aria-hidden="true"><circle cx="150" cy="200" r="30" fill={POCHI_DOT[color]} /></svg>
+      {/if}
+      <div class="sq-cover" style:clip-path={peel > 0 ? `inset(0 0 ${peel * 100}% 0)` : null}></div>
     {:else if resultColor}
       {#if deka}
-        <img class="sq-pin" src={`/tiles/${deka === 'p1' ? 'Pin1' : 'Pin2'}.svg`} alt="" draggable="false" />
+        <img class="sq-pin" class:grow={peel > 0} src={`/tiles/${deka === 'p1' ? 'Pin1' : 'Pin2'}.svg`} alt="" draggable="false" />
+        <svg class="sq-face" viewBox="0 0 300 400" aria-hidden="true"><circle cx="150" cy="200" r="30" fill={POCHI_DOT[fakeMiss ? 'red' : resultColor]} /></svg>
       {:else}
         <svg class="sq-face" viewBox="0 0 300 400" aria-hidden="true"><circle cx="150" cy="200" r="30" fill={POCHI_DOT[fakeMiss ? 'red' : resultColor]} /></svg>
       {/if}
@@ -304,6 +340,7 @@
     {/if}
     {#if stage === 'result' && rphase === 'burst'}<div class="sq-burst" aria-hidden="true"></div>{/if}
   </div>
+  {#if stage === 'push' && !readOnly && peel < 0.05}<div class="sq-hint" aria-hidden="true">下から上へ指で絞る</div>{/if}
   {#if stage === 'push'}
     <div class="sq-pushwrap">
       {#if readOnly}
@@ -362,6 +399,12 @@
   .sq-cover { position: absolute; inset: -2px; border-radius: 14px; background: url('/tiles/Back.svg') center / 100% 100%; pointer-events: none; }
   .sq-face, .sq-pin { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .sq-pin { transform: scale(0.68); }
+  /* 絞った時: 小さい点から 1p ・ 2p の大きさへ (「でか」はめくれ切ってから) */
+  .sq-pin.grow { animation: sqPinGrow 0.45s cubic-bezier(0.2, 1.5, 0.4, 1) both; }
+  @keyframes sqPinGrow { from { transform: scale(0.14); } to { transform: scale(0.68); } }
+  .sq-tile.peelable { cursor: grab; touch-action: none; }
+  .sq-hint { position: absolute; z-index: 4; left: 50%; top: calc(42% + min(46vw, 210px) * 0.72); transform: translateX(-50%); padding: 4px 14px; border-radius: 999px;
+    background: rgba(0, 0, 0, 0.6); color: #fff; font: 700 clamp(12px, 2.6vmin, 16px) 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.08em; white-space: nowrap; pointer-events: none; }
   /* キリン柄: 牌の背に茶色の斑 (光りの段だけ) */
   .sq-kirin { position: absolute; inset: -2px; border-radius: 14px; pointer-events: none; mix-blend-mode: multiply; opacity: 0.85;
     background:
