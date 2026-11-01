@@ -1,6 +1,6 @@
 ﻿
 <script lang="ts">
-  // スタンプ pallet [12 種 grid、 thumb image + label]
+  // スタンプ pallet [17 種 grid、背が足りない時は縦に送る、 thumb image + label]
   // 自家 panel の「💬」 button から open、 click で sendStamp
   import { STAMP_IDS, STAMP_LABELS, type StampId } from './store';
   export let onSelect: (id: StampId) => void;
@@ -39,8 +39,13 @@
     background: #fff;
     border-radius: 8px;
     padding: 12px;
-    min-width: 360px;
+    min-width: min(360px, 92vw);
     max-width: 92vw;
+    /* 2026-11-02 17 種に増えたので、背の低い画面 (スマホ横) では中だけ縦に送る */
+    max-height: 90vh;
+    max-height: 90dvh;
+    display: flex;
+    flex-direction: column;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   }
   .stamp-pallet-header {
@@ -62,6 +67,8 @@
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 6px;
+    overflow-y: auto;
+    min-height: 0;
   }
   .stamp-btn {
     display: flex;

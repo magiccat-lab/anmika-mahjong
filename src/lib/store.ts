@@ -52,11 +52,14 @@ import {
 
 /** 12 種スタンプ ID [テキスト frame で先行、 後追いで画像差替予定]
  *  game state 副作用なし、 純粋 cosmetic [_action_log にも入らない、 reload 復元なし] */
-// リョー指示 2026-05-15: 段階的に復活、 現 6 種有効。
-// 他は image 残置で 後で復活可能、 STAMP_IDS から外すだけで pallet / popup から消える
+// リョー指示 2026-05-15: 段階的に復活。2026-11-02 リョー「このへんからスタンプ足して」で 17 種
+// [隠していた 8 種は絵を元のシートから切り直し、一発ポッチを新しく、マイ転とサイコロは新しい絵]
+// STAMP_IDS から外すだけで pallet / popup から消える。server/ws_server.ts の STAMP_IDS も同じ並びにする
 export const STAMP_IDS = [
   'shunkashutou', 'kita4', 'konmika', 'shubapotsumo',
-  'doko', 'gyakushubatsumo', 'plus', 'saikoro',
+  'doko', 'gyakushubatsumo', 'plus', 'minus',
+  'saikoro', 'ippatsu', 'fever', 'koi',
+  'shuva', 'utare', 'akakino', 'magege', 'udeba',
 ] as const;
 export type StampId = typeof STAMP_IDS[number];
 export const STAMP_LABELS: Record<StampId, string> = {
@@ -67,7 +70,16 @@ export const STAMP_LABELS: Record<StampId, string> = {
   doko: 'どっから切っとんねーん',
   gyakushubatsumo: '逆シュバツモ',
   plus: '急にプラ転',
+  minus: '急にマイ転…',
   saikoro: 'サイコロチャンス！',
+  ippatsu: '一発ポッチ！？',
+  fever: 'フィーバー！',
+  koi: '来い！ミカ！',
+  shuva: 'シュバらなくていいの？',
+  utare: 'う、打たれ負け！',
+  akakino: '赤黄のこ',
+  magege: '曲げ得',
+  udeba: '腕場',
 };
 const _STAMP_ID_SET: Set<string> = new Set(STAMP_IDS);
 /** スタンプ表示の自動 fade-out [ms] */
