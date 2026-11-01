@@ -9,7 +9,7 @@ import {
   CRACK_TABLE, DELAY_RATE, GLOW_TABLE, LAMP_PRE_RATE, OPENING_TABLE, PARTICLE_TABLE, PREMIUM_TABLE, PULSE_TABLE, PUSH_TABLE,
   type Crack, type GlowColor, type OddsTable, type Opening, type Particle, type Pulse, type PushLook,
 } from './pochiFx';
-import { ballColor, planRoll, type BallColor } from './diceFx';
+import { ballColor, planRoll, STRONG_REACH_RATE, type BallColor } from './diceFx';
 
 // img: 演出一覧に出す絵 (public/fx_odds/<img>.webp、本物の卓で撮ったコマ)。ball: サイコロの玉の色 (絵の代わりに玉を描く)
 export type OddsRow = { name: string; rate: number; hit: number | null; note?: string; none?: boolean; img?: string; ball?: BallColor };
@@ -102,7 +102,7 @@ export function pochiPremiumRows(pGood = 0.5): OddsRow[] {
   ];
 }
 
-type DiceOutcome = { p: number; reach: boolean; ball: BallColor; outcome: 'hit' | 'zoro' | 'miss' };
+type DiceOutcome = { p: number; reach: boolean; strong: boolean; ball: BallColor; outcome: 'hit' | 'zoro' | 'miss' };
 
 /** サイコロを 1 振りした時の形と割合 (宣言した 2 つの目がそろえば当たり、ゾロ目はリプレイ) */
 export function diceOutcomes(): DiceOutcome[] {
@@ -115,9 +115,15 @@ export function diceOutcomes(): DiceOutcome[] {
       const pair: [number, number] = [Math.min(d1, d2), Math.max(d1, d2)];
       const hit = !zoro && pair[0] === combo[0] && pair[1] === combo[1];
       const plan = planRoll(combo, { dice: [d1, d2], hit, zoro }, [0]);
+      // 強リーチは玉と別の乱数で決まる (diceFx planRoll)
+      const ps = plan.reach ? STRONG_REACH_RATE[plan.outcome] : 0;
       for (const ball of ['rainbow', 'gold', 'blue', 'white'] as const) {
         const pb = g.filter((r) => ballColor(plan.outcome, r) === ball).length / N;
-        if (pb > 0) out.push({ p: pb / 36, reach: plan.reach, ball, outcome: plan.outcome });
+        if (pb <= 0) continue;
+        for (const strong of [true, false]) {
+          const pst = strong ? ps : 1 - ps;
+          if (pst > 0) out.push({ p: (pb * pst) / 36, reach: plan.reach, strong, ball, outcome: plan.outcome });
+        }
       }
     }
   }
@@ -144,7 +150,8 @@ export function diceBallRows(): OddsRow[] {
 export function diceReachRows(): OddsRow[] {
   const o = diceOutcomes();
   return [
-    diceRow('リーチ (宣言した目が 1 個目に出る)', o, (x) => x.reach),
+    diceRow('強リーチ (赤の帯「激アツ」)', o, (x) => x.reach && x.strong, { note: '鼓動が長く、画面が赤く暗くなる' }),
+    diceRow('リーチ (宣言した目が 1 個目に出る)', o, (x) => x.reach && !x.strong),
     diceRow('リーチ無し', o, (x) => !x.reach, { none: true }),
   ];
 }

@@ -31,7 +31,7 @@
   import { onDestroy } from 'svelte';
   import DiceCube from './DiceCube.svelte';
   import { playSound } from './prefs';
-  import { planRoll, ZORO_WORD, type BallColor, type RollPlan } from './diceFx';
+  import { planRoll, zoroBonusBase, zoroStreakAt, ZORO_WORD, type BallColor, type RollPlan } from './diceFx';
 
   $: chance = chances[currentIdx];
   // 表示は「演出が着地した分」だけ [spin 中に結果 text が先バレしない]
@@ -42,6 +42,10 @@
   $: rollsLeft = Math.max(0, rollCount - nonZoroCount);
   $: perHitChip = chance ? chance.baseChip * chance.count * chipMultiplier : 0;
   $: who = winnerName ?? `player ${winner}`;
+  // [2026-11-02 リョー「サイコロのゾロ目連続ボーナスとかももっと強調してほしい」] 連続特典が付くサイコロか (store の判定と同じ)
+  $: isShuvariSai = !!chance && (chance.alwaysShuvari === true || (chance.shuvariApplicable && ownerShuvariActive));
+  // 直前に着いた振りがゾロ目なら、次もゾロ目で特典 (連続チャンス)。サイコロの台を金に光らせる
+  $: zoroChance = isShuvariSai && !finalized && shownRolls.length > 0 && shownRolls[shownRolls.length - 1].zoro;
 
   // 順序なし 15 通り [(1,2), (1,3), ... (5,6)] 生成
   const allCombos: Array<[number, number]> = [];
@@ -66,7 +70,8 @@
   let hitDice = false;
   let displayD1 = 1;
   let displayD2 = 1;
-  let landingQueue: Array<{ d1: number; d2: number; fanfare: boolean; upto: number; plan: RollPlan }> = [];
+  type Landing = { d1: number; d2: number; fanfare: boolean; upto: number; plan: RollPlan; zoroStreak: number; bonus: number };
+  let landingQueue: Landing[] = [];
   let revealedRollsCount = 0;
   let prevRollsCount = 0;
   let awaitingRollAck = false;
@@ -83,6 +88,9 @@
   let shakeKey = 0;
   let confettiKey = 0;
   let chipsText: string | null = null;
+  let party = false;    // 紙吹雪 (大当り ・ ゾロ目連続特典)
+  let strongOn = false; // 強リーチの赤い暗幕
+  let bonusOn = false;  // ゾロ目連続特典の金の帯
   let seq = 0;          // 演出の世代。chance 切替 ・ destroy で上げて走っている演出を止める
   let fxGen = 0;        // 大当りなどの後片付けが次の振りの演出を消さないための世代
   const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -117,7 +125,7 @@
     return new Promise((r) => later(r, ms));
   }
   function clearFx() {
-    band = null; stamp = null; rays = false; dim = 0; chipsText = null; ballPop = false;
+    band = null; stamp = null; rays = false; dim = 0; chipsText = null; ballPop = false; party = false; strongOn = false; bonusOn = false;
   }
   function stopAll() {
     seq++;
@@ -139,7 +147,7 @@
   }
   function se(name: string, volume = 0.6) { playSE(`/sounds/fx/${name}.mp3`, volume); }
 
-  async function playRoll(item: { d1: number; d2: number; fanfare: boolean; upto: number; plan: RollPlan }) {
+  async function playRoll(item: Landing) {
     const my = ++seq;
     const live = () => my === seq;
     const p = item.plan;
@@ -169,13 +177,16 @@
       reachDie = p.first;
       slowDie = p.first === 0 ? 1 : 0;
       dim = 0.45;
-      band = { word: 'リーチ', light: true, top: '13%', key: Date.now() };
+      // 強リーチ: 赤の帯「激アツ」、画面が赤く暗くなり、鼓動が 2 回長い
+      strongOn = p.strong;
+      band = { word: p.strong ? '激アツ' : 'リーチ', light: !p.strong, top: '13%', key: Date.now() };
       se('don', 0.5); se('gyuiin', 0.6);
-      const beats = quick ? 1 : 3;
+      if (p.strong) { shakeKey++; se('kyuin', 0.5); }
+      const beats = quick ? 1 : p.strong ? 5 : 3;
       for (let i = 0; i < beats; i++) { await sleep(400); if (!live()) return; se('heart', 0.7); }
       await sleep(quick ? 120 : 240);
       if (!live()) return;
-      band = null;
+      band = null; strongOn = false;
     } else {
       se('don', 0.35);
       await sleep(quick ? 100 : 200);
@@ -187,20 +198,36 @@
     const gen = fxGen;
     if (p.outcome === 'hit') {
       reachDie = null; hitDice = true;
-      flashKey++; shakeKey++; rays = true; dim = 0.3; confettiKey++;
+      flashKey++; shakeKey++; rays = true; dim = 0.3; confettiKey++; party = true;
       band = { word: '大当り', light: false, top: '14%', key: Date.now() };
       se('gashan', 0.7); se('kyuin', 0.6); se('don', 0.7);
       later(() => { if (gen === fxGen) playSE('/sounds/se_a.mp3', 0.6); }, 260);
       const target = perHitChip;
       for (let k = 0; k <= 10; k++) later(() => { if (gen === fxGen) chipsText = `+${Math.round(target * k / 10)} オール`; }, 300 + k * 35);
       later(() => { if (gen === fxGen) { clearFx(); hitDice = false; } }, quick ? 900 : 1700);
+    } else if (p.outcome === 'zoro' && item.bonus !== 0) {
+      // ゾロ目連続特典: 大当りと同じ強さで、金の帯「ゾロ目 N 連」と枚数を数え上げる
+      reachDie = null; hitDice = true; bonusOn = true;
+      flashKey++; shakeKey++; rays = true; dim = 0.35; confettiKey++; party = true;
+      band = { word: `ゾロ目 ${item.zoroStreak} 連`, light: false, top: '14%', key: Date.now() };
+      stamp = '連続特典';
+      se('gashan', 0.7); se('kyuin', 0.6); se('don', 0.7);
+      later(() => { if (gen === fxGen) playSE('/sounds/se_a.mp3', 0.7); }, 260);
+      const target = item.bonus;
+      const sign = target > 0 ? '+' : '';
+      const tail = target < 0 ? ' オール [払い]' : ' オール';
+      for (let k = 0; k <= 12; k++) later(() => { if (gen === fxGen) chipsText = `${sign}${Math.round(target * k / 12)}${tail}`; }, 320 + k * 40);
+      later(() => { if (gen === fxGen) { ballPop = true; ballNow = null; } }, 380);
+      later(() => { if (gen === fxGen) { clearFx(); hitDice = false; } }, quick ? 1000 : 2000);
     } else if (p.outcome === 'zoro') {
       reachDie = null; dim = 0;
       stamp = ZORO_WORD;
       se('pikiin', 0.6);
       if (item.fanfare) playSE('/sounds/se_a.mp3', 0.6);
+      // 連続特典の付くサイコロの 1 回目のゾロ目: 「次もゾロ目で特典」の札を出す
+      if (isShuvariSai && item.zoroStreak === 1) { chipsText = '次もゾロ目で連続特典'; se('kira', 0.6); }
       later(() => { if (gen === fxGen) { ballPop = true; ballNow = null; } }, 380);
-      later(() => { if (gen === fxGen) clearFx(); }, quick ? 600 : 1000);
+      later(() => { if (gen === fxGen) clearFx(); }, quick ? 700 : 1300);
     } else {
       if (p.reach) se('hazure', 0.5);
       later(() => { if (gen === fxGen) { reachDie = null; dim = 0; } }, p.reach ? 500 : 0);
@@ -258,7 +285,10 @@
         const r = rolls[i];
         const prev = i >= 1 ? rolls[i - 1] : null;
         const plan = planRoll(selectedCombo, r, [winner, currentIdx, i, r.dice[0], r.dice[1], selectedCombo?.[0] ?? 0, selectedCombo?.[1] ?? 0]);
-        landingQueue.push({ d1: r.dice[0], d2: r.dice[1], fanfare: r.hit || (!!r.zoro && !!prev?.zoro), upto: i + 1, plan });
+        const zoroStreak = zoroStreakAt(rolls, i);
+        // 特典の枚数は store と同じ倍率 (App が computeChipMultiplier をシュバ抜きで渡している) を掛ける。逆ぽっちは負 = 払い
+        const bonus = isShuvariSai && zoroStreak >= 2 ? Math.round(zoroBonusBase(r.dice[0]) * chipMultiplier) : 0;
+        landingQueue.push({ d1: r.dice[0], d2: r.dice[1], fanfare: r.hit || (!!r.zoro && !!prev?.zoro), upto: i + 1, plan, zoroStreak, bonus });
       }
       landingQueue = landingQueue;
       prevRollsCount = rolls.length;
@@ -271,19 +301,19 @@
 {#if chance}
   <!-- 演出の層 (画面全体)。.modal は transform を持つので、その外に置く -->
   <div class="sd-layer" aria-hidden="true">
-    <div class="sd-dim" style:opacity={dim}></div>
+    <div class="sd-dim" class:strong={strongOn} style:opacity={dim}></div>
     <div class="sd-rays" class:on={rays}></div>
   </div>
   <div class="sd-layer front" aria-hidden="true">
     {#key flashKey}{#if flashKey}<div class="sd-flash"></div>{/if}{/key}
     {#if band}{#key band.key}
-      <div class="sd-dr" class:light={band.light} style:--top={band.top}>
+      <div class="sd-dr" class:light={band.light} class:strong={strongOn} class:bonus={bonusOn} style:--top={band.top}>
         <div class="sd-band"><span class="sd-word">{band.word}</span><span class="sd-who">{who}</span></div>
       </div>
     {/key}{/if}
     {#if stamp}<div class="sd-stamp">{stamp}</div>{/if}
     {#if chipsText}<div class="sd-chips">{chipsText}</div>{/if}
-    {#key confettiKey}{#if confettiKey && hitDice}
+    {#key confettiKey}{#if confettiKey && party}
       {#each CONFETTI as c}<i class="sd-confetti" style:left={c.left} style:background={c.color} style:animation-duration={c.dur} style:animation-delay={c.delay}></i>{/each}
     {/if}{/key}
   </div>
@@ -334,7 +364,8 @@
         </div>
       {/if}
       {#if !finalized || !settled}
-        <div class="dice-stage" aria-label="サイコロ">
+        <div class="dice-stage" class:zoro-chance={zoroChance} aria-label="サイコロ">
+          {#if zoroChance}<span class="zc-tag">連続チャンス</span>{/if}
           <div class="die-wrap" class:reach={reachDie === 0} class:hit={hitDice}><DiceCube value={displayD1} rolling={rollingA} slow={slowDie === 0} size={76} /></div>
           <div class="die-wrap" class:reach={reachDie === 1} class:hit={hitDice}><DiceCube value={displayD2} rolling={rollingB} slow={slowDie === 1} size={76} /></div>
         </div>
@@ -357,7 +388,7 @@
           <div class="result-row">確定: <strong>{summary?.hits ?? hits} hit</strong> / base {chance.baseChip} × {chance.count} 回</div>
           <div class="result-row">加算チップ: <strong>{summary?.chipN ?? 0} オール</strong></div>
           {#if (summary?.zoroBonusTotal ?? 0) !== 0}
-            <div class="result-row">ゾロ目連続特典: <strong>{(summary?.zoroBonusTotal ?? 0) > 0 ? '+' : ''}{summary?.zoroBonusTotal ?? 0} オール{(summary?.zoroBonusTotal ?? 0) < 0 ? ' [払い]' : ''}</strong></div>
+            <div class="result-row zoro-bonus">ゾロ目連続特典: <strong>{(summary?.zoroBonusTotal ?? 0) > 0 ? '+' : ''}{summary?.zoroBonusTotal ?? 0} オール{(summary?.zoroBonusTotal ?? 0) < 0 ? ' [払い]' : ''}</strong></div>
           {/if}
           {#if !chance.shuvariApplicable && !chance.alwaysShuvari}
             <div class="result-row note">[シュバ非適用]</div>
@@ -510,6 +541,16 @@
   .sd-layer { position: fixed; inset: 0; pointer-events: none; z-index: 1000; overflow: hidden; }
   .sd-layer.front { z-index: 1020; }
   .sd-dim { position: absolute; inset: 0; background: #000; opacity: 0; transition: opacity 0.25s; }
+  .sd-dim.strong { background: radial-gradient(circle, #3a0000, #000 75%); }
+  /* 強リーチ = 赤の帯、ゾロ目連続特典 = 虹の縁の金の帯 */
+  .sd-dr.strong { --pink: #ff5a4a; --pink2: #b3121f; --sh: #3a0000; }
+  .sd-dr.bonus .sd-band { box-shadow: 0 0 0 4px #fff inset, 0 0 0 9px #ffd23b inset, 0 0 50px rgba(255, 210, 80, 0.95), 0 10px 30px rgba(0, 0, 0, 0.5); }
+  .dice-stage { position: relative; }
+  .dice-stage.zoro-chance { border-color: #ffd23b; box-shadow: 0 0 18px 4px rgba(255, 210, 60, 0.7), inset 0 0 24px rgba(255, 210, 60, 0.45); animation: sdZc 0.9s ease-in-out infinite alternate; }
+  .zc-tag { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); padding: 1px 10px; border-radius: 3px; background: #ffd23b; color: #3a2405; font-weight: 800; font-size: 12px; letter-spacing: 0.1em; white-space: nowrap; }
+  .result-row.zoro-bonus { font-size: 16px; color: #ffe27a; }
+  .result-row.zoro-bonus strong { font-size: 20px; }
+  @keyframes sdZc { from { box-shadow: 0 0 10px 2px rgba(255, 210, 60, 0.5), inset 0 0 16px rgba(255, 210, 60, 0.3); } to { box-shadow: 0 0 24px 7px rgba(255, 210, 60, 0.9), inset 0 0 30px rgba(255, 210, 60, 0.55); } }
   .sd-rays { position: absolute; left: 50%; top: 50%; width: 220vmax; height: 220vmax; margin: -110vmax 0 0 -110vmax; border-radius: 50%; opacity: 0; transition: opacity 0.2s;
     background: repeating-conic-gradient(#ff3b3b 0 6deg, transparent 6deg 12deg, #ffd23b 12deg 18deg, transparent 18deg 24deg, #3bff8a 24deg 30deg, transparent 30deg 36deg, #3bb8ff 36deg 42deg, transparent 42deg 48deg, #c63bff 48deg 54deg, transparent 54deg 60deg);
     -webkit-mask: radial-gradient(circle, #000 6%, transparent 50%); mask: radial-gradient(circle, #000 6%, transparent 50%); animation: sdSpin 5s linear infinite; }
@@ -541,7 +582,7 @@
   @keyframes sdHue { to { filter: hue-rotate(360deg); } }
   @keyframes sdPop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
   @media (prefers-reduced-motion: reduce) {
-    .sd-band, .sd-word, .sd-stamp, .sd-rays, .ball.rainbow, .ball.pop { animation: none; }
+    .sd-band, .sd-word, .sd-stamp, .sd-rays, .ball.rainbow, .ball.pop, .dice-stage.zoro-chance { animation: none; }
     .sd-confetti { display: none; }
   }
 </style>

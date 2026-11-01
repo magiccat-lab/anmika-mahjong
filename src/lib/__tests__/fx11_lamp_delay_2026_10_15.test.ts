@@ -24,7 +24,7 @@ describe('告知ランプ (fx10 L1)', () => {
 });
 
 describe('遅れ (fx10 B1)', () => {
-  it('当たりの 20%、外れの 5% で遅れ、遅れは 0.3 秒', () => {
+  it('当たりの 15%、外れの 5% で遅れ、遅れは 0.3 秒', () => {
     const g = grid();
     expect(g.filter((r) => delayRoll(true, r)).length / 1000).toBeCloseTo(DELAY_RATE.good, 3);
     expect(g.filter((r) => delayRoll(false, r)).length / 1000).toBeCloseTo(DELAY_RATE.bad, 3);
@@ -38,11 +38,11 @@ describe('遅れ (fx10 B1)', () => {
 
 describe('演出一覧の「引いた後」', () => {
   const rows = pochiExtraRows();
-  it('先告知 15% ・ 後告知 35% で、どちらも当たり確定', () => {
+  it('先告知 5% ・ 後告知 45% (2026-11-02 から先告知は当たりの 1 割) で、どちらも当たり確定', () => {
     const pre = rows.find((r) => r.name.includes('先告知'))!;
     const post = rows.find((r) => r.name.includes('後告知'))!;
-    expect(pre.rate).toBeCloseTo(0.15, 3);
-    expect(post.rate).toBeCloseTo(0.35, 3);
+    expect(pre.rate).toBeCloseTo(0.05, 3);
+    expect(post.rate).toBeCloseTo(0.45, 3);
     expect(pre.hit).toBe(1);
     expect(post.hit).toBe(1);
   });

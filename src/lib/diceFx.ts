@@ -20,18 +20,34 @@ export function rollSeed(parts: number[]): number {
   return (h >>> 0) / 4294967296;
 }
 
-/** 振る前の玉の色。当たり: 虹 3 割 ・ 金 4 割 ・ 青 2 割 ・ 白 1 割。外れ: 白 7 割 ・ 青 2 割強 ・ 金 1 割弱。ゾロ目: 青 6 割 ・ 白 4 割 */
+/** 振る前の玉の色。[2026-11-02 リョー「無演出とかでも一定の確率でちゃんと当たるように」で均した]
+ *  当たり: 虹 1.5 割 ・ 金 3 割 ・ 青 3 割 ・ 白 2.5 割 (前は白 1 割で、白の玉の当たりは 0.9%)。
+ *  外れ: 白 6.8 割 ・ 青 2.5 割 ・ 金 0.7 割。ゾロ目: 金 1 割 ・ 青 5 割 ・ 白 4 割 */
 export function ballColor(outcome: RollOutcome, rnd: number): BallColor {
   if (outcome === 'hit') {
-    if (rnd < 0.3) return 'rainbow';
-    if (rnd < 0.7) return 'gold';
-    if (rnd < 0.9) return 'blue';
+    if (rnd < 0.15) return 'rainbow';
+    if (rnd < 0.45) return 'gold';
+    if (rnd < 0.75) return 'blue';
     return 'white';
   }
-  if (outcome === 'zoro') return rnd < 0.6 ? 'blue' : 'white';
-  if (rnd < 0.7) return 'white';
+  if (outcome === 'zoro') return rnd < 0.1 ? 'gold' : rnd < 0.6 ? 'blue' : 'white';
+  if (rnd < 0.68) return 'white';
   if (rnd < 0.93) return 'blue';
   return 'gold';
+}
+
+/** [2026-11-02 リョー「サイコロとかの演出も足すとかね」] 強リーチ (赤の帯「激アツ」・ 鼓動が長い)。リーチの時だけ。
+ *  当たり 55% ・ ゾロ目 25% ・ 外れ 12% で強になる。リーチの当たりは 1 割なので、強リーチは約 3 割 ・ 普通のリーチは約 5% */
+export const STRONG_REACH_RATE: Readonly<Record<RollOutcome, number>> = { hit: 0.55, zoro: 0.25, miss: 0.12 };
+export function strongReach(outcome: RollOutcome, rnd: number): boolean { return rnd < STRONG_REACH_RATE[outcome]; }
+
+/** ゾロ目連続特典の基本の枚数 (store の rollSaiKoroDice と同じ: 1・1 は 111、ほかは目 × 11) */
+export function zoroBonusBase(n: number): number { return n === 1 ? 111 : n * 11; }
+/** rolls の i 番目までに続いたゾロ目の数 (i 番目がゾロ目でなければ 0) */
+export function zoroStreakAt(rolls: ReadonlyArray<{ zoro: boolean }>, i: number): number {
+  let n = 0;
+  for (let k = i; k >= 0 && rolls[k]?.zoro; k -= 1) n += 1;
+  return n;
 }
 
 export type RollPlan = {
@@ -40,6 +56,8 @@ export type RollPlan = {
   reach: boolean;
   outcome: RollOutcome;
   ball: BallColor;
+  /** 強リーチ (リーチの時だけ true になり得る) */
+  strong: boolean;
 };
 
 export function planRoll(
@@ -56,5 +74,6 @@ export function planRoll(
     reach: inCombo(first === 0 ? d1 : d2),
     outcome,
     ball: ballColor(outcome, rollSeed(seedParts)),
+    strong: inCombo(first === 0 ? d1 : d2) && strongReach(outcome, rollSeed([...seedParts, 7])),
   };
 }

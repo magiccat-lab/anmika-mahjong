@@ -22,6 +22,7 @@
   import PochiSqueeze from './lib/PochiSqueeze.svelte';
   import FuyuFlip from './lib/FuyuFlip.svelte';
   import Confetti from './lib/Confetti.svelte';
+  import { EMPTY_FEVER_RUNS, feverRunTotal, signed, trackFeverRuns, type FeverRuns } from './lib/feverRun';
   import { publicPochiCandidates, kakuteiOf, POCHI_GOOD, pochiLeftForViewer, rollPlan, pochiGood, planFromRelay, DEFAULT_PLAN, type PochiColor, type PochiPlan } from './lib/pochiFx';
   import LobbyPanel from './lib/LobbyPanel.svelte';
   import RoomPanel from './lib/RoomPanel.svelte';
@@ -2809,6 +2810,17 @@
     }
   }
   $: feverInProgress = ([0, 1, 2] as const).some((p) => $game.game.feverActive[p]);
+  // [2026-11-02 リョー「フィーバーの連続の時に通算何点何枚きたか」] フィーバーに入ってからの通算 (席の札と連続の帯に出す)
+  let feverRuns: FeverRuns = EMPTY_FEVER_RUNS;
+  $: {
+    const st: any = $game.game.state ?? {};
+    feverRuns = trackFeverRuns(feverRuns, {
+      feverActive: $game.game.feverActive, defen: st.defen ?? [], chip: $game.game.chipLedger,
+      rk: `${st.changbang}-${st.jushu}-${st.benbang}`,
+    });
+  }
+  $: feverTotals = ([0, 1, 2] as const).map((p) => feverRunTotal(feverRuns[p]));
+  $: feverWins = ([0, 1, 2] as const).map((p) => ($game.winStreak && $game.winStreak.player === p ? $game.winStreak.count : 0));
   // フィーバー中は間を空けて1巡ずつ見せる [2026-10-15 リョー「ちょっと遅く」で 0.8 → 1 秒、人の強制ツモ切りと同じ]
   $: cpuDelayMs = cpuSlowMode ? 2500 : feverInProgress ? FEVER_TSUMOGIRI_MS : 0;
 
@@ -2991,6 +3003,10 @@
       {#if $game.game.shuvariActive[p]}<span class="sc-tag hot">シュバ</span>{/if}
       {#if $game.game.feverActive[p]}<span class="sc-tag hot">フィーバー</span>{/if}
     </div>
+    {#if feverTotals[p]}
+      {@const ft = feverTotals[p]}
+      <div class="sc-fever" title="フィーバーに入ってからの通算">{feverWins[p] >= 2 ? `${feverWins[p]} 連 ・ ` : ''}通算 <b>{signed(ft.defen)}</b> 点 ・ <b>{signed(ft.chip)}</b> 枚</div>
+    {/if}
     <div class="sc-pt">{#key $game.game.state.defen[p]}<span class="sval">{$game.game.state.defen[p].toLocaleString()}</span>{/key}</div>
     <div class="sc-sub">
       <span>チップ {($game.game.chipLedger[p] ?? 0) + chipOffsets[p]}</span>
@@ -3827,7 +3843,7 @@
       <div class="fx fx-{fxNow.id} fx-{fxTier} dr {fxNow.style ? 'yk-' + fxNow.style : ''} {fxNow.combo && fxNow.combo >= 2 ? 'combo-' + Math.min(fxNow.combo, 4) : ''}" class:fx-skippable={fxTier === 'heavy'}
         style="--fx-dur: {fxDur}ms; --fit: {Math.min(1, 3.2 / (fxNow.label ?? FX_LABELS[fxNow.id]).length)}" aria-hidden="true"
         on:click={() => { if (fxTier === 'heavy' && fxNow) skipCutin(fxNow.ts); }}>
-        <div class="dr-band"><span class="fx-word dr-word">{fxNow.label ?? FX_LABELS[fxNow.id]}</span><span class="fx-who dr-who">{fxWho}</span>{#if fxNow.combo && fxNow.combo >= 2}<span class="dr-combo">{fxNow.combo} 連続</span>{/if}</div>
+        <div class="dr-band"><span class="fx-word dr-word">{fxNow.label ?? FX_LABELS[fxNow.id]}</span><span class="fx-who dr-who">{fxWho}</span>{#if fxNow.combo && fxNow.combo >= 2}<span class="dr-combo">{fxNow.combo} 連続</span>{#if fxNow.seat !== undefined && feverTotals[fxNow.seat]}<span class="dr-total">通算 {signed(feverTotals[fxNow.seat]?.defen ?? 0)} 点 ・ {signed(feverTotals[fxNow.seat]?.chip ?? 0)} 枚</span>{/if}{/if}</div>
       </div>
     {/key}
   {/if}
@@ -6955,6 +6971,13 @@
     z-index: 3; opacity: 1; transform: skewX(-12deg) scale(0); animation: drCombo var(--fx-dur) cubic-bezier(0.2, 1.6, 0.3, 1) both;
   }
   @keyframes drCombo { 0%, 18% { opacity: 0; transform: skewX(-12deg) scale(0); } 30%, 84% { opacity: 1; transform: skewX(-12deg) scale(1); } 100% { opacity: 0; transform: skewX(-12deg) scale(0.9); } }
+  .dr-total {
+    position: absolute; right: 10%; bottom: -20%; padding: 4px 14px; background: #111; color: #ffe27a !important;
+    font: 400 clamp(14px, 2.4vw, 26px) 'FX Kana', 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.04em; white-space: nowrap;
+    z-index: 3; transform: skewX(-12deg) scale(0); animation: drCombo var(--fx-dur) cubic-bezier(0.2, 1.6, 0.3, 1) both;
+  }
+  .sc-fever { font-size: 11px; color: #ffd27a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sc-fever b { font-size: 13px; color: #ffe9a8; }
   .dr.combo-2 .dr-combo { background: #b8862b; }
   .dr.combo-3 .dr-combo { background: #c0392b; }
   .dr.combo-4 .dr-combo { background: linear-gradient(90deg, #e53935, #fb8c00, #fdd835, #43a047, #1e88e5, #8e24aa); }

@@ -29,13 +29,13 @@ describe('表 (仕様の当たり時 ・ 外れ時の列)', () => {
   });
   it('仕様の数そのまま (抜き打ち)', () => {
     expect(OPENING_TABLE.freeze_black).toEqual([0.8, 0]);
-    expect(OPENING_TABLE.line).toEqual([24, 30]);
-    expect(GLOW_TABLE.gold).toEqual([49.3, 6.7]);
+    expect(OPENING_TABLE.line).toEqual([22, 27]); // 2026-11-02 均し直し
+    expect(GLOW_TABLE.gold).toEqual([32, 12]);
     expect(GLOW_TABLE.rainbow[1]).toBe(0);
-    expect(PULSE_TABLE.blink).toEqual([3, 0]);
-    expect(PARTICLE_TABLE.none).toEqual([40, 80]);
-    expect(CRACK_TABLE.all).toEqual([5, 0]);
-    expect(PUSH_TABLE.normal).toEqual([57, 88]);
+    expect(PULSE_TABLE.blink).toEqual([2, 0]);
+    expect(PARTICLE_TABLE.none).toEqual([52, 68]);
+    expect(CRACK_TABLE.all).toEqual([3, 0]);
+    expect(PUSH_TABLE.normal).toEqual([70, 86]);
     expect(PREMIUM_TABLE).toEqual({ kirin: 0.5, revive: 0.5 });
   });
   it('外れでは出ない物 (虹 ・ フリーズ ・ プレミア ・ 牌全体のひび ・ PUSH 虹) は外れの列が 0', () => {
@@ -111,10 +111,10 @@ describe('100 万回の引き (仕様 7: 当たり 50 ± 0.2%、出る割合 ・
       expect(total).toBe(N);
     }
     const none = pochiOpeningRows().find((r) => r.none)!;
-    expect(none.rate).toBeCloseTo(0.28, 9);
-    expect(none.hit!).toBeCloseTo(6 / 56, 9);
+    expect(none.rate).toBeCloseTo(0.385, 9);
+    expect(none.hit!).toBeCloseTo(29 / 77, 9);
     for (const r of pochiOpeningRows().slice(0, 3)) expect(r.hit).toBe(1);
-    expect(pochiExtraRows()[0].rate).toBeCloseTo(0.15, 9);
+    expect(pochiExtraRows()[0].rate).toBeCloseTo(0.05, 9);
     expect(pochiPremiumRows().map((r) => r.hit)).toEqual([1, 1]);
     expect(pochiPremiumRows()[0].rate).toBeCloseTo(0.0025, 9);
   });

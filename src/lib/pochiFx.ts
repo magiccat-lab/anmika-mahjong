@@ -75,7 +75,7 @@ export function pochiLeftForViewer(game: any, ownTiles: string[]): PochiColor[] 
 //  表の数は仕様の「当たり時 ・ 外れ時」の列そのまま (% 単位)。演出一覧のページ (fxOdds) もこの表から数える
 //  仕様から外した物 (10-25 遊真の判断): ⑧ の「PUSH が無音」(押しても何も起きないのは不具合と見分けがつかない) と
 //  「卓の影のシルエット」(絵が要る上に気づかれない)。⑧ の暗転フリーズは ① と同じ物なので ① だけで引く。
-//  告知ランプの先 ・ 後は 10-15 にリョーが決めた 3 割 ・ 7 割のまま (仕様の 1 割 ・ 9 割にはしない)。遅れは今のまま 20% ・ 5%
+//  告知ランプの先 ・ 後は 2026-11-02 から仕様の 1 割 ・ 9 割 (下の LAMP_PRE_RATE)。遅れは 15% ・ 5%
 export type Opening = 'freeze_black' | 'freeze_still' | 'premium' | 'mono' | 'bolt' | 'line' | 'none';
 export type GlowColor = 'white' | 'blue' | 'green' | 'red' | 'gold' | 'rainbow';
 export type Pulse = 'slow' | 'fast' | 'hold' | 'blink';
@@ -89,23 +89,28 @@ export type PochiPlan = { opening: Opening; glow: GlowColor; pulse: Pulse; parti
 /** 表: 項目 → [当たり時 %, 外れ時 %]。各列の合計は 100 */
 export type OddsTable<K extends string> = Readonly<Record<K, readonly [number, number]>>;
 /** ① 引いた瞬間 (どれか 1 つ) */
+// [2026-11-02 リョー「演出が出た瞬間に方向性決まるの微妙だから無演出とかでも一定の確率でちゃんと当たるように」]
+//  前の表は予告なしの当たりが 11%、光りが白のままだと 2% で、全部が地味だと 0.07% (実質 0)。引いた瞬間 ・ 光りの色で
+//  半分以上の回が決まっていた。各段の差を小さくし、段を重ねて少しずつ上がる形に作り直した。
+//  当たりの元の割合 5 割の時: 全部が地味 (予告なし ・ 白 ・ ゆっくり ・ PUSH 通常) でも 9%、確定 (フリーズ ・ プレミア ・ 虹 ・ 先告知) は約 13%、
+//  見えている演出だけで当たりが 15〜85% の間に残る回が約 7 割 (前は 18%)。数え方は __tests__/fx_balance_2026_11_02.test.ts
 export const OPENING_TABLE: OddsTable<Opening> = {
-  freeze_black: [0.8, 0], freeze_still: [2.0, 0], premium: [1.0, 0],
-  mono: [26.0, 4], bolt: [40.2, 16], line: [24.0, 30], none: [6.0, 50],
+  freeze_black: [0.8, 0], freeze_still: [1.2, 0], premium: [1.0, 0],
+  mono: [18, 6], bolt: [28, 19], line: [22, 27], none: [29, 48],
 };
 /** ② 牌の光りの色 (最終的に到達する色)。白 → 青 → 緑 → 赤 → 金 → 虹 の順に上がって止まる */
 export const GLOW_TABLE: OddsTable<GlowColor> = {
-  white: [0.5, 23.5], blue: [3.8, 28.2], green: [11.2, 24.8], red: [23.2, 16.8], gold: [49.3, 6.7], rainbow: [12.0, 0],
+  white: [8, 25], blue: [12, 26], green: [17, 22], red: [22, 15], gold: [32, 12], rainbow: [9, 0],
 };
 export const GLOW_ORDER: readonly GlowColor[] = ['white', 'blue', 'green', 'red', 'gold', 'rainbow'];
 /** ③ 脈打ち */
-export const PULSE_TABLE: OddsTable<Pulse> = { slow: [30, 70], fast: [45, 28], hold: [22, 2], blink: [3, 0] };
+export const PULSE_TABLE: OddsTable<Pulse> = { slow: [52, 66], fast: [32, 28], hold: [14, 6], blink: [2, 0] };
 /** ④ 粒子 (発展の時だけ見せる。発展しない時も引くが見せない) */
-export const PARTICLE_TABLE: OddsTable<Particle> = { none: [40, 80], float: [40, 18], suck: [18, 2], rainbow: [2, 0] };
+export const PARTICLE_TABLE: OddsTable<Particle> = { none: [52, 68], float: [32, 26], suck: [14, 6], rainbow: [2, 0] };
 /** ⑤ ひび (溜め。発展の時だけ見せる) */
-export const CRACK_TABLE: OddsTable<Crack> = { none: [35, 75], one: [30, 18], two: [30, 7], all: [5, 0] };
+export const CRACK_TABLE: OddsTable<Crack> = { none: [50, 66], one: [28, 22], two: [19, 12], all: [3, 0] };
 /** ⑥ PUSH ボタン */
-export const PUSH_TABLE: OddsTable<PushLook> = { normal: [57, 88], red: [25, 10], gold: [14, 2], rainbow: [4, 0] };
+export const PUSH_TABLE: OddsTable<PushLook> = { normal: [70, 86], red: [18, 11], gold: [9, 3], rainbow: [3, 0] };
 /** ⑧ プレミア (当たりの時だけ、他の演出に上乗せ)。% は当たりの中の割合 */
 export const PREMIUM_TABLE: Readonly<Record<Exclude<Premium, null>, number>> = { kirin: 0.5, revive: 0.5 };
 export const ALL_TABLES = { opening: OPENING_TABLE, glow: GLOW_TABLE, pulse: PULSE_TABLE, particle: PARTICLE_TABLE, crack: CRACK_TABLE, push: PUSH_TABLE } as const;
@@ -211,11 +216,12 @@ export function glowSteps(target: GlowColor): { at: number; color: GlowColor }[]
 }
 
 // ---- 告知ランプと遅れ (2026-10-15 fx10 の答え L1 a ・ B1 a。演出一覧のページも同じ数を読む) ----
-/** 告知ランプ: 当たりなら必ず画面の外周が金に光る。引いた瞬間 (先告知) が 3 割、めくれた後 (後告知) が 7 割。外れは光らない */
+/** 告知ランプ: 当たりなら必ず画面の外周が金に光る。引いた瞬間 (先告知) が 1 割、めくれた後 (後告知) が 9 割。外れは光らない */
 export type LampTiming = 'pre' | 'post';
-export const LAMP_PRE_RATE = 0.3;
+// [2026-11-02] 先告知は当たりの 3 割 → 1 割 (10-25 のリョーの仕様の数)。3 割だと引いた瞬間に 15% の回が決まっていた
+export const LAMP_PRE_RATE = 0.1;
 export function lampRoll(good: boolean, rnd: number): LampTiming | null { return good ? (rnd < LAMP_PRE_RATE ? 'pre' : 'post') : null; }
-/** 遅れ: 引いた時の「ピキーン」だけが 0.3 秒遅れる (牌と画面は普通に動く)。当たりの 20%、外れの 5% */
-export const DELAY_RATE = { good: 0.2, bad: 0.05 } as const;
+/** 遅れ: 引いた時の「ピキーン」だけが 0.3 秒遅れる (牌と画面は普通に動く)。当たりの 15%、外れの 5% */
+export const DELAY_RATE = { good: 0.15, bad: 0.05 } as const;
 export const DELAY_MS = 300;
 export function delayRoll(good: boolean, rnd: number): boolean { return rnd < (good ? DELAY_RATE.good : DELAY_RATE.bad); }

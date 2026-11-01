@@ -13,18 +13,18 @@ describe('白ぽっちの表', () => {
     const none = (p: number) => pochiOpeningRows(p).find((r) => r.none)!;
     expect(none(1).hit).toBe(1);
     expect(none(0).hit).toBe(0);
-    expect(none(0.5).rate).toBeCloseTo(0.28, 9);
+    expect(none(0.5).rate).toBeCloseTo(0.385, 9);
   });
   it('光りの虹は確定、PUSH 虹も確定', () => {
     expect(pochiGlowRows().find((r) => r.name.startsWith('虹'))!.hit).toBe(1);
     expect(pochiPushRows().find((r) => r.name === 'PUSH 虹')!.hit).toBe(1);
   });
-  it('告知ランプ (先 15% ・ 後 35%) と遅れ (フリーズの分を除く)', () => {
+  it('告知ランプ (先 5% ・ 後 45%) と遅れ (フリーズの分を除く)', () => {
     const [pre, post, delay] = pochiExtraRows();
-    expect(pre.rate).toBeCloseTo(0.15, 9);
-    expect(post.rate).toBeCloseTo(0.35, 9);
+    expect(pre.rate).toBeCloseTo(0.05, 9);
+    expect(post.rate).toBeCloseTo(0.45, 9);
     expect(pre.hit).toBe(1);
-    expect(delay.rate).toBeCloseTo(0.5 * (1 - 0.028) * 0.2 + 0.5 * 0.05, 9);
+    expect(delay.rate).toBeCloseTo(0.5 * (1 - 0.02) * 0.15 + 0.5 * 0.05, 9);
   });
   it('絵のある行の絵はある', () => {
     for (const r of [...pochiOpeningRows(), ...pochiGlowRows(), ...pochiExtraRows()]) {

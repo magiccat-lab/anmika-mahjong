@@ -15,7 +15,7 @@ describe('diceFx', () => {
   it('外れは白が多く、当たりは金か虹が多い', () => {
     const count = (o: 'hit' | 'miss', c: string) => Array.from({ length: 1000 }, (_, i) => ballColor(o, i / 1000)).filter((x) => x === c).length;
     expect(count('miss', 'white')).toBeGreaterThan(600);
-    expect(count('hit', 'rainbow') + count('hit', 'gold')).toBeGreaterThan(600);
+    expect(count('hit', 'rainbow') + count('hit', 'gold')).toBeGreaterThan(400); // 2026-11-02 白でも当たる様に均した (虹+金 45%)
   });
 
   it('色は同じ入力なら同じ (全員の画面で同じ色)', () => {

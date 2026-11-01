@@ -8,14 +8,14 @@ import { CUTIN_TIER } from '../store';
 import { FX_LABELS } from '../fxArtwork';
 
 describe('無演出 (fx9 B7、先輩「無演出でもあたるように」) [2026-10-25 表の引きに直した]', () => {
-  it('無演出は当たりの 6%、外れの 50% (仕様 ①)', () => {
-    expect(OPENING_TABLE.none).toEqual([6, 50]);
+  it('無演出は当たりの 29%、外れの 48% (11-02 均し直し)', () => {
+    expect(OPENING_TABLE.none).toEqual([29, 48]); // 2026-11-02 均し直し
   });
   it('演出一覧に無演出の行が出て、当たる事がある', () => {
     const row = pochiOpeningRows().find((r) => r.name.startsWith('無演出'))!;
     expect(row.none).toBe(true);
-    expect(row.rate).toBeCloseTo(0.28, 9);
-    expect(row.hit!).toBeCloseTo(6 / 56, 9);
+    expect(row.rate).toBeCloseTo(0.385, 9);
+    expect(row.hit!).toBeCloseTo(29 / 77, 9);
     expect(pochiOpeningRows().reduce((a, r) => a + r.rate, 0)).toBeCloseTo(1, 6);
   });
 });
