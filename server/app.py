@@ -2215,6 +2215,63 @@ async def stats_summary(request: Request):
     }
 
 
+_PVP_STAT_COLS = (
+    "seat", "incomplete", "rounds", "riichi", "fever_riichi", "furo_rounds", "ankan", "nuki", "wins",
+    "tsumo_wins", "ron_wins", "deal_ins", "points_won", "points_dealt_in", "hule_chips", "placement", "final_defen",
+)
+
+
+@app.get("/api/stats/pvp")
+async def stats_pvp(request: Request):
+    """[2026-11-02 リョー「戦績の所、対人戦のみに」「回ごとの推移とかも」] 対人戦 [3 席とも人] の
+    試合を古い順に 1 試合 1 行で返す。率・推移は client [src/lib/pvpStats.ts] が数える。
+    範囲は summary と同じ [stats_since 以降、?since=all で全期間]。チップは matches.chip_delta_json
+    [抜け番の分も入る] が正"""
+    if not current_user(request):
+        raise HTTPException(status_code=401, detail="login required")
+    q_since = (request.query_params.get("since") or "").strip()
+    with db_conn() as c:
+        stats_since = _get_setting(c, "stats_since", "")
+        effective = "" if q_since == "all" else (q_since or stats_since)
+        ms = c.execute(
+            "SELECT match_id, room_id, match_no, members_json, chip_delta_json, finished_at FROM matches"
+            " WHERE (? = '' OR finished_at >= ?) ORDER BY finished_at, match_id",
+            (effective, effective),
+        ).fetchall()
+        matches: list[dict[str, Any]] = []
+        for m in ms:
+            try:
+                members = json.loads(m["members_json"] or "[]")
+                chips = json.loads(m["chip_delta_json"] or "{}")
+            except ValueError:
+                continue
+            uids = [str(x.get("user_id", "")) for x in members]
+            if not uids or any(u.startswith("CPU") or not u for u in uids):
+                continue
+            matches.append({
+                "id": m["match_id"], "at": m["finished_at"], "room": m["room_id"], "no": m["match_no"],
+                "chips": {str(k): int(v) for k, v in chips.items()}, "p": {},
+            })
+        by_id = {m["id"]: m for m in matches}
+        if by_id:
+            cols = ", ".join(_PVP_STAT_COLS)
+            marks = ",".join("?" * len(by_id))
+            for r in c.execute(f"SELECT match_id, user_id, {cols} FROM match_player_stats WHERE match_id IN ({marks})", list(by_id)):
+                by_id[r["match_id"]]["p"][r["user_id"]] = {k: r[k] for k in _PVP_STAT_COLS}
+        uids = sorted({u for m in matches for u in (*m["p"], *m["chips"])})
+        names: dict[str, str] = {}
+        if uids:
+            marks = ",".join("?" * len(uids))
+            for r in c.execute(f"SELECT user_id, COALESCE(display_name, username, user_id) AS name FROM users WHERE user_id IN ({marks})", uids):
+                names[r["user_id"]] = r["name"]
+    return {
+        "stats_since": stats_since,
+        "effective_since": effective,
+        "names": {u: names.get(u, u) for u in uids},
+        "matches": matches,
+    }
+
+
 # ws の部屋の記録 [サイコロの収支]。ws_server は repo の頭で起動して data/anmika.sqlite3 を使う
 WS_DB_PATH = Path(os.environ.get("ANMIKA_WS_DB_PATH", str(Path(__file__).resolve().parent.parent / "data" / "anmika.sqlite3")))
 _profile_cache: dict[str, Any] = {"t": 0.0, "body": None}

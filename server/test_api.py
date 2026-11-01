@@ -873,3 +873,29 @@ def test_stats_profile_pvp_only_and_dice_sum_zero(env, tmp_path, monkeypatch):
     assert players["b"]["dice_others"] == -5
     assert sum(p["chip"] for p in players.values()) == 0
     assert sum(p.get("dice_chip", 0) for p in players.values()) == 0
+
+
+# ---- 対人戦の戦績 [2026-11-02] ----
+
+def test_stats_pvp_needs_login(env):
+    assert env.client.get("/api/stats/pvp").status_code == 401
+
+
+def test_stats_pvp_only_human_matches_in_order_with_sitout_chips(env):
+    add_match("P1", [("a", 0), ("b", 1), ("c", 2)], {"a": 30, "b": -10, "c": -20},
+              {"a": (8, 2, 0, 1), "b": (8, 1, 1, 2), "c": (8, 0, 2, 3)})
+    add_match("C1", [("a", 0), ("CPU_1", 1), ("CPU_2", 2)], {"a": 40, "CPU_1": -20, "CPU_2": -20},
+              {"a": (8, 3, 0, 1), "CPU_1": (8, 0, 1, 2), "CPU_2": (8, 0, 2, 3)})
+    # 4 人回しの部屋: d は抜け番でサイコロの分だけ動く
+    add_match("R1", [("a", 0), ("b", 1), ("c", 2)], {"a": -5, "b": 10, "c": -10, "d": 5},
+              {"a": (6, 0, 1, 3), "b": (6, 2, 0, 1), "c": (6, 1, 0, 2)})
+    login(env.client, "a")
+    r = env.client.get("/api/stats/pvp")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    rooms = [m["room"] for m in body["matches"]]
+    assert rooms == ["P1", "R1"]
+    r1 = body["matches"][1]
+    assert r1["chips"]["d"] == 5 and set(r1["p"]) == {"a", "b", "c"}
+    assert r1["p"]["b"]["placement"] == 1 and r1["p"]["b"]["wins"] == 2
+    assert set(body["names"]) == {"a", "b", "c", "d"}
