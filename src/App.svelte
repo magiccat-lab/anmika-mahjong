@@ -1458,6 +1458,41 @@
       )
     : [];
   $: if (riichiSuggestions.length === 0) riichiHoverPai = null;
+  // [2026-11-01 先輩「待ち牌アシストでシュバ棒のキャンセル/リーチ取消ボタンが押せない」]
+  // 宣言牌の候補が 2 枚以上だとパネルが上に伸び、選んだリーチのボタン [もう一度押すと取消] に被って押せなかった。
+  // パネルと操作の帯が重なる時は、帯をパネルの上まで持ち上げる。画面が低くて上げ切れない時はパネルを押しても下に通す
+  let toolbarRedEl: HTMLDivElement | null = null;
+  let riichiFloatEl: HTMLDivElement | null = null;
+  let riichiToolbarLift = 0;
+  let riichiPassThrough = false;
+  function measureRiichiLift() {
+    if (!toolbarRedEl || !riichiFloatEl) { riichiToolbarLift = 0; riichiPassThrough = false; return; }
+    const tb = toolbarRedEl.getBoundingClientRect();
+    const rw = riichiFloatEl.getBoundingClientRect();
+    // 持ち上げる前の位置で比べる [今の持ち上げ分を戻す]
+    const top = tb.top + riichiToolbarLift;
+    const bottom = tb.bottom + riichiToolbarLift;
+    const overlapX = tb.width > 0 && rw.width > 0 && tb.left < rw.right && rw.left < tb.right;
+    if (!overlapX || bottom <= rw.top - 6) { riichiToolbarLift = 0; riichiPassThrough = false; return; }
+    const need = bottom - rw.top + 6;
+    const room = Math.max(0, top - 8);
+    riichiToolbarLift = Math.round(Math.min(need, room));
+    riichiPassThrough = need > room;
+  }
+  let riichiLiftObserver: ResizeObserver | null = null;
+  $: {
+    riichiLiftObserver?.disconnect();
+    riichiLiftObserver = null;
+    if (riichiFloatEl && typeof ResizeObserver !== 'undefined') {
+      riichiLiftObserver = new ResizeObserver(() => measureRiichiLift());
+      riichiLiftObserver.observe(riichiFloatEl);
+      if (toolbarRedEl) riichiLiftObserver.observe(toolbarRedEl);
+    } else {
+      riichiToolbarLift = 0;
+      riichiPassThrough = false;
+    }
+  }
+  onDestroy(() => riichiLiftObserver?.disconnect());
 
   // [2026-07-22 リョー要望] 鳴き判断中の対象は自分の手牌側でハイライトする
   // [河の牌に付けると全 client で同じ牌が光り、鳴ける牌が出た事が他家にバレる]
@@ -3820,7 +3855,7 @@
           <button class="stamp-open-btn" on:click={openStampPallet} title="スタンプ" aria-label="スタンプ">スタンプ</button>
         {/if}
         <!-- 操作 [リーチ ・ カン ・ ポン ・ 北抜き ・ 次へ]: 帯の右端に下を揃えて置き、選択肢が増えたら上へ伸びる [手牌は動かない] -->
-        <div class="toolbar toolbar-red">
+        <div class="toolbar toolbar-red" bind:this={toolbarRedEl} style:--rw-lift="{riichiToolbarLift}px">
           <!-- 現在 player [手番] が P0 [user] の時だけ アクション button 表示 [リョー指示 2026-05-12: CPU 手番中 北抜きボタンが出る bug fix] -->
           <!-- ツモ button は center overlay に移動。暗槓は下の実候補一覧から宣言する。 -->
           {#if currentPlayer === actorSeat && !$game.roundEnded && !$game.awaitingRonDecision && !$game.awaitingFulou && !$game.pendingFeverContinue && !$game.pendingFuyu && !$game.pendingKinpei && $game.game.canLizhi(currentPlayer) && baseLizhiCandidates.length > 0}
@@ -3884,7 +3919,7 @@
     {/if}
     {#if riichiSuggestions.length > 0}
       <!-- 手牌の真上に重ねる [高さ 0 の台座に絶対配置。手牌の位置は動かさない] -->
-      <div class="riichi-wait-anchor"><div class="riichi-wait-float"><RiichiWaitPanel suggestions={riichiSuggestions} activePai={riichiHoverPai} /></div></div>
+      <div class="riichi-wait-anchor"><div class="riichi-wait-float" class:rw-pass={riichiPassThrough} bind:this={riichiFloatEl}><RiichiWaitPanel suggestions={riichiSuggestions} activePai={riichiHoverPai} /></div></div>
     {/if}
     <PlayerHandPanel
       player={srv0} label="player {srv0} [自家]"
@@ -7597,4 +7632,7 @@
   }
   /* スマホは手牌の上の「ツモ切り」の段に重なるので、パネルはタップを通す [見るだけで押す物が無い] */
   @media (hover: none) { .riichi-wait-float { pointer-events: none; } }
+  .riichi-wait-float.rw-pass { pointer-events: none; }
+  /* パネルと重なる時だけ、操作の帯 [リーチの取消など] をパネルの上へ持ち上げる [量は measureRiichiLift] */
+  main.mode-single .toolbar-red { translate: 0 calc(-1 * var(--rw-lift, 0px)); }
 </style>
