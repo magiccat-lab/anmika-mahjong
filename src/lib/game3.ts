@@ -1299,7 +1299,7 @@ export class Game3 {
     for (const p of [0, 1, 2] as PlayerId[]) {
       this.shoupai.set(p, buildShoupai(deal.hands[p]));
       this.he.set(p, new Majiang.He());
-      this.events.push({ type: 'qipai', player: p, tiles: deal.hands[p] });
+      this.events.push(this.qipaiEvent_(p, deal.hands[p]));
     }
   }
 
@@ -1354,7 +1354,7 @@ export class Game3 {
         this.shoupai.set(p, new Majiang.Shoupai([])); // empty fallback
       }
       this.he.set(p, new Majiang.He());
-      this.events.push({ type: 'qipai', player: p, tiles: tiles[p] });
+      this.events.push(this.qipaiEvent_(p, tiles[p]));
     }
     dlog('[qipai] shan.baopai=', [...this.shan.baopai], 'shan.fubaopai=', [...(this.shan.fubaopai ?? [])], 'huapai=', { ...this.huapai }, 'feverActive=', { ...this.feverActive });
   }
@@ -1469,10 +1469,29 @@ export class Game3 {
       gold: this.shan.lastZimoGold && (pai === 'gp' || pai === 'gs' || pai === 'gN'),
       ...(this.pochiChangedSince(player, pochiBefore) ? { pochiUndo: pochiBefore } : {}),
     };
-    this.events.push({ type: 'zimo', player, pai });
+    this.events.push(this.zimoEvent_(player, pai));
     markFirstTurnDraw(this.firstTurnState, player);
     dlog('[zimo]', { player, pai, rawPai, pochi: rawColor, gold: this.shan.lastZimoGold, drawnHua: [...this.shan.lastDrawnHuapai], huapaiAfter: [...this.huapai[player]] });
     return pai;
+  }
+
+  /** 牌譜の配牌 event。[2026-11-02 cpu-lab] 牌譜から局面を再生できるように、配牌で抜いた華と
+   *  局の始めのドラ表 [表示分だけ、裏は入れない] も残す。どちらも卓上の公開情報。
+   *  他の席へは ws_server.publicEventForSeat が枚数だけにして配る */
+  private qipaiEvent_(player: PlayerId, tiles: Pai[]): GameEvent {
+    return {
+      type: 'qipai',
+      player,
+      tiles,
+      baopai: [...this.shan.displayBaopai],
+      hua: [...(this.huapai[player] ?? [])],
+    };
+  }
+
+  /** 牌譜のツモ event。この牌の前に抜いた華 [公開情報] があれば hua に残す [2026-11-02 cpu-lab] */
+  private zimoEvent_(player: PlayerId, pai: Pai): GameEvent {
+    const hua = [...(this.shan.lastDrawnHuapai ?? [])];
+    return hua.length > 0 ? { type: 'zimo', player, pai, hua } : { type: 'zimo', player, pai };
   }
 
   /** 打牌、 拡張表記情報 [meta.gold / meta.pochi] を受けて 河の表示色を記録
@@ -1519,7 +1538,7 @@ export class Game3 {
       gold: this.shan.lastZimoGold && (pai === 'gp' || pai === 'gs' || pai === 'gN'),
       ...(this.pochiChangedSince(player, pochiBefore) ? { pochiUndo: pochiBefore } : {}),
     };
-    this.events.push({ type: 'zimo', player, pai });
+    this.events.push(this.zimoEvent_(player, pai));
   }
 
   /** Exact physical identity of the current standalone draw. */
@@ -4545,6 +4564,9 @@ export class Game3 {
       defen: winnerGain,
       loser,
       pochiReverse: isPochiReverse,
+      // [2026-11-02 cpu-lab] 和了の時点で表示しているドラ表 [秋 ・ カンで増えた分を含む]。裏ドラは入れない
+      // [ダブロンの判断待ちの間も event は全席に配るので、裏を載せると伏せ情報が漏れる]
+      baopai: [...this.shan.displayBaopai],
     } as any);
   }
 
@@ -5084,7 +5106,7 @@ export class Game3 {
       this.yifaActive = { 0: false, 1: false, 2: false };
       this.lingshangActive[player] = true;
       this.lingshangFromKan[player] = true;
-      this.events.push({ type: 'gang', player, mianzi });
+      this.events.push({ type: 'gang', player, mianzi, baopai: [...this.shan.displayBaopai] });
       // [2026-05-15 fix bug B] 大明槓 [鳴き派生] でも シュバ倍率 強制 解除。
       // 副露 と 同様 ゾロ目連続 シュバ宣言 と両立しない。
       this.shuvariActive[player] = false;
@@ -5328,7 +5350,7 @@ export class Game3 {
         // 牌譜復元時に「まだ槍槓待ち」と誤認するので、ここでは立てない。
         this.qianggangPending = false;
       }
-      this.events.push({ type: 'gang', player, mianzi });
+      this.events.push({ type: 'gang', player, mianzi, baopai: [...this.shan.displayBaopai] });
     }
     if (replacement !== null) markFirstTurnCall(this.firstTurnState);
     return replacement;

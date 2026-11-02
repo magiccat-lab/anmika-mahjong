@@ -806,7 +806,7 @@ function confirmedFeverWaitInfo(game: any): {
   return { waitInfo, waitsByDeclarer };
 }
 
-function publicEventForSeat(event: any, recipientSeat: number): Record<string, unknown> {
+export function publicEventForSeat(event: any, recipientSeat: number): Record<string, unknown> {
   if (event?.type === 'qipai') {
     return { type: 'qipai', player: event.player, count: Array.isArray(event.tiles) ? event.tiles.length : 13 };
   }
