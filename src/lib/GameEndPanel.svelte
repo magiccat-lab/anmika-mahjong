@@ -75,8 +75,10 @@
   .ranking .raw-defen { font-size: clamp(13px, 3.6vw, 18px); font-variant-numeric: tabular-nums; }
   .ranking .ledger, .ranking .uma, .ranking .topn, .ranking .tonton { font-size: clamp(13px, 3.6vw, 18px); }
   /* 順位と名前は横にスクロールしても左に残す [狭い画面で表が 9 列まで広がるため] */
-  .ranking th.pos, .ranking td.pos { position: sticky; left: 0; z-index: 1; min-width: 3.2em; background: var(--cy-panel-solid); }
-  .ranking th.who, .ranking td.who { position: sticky; left: 3.2em; z-index: 1; background: var(--cy-panel-solid); }
+  /* [11-02 #18] 順位の列は padding 込みの px 幅で決め、名前の列はちょうどその右に止める
+     [em だと見出しと本文で字の大きさが違い、padding も入らず名前が順位に被った] */
+  .ranking th.pos, .ranking td.pos { position: sticky; left: 0; z-index: 1; box-sizing: border-box; width: 72px; min-width: 72px; max-width: 72px; background: var(--cy-panel-solid); }
+  .ranking th.who, .ranking td.who { position: sticky; left: 72px; z-index: 1; background: var(--cy-panel-solid); }
   .ranking th.fin-h, .ranking td.final { position: sticky; right: 0; z-index: 1; background: var(--cy-panel-solid); box-shadow: -8px 0 8px -6px rgba(0, 0, 0, 0.6); }
   .ranking th.pos, .ranking th.who, .ranking th.fin-h { background: color-mix(in srgb, var(--cy-line) 8%, var(--cy-panel-solid)); }
 </style>
