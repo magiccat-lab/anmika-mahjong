@@ -10,12 +10,20 @@
 // @ts-ignore - majiang-core 型定義なし
 import Majiang from '@kobalab/majiang-core';
 import { tulipNeighbors } from './tulip';
+import { normalizeBaopaiForMajiang } from '../helpers';
 import { americanChitoiComplete, countAmericanChitoiQuads } from './tingpai';
 
 export const CHIP_PER_POINT = 1.65 / 1000;
 
 // アンミカの萬子は 7 と 9 だけで、7 は 1 として扱う (順子にならない)。majiang-core にそのまま渡すと 7萬 9萬 を嵌張と数えるので、
 // 分析では 7萬 を 1萬 に置き換えた手でシャンテン ・ 待ち ・ 点数を出す [2026-10-14、昨夜の「シャンテン戻し」の多くが 9萬切りだった]
+/** swapM7 した手 (7萬 → 1萬) に合わせたドラ表示の正規化 [クラウドレビュー 11-02 #9]。
+ *  通常の normalizeBaopaiForMajiang は 9萬表示 → m6 (ドラ 7萬) だが、置き換えた手では 7萬が 1萬の位置にいるので
+ *  9萬表示はそのまま m9 (majiang-core の次は 1萬) にする。7萬表示 → m8 (ドラ 9萬) は同じ */
+export function normalizeBaopaiForSwappedM7(p: string): string {
+  const np = normalizeBaopaiForMajiang(p);
+  return np === 'm6' ? 'm9' : np;
+}
 export function swapM7(sp: any): any {
   const m7 = Number(sp?._bingpai?.m?.[7] ?? 0);
   if (!m7) return sp;

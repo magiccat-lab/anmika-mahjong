@@ -160,7 +160,7 @@ import { canFeverLizhi as canFeverLizhiHelper, isFeverWaitExhausted as isFeverWa
 import { isKanpaman as isKanpamanHelper, doraIndicatorOf as doraIndicatorOfHelper } from './game3/yaku';
 import { correctedFuForM7 } from './game3/fu7m';
 import { tulipNeighbors } from './game3/tulip';
-import { anmikaHuleRule, chipEnvOf, swapM7, swapKind, unswapKind, unswapM1, tenpaiWinValue, type TenpaiWait } from './game3/cpuValue';
+import { anmikaHuleRule, chipEnvOf, normalizeBaopaiForSwappedM7, swapM7, swapKind, unswapKind, unswapM1, tenpaiWinValue, type TenpaiWait } from './game3/cpuValue';
 import { computeChipMultiplier as computeChipMultiplierHelper, applyChipOall as applyChipOallHelper, applyChipFromLoser as applyChipFromLoserHelper, type ChipState as ChipStateT, type ChipApplyOpts as ChipApplyOptsT, type ChipBreakdownEntry, type ChipSettlementEffect } from './game3/chip';
 import { getTingpaiList as getTingpaiListHelper, getTingpaiListBeforeZimo as getTingpaiListBeforeZimoHelper, canTsumoWithPochiSwap as canTsumoWithPochiSwapHelper, americanChitoiXiangting, americanChitoiComplete, countAmericanChitoiQuads } from './game3/tingpai';
 import { saveSnapshot as saveSnapshotHelper, restoreSnapshot as restoreSnapshotHelper, type PreHuleSnapshot } from './game3/snapshot';
@@ -2054,7 +2054,8 @@ export class Game3 {
       zhuangfeng: this.changfengZ - 1,
       menfeng: this.zifengZ(player) - 1,
       lizhi: closed ? 1 : 0,
-      baopai: (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f') && !isPositiveZ5(p)).map(normalizeBaopaiForMajiang),
+      // 手は swapM7 済み: ドラ表示も置き換えた位置に合わせる [クラウドレビュー 11-02 #9]
+      baopai: (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f') && !isPositiveZ5(p)).map(normalizeBaopaiForSwappedM7),
       fubaopai: null,
       changbang: this.state.benbang,
       lizhibang: this.state.lizhibang,
