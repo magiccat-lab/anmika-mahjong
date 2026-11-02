@@ -3,7 +3,7 @@
   // 指でなぞる・マウスを乗せると縦線と、その試合の時点の値の一覧が出る
   import type { Point } from './pvpStats';
 
-  export type Series = { key: string; name: string; color: string; points: Point[] };
+  type Series = { key: string; name: string; color: string; points: Point[] };
 
   export let series: Series[] = [];
   export let xMin = 1;

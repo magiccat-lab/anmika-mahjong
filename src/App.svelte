@@ -3044,7 +3044,7 @@
       <!-- [2026-10-15 リョー「北抜きとかのUI、華の下に出すようにすれば画面上下しなくていい」→「北抜きボタンは同じでいい。
            上のログの北抜きを華の下に置けって」] お知らせの帯 [旧: 卓の上の header。出る ・ 消えるたびに卓が上下していた] を
            「あなたの華」の欄の下に重ねて出す。卓の上に重ねるので手牌も欄も動かない。北抜きのボタンは手牌の上の帯のまま -->
-      <div class="msg-band" role="status">{prettyOnlineMessage($game.message, seatDisplayNames)}</div>
+      <div class="msg-band" role="status">{prettyOnlineMessage($game.message ?? '', seatDisplayNames)}</div>
     {/if}
   </section>
 {/snippet}

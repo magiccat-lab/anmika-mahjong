@@ -893,9 +893,9 @@ export function stripRinshanTile(message: string): string {
  */
 export function reactionCandidateMessage(message: unknown, own: number | null, ownIsRonCandidate: boolean): unknown {
   if (typeof message !== 'string') return message;
-  message = stripRinshanTile(message);
-  const isNorthRon = message.startsWith('北抜きロン可能:');
-  if (!isNorthRon && !message.startsWith('ロン可能:') && !message.includes('槍槓 ron 候補')) return message;
+  const text = stripRinshanTile(message);
+  const isNorthRon = text.startsWith('北抜きロン可能:');
+  if (!isNorthRon && !text.startsWith('ロン可能:') && !text.includes('槍槓 ron 候補')) return text;
   if (!ownIsRonCandidate || own === null) return null;
   return `${isNorthRon ? '北抜きロン可能' : 'ロン可能'}: player ${own}`;
 }
