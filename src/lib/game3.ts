@@ -1029,6 +1029,11 @@ export class Game3 {
     if (someoneFever && !this.feverActive[player]) {
       return toCorePai(sp._zimo) === 'z4';
     }
+    // [クラウドレビュー 11-02 #6] 自分のフィーバー中も手牌は固定。手持ちの北
+    // [役満形の一部など] を抜くと待ちが壊れるため、ツモ牌が北の時だけ抜ける
+    if (this.feverActive[player]) {
+      return toCorePai(sp._zimo) === 'z4';
+    }
     return sp._bingpai?.z?.[4] >= 1;
   }
 
