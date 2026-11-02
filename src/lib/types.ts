@@ -42,11 +42,13 @@ export interface GameState {
 
 // 局の進行イベント [牌譜出力にも使う]
 export type GameEvent =
-  | { type: 'qipai'; player: PlayerId; tiles: Pai[] }       // 配牌
-  | { type: 'zimo'; player: PlayerId; pai: Pai }            // ツモ
+  // baopai: 局の始めのドラ表 [表示分] / hua: 配牌で抜いた華 [2026-11-02 から]
+  | { type: 'qipai'; player: PlayerId; tiles: Pai[]; baopai?: Pai[]; hua?: Pai[] }       // 配牌
+  // hua: このツモの前に抜いた華 [抜いた時だけ、2026-11-02 から]
+  | { type: 'zimo'; player: PlayerId; pai: Pai; hua?: Pai[] }            // ツモ
   | { type: 'dapai'; player: PlayerId; pai: Pai }           // 打牌
   | { type: 'fulou'; player: PlayerId; from: PlayerId; mianzi: string }  // 副露
-  | { type: 'gang'; player: PlayerId; mianzi: string }      // カン
+  | { type: 'gang'; player: PlayerId; mianzi: string; baopai?: Pai[] }      // カン [baopai: カンドラを開いた後のドラ表、2026-11-02 から]
   | { type: 'lizhi'; player: PlayerId; open?: boolean; fever?: boolean; shuvari?: boolean }  // リーチ
   | { type: 'hule'; players: PlayerId[]; details: any }     // 和了
   | { type: 'pingju'; reason: string };                     // 流局
