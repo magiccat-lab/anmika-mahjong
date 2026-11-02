@@ -41,6 +41,7 @@
   import HeaderInfo from './lib/HeaderInfo.svelte';
   import RoundEndPanel from './lib/RoundEndPanel.svelte';
   import WallMeter from './lib/WallMeter.svelte';
+  import { nextWallTotal, type WallTotalState } from './lib/wallTotal';
   import NextDrawsPanel from './lib/NextDrawsPanel.svelte';
   import { kinpeiOptions } from './lib/kinpeiLabel';
   import { kanButtonLabel, kanTileName } from './lib/kanLabel';
@@ -455,13 +456,10 @@
   $: paishu = $game.game.shan.paishu;
   // [2026-10-29 見た目 B / P1] 山の目盛りの数 = その局で見えた残り山の最大枚数 [山 (shan) が替わったら数え直す]。
   // 局の途中から繋いでも、その時の残りより小さくはならない
-  let wallShan: unknown = null;
-  let wallTotal = 0;
-  $: {
-    const _shan = $game.game.shan;
-    if (_shan !== wallShan) { wallShan = _shan; wallTotal = paishu; }
-    else if (paishu > wallTotal) wallTotal = paishu;
-  }
+  // [11-02 #15] オンラインは投影のたびに shan が作り直されるので、shan ではなく局の鍵で数え直す
+  let wallTotalState: WallTotalState = { roundKey: null, total: 0 };
+  $: wallTotalState = nextWallTotal(wallTotalState, `${state.changbang}-${state.jushu}-${state.benbang}`, paishu);
+  $: wallTotal = wallTotalState.total;
   $: baopai = $game.game.shan.displayBaopai;
   $: lastZimo = $game.lastZimo;
   $: currentPlayer = $game.game.lunbanToPlayerId(state.lunban);
