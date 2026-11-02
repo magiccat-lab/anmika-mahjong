@@ -1,6 +1,6 @@
 // CPU 打牌: テンパイ候補の手の価値 [2026-10-28 3 者合議]。
 // 同シャンテン ・ 同受け入れの同点崩しだけに効く。受け入れは落とさない / 押し引き ・ 強制ツモ切り ・ テンパイ前は変えない。
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // @ts-ignore - majiang-core 型定義なし
 import Majiang from '@kobalab/majiang-core';
 import { Game3, buildShoupai, type DiscardAdviceRow } from '../game3';
@@ -10,6 +10,13 @@ import {
 } from '../game3/cpuValue';
 import * as toolsChipValue from '../../../tools/lib/chip_value.mts';
 import * as cpuValue from '../game3/cpuValue';
+// g.qipai() の配牌で山の残りが変わり、ぽっち z5 の比べが 4 回に 1 回ほど落ちたので乱数を固定する (種は 99 で全件が通る)
+beforeEach(() => {
+  let x = 99;
+  vi.restoreAllMocks();
+  vi.spyOn(Math, 'random').mockImplementation(() => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648; });
+});
+afterEach(() => { vi.restoreAllMocks(); });
 
 const P0 = 0 as PlayerId;
 

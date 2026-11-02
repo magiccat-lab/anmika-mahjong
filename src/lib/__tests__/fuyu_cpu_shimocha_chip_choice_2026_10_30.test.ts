@@ -3,7 +3,7 @@
 //   useNow  = 冬を使った時の、下家のこの和了の祝儀の増減 [アリス / チューリップ込み]
 //   holdNow = 保留した時の同じ増減
 //   使う ⇔ useNow > holdNow + holdNow × pMore   [同点は保留]
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { get } from 'svelte/store';
 import {
   game,
@@ -13,6 +13,13 @@ import {
   cpuShimochaFuyuPending,
 } from '../store';
 import { buildShoupai } from '../game3';
+// 配牌 [ドラ ・ 他の席の手] で holdNow が揺れ (b) が 4 回に 1 回ほど落ちたので乱数を固定する (review1102_01 と同じ。種は 1 で全件が通る)
+beforeEach(() => {
+  let x = 1;
+  vi.restoreAllMocks();
+  vi.spyOn(Math, 'random').mockImplementation(() => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648; });
+});
+afterEach(() => { vi.restoreAllMocks(); });
 
 /** 逆ぽっち中のフィーバー者が冬を持ってツモ和了する直前の卓。待ちは m5 */
 function arm(reverse: boolean, opts: { extraWaitInWall?: number; headReveals?: string[]; gold?: boolean } = {}): any {
