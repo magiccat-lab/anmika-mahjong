@@ -7,7 +7,7 @@ import Majiang from '@kobalab/majiang-core';
 
 import type { GameEvent, GameState, Lunban, Pai, PlayerId } from './types';
 import { Shan3, defaultSanmaRule, type ShanRule } from './shan3';
-import { discardTieScore, legacyKindBase, TIE_RESID } from './game3/cpuDiscardTie';
+import { discardTieScore, legacyKindBase, softUkeireScore, TIE_RESID } from './game3/cpuDiscardTie';
 
 // 共通 helper は helpers.ts に分離 [code clean-up 2026-05-10]
 import { DEBUG_LOG, dlog, normalizePai, toCorePai, isGoldPai, isNijiPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, addAnmikaPai, patchAnmikaShoupai, countGoldInHand, countPochiInHand, countNijiInHand, isPositiveZ5, isNegativeZ5, fanshuLevel, LEVEL_TO_FANSHU, isValidAnmikaTile } from './helpers';
@@ -2132,11 +2132,13 @@ export class Game3 {
   }
 
   /** rows から CPU の1位打牌を選ぶ [挙動保存: 同点は候補順の先勝ち]。
-   *  通常は xt 最小 > ukeire 最大 > priority 最大。
+   *  通常は xt 最小 > [テンパイ前: 受け入れと priority の合算点 / テンパイ: ukeire 最大 > 手の価値 > priority]。
    *  ベタオリ中は safety [純粋な安全度] を最優先し、同安全度の中で手を進める */
   private selectBestFromRows_(rows: DiscardAdviceRow[], foldMode: boolean, valueOf?: (row: DiscardAdviceRow) => number): string | null {
     // テンパイ候補だけ手の価値 [チップ] を見る。同シャンテン ・ 同受け入れの時だけ、prio より前の同点崩し [受け入れは落とさない]
     const val = (r: DiscardAdviceRow): number => (valueOf && r.xiangting === 0 ? valueOf(r) : 0);
+    // [cpu-lab 型 4] テンパイ前は受け入れと prio を 1 つの点で比べる [cpuDiscardTie.softUkeireScore]
+    const soft = this.softScorer_(rows);
     let best: DiscardAdviceRow | null = null;
     let keep: DiscardAdviceRow | null = null;
     for (const row of rows) {
@@ -2149,12 +2151,11 @@ export class Game3 {
             || (safety === cur.safety && xt === cur.xiangting && ukeire > cur.ukeire);
         }
         if (xt !== cur.xiangting) return xt < cur.xiangting;
+        if (xt > 0) return soft(row) > soft(cur) + 1e-9;
         if (ukeire !== cur.ukeire) return ukeire > cur.ukeire;
-        if (xt === 0) {
-          const v = val(row);
-          const cv = val(cur);
-          if (Math.abs(v - cv) > 1e-6) return v > cv;
-        }
+        const v = val(row);
+        const cv = val(cur);
+        if (Math.abs(v - cv) > 1e-6) return v > cv;
         return prio > cur.prio;
       };
       if (isBetter(best)) best = row;
@@ -2166,6 +2167,13 @@ export class Game3 {
       return keep.pai;
     }
     return best ? best.pai : null;
+  }
+
+  /** テンパイ前の候補の点 [同じシャンテンの中の受け入れ最大を基準に] */
+  private softScorer_(rows: DiscardAdviceRow[]): (row: DiscardAdviceRow) => number {
+    const ukMax = new Map<number, number>();
+    for (const r of rows) ukMax.set(r.xiangting, Math.max(ukMax.get(r.xiangting) ?? 0, r.ukeire));
+    return (r) => softUkeireScore(r.prio, r.ukeire, ukMax.get(r.xiangting) ?? r.ukeire);
   }
 
   /** 強制ツモ切り時の advise 表示用行。metrics は取れる範囲で埋める [失敗時 0]。 */
@@ -2203,6 +2211,7 @@ export class Game3 {
       return [{ ...rows[0], forced, recommended: true }];
     }
     const bestPai = this.selectBestFromRows_(rows, foldMode, valueOf);
+    const soft = this.softScorer_(rows);
     const sorted = [...rows].sort((a, b) => {
       if (foldMode) {
         if (a.safety !== b.safety) return b.safety - a.safety;
@@ -2210,11 +2219,10 @@ export class Game3 {
         return b.ukeire - a.ukeire;
       }
       if (a.xiangting !== b.xiangting) return a.xiangting - b.xiangting;
+      if (a.xiangting > 0) return soft(b) - soft(a);
       if (a.ukeire !== b.ukeire) return b.ukeire - a.ukeire;
-      if (a.xiangting === 0) {
-        const dv = valueOf(b) - valueOf(a);
-        if (Math.abs(dv) > 1e-6) return dv;
-      }
+      const dv = valueOf(b) - valueOf(a);
+      if (Math.abs(dv) > 1e-6) return dv;
       return b.prio - a.prio;
     });
     return sorted.slice(0, topN).map((row) => ({

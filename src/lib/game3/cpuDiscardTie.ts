@@ -93,3 +93,18 @@ export function discardTieScore(t: DiscardTieInput): number {
   }
   return v;
 }
+
+// [cpu-lab 2026-11-02 型 4] 受け入れの差も同じ物差しで比べる。
+// 前はシャンテンが同じなら受け入れ最大が絶対で、同点崩しは受け入れが 1 枚でも少ない候補には効かなかった。
+// 人は受け入れの 9 割前後なら好みの牌 [孤立字牌 ・ 端牌] を切る。テンパイ前の候補は
+//   score = prio - UK_REL × (最大 - 受け入れ) / 最大 - UK_GAP × (最大 - 受け入れ)
+// の大きい方を切る [prio と 2 つの重みを人の対局 古い 80% で当てはめ、prio の重みで割った物]。
+// テンパイ [待ちの形と手の価値で選ぶ] とベタオリは今まで通り。
+export const UK_REL = 1.86;
+export const UK_GAP = 0.091;
+
+/** テンパイ前の打牌候補の点 [大きい方を切る]。ukMax は同じシャンテンの候補の受け入れの最大 */
+export function softUkeireScore(prio: number, ukeire: number, ukMax: number): number {
+  const gap = Math.max(0, ukMax - ukeire);
+  return prio - UK_REL * gap / Math.max(ukMax, 1) - UK_GAP * gap;
+}
