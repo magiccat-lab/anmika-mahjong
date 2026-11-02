@@ -395,7 +395,7 @@ export function turnTimeoutAction(
   const forcedKan = game.getForcedLizhiKanCandidates(current);
   if (forcedKan.length > 0) return { type: 'declareKan', mianzi: forcedKan[0] };
 
-  // [2026-07-21 監査 L-05 fix] CPU の三元牌自動暗槓 [z5-z7 の 4 枚揃い] を single mode
+  // [2026-07-21 監査 L-05 fix] CPU の字牌自動暗槓 [11-02 から風牌も、filterCpuAutoKan] を single mode
   // [cpuStepImpl] と揃える。役牌 1 役 + 新ドラ確定で正収益。旧 online path はこれを
   // 通らず、single とだけ挙動が分岐していた
   if (isCpu && !game.lizhi.has(current)) {

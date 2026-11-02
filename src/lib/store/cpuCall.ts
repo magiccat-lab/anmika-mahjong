@@ -11,7 +11,7 @@
 //   - 数牌 / オタ風はポンのみ。副露 1 つ以上 かつ 現シャンテン <= 2 かつ ポンで
 //     シャンテンが下がる時だけ。7 は絶対に鳴かない [フィーバー権が飛ぶため]
 //   - 大明槓は三元牌 + 役牌風だけ
-//   - 暗槓 / 加槓は三元牌の 4 枚揃いだけ
+//   - 暗槓 / 加槓は字牌 [北を除く] の 4 枚揃いだけ [11-02 から風牌も]
 //   - 七対子 / 全虹の芽がある手は見送る [shouldSkipPonForFever]。
 //     single も online も feverSkip: true [10-28 に online を揃えた]
 import { toCorePai } from '../helpers';
@@ -97,10 +97,9 @@ export function decideCpuDaiminkan(game: CallGame, seat: PlayerId, discarded: st
   return { call: false, reason: 'kan-not-honor' };
 }
 
-/** getKanCandidates の結果から CPU が自動で槓する三元牌の mianzi だけを残す [順序は保つ] */
+/** getKanCandidates の結果から CPU が自動で槓する字牌の mianzi だけを残す [順序は保つ]。
+ *  [cpu-lab 2026-11-02 型 5] 三元牌だけ → 風牌 [東南西] も。人の対局 [古い 80%] では風牌の暗槓 ・ 加槓を
+ *  7〜8 割がしていた [オタ風も同じ]。字牌の槓は手の形を崩さない。北は抜き専用なので入れない */
 export function filterCpuAutoKan(kanMianzis: readonly string[]): string[] {
-  return kanMianzis.filter((m) => {
-    const head = `${m[0]}${m[1]}`;
-    return head === 'z5' || head === 'z6' || head === 'z7';
-  });
+  return kanMianzis.filter((m) => m[0] === 'z' && m[1] !== '4');
 }

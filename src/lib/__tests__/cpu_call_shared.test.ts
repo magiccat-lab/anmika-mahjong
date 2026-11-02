@@ -115,7 +115,7 @@ describe('decideCpuDaiminkan / filterCpuAutoKan', () => {
   });
 
   it('自動暗槓 / 加槓は三元牌の槓子だけ残す [順序保持]', () => {
-    expect(filterCpuAutoKan(['p5555', 'z7777', 'z1111', 'z5555', 'm9999', 'z6+666'])).toEqual(['z7777', 'z5555', 'z6+666']);
+    expect(filterCpuAutoKan(['p5555', 'z7777', 'z1111', 'z5555', 'm9999', 'z6+666', 'z4444'])).toEqual(['z7777', 'z1111', 'z5555', 'z6+666']);
     expect(filterCpuAutoKan([])).toEqual([]);
   });
 });

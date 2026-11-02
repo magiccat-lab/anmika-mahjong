@@ -286,7 +286,7 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       continue;
     }
     // CPU 暗槓 / 加槓 [ゆーま 2026-05-14 自走]:
-    //   - 三元牌 [z5-z7] の 4 枚揃いのみ auto-ankan、 yakuhai 1 役 + 新ドラ確定で正収益
+    //   - 字牌 [北を除く] の 4 枚揃いのみ auto-ankan [11-02 cpu-lab で三元牌から風牌まで広げた]
     //   - 風牌 / 数牌 はスルー [新ドラ で他家への 与ドラ リスクを許容しない 保守設計]
     //   - majiang-core 側で 形崩れ filter は通る前提 [getKanCandidates の get_gang_mianzi]
     //   - 副露直後 [_zimo が mianzi 文字列、 length>3] は kan 不可 [実 tile 無いため skip]
