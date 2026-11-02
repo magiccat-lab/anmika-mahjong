@@ -6486,6 +6486,9 @@
     font-size: 12px;
     cursor: pointer;
   }
+  /* [11-02 #16] 全体の button:hover:not(:disabled) { #e8e8e8 } より強くして、乗っても文字色と同化させない */
+  .screen-replay-bar button:hover:not(:disabled),
+  .screen-replay-bar select:hover:not(:disabled) { background: rgba(255, 255, 255, 0.22); }
   .screen-replay-bar select option { color: #111; }
   .screen-replay-bar input[type='range'] { width: 160px; }
   .srb-error { color: #ffb4a8; }
