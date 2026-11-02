@@ -5216,6 +5216,7 @@ export class Game3 {
     const _drawnCore = this.lastZimoInfo.pai ? toCorePai(this.lastZimoInfo.pai) : null;
     const pochiUndoOnKan = _drawnUndo && _drawnCore && /^[mpsz]\d{4}$/.test(mianzi)
       && mianzi.slice(0, 2) === _drawnCore ? _drawnUndo : null;
+    const _origYifa = { ...this.yifaActive };
     try {
       sp.gang(mianzi);
     } catch {
@@ -5246,6 +5247,9 @@ export class Game3 {
         this.setPochiMultiplier(player, pochiUndoOnKan.multiplier);
         this.kinpeiTarget[player] = pochiUndoOnKan.kinpeiTarget;
       }
+      // [クラウドレビュー 11-02 #7] 槓で一発は消える。嶺上の 1p/2p をでかぽっち扱いしないよう、
+      // 嶺上ツモ効果より先に一発を消す [失敗時は下の rollback で戻す]
+      this.yifaActive = { 0: false, 1: false, 2: false };
       // R10 P0 #5 #6 fix: 暗槓 / 加槓 嶺上 でも ぽっち効果 + lastZimoInfo 反映
       this.applyRinshanZimoEffects(player, replacement, rawReplacement);
       if (this.shan.lastDrawnHuapai.length > 0) {
@@ -5278,6 +5282,7 @@ export class Game3 {
       restorePhysicalHandState(sp, _origPhysicalHand);
       this.setPochiMultiplier(player, _origPochi.multiplier);
       this.kinpeiTarget[player] = _origPochi.kinpeiTarget;
+      this.yifaActive = _origYifa;
       const shanRestoreAny = this.shan as any;
       // R24 P1 #3 fix: Shan3.restore で完全 rollback、 失敗時 fallback で個別 field 復元
       if (_shanSnap && typeof shanRestoreAny.restore === 'function') {
