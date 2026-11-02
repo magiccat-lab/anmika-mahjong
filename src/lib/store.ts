@@ -523,6 +523,13 @@ export function decideCpuShimochaFuyuBeforeAuto(s: StoreState, winner: PlayerId,
   return use;
 }
 
+/** 金北の強化先の候補から、保留した冬を外す。冬を強化先に選ぶと冬を使う [selectKinpei / isFeverPayAuto] ので、
+ *  逆で冬のやめ権の持ち主 [下家] が保留を決めた後に冬を残すと、その保留が金北で覆ってしまう
+ *  [クラウドレビュー 11-02 #1] */
+export function kinpeiHuapaiAfterFuyuHold(huapai: string[], fuyuHeld: boolean): string[] {
+  return fuyuHeld ? huapai.filter((h) => h !== 'f4') : huapai;
+}
+
 /** 下家 CPU が冬を判定し、そのまま selectFuyu と同じ再計算 [resolveFuyuSelection] で和了を進める。
  *  人間に聞く経路と同じ引数で冬の段を作ってから確定する。和了前 [restoreSnapshot 後] に呼ぶ */
 export function applyCpuShimochaFuyu(
@@ -583,10 +590,17 @@ export function resolveFuyuSelection(s: StoreState, use: boolean): StoreState {
       }
     }
     const resolvedHuapai = s.game.effectiveHuapaiAtHule(winner as PlayerId);
+    // 逆の金北は同卓者が決める [enterKinpeiStage の decisionOwners]。全員 CPU なら人間の和了者にも出さず自動
+    // [tsumo / ron の isFeverPayAuto と同じ。クラウドレビュー 11-02 #1]
+    const isFeverPayAuto_fuyu = !!s.game.pochiPaymentMode[winner as 0|1|2]
+      && ([0, 1, 2] as const).filter((p) => p !== winner).every((p) => s.cpu[p]);
+    // 逆の下家 CPU が保留を決めた冬は、自動の金北の強化先にしない [選ぶと冬を使って保留が覆る]
+    const autoKinpeiHuapai = kinpeiHuapaiAfterFuyuHold(resolvedHuapai, !use && !!s.game.pochiPaymentMode[winner as 0|1|2]);
     if (hasGoldKita(s.game, winner as PlayerId)
       && s.game.kinpeiTarget[winner as 0|1|2] === null
       && resolvedHuapai.length > 0
-      && !s.cpu[winner as 0|1|2]) {
+      && !s.cpu[winner as 0|1|2]
+      && !isFeverPayAuto_fuyu) {
       // R6 P1 #4 fix: 冬 modal 経由でも otherWinners [ダブロン CPU 他候補] を保存する。
       let otherWinners: number[] = [...fuyuOtherWinners];
       if (otherWinners.length === 0 && isRon && ronfrom !== null && s.lastDapai) {
@@ -615,12 +629,12 @@ export function resolveFuyuSelection(s: StoreState, use: boolean): StoreState {
       s.message = `🎁 金北 強化対象を選択してください [保留も可]`;
       return { ...s };
     }
-    if (s.cpu[winner as 0|1|2]
+    if ((s.cpu[winner as 0|1|2] || isFeverPayAuto_fuyu)
       && hasGoldKita(s.game, winner as PlayerId)
       && s.game.kinpeiTarget[winner as 0|1|2] === null
-      && resolvedHuapai.length > 0) {
+      && autoKinpeiHuapai.length > 0) {
       s.game.restoreSnapshot();
-      s.game.autoResolveKinpei(winner as any, resolvedHuapai);
+      s.game.autoResolveKinpei(winner as any, autoKinpeiHuapai);
       saveHuleSnapshot(s.game);
       result = isRon && ronfrom !== null
         ? s.game.hule(winner as any, s.lastDapai!.pai, ronfrom as any)
