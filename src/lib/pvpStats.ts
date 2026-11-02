@@ -18,6 +18,7 @@ export type PvpRow = {
   points_won: number;
   points_dealt_in: number;
   hule_chips: number;
+  hule_chips_won?: number; // 自分の和了の分だけ [2026-11-02 から。古い server は無い]
   placement: number | null;
   final_defen: number | null;
 };
@@ -59,6 +60,7 @@ export type PlayerAgg = {
   pointsWon: number;
   pointsDealt: number;
   hule: number;
+  huleWon: number;
   defenSum: number;
   defenN: number;
   defenBest: number;
@@ -71,7 +73,7 @@ const blank = (uid: string, name: string): PlayerAgg => ({
   uid, name, games: 0, rounds: 0, place: [0, 0, 0], placeSum: 0, placed: 0, topStreak: 0, lastAvoidStreak: 0,
   chipTotal: 0, chipMatches: 0, chipBest: -Infinity, chipWorst: Infinity, chipLast10: 0, chipPlus: 0,
   riichi: 0, fever: 0, furo: 0, ankan: 0, nuki: 0, wins: 0, tsumo: 0, ron: 0, dealIns: 0,
-  pointsWon: 0, pointsDealt: 0, hule: 0, defenSum: 0, defenN: 0, defenBest: -Infinity, incomplete: 0,
+  pointsWon: 0, pointsDealt: 0, hule: 0, huleWon: 0, defenSum: 0, defenN: 0, defenBest: -Infinity, incomplete: 0,
   firstAt: '', lastAt: '',
 });
 
@@ -114,6 +116,7 @@ export function aggregate(matches: PvpMatch[], names: Record<string, string>): P
       a.pointsWon += r.points_won;
       a.pointsDealt += r.points_dealt_in;
       a.hule += r.hule_chips;
+      a.huleWon += r.hule_chips_won ?? 0;
       a.incomplete += r.incomplete ? 1 : 0;
       if (r.final_defen != null) {
         a.defenSum += r.final_defen;

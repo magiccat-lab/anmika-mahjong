@@ -2217,7 +2217,8 @@ async def stats_summary(request: Request):
 
 _PVP_STAT_COLS = (
     "seat", "incomplete", "rounds", "riichi", "fever_riichi", "furo_rounds", "ankan", "nuki", "wins",
-    "tsumo_wins", "ron_wins", "deal_ins", "points_won", "points_dealt_in", "hule_chips", "placement", "final_defen",
+    "tsumo_wins", "ron_wins", "deal_ins", "points_won", "points_dealt_in", "hule_chips", "hule_chips_won",
+    "placement", "final_defen",
 )
 
 

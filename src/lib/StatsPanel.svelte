@@ -92,7 +92,10 @@
         { label: '一番勝った試合', val: (p) => p.chipBest, best: 1, show: (p) => sgn(p.chipBest) },
         { label: '一番負けた試合', val: (p) => p.chipWorst, best: 1, show: (p) => sgn(p.chipWorst) },
         { label: '直近10試合', val: (p) => p.chipLast10, best: 1, show: (p) => sgn(p.chipLast10) },
-        { label: '和了祝儀 / 試合', val: (p) => div(p.hule, p.games), best: 1, show: (p) => sgn(div(p.hule, p.games), 1) },
+        // [2026-11-02 リョー「上がり1回の祝儀がマイナスなの変じゃない？」] hule は人の和了で払った分も入る
+        // 差し引きだった。自分の和了の分 [÷ 和了] と払った分 [÷ 試合] に分ける
+        { label: '和了1回の祝儀', val: (p) => div(p.huleWon, p.wins), best: 1, show: (p) => sgn(div(p.huleWon, p.wins), 1) },
+        { label: '人の和了で払った祝儀 / 試合', val: (p) => div(p.hule - p.huleWon, p.games), best: 1, show: (p) => sgn(div(p.hule - p.huleWon, p.games), 1) },
       ],
     },
     {

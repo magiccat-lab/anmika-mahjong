@@ -98,6 +98,10 @@ def test_chip_transfer_only_from_dto_paifu():
     assert rows[0]["hule_chips"] == 2
     assert rows[1]["hule_chips"] == -1
     assert rows[2]["hule_chips"] == -1
+    # 自分の和了の分だけ [人の和了で払った -1 は入らない]
+    assert rows[0]["hule_chips_won"] == 2
+    assert rows[1]["hule_chips_won"] == 0
+    assert rows[2]["hule_chips_won"] == 0
 
 
 def test_placement_from_final_defen():

@@ -65,6 +65,7 @@ def _new_seat_row() -> dict[str, Any]:
         "points_won": 0,
         "points_dealt_in": 0,
         "hule_chips": 0,
+        "hule_chips_won": 0,
         "placement": None,
         "final_defen": None,
     }
@@ -185,6 +186,10 @@ def derive_match_stats(paifu: Any) -> dict[str, Any]:
                 ct_delta = _delta_map(ct.get("delta"))
                 for p in SEATS:
                     rows[p]["hule_chips"] += ct_delta[p]
+                # [2026-11-02 リョー「上がり1回の祝儀がマイナスなの変じゃない？」] hule_chips は人の和了で
+                # 払った分も入る差し引き。自分の和了の分だけを別に持つ [ぽっち逆の和了は自分が払うので負になり得る]
+                if s is not None:
+                    rows[s]["hule_chips_won"] += ct_delta[s]
             da = ev.get("defenAfter")
             if isinstance(da, dict):
                 last_defen_after = _delta_map(da)
@@ -230,7 +235,7 @@ def seat_map_from_members(members: Any, fallback: dict[str, int] | None = None) 
 STAT_COLUMNS = (
     "seat", "stats_version", "incomplete", "rounds", "riichi", "fever_riichi",
     "furo_rounds", "ankan", "nuki", "wins", "tsumo_wins", "ron_wins", "deal_ins",
-    "points_won", "points_dealt_in", "hule_chips", "placement", "final_defen", "chip_delta",
+    "points_won", "points_dealt_in", "hule_chips", "hule_chips_won", "placement", "final_defen", "chip_delta",
 )
 
 # DDL は app.py init_db と recompute_stats.py の両方から呼ぶ [SSoT はここ]
@@ -254,6 +259,7 @@ CREATE TABLE IF NOT EXISTS match_player_stats (
     points_won INTEGER NOT NULL DEFAULT 0,
     points_dealt_in INTEGER NOT NULL DEFAULT 0,
     hule_chips INTEGER NOT NULL DEFAULT 0,
+    hule_chips_won INTEGER NOT NULL DEFAULT 0,
     placement INTEGER,
     final_defen INTEGER,
     chip_delta INTEGER NOT NULL DEFAULT 0,
@@ -270,6 +276,10 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 def ensure_tables(conn: Any) -> None:
     conn.executescript(STATS_DDL)
+    # 後から足した列 [CREATE IF NOT EXISTS は既存の表に列を足さない]。値は recompute_stats.py で入る
+    have = {r[1] for r in conn.execute("PRAGMA table_info(match_player_stats)")}
+    if "hule_chips_won" not in have:
+        conn.execute("ALTER TABLE match_player_stats ADD COLUMN hule_chips_won INTEGER NOT NULL DEFAULT 0")
 
 
 def upsert_stat_row(conn: Any, match_id: int, row: dict[str, Any]) -> None:
