@@ -6,7 +6,8 @@ review ページで OK → 「これをオンミカのサイト上で見れる�
   ・チップ収支 ・ 順位 ・ 和了 ・ 放銃 ・ リーチ: stats DB の matches.chip_delta_json と match_player_stats (DB の直しは chip_delta にだけ入る)
   ・サイコロ: ws の記録 (room_accepted_commands)。selectSaiKoroCombo から advanceSaiKoro までの command の
     _roomChipDelta を席ごとに足す。振った人の分だけでなく、他人のサイコロで払った ・ 貰った分も入る (3 人の和は 0)
-  ・打牌: 部屋のまとめ (summaries/*/data.json) の discard_review.by_player (CPU と同じ打牌の率 ・ 降りの率)
+  ・打牌: 部屋のまとめ (summaries/*/data.json) の discard_review.by_player (CPU と同じ打牌の率 ・ 降りの率)。
+    部屋の通しの数なので、CPU 戦と対人戦が混ざる部屋の分は 全部 にだけ入れる
 """
 from __future__ import annotations
 
@@ -48,7 +49,8 @@ def compute(stats_db, ws_db, summaries):
     for m in s.execute('select match_id, room_id, match_no, members_json, chip_delta_json from matches'):
         members = json.loads(m['members_json'])
         kind = 'cpu' if any(str(x['user_id']).startswith('CPU') for x in members) else 'pvp'
-        room_kind[m['room_id']] = kind
+        # 部屋の中の試合の種別の集まり (回しの部屋は CPU 戦と対人戦が混ざる事がある)
+        room_kind.setdefault(m['room_id'], set()).add(kind)
         # NH49 (1 試合) だけ members に seat が無い。その時は ws の部屋の開始時の席で埋める (下)
         seats = {int(x['seat']): str(x['user_id']) for x in members} if all('seat' in x for x in members) else None
         match_seats[(m['room_id'], m['match_no'])] = (seats, kind)
@@ -166,15 +168,18 @@ def compute(stats_db, ws_db, summaries):
         if n > best.get(d['room'], (0, None))[0]:
             best[d['room']] = (n, d)
     by_name = {v: k for k, v in names.items() if not k.startswith('CPU')}
+    # まとめの by_player は部屋の通しで試合に分けられないので、部屋の試合が全部同じ種別の時だけ pvp / cpu に入れる。
+    # CPU 戦と対人戦が混ざる部屋は 全部 (all) にだけ入れる (CPU 戦の打牌が対人戦に混ざらないように)
     for room, (_n, d) in best.items():
-        kind = room_kind.get(room)
-        if not kind:
+        kinds = room_kind.get(room)
+        if not kinds:
             continue
+        targets = ('all', *kinds) if len(kinds) == 1 else ('all',)
         for name, v in ((d.get('discard_review') or {}).get('by_player') or {}).items():
             u = by_name.get(name)
             if not u:
                 continue
-            for k in ('all', kind):
+            for k in targets:
                 c = P[u][k]
                 for f in ('evaluated', 'cpu_match', 'fold_spots', 'folded'):
                     c['dr_' + f] += v.get(f) or 0

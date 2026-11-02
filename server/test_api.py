@@ -929,6 +929,38 @@ def test_stats_profile_seatless_match_without_snapshot_skips_dice(env, tmp_path,
     assert all(p.get("dice_chip", 0) == 0 and p.get("dice_n", 0) == 0 for p in players.values())
 
 
+def test_stats_profile_discard_review_of_mixed_room_is_not_pvp(env, tmp_path, monkeypatch):
+    # [クラウドレビュー 11-02 #13] 打牌の評価は部屋ごと (by_player) で試合に分けられない。部屋の最後の試合の種別で
+    # 全部を数えていたので、CPU 戦と対人戦が混ざる部屋の CPU 戦の打牌が対人戦に入っていた
+    ws = tmp_path / "ws.sqlite3"
+    make_ws_db(ws, [])
+    _profile_env(monkeypatch, tmp_path, ws)
+    # 部屋 M: 1 試合目は CPU 入り、2 試合目は 3 人とも人。部屋 P1: 対人戦だけ
+    add_match("M", [("a", 0), ("CPU_M_1", 1), ("CPU_M_2", 2)], {"a": 10, "CPU_M_1": -5, "CPU_M_2": -5},
+              {"a": (8, 1, 0, 1), "CPU_M_1": (8, 0, 0, 2), "CPU_M_2": (8, 0, 0, 3)}, match_no=1)
+    with appmod.db_conn() as c:
+        cur = c.execute("INSERT INTO matches(room_id, match_no, members_json, paifu_json, chip_delta_json) VALUES(?,?,?,?,?)",
+                        ("M", 2, json.dumps([{"user_id": u, "seat": s} for u, s in (("a", 0), ("b", 1), ("c", 2))]), "{}",
+                         json.dumps({"a": 1, "b": 0, "c": -1})))
+        for u, s in (("a", 0), ("b", 1), ("c", 2)):
+            c.execute("INSERT INTO match_player_stats(match_id, user_id, seat, stats_version, rounds, placement) VALUES(?,?,?,?,?,?)",
+                      (cur.lastrowid, u, s, 1, 8, s + 1))
+        c.commit()
+    add_match("P1", [("a", 0), ("b", 1), ("c", 2)], {"a": 30, "b": -10, "c": -20},
+              {"a": (8, 2, 0, 1), "b": (8, 1, 1, 2), "c": (8, 0, 2, 3)})
+    for room, n in (("M", 100), ("P1", 40)):
+        d = tmp_path / "summaries" / room
+        d.mkdir(parents=True)
+        (d / "data.json").write_text(json.dumps({"room": room, "match_records": [1],
+            "discard_review": {"by_player": {"a": {"evaluated": n, "cpu_match": n // 2}}}}))
+    login(env.client, "a")
+    r = env.client.get("/api/stats/profile")
+    assert r.status_code == 200, r.text
+    a = {p["name"]: p for p in r.json()["players"]}["a"]
+    assert a["matches"] == 2
+    assert a.get("dr_evaluated") == 40 and a.get("dr_cpu_match") == 20
+
+
 # ---- 対人戦の戦績 [2026-11-02] ----
 
 def test_stats_pvp_needs_login(env):
