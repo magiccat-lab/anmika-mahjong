@@ -64,10 +64,13 @@ export function cpuStepImpl(initial: StoreState): StoreState {
       let result = s.game.hule(cur);
       // 秋で今回初めて表示された華も、CPU の金北自動選択候補に含める。
       const resolvedHuapai = s.game.effectiveHuapaiAtHule(cur);
+      // 逆の下家 CPU の冬の判定待ちなら、金北は冬の段 [resolveFuyuSelection] で判定の後に決める
+      // [先に冬へ付けると、保留なのに金北が冬に付いて無駄になる。クラウドレビュー 11-02 #2]
       if (result
         && (s.game.goldHand[cur].z > 0 || (s.game.nukidoraGold[cur] ?? 0) > 0)
         && s.game.kinpeiTarget[cur] === null
-        && resolvedHuapai.length > 0) {
+        && resolvedHuapai.length > 0
+        && !cpuShimochaFuyuPending(s, cur)) {
         s.game.applySnapshot(localSnap);
         s.game.autoResolveKinpei(cur as any, resolvedHuapai);
         // Subsequent pochi-choice rewinds must retain the chosen Kinpei target.

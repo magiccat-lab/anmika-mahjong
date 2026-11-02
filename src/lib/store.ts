@@ -530,6 +530,18 @@ export function kinpeiHuapaiAfterFuyuHold(huapai: string[], fuyuHeld: boolean): 
   return fuyuHeld ? huapai.filter((h) => h !== 'f4') : huapai;
 }
 
+/** CPU の金北の自動選択 [autoResolveKinpei]。逆の下家 CPU の冬の判定 [decideCpuShimochaFuyuBeforeAuto の戻り値] が
+ *  保留なら冬を強化先から外す。冬の判定より後に呼ぶ [先に冬を選ぶと、保留なのに冬に金北が付いて無駄になる。
+ *  クラウドレビュー 11-02 #2] */
+export function autoResolveKinpeiAfterFuyu(
+  s: StoreState,
+  winner: PlayerId,
+  fuyuDecision: boolean | null,
+  huapai: string[] = s.game.effectiveHuapaiAtHule(winner),
+): void {
+  s.game.autoResolveKinpei(winner, kinpeiHuapaiAfterFuyuHold(huapai, fuyuDecision === false));
+}
+
 /** 下家 CPU が冬を判定し、そのまま selectFuyu と同じ再計算 [resolveFuyuSelection] で和了を進める。
  *  人間に聞く経路と同じ引数で冬の段を作ってから確定する。和了前 [restoreSnapshot 後] に呼ぶ */
 export function applyCpuShimochaFuyu(
@@ -669,9 +681,9 @@ export function resolveFuyuSelection(s: StoreState, use: boolean): StoreState {
           // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
           autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
           // 逆の下家 CPU の冬の使う / 保留 [祝儀の見込み。2026-10-30 リョー]
-          decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, ld.player as PlayerId);
+          const fuyuDecision = decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, ld.player as PlayerId);
           if (hasGoldKita(s.game, p as PlayerId)) {
-            s.game.autoResolveKinpei(p as any);
+            autoResolveKinpeiAfterFuyu(s, p as PlayerId, fuyuDecision);
             saveHuleSnapshot(s.game);
           }
           let r2 = s.game.hule(p as any, ld.pai, ld.player as any);
@@ -797,9 +809,9 @@ export function processKakanQianggangWindow(
       // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
       autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
       // 逆の下家 CPU の冬の使う / 保留 [祝儀の見込み。2026-10-30 リョー]
-      decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, player as PlayerId);
+      const fuyuDecision = decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, player as PlayerId);
       if (hasGoldKita(s.game, p as PlayerId)) {
-        s.game.autoResolveKinpei(p as any);
+        autoResolveKinpeiAfterFuyu(s, p as PlayerId, fuyuDecision);
         saveHuleSnapshot(s.game);
       }
       let r = s.game.hule(p as any, kakanPai, player as any);
@@ -1924,11 +1936,8 @@ export function createGameStore() {
           if (availableHuapai.length > 0) {
             s.game.restoreSnapshot();
             // 逆の時の下家 CPU が冬を保留すると判定したら、金北の強化先に冬を自動で選ばない
-            const holdFuyuRon = decideCpuShimochaFuyuBeforeAuto(s, player as PlayerId, s.lastDapai.player as PlayerId) === false;
-            s.game.autoResolveKinpei(
-              player as any,
-              holdFuyuRon ? availableHuapai.filter((h) => h !== 'f4') : availableHuapai,
-            );
+            const fuyuDecisionRon = decideCpuShimochaFuyuBeforeAuto(s, player as PlayerId, s.lastDapai.player as PlayerId);
+            autoResolveKinpeiAfterFuyu(s, player as PlayerId, fuyuDecisionRon, availableHuapai);
             if (isFeverPayAuto_ron && s.game.kinpeiTarget[player as 0|1|2] === 'fuyu') {
               s.game.fuyuConsumed[player as 0|1|2] = true;
             }
@@ -1964,9 +1973,9 @@ export function createGameStore() {
             // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
             autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
             // 逆の下家 CPU の冬の使う / 保留 [祝儀の見込み。2026-10-30 リョー]
-            decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, ld.player as PlayerId);
+            const fuyuDecision = decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, ld.player as PlayerId);
             if (hasGoldKita(s.game, p as PlayerId)) {
-              s.game.autoResolveKinpei(p as any);
+              autoResolveKinpeiAfterFuyu(s, p as PlayerId, fuyuDecision);
               saveHuleSnapshot(s.game);
             }
             let r2 = s.game.hule(p as any, ld.pai, ld.player as any);
@@ -2807,10 +2816,10 @@ export function createGameStore() {
               // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
               autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
               // 逆の下家 CPU の冬の使う / 保留 [祝儀の見込み。2026-10-30 リョー]
-              decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, s.lastDapai.player as PlayerId);
+              const fuyuDecision = decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, s.lastDapai.player as PlayerId);
               // R5 P1 #4 fix: human pass 後 CPU 後発ロン でも 金北 autoResolve、 通常 path と揃える
               if (hasGoldKita(s.game, p as PlayerId)) {
-                s.game.autoResolveKinpei(p as any);
+                autoResolveKinpeiAfterFuyu(s, p as PlayerId, fuyuDecision);
                 saveHuleSnapshot(s.game);
               }
               let result = s.game.hule(p as any, s.lastDapai.pai, s.lastDapai.player as any);
@@ -3061,11 +3070,8 @@ export function createGameStore() {
           && resolvedHuapai.length > 0) {
           s.game.restoreSnapshot();
           // 逆の時の下家 CPU が冬を保留すると判定したら、金北の強化先に冬を自動で選ばない
-          const holdFuyuTsumo = decideCpuShimochaFuyuBeforeAuto(s, player as PlayerId, null) === false;
-          s.game.autoResolveKinpei(
-            player,
-            holdFuyuTsumo ? resolvedHuapai.filter((h) => h !== 'f4') : resolvedHuapai,
-          );
+          const fuyuDecisionTsumo = decideCpuShimochaFuyuBeforeAuto(s, player as PlayerId, null);
+          autoResolveKinpeiAfterFuyu(s, player as PlayerId, fuyuDecisionTsumo, resolvedHuapai);
           if (isFeverPayAuto_tsumo && s.game.kinpeiTarget[player] === 'fuyu') {
             s.game.fuyuConsumed[player] = true;
           }
@@ -3899,10 +3905,14 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
       // [2026-07-21 監査 D-11 fix] CPU ロンも待ち枯れ FEVER なら冬を自動使用
       autoConsumeFuyuIfFeverExhausted(s, p as PlayerId);
       // 逆の下家 CPU の冬の判定 [2 人目以降の CPU ロン。先頭は下の冬の段で決める]
-      if (ronResults.length > 0) decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, player as PlayerId);
+      const fuyuDecision = ronResults.length > 0
+        ? decideCpuShimochaFuyuBeforeAuto(s, p as PlayerId, player as PlayerId)
+        : null;
       // R7 P1 #6 fix: CPU 直ロン経路 [discard 直後] でも autoResolveKinpei、 通常 path と揃え
-      if (hasGoldKita(s.game, p as PlayerId)) {
-        s.game.autoResolveKinpei(p as any);
+      // 先頭が下家 CPU の冬の判定待ちなら、金北は冬の段 [resolveFuyuSelection] で判定の後に決める
+      if (hasGoldKita(s.game, p as PlayerId)
+        && !(ronResults.length === 0 && cpuShimochaFuyuPending(s, p as PlayerId))) {
+        autoResolveKinpeiAfterFuyu(s, p as PlayerId, fuyuDecision);
         saveHuleSnapshot(s.game);
       }
       // fromPlayer 渡し忘れで ronpaiWithDir null → hule が ロン認識せず役なし扱いになる bug fix
