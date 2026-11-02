@@ -606,11 +606,12 @@ export function resolveFuyuSelection(s: StoreState, use: boolean): StoreState {
     // [tsumo / ron の isFeverPayAuto と同じ。クラウドレビュー 11-02 #1]
     const isFeverPayAuto_fuyu = !!s.game.pochiPaymentMode[winner as 0|1|2]
       && ([0, 1, 2] as const).filter((p) => p !== winner).every((p) => s.cpu[p]);
-    // 逆の下家 CPU が保留を決めた冬は、自動の金北の強化先にしない [選ぶと冬を使って保留が覆る]
-    const autoKinpeiHuapai = kinpeiHuapaiAfterFuyuHold(resolvedHuapai, !use && !!s.game.pochiPaymentMode[winner as 0|1|2]);
+    // 逆で下家 [やめ権の持ち主] が保留を決めた冬は、誰の金北の強化先にもしない [選ぶと冬を使って保留が覆る。
+    // 逆のやめ権は下家だけ。クラウドレビュー 11-02 #1 / #3]。正は立直者が金北も選ぶので冬を残す
+    const kinpeiHuapai = kinpeiHuapaiAfterFuyuHold(resolvedHuapai, !use && !!s.game.pochiPaymentMode[winner as 0|1|2]);
     if (hasGoldKita(s.game, winner as PlayerId)
       && s.game.kinpeiTarget[winner as 0|1|2] === null
-      && resolvedHuapai.length > 0
+      && kinpeiHuapai.length > 0
       && !s.cpu[winner as 0|1|2]
       && !isFeverPayAuto_fuyu) {
       // R6 P1 #4 fix: 冬 modal 経由でも otherWinners [ダブロン CPU 他候補] を保存する。
@@ -630,7 +631,7 @@ export function resolveFuyuSelection(s: StoreState, use: boolean): StoreState {
         winner,
         isRon,
         ronfrom,
-        availableHuapai: resolvedHuapai,
+        availableHuapai: kinpeiHuapai,
         // [2026-10-08 リョー「強化先の選択は上がりとか一式の情報見て選ぶから先に出して」] 冬経路も暫定和了を見せる
         preview: kinpeiPreview(result),
         otherWinners,
@@ -644,9 +645,9 @@ export function resolveFuyuSelection(s: StoreState, use: boolean): StoreState {
     if ((s.cpu[winner as 0|1|2] || isFeverPayAuto_fuyu)
       && hasGoldKita(s.game, winner as PlayerId)
       && s.game.kinpeiTarget[winner as 0|1|2] === null
-      && autoKinpeiHuapai.length > 0) {
+      && kinpeiHuapai.length > 0) {
       s.game.restoreSnapshot();
-      s.game.autoResolveKinpei(winner as any, autoKinpeiHuapai);
+      s.game.autoResolveKinpei(winner as any, kinpeiHuapai);
       saveHuleSnapshot(s.game);
       result = isRon && ronfrom !== null
         ? s.game.hule(winner as any, s.lastDapai!.pai, ronfrom as any)
