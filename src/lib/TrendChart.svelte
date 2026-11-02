@@ -1,9 +1,11 @@
+<script lang="ts" module>
+  import type { Point } from './pvpStats';
+  export type Series = { key: string; name: string; color: string; points: Point[] };
+</script>
+
 <script lang="ts">
   // [2026-11-02 リョー「回ごとの推移とかも」] 対人戦の通し番号を横軸にした折れ線。y は 1 本だけ。
   // 指でなぞる・マウスを乗せると縦線と、その試合の時点の値の一覧が出る
-  import type { Point } from './pvpStats';
-
-  export type Series = { key: string; name: string; color: string; points: Point[] };
 
   export let series: Series[] = [];
   export let xMin = 1;
