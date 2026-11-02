@@ -1437,7 +1437,9 @@ export class Game3 {
       if (!isWhiteWaiting && this.lizhi.has(player)) {
         this.applyPochiColorMultiplier(player, c);
         // 逆ぽっち [赤/黄] ツモで kinpeiTarget 未選択なら強制自動
-        if ((c === 'yellow' || c === 'red') && this.kinpeiTarget[player] === null) {
+        // [クラウドレビュー 11-02 #8 リョー裁定] 結果の状態で判定: 逆→逆で 1 倍正に戻ったら
+        // 自動にせず、和了者本人が金ペー先を選ぶ
+        if ((c === 'yellow' || c === 'red') && this.pochiPaymentMode[player] && this.kinpeiTarget[player] === null) {
           this.autoResolveKinpei(player);
         }
       }
@@ -1453,7 +1455,7 @@ export class Game3 {
       } else if (corePai === 'p2') {
         this.shan.lastZimoPochi = 'yellow';
         this.applyPochiColorMultiplier(player, 'yellow');
-        if (this.kinpeiTarget[player] === null) this.autoResolveKinpei(player);
+        if (this.pochiPaymentMode[player] && this.kinpeiTarget[player] === null) this.autoResolveKinpei(player);
       }
     }
     // 直前ツモ情報を保存 [ツモ切り時の色判定用]
@@ -1489,7 +1491,8 @@ export class Game3 {
       // (嶺上 / 北抜き 代替ツモも同様)
       if (!isWhiteWaiting && this.lizhi.has(player)) {
         this.applyPochiColorMultiplier(player, rawColor);
-        if ((rawColor === 'yellow' || rawColor === 'red') && this.kinpeiTarget[player] === null) {
+        // [クラウドレビュー 11-02 #8] 結果が逆払いの時だけ自動 [逆→逆の 1 倍正は本人が選ぶ]
+        if ((rawColor === 'yellow' || rawColor === 'red') && this.pochiPaymentMode[player] && this.kinpeiTarget[player] === null) {
           this.autoResolveKinpei(player);
         }
       }
@@ -1505,7 +1508,7 @@ export class Game3 {
       } else {
         this.shan.lastZimoPochi = 'yellow';
         this.applyPochiColorMultiplier(player, 'yellow');
-        if (this.kinpeiTarget[player] === null) this.autoResolveKinpei(player);
+        if (this.pochiPaymentMode[player] && this.kinpeiTarget[player] === null) this.autoResolveKinpei(player);
       }
     }
     // lastZimoInfo [ツモ切り meta 判定用]
