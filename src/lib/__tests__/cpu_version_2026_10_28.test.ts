@@ -13,12 +13,15 @@ function fakeLib(files: Record<string, string>): string {
 }
 
 describe('cpuVersion', () => {
-  it('実ソースでは game3.ts / cpu*.ts [cpuCall.ts を含む] を昇順に拾う', () => {
+  it('実ソースでは game3.ts / cpu*.ts [cpuCall.ts を含む] / store.ts / server/authority.ts を昇順に拾う', () => {
     const files = cpuSourceFiles();
     expect(files[0]).toBe('game3.ts');
     expect(files).toContain('game3/cpuValue.ts');
     expect(files).toContain('store/cpuCall.ts');
     expect(files).toContain('store/cpuFever.ts');
+    // [クラウドレビュー 11-02 #10] 下家 CPU の冬判定 [store.ts] とオンライン CPU の鳴き設定 [server/authority.ts]
+    expect(files).toContain('store.ts');
+    expect(files).toContain('server/authority.ts');
     expect([...files].sort()).toEqual(files);
     expect(getCpuVersion()).toMatch(/^[0-9a-f]{12}$/);
     expect(getCpuVersion()).toBe(computeCpuVersion());
