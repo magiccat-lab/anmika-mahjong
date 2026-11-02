@@ -1288,6 +1288,42 @@ function actionRelay(
 
 export type MatchReplayFrame = { at: string; msg: Record<string, unknown> };
 
+/** [2026-11-02 クラウドレビュー 11-02 #17] 牌譜再生の frames だけ、他の席が引いたぽっち (白ぽっち z5b/r/g/y ・
+ *  でかぽっちの 1筒 ・ 2筒) の牌と色を載せる。対局中は publicEventForSeat が他の席のツモ牌を伏せるので、
+ *  client の走査 (App.svelte の POCHI_COLOR_MAP[ev.pai] / lastZimoInfo.pochi) が他の席の絞りを作れなかった。
+ *  試合は終わっているが、ぽっちでない牌は伏せたままにする。対局中の配信 (captureSeatProjection) は変えない */
+export function revealReplayPochi<T>(msg: T, authority: RoomAuthority): T {
+  const m = msg as any;
+  const projection = m?.type === 'sync' ? m.snapshot?.state : m?.type === 'action' ? m.action?._state : null;
+  if (!projection || !Array.isArray(projection.publicEvents)) return msg;
+  const game = authority.canonicalState().game;
+  const events = game.events as any[];
+  projection.publicEvents = projection.publicEvents.map((event: any, i: number) => {
+    if (event?.type !== 'zimo' || event.pai != null) return event;
+    const truth = events[i];
+    if (truth?.type === 'zimo' && truth.player === event.player && typeof truth.pai === 'string' && /^z5[brgy]$/.test(truth.pai)) {
+      return { ...event, pai: truth.pai };
+    }
+    return event;
+  });
+  // でかぽっち: 直前のツモの色 (lastZimoInfo.pochi) が要る。白ぽっちは上の pai で足りるので 1筒 ・ 2筒だけ
+  const zi = game.lastZimoInfo;
+  const shown = projection.fields?.lastZimoInfo;
+  const core = String(zi?.pai ?? '').replace(/[^a-z0-9]/g, '').slice(0, 2);
+  if (zi && shown && shown.pai == null && zi.player === shown.player && zi.pochi && (core === 'p1' || core === 'p2')) {
+    projection.fields.lastZimoInfo = { ...shown, pai: zi.pai, pochi: zi.pochi };
+    for (let i = projection.publicEvents.length - 1; i >= 0; i--) {
+      const event = projection.publicEvents[i];
+      if (event?.type !== 'zimo') continue;
+      if (event.player === zi.player && event.pai == null && events[i]?.pai === zi.pai) {
+        projection.publicEvents[i] = { ...event, pai: zi.pai };
+      }
+      break;
+    }
+  }
+  return msg;
+}
+
 /** [2026-10-27 修] 対局画面の牌譜再生。リョー「おんみかの牌譜再生も普通にオンミカ画面のままで牌譜見たい
  *  …視点も変えられるように…白ポッチの色とか、上がり枚数の画面とか、サイコロとかも同じように再現」。
  *  記録した command を試合の区切りから authority に流し直し、その時に席 recipientRoomSeat へ送ったはずの
@@ -1332,7 +1368,7 @@ export function buildMatchReplay(
   };
   const currentMembers = roomMembers.map((member) => ({ ...member, connected: true }));
   const frames: MatchReplayFrame[] = [
-    { at: state.updatedAt, msg: syncPayload(state, recipientRoomSeat, authority, currentMembers) },
+    { at: state.updatedAt, msg: revealReplayPochi(syncPayload(state, recipientRoomSeat, authority, currentMembers), authority) },
   ];
   for (const command of commands.slice(from, end)) {
     if (command.action.type === 'stamp') {
@@ -1351,7 +1387,7 @@ export function buildMatchReplay(
       action: command.action,
     }, new Date(command.acceptedAt));
     state = appended.snapshot;
-    frames.push({ at: command.acceptedAt, msg: actionRelay(appended.command, state, recipientRoomSeat, authority) });
+    frames.push({ at: command.acceptedAt, msg: revealReplayPochi(actionRelay(appended.command, state, recipientRoomSeat, authority), authority) });
     authority.takePendingCutins();
   }
   return {
