@@ -2295,7 +2295,7 @@ async def stats_profile(request: Request):
     now = _time.time()
     if _profile_cache["body"] is None or now - _profile_cache["t"] > 60:
         out = await asyncio.to_thread(player_profile.compute, DB_PATH, WS_DB_PATH, SUMMARY_DIR)
-        players = [{"name": name, **kinds["pvp"]} for name, kinds in out["players"].items() if kinds["pvp"].get("matches")]
+        players = [{"id": uid, "name": p["name"], **p["pvp"]} for uid, p in out["players"].items() if p["pvp"].get("matches")]
         players.sort(key=lambda p: -p["matches"])
         at = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).isoformat(timespec="seconds")
         _profile_cache.update(t=now, body={"players": players, "at": at})

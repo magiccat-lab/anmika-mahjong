@@ -3,7 +3,7 @@
   // /api/stats/profile の生カウントから率を出す。行と式は review ページ (anmika-profile1、リョー OK) と同じ
   import { onMount } from 'svelte';
 
-  type Counts = { name: string } & Record<string, number>;
+  type Counts = { id: string; name: string } & Record<string, number>;
   type Row = [label: string, val: (p: Counts) => number, best: 1 | -1 | 0, show: (p: Counts) => string];
 
   const FEW = 30; // これより少ない対人戦の試合数の人は、緑の対象から外す
@@ -78,14 +78,14 @@
   ];
 
   const few = (p: Counts) => g(p, 'matches') < FEW;
-  // 行ごとの一番良い人 [同じ値なら先の人]。比べない行は null
+  // 行ごとの一番良い人の id [同じ値なら先の人。表示名は重なる事があるので id で持つ]。比べない行は null
   function bestOf([, val, best]: Row): string | null {
     let pick: Counts | null = null;
     for (const p of players) {
       if (few(p)) continue;
       if (!pick || (best > 0 ? val(p) > val(pick) : val(p) < val(pick))) pick = p;
     }
-    return best && pick ? pick.name : null;
+    return best && pick ? pick.id : null;
   }
 </script>
 
@@ -104,7 +104,7 @@
         <thead>
           <tr>
             <th></th>
-            {#each players as p (p.name)}
+            {#each players as p (p.id)}
               <th>{p.name}{#if few(p)}<small>試合が少ない</small>{/if}</th>
             {/each}
           </tr>
@@ -114,8 +114,8 @@
             {@const pick = bestOf(row)}
             <tr>
               <th scope="row">{row[0]}</th>
-              {#each players as p (p.name)}
-                <td class:best={p.name === pick} class:few={few(p)}>{row[3](p)}</td>
+              {#each players as p (p.id)}
+                <td class:best={p.id === pick} class:few={few(p)}>{row[3](p)}</td>
               {/each}
             </tr>
           {/each}

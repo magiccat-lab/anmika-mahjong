@@ -167,7 +167,9 @@ def compute(stats_db, ws_db, summaries):
         n = len(d.get('match_records') or [])
         if n > best.get(d['room'], (0, None))[0]:
             best[d['room']] = (n, d)
-    by_name = {v: k for k, v in names.items() if not k.startswith('CPU')}
+    # まとめの by_player は表示名で引く。同じ表示名の人が複数いる名前は誰の打牌か分からないので使わない
+    human_names = collections.Counter(v for k, v in names.items() if not k.startswith('CPU'))
+    by_name = {v: k for k, v in names.items() if not k.startswith('CPU') and human_names[v] == 1}
     # まとめの by_player は部屋の通しで試合に分けられないので、部屋の試合が全部同じ種別の時だけ pvp / cpu に入れる。
     # CPU 戦と対人戦が混ざる部屋は 全部 (all) にだけ入れる (CPU 戦の打牌が対人戦に混ざらないように)
     for room, (_n, d) in best.items():
@@ -185,6 +187,7 @@ def compute(stats_db, ws_db, summaries):
                     c['dr_' + f] += v.get(f) or 0
 
     out = {'no_ws_rooms': sorted(set(room_kind) - seen_rooms), 'dice_outside_matches': dict(unmatched), 'players': {}}
+    # 鍵は user_id (表示名は重なる事がある)。表示名は name に持つ
     for u, kinds in P.items():
-        out['players'][names.get(u, u)] = {k: dict(v) for k, v in kinds.items()}
+        out['players'][u] = {'name': names.get(u, u), **{k: dict(v) for k, v in kinds.items()}}
     return out

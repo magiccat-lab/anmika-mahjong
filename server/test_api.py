@@ -961,6 +961,33 @@ def test_stats_profile_discard_review_of_mixed_room_is_not_pvp(env, tmp_path, mo
     assert a.get("dr_evaluated") == 40 and a.get("dr_cpu_match") == 20
 
 
+def test_stats_profile_same_display_name_is_not_merged(env, tmp_path, monkeypatch):
+    # [クラウドレビュー 11-02 #14] 人を表示名で束ねていたので、同じ表示名の 2 人が 1 人にまとまっていた
+    ws = tmp_path / "ws.sqlite3"
+    make_ws_db(ws, [])
+    _profile_env(monkeypatch, tmp_path, ws)
+    add_match("P1", [("a", 0), ("b", 1), ("c", 2)], {"a": 30, "b": -10, "c": -20},
+              {"a": (8, 2, 0, 1), "b": (8, 1, 1, 2), "c": (8, 0, 2, 3)})
+    with appmod.db_conn() as c:
+        c.execute("UPDATE users SET display_name='Ryo' WHERE user_id IN ('a','b')")
+        c.commit()
+    # まとめは表示名で引くので、重なる名前の打牌は誰の物か分からない → 誰にも入れない
+    d = tmp_path / "summaries" / "P1"
+    d.mkdir(parents=True)
+    (d / "data.json").write_text(json.dumps({"room": "P1", "match_records": [1],
+        "discard_review": {"by_player": {"Ryo": {"evaluated": 50}, "c": {"evaluated": 30}}}}))
+    login(env.client, "c")
+    r = env.client.get("/api/stats/profile")
+    assert r.status_code == 200, r.text
+    ps = r.json()["players"]
+    assert len(ps) == 3
+    by_id = {p["id"]: p for p in ps}
+    assert by_id["a"]["name"] == by_id["b"]["name"] == "Ryo"
+    assert by_id["a"]["chip"] == 30 and by_id["b"]["chip"] == -10 and by_id["a"]["matches"] == 1
+    assert sum(p["chip"] for p in ps) == 0
+    assert "dr_evaluated" not in by_id["a"] and "dr_evaluated" not in by_id["b"] and by_id["c"]["dr_evaluated"] == 30
+
+
 # ---- 対人戦の戦績 [2026-11-02] ----
 
 def test_stats_pvp_needs_login(env):
