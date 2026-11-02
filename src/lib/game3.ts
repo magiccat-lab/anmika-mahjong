@@ -19,8 +19,10 @@ function isMenzenHand(sp: any): boolean {
 }
 
 /** 他家リーチ中、自分がこのシャンテン以上ならベタオリへ切り替える
- *  [0 = テンパイ、1 = 1 シャンテンまでは押す] */
-const PICK_FOLD_XIANGTING = 2;
+ *  [0 = テンパイ、1 = 1 シャンテンまでは押す]
+ *  [cpu-lab 2026-11-02] 2 → 3。人の対局では他家リーチに 2 シャンテンでも手を崩して降りる事はほぼ無く
+ *  [シャンテンを戻す打牌 4%、無筋 51%]、2 シャンテンのベタオリが一番ずれていた */
+const PICK_FOLD_XIANGTING = 3;
 
 /** Shared riichi shanten, including this ruleset's m7-as-m1 fallback. */
 function lizhiXiangting(sp: any): number {
