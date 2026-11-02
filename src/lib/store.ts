@@ -826,6 +826,18 @@ export function processKakanQianggangWindow(
         if (choice.pending) return { s, handled: true };
         r = choice.result;
       }
+      // [2026-10-30 リョー] CPU の槍槓ロンも、やめ権を持つ下家が人間なら冬の 使う / 保留 を聞く
+      // [innerDiscard の CPU ロンと同じ。クラウドレビュー 11-02 #4]。qianggangPending は立てたまま
+      // 冬の段へ渡し、selectFuyu の再計算 [resolveFuyuSelection] が槍槓として他の CPU ロンも拾う
+      if (r && fuyuQuestionNeeded(s, p as PlayerId)) {
+        const availableHuapai = s.game.effectiveHuapaiAtHule(p as PlayerId);
+        const preview = fuyuPreview(s.game, r);
+        s.game.restoreSnapshot();
+        enterFuyuStage(s, { winner: p, isRon: true, ronfrom: player, availableHuapai, humanOthers: [], ...preview });
+        s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), p];
+        s.message = `❄️ フィーバー中、冬を使う？ [使う = アリス発動 + フィーバー終了 / 保留 = 継続]`;
+        return { s, handled: true };
+      }
       if (r) {
         ronResults.push({ player: p, result: r });
       }
@@ -3928,15 +3940,15 @@ export function innerDiscard(s: StoreState, pai: string, meta?: { gold?: boolean
         if (choice.pending) return { ...s };
         result = choice.result;
       }
-      // [2026-10-30 リョー] 逆ぽっちの CPU ロンも、やめ権を持つ下家が人間なら冬を聞く [先頭の 1 人だけ。
-      // 同時に ron した他の CPU は selectFuyu の再計算が拾う]。CPU が下家なら聞かずに保留
+      // [2026-10-30 リョー] 逆ぽっちの CPU ロンも、やめ権を持つ下家が人間なら冬を聞く [ダブロンの 2 人目でも聞く。
+      // 先に評価した他の CPU も selectFuyu の再計算が拾う。クラウドレビュー 11-02 #4]。CPU が下家なら聞かずに判定
       if (result && ronResults.length === 0 && cpuShimochaFuyuPending(s, p as PlayerId)) {
         const availableHuapai = s.game.effectiveHuapaiAtHule(p as PlayerId);
         s.game.restoreSnapshot();
         s.ronDeclaredPlayers = [...(s.ronDeclaredPlayers ?? []), p];
         return applyCpuShimochaFuyu(s, { winner: p, isRon: true, ronfrom: player, availableHuapai, humanOthers: [] });
       }
-      if (result && ronResults.length === 0 && fuyuQuestionNeeded(s, p as PlayerId)) {
+      if (result && fuyuQuestionNeeded(s, p as PlayerId)) {
         const availableHuapai = s.game.effectiveHuapaiAtHule(p as PlayerId);
         const preview = fuyuPreview(s.game, result);
         s.game.restoreSnapshot();
