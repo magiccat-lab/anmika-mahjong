@@ -63,10 +63,19 @@ describe('decideCpuShuvari: 切るかどうか', () => {
   });
 
   it('虹 + 金の高祝儀手ならシュバる', () => {
-    const g = buildG(['np3', 'gp', 'p4', 'p5', 'p6', 'p7', 's2', 's3', 's4', 's5', 's6', 's7', 'z1']);
+    const g = buildG(['np3', 'gp', 'gs', 'p5', 'p6', 'p7', 's2', 's3', 's4', 's5', 's6', 's7', 'z1']);
     const d = decideCpuShuvari(g, 0);
-    expect(d.score).toBe(11);
+    expect(d.score).toBe(15);
     expect(d.shuvari).toBe(true);
+  });
+
+  it('[cpu-lab 11-02] 東 1 局は 13 枚から、東 2 局は 9 枚から [人の対局に合わせた]', () => {
+    const g = buildG(['np3', 'gp', 'p4', 'p5', 'p6', 'p7', 's2', 's3', 's4', 's5', 's6', 's7', 'z1']);
+    expect(decideCpuShuvari(g, 0).score).toBe(11);
+    expect(decideCpuShuvari(g, 0).shuvari).toBe(false);
+    g.state.jushu = 1;
+    expect(decideCpuShuvari(g, 0).threshold).toBe(9);
+    expect(decideCpuShuvari(g, 0).shuvari).toBe(true);
   });
 
   it('シュバ使用済なら何を持っていても切らない', () => {
@@ -78,21 +87,20 @@ describe('decideCpuShuvari: 切るかどうか', () => {
   });
 
   it('フィーバー tier で見込みが跳ね上がる', () => {
-    // 赤 1 枚 [2 枚] 単体では基準未満だが、tier 4 なら 8 枚で到達する
-    const g = buildG(['p0', 'p3', 'p4', 'p5', 'p6', 'p7', 's2', 's3', 's4', 's5', 's6', 's7', 'z1']);
+    // 金 1 枚 [4 枚] 単体では基準未満だが、tier 4 なら 16 枚で到達する
+    const g = buildG(['gp', 'p3', 'p4', 'p5', 'p6', 'p7', 's2', 's3', 's4', 's5', 's6', 's7', 'z1']);
     expect(decideCpuShuvari(g, 0).shuvari).toBe(false);
     const fever = decideCpuShuvari(g, 0, { feverTier: 4 });
-    expect(fever.score).toBe(8);
+    expect(fever.score).toBe(16);
     expect(fever.shuvari).toBe(true);
   });
 
-  it('終盤は基準が下がって切りやすくなる', () => {
-    const g = buildG(['gp', 'p3', 'p4', 'p5', 'p6', 'p7', 's2', 's3', 's4', 's5', 's6', 's7', 'z1']);
-    // 金 1 枚 = 4 枚。序盤は基準 8 で見送り
+  it('最後の局 [東 3 局] は見込みに関係なく使い切る', () => {
+    const g = buildG();
     expect(decideCpuShuvari(g, 0).shuvari).toBe(false);
     g.state.jushu = SHUVARI_LATE_JUSHU;
     const late = decideCpuShuvari(g, 0);
-    expect(late.threshold).toBe(SHUVARI_THRESHOLD - 4);
+    expect(late.threshold).toBe(0);
     expect(late.shuvari).toBe(true);
   });
 });

@@ -17,10 +17,13 @@ const CHIP_PER_NIJI = 7;
 const CHIP_PER_NUKI = 1;
 const CHIP_PER_FUYU = 2;
 
-/** シュバを切る基準 [見込み祝儀 枚]。虹 1 枚 [7] + α で届く水準 */
-export const SHUVARI_THRESHOLD = 8;
-/** 終盤は使い残しが一番損なので基準を下げる */
-export const SHUVARI_LATE_RELIEF = 4;
+/** シュバを切る基準 [見込み祝儀 枚] を局 [jushu] ごとに。
+ *  [cpu-lab 2026-11-02] 人の対局 [古い 80%] に合わせた。人は東 1 局では見込み 12〜13 枚を超えて初めて
+ *  半分以上が切り、東 2 局は 9 枚前後、東 3 局 [最後] は見込みに関係なく 7 割が切る [使い残しが一番損]。
+ *  前は 8 枚 [東 3 局から 4 枚] で、序盤に安く使い、終盤に使い残していた */
+export const SHUVARI_THRESHOLD_BY_JUSHU = [13, 9, 0] as const;
+/** 東 1 局の基準 */
+export const SHUVARI_THRESHOLD = SHUVARI_THRESHOLD_BY_JUSHU[0];
 /** この局数以降を終盤とみなす [東 3 局 = jushu 2] */
 export const SHUVARI_LATE_JUSHU = 2;
 
@@ -123,8 +126,8 @@ export function decideCpuShuvari(
 
   const jushu = game.state?.jushu ?? 0;
   const late = jushu >= SHUVARI_LATE_JUSHU;
-  const threshold = late ? SHUVARI_THRESHOLD - SHUVARI_LATE_RELIEF : SHUVARI_THRESHOLD;
-  if (late) reasons.push('終盤で基準を下げた');
+  const threshold = SHUVARI_THRESHOLD_BY_JUSHU[Math.min(Math.max(jushu, 0), SHUVARI_THRESHOLD_BY_JUSHU.length - 1)];
+  if (late) reasons.push('最後の局なので使い切る');
 
   return { shuvari: score >= threshold, score, threshold, reasons };
 }
