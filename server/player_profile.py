@@ -86,6 +86,10 @@ def compute(stats_db, ws_db, summaries):
     # 最初が start.initialMapping、nextMatch ごとに _nextMapping の gameToRoom。抜け番の人もサイコロで払う ・ 貰う
     # ws の DB がまだ無い (ws_server が 1 度も動いていない) 時はサイコロを 0 として扱う
     w = ro(ws_db) if Path(ws_db).is_file() else empty_ws()
+    # 部屋の表が無い DB (戦績 DB を指した時など) も同じく 0 として扱う
+    have = {r[0] for r in w.execute("select name from sqlite_master where type='table'")}
+    if not {'room_state_snapshots', 'room_accepted_commands'} <= have:
+        w = empty_ws()
     init_map = {}
     for r in w.execute('select room_id, snapshot_json from room_state_snapshots'):
         start = json.loads(r['snapshot_json']).get('start') or {}

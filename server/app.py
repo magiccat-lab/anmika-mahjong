@@ -2272,12 +2272,12 @@ async def stats_pvp(request: Request):
     }
 
 
-# ws の部屋の記録 [サイコロの収支]。ws_server は repo の頭で起動して ANMIKA_DB_PATH か data/anmika.sqlite3 を使う
-# (server/persistence.ts の RoomPersistence と同じ順)。ANMIKA_WS_DB_PATH があればそれが先
+# ws の部屋の記録 [サイコロの収支]。ws_server は repo の頭で起動して data/anmika.sqlite3 を使う。
+# ANMIKA_DB_PATH はこの API 自身の戦績 DB (上の DB_PATH) なので ws の場所には使わない
+# (ws_server を別の場所で動かす時は ANMIKA_WS_DB_PATH で合わせる)
 def _ws_db_path() -> Path:
     return Path(
         os.environ.get("ANMIKA_WS_DB_PATH")
-        or os.environ.get("ANMIKA_DB_PATH")
         or str(Path(__file__).resolve().parent.parent / "data" / "anmika.sqlite3")
     )
 

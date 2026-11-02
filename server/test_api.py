@@ -894,16 +894,26 @@ def test_stats_profile_without_ws_db_is_200_and_dice_zero(env, tmp_path, monkeyp
     assert not (tmp_path / "missing_ws.sqlite3").exists()
 
 
-def test_ws_db_path_default_follows_anmika_db_path(monkeypatch, tmp_path):
-    # ws_server (server/persistence.ts) は ANMIKA_DB_PATH を使う。ANMIKA_WS_DB_PATH が無ければそれに合わせる
+def test_stats_profile_ws_path_on_stats_db_is_200(env, tmp_path, monkeypatch):
+    # [11-02 #11 の続き] ws の DB の場所に部屋の表が無い DB (e2e で ANMIKA_DB_PATH の戦績 DB を指した時) でも 500 にしない
+    _profile_env(monkeypatch, tmp_path, appmod.DB_PATH)
+    add_match("P1", [("a", 0), ("b", 1), ("c", 2)], {"a": 30, "b": -10, "c": -20},
+              {"a": (8, 2, 0, 1), "b": (8, 1, 1, 2), "c": (8, 0, 2, 3)})
+    login(env.client, "a")
+    r = env.client.get("/api/stats/profile")
+    assert r.status_code == 200, r.text
+    players = {p["name"]: p for p in r.json()["players"]}
+    assert players["a"]["chip"] == 30 and players["a"].get("dice_chip", 0) == 0
+
+
+def test_ws_db_path_does_not_follow_api_db_path(monkeypatch, tmp_path):
+    # app.py の ANMIKA_DB_PATH は API 自身の戦績 DB。ws の DB の代わりにしない (同じ名前の変数を ws_server は別の意味で読む)
     monkeypatch.delenv("ANMIKA_WS_DB_PATH", raising=False)
     monkeypatch.setenv("ANMIKA_DB_PATH", str(tmp_path / "x.sqlite3"))
-    assert appmod._ws_db_path() == tmp_path / "x.sqlite3"
+    default = Path(appmod.__file__).resolve().parent.parent / "data" / "anmika.sqlite3"
+    assert appmod._ws_db_path() == default
     monkeypatch.setenv("ANMIKA_WS_DB_PATH", str(tmp_path / "w.sqlite3"))
     assert appmod._ws_db_path() == tmp_path / "w.sqlite3"
-    monkeypatch.delenv("ANMIKA_WS_DB_PATH")
-    monkeypatch.delenv("ANMIKA_DB_PATH")
-    assert appmod._ws_db_path() == Path(appmod.__file__).resolve().parent.parent / "data" / "anmika.sqlite3"
 
 
 def test_stats_profile_seatless_match_without_snapshot_skips_dice(env, tmp_path, monkeypatch):
