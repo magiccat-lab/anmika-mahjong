@@ -561,6 +561,20 @@ export function applyCpuShimochaFuyu(
 /** 冬の 使う / 保留 を確定して和了を再計算し、精算まで進める [store.selectFuyu の本体。
  *  人間の選択も、下家 CPU の自動判定 [applyCpuShimochaFuyu] も同じ道を通す] */
 export function resolveFuyuSelection(s: StoreState, use: boolean): StoreState {
+  const fuyuWinner = s.pendingFuyu?.winner as PlayerId | undefined;
+  const fuyuIsRon = !!s.pendingFuyu?.isRon;
+  const out = resolveFuyuSelectionBody(s, use);
+  // CPU 和了のサイコロ ・ 局終了は人間の確認 [ackCpuWin] まで自動進行しない。冬の段を通った
+  // CPU 和了も普通の CPU ロン [innerDiscard] ・ ツモ [cpuStepImpl] と揃える [クラウドレビュー 11-02 #5]
+  if (fuyuWinner !== undefined && !out.pendingFuyu) {
+    const saiOwner = out.pendingSaiKoro?.winner;
+    if (saiOwner !== undefined && out.cpu[saiOwner as PlayerId]) out.cpuWinAck = false;
+    if (!fuyuIsRon && out.roundEnded && out.cpu[fuyuWinner]) out.cpuWinAck = false;
+  }
+  return out;
+}
+
+function resolveFuyuSelectionBody(s: StoreState, use: boolean): StoreState {
     if (!s.pendingFuyu) return { ...s };
     // R8 P0 #1 fix: pendingFuyu = null 前に humanOthers も const 退避、
     // 旧 code は null 後に s.pendingFuyu?.humanOthers を読んでて 必ず [] になってた = R7 #3 dead
