@@ -31,15 +31,15 @@ const FAR_HAND = ['m1', 'm4', 'm8', 's1', 's4', 's9', 'p5', 'p5', 'p2', 'z2'];
 const PLAIN = ['p2', 'p4', 'p5', 'p6', 's2', 's3', 's4', 's5', 's6'];
 
 describe('decideCpuPon: 代表手', () => {
-  it('三元牌は常にポン [門前でも]', () => {
+  it('三元牌は常にポン [門前でも、他に対子があれば]', () => {
     for (const z of ['z5', 'z6', 'z7']) {
-      const g = buildG([z, z, ...PLAIN, 'm1', 'm9']);
+      const g = buildG([z, z, ...PLAIN, 's9', 's9']);
       expect(decideCpuPon(g, 0, z, FEVER_ON)).toEqual({ call: true, reason: 'sanyuan' });
     }
   });
 
   it('役牌でない風牌は見送る', () => {
-    const g = buildG(['z3', 'z3', ...PLAIN, 'm1', 'm9']);
+    const g = buildG(['z3', 'z3', ...PLAIN, 's9', 's9']);
     const zifeng = g.zifengZ(0);
     const off = [1, 2, 3].find((n) => n !== g.changfengZ && n !== zifeng)!;
     expect(decideCpuPon(g, 0, `z${off}`, FEVER_ON)).toEqual({ call: false, reason: 'non-yakuhai-wind' });
@@ -77,6 +77,13 @@ describe('decideCpuPon: 代表手', () => {
     const g = buildG(ADVANCE_HAND, ['z666+']);
     g.estimateXiangtingWithExtra = () => { throw new Error('boom'); };
     expect(decideCpuPon(g, 0, 'p5', FEVER_ON).call).toBe(false);
+  });
+
+  it('[cpu-lab 型 6] 門前で対子がその 1 組だけなら役牌でもポンしない [副露済みなら鳴く]', () => {
+    const g = buildG(['z5', 'z5', ...PLAIN, 'm1', 'm9']);
+    expect(decideCpuPon(g, 0, 'z5', FEVER_ON)).toEqual({ call: false, reason: 'no-pair-left' });
+    const open = buildG(['z5', 'z5', ...PLAIN.slice(0, 8)], ['z666+']);
+    expect(decideCpuPon(open, 0, 'z5', FEVER_ON)).toEqual({ call: true, reason: 'sanyuan' });
   });
 
   it('七対子 / 全虹の芽がある手は feverSkip の時だけ見送る [三元牌でも]', () => {
@@ -135,7 +142,8 @@ type Scenario = {
 };
 
 const SCENARIOS: Scenario[] = [
-  { name: '發ポン', hand: ['z6', 'z6', ...PLAIN, 'm1', 'm9'], tile: 'z6', expect: 'pon' },
+  { name: '發ポン', hand: ['z6', 'z6', ...PLAIN, 's9', 's9'], tile: 'z6', expect: 'pon' },
+  { name: '門前で対子が發だけなら鳴かない [cpu-lab 型 6]', hand: ['z6', 'z6', ...PLAIN, 'm1', 'm9'], tile: 'z6', expect: 'none' },
   {
     name: 'オタ風は鳴かない',
     hand: ['z1', 'z2', 'z3', ...PLAIN, 'm1', 'm9'].slice(0, 11).concat(['m1', 'm9']),
@@ -145,7 +153,7 @@ const SCENARIOS: Scenario[] = [
   { name: '数牌は門前で鳴かない', hand: ['p5', 'p5', 'm1', 'm2', 'm3', 's4', 's5', 's6', 's8', 'z1', 'z2', 'm9', 'm8'], tile: 'p5', expect: 'none' },
   { name: '副露後の進む数牌ポン', hand: ADVANCE_HAND, fulou: ['z666+'], tile: 'p5', expect: 'pon' },
   { name: '7 は鳴かない', hand: ['m1', 'm2', 'm3', 's4', 's5', 's6', 'p7', 'p7', 's9', 'z1'], fulou: ['z666+'], tile: 'p7', expect: 'none' },
-  { name: '發を 3 枚持ちでもポンが先 [CPU の大明槓は実質ここでは出ない]', hand: ['z6', 'z6', 'z6', ...PLAIN, 'm1'], tile: 'z6', expect: 'pon' },
+  { name: '發を 3 枚持ちでもポンが先 [CPU の大明槓は実質ここでは出ない]', hand: ['z6', 'z6', 'z6', ...PLAIN.slice(0, 8), 's9', 's9'], tile: 'z6', expect: 'pon' },
   // 7 対子の芽がある手の發ポンは両方見送る [10-28 に online を single に揃えた。前は online だけ鳴いていた]
   { name: '7 対子の芽 + 發', hand: ['m7', 'm7', 'z6', 'z6', ...PLAIN], tile: 'z6', expect: 'none' },
 ];

@@ -6,7 +6,7 @@
 //
 // 規則:
 //   - チーは無い [三麻]
-//   - 三元牌 [z5-z7] は常にポン / 大明槓
+//   - 三元牌 [z5-z7] は常にポン / 大明槓 [11-02: 門前で対子がその 1 組だけならポンしない]
 //   - 風牌 [z1-z3] は場風 or その席の自風の時だけポン / 大明槓
 //   - 数牌 / オタ風はポンのみ。副露 1 つ以上 かつ 現シャンテン <= 2 かつ ポンで
 //     シャンテンが下がる時だけ。7 は絶対に鳴かない [フィーバー権が飛ぶため]
@@ -35,7 +35,8 @@ export type CpuCallReason =
   | 'seven'
   | 'non-yakuhai-wind'
   | 'number-no-advance'
-  | 'kan-not-honor';
+  | 'kan-not-honor'
+  | 'no-pair-left';
 
 export interface CpuCallDecision {
   call: boolean;
@@ -68,12 +69,36 @@ function ponAdvancesShanten(game: CallGame, seat: PlayerId, core: string): boole
   }
 }
 
+/** 手の対子 [2 枚以上の種類] の数。majiang-core の [s][5] は赤 ・ 金を含む */
+function pairKinds(sp: any): number {
+  const bp = sp?._bingpai ?? {};
+  let n = 0;
+  for (const s of ['m', 'p', 's', 'z'] as const) {
+    const arr = bp[s];
+    if (!arr) continue;
+    for (let i = 1; i < arr.length; i++) if (Number(arr[i] ?? 0) >= 2) n += 1;
+  }
+  return n;
+}
+
+/** 門前で、その対子をポンすると雀頭の候補が残らないか
+ *  [cpu-lab 2026-11-02 型 6] 人の対局 [古い 80%] では門前の役牌ポンでも、対子がその 1 組だけの時は 2 割しかポンしない */
+function ponLeavesNoPair(game: CallGame, seat: PlayerId): boolean {
+  const sp = game.shoupai.get(seat) as any;
+  const fulous = (sp?._fulou ?? []) as string[];
+  if (fulous.some((m) => /[+=\-]/.test(m))) return false;
+  return pairKinds(sp) <= 1;
+}
+
 /** CPU の seat が discarded をポンするか */
 export function decideCpuPon(game: CallGame, seat: PlayerId, discarded: string, opts: CpuCallOptions): CpuCallDecision {
   const core = toCorePai(discarded);
   const c = classify(core);
   if (opts.feverSkip && shouldSkipPonForFever(game as Game3, seat)) {
     return { call: false, reason: 'fever-skip' };
+  }
+  if ((c.sanyuan || c.fengpai) && ponLeavesNoPair(game, seat)) {
+    return { call: false, reason: 'no-pair-left' };
   }
   if (c.sanyuan) return { call: true, reason: 'sanyuan' };
   if (c.fengpai) {
