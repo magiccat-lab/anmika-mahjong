@@ -138,6 +138,9 @@ def compute(stats_db, ws_db, summaries):
             unmatched[ses['room']] += 1
             continue
         users, kind = match_seats[key]
+        if users is None:
+            # members に seat が無く、ws に部屋の snapshot も無い試合は席 → 人 が分からないので飛ばす
+            continue
         seat_user = room_seat_user[ses['room']]
         roller = users.get(ses['seat'], '')
         for seat, v in ses['delta'].items():

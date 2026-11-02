@@ -906,6 +906,29 @@ def test_ws_db_path_default_follows_anmika_db_path(monkeypatch, tmp_path):
     assert appmod._ws_db_path() == Path(appmod.__file__).resolve().parent.parent / "data" / "anmika.sqlite3"
 
 
+def test_stats_profile_seatless_match_without_snapshot_skips_dice(env, tmp_path, monkeypatch):
+    # [クラウドレビュー 11-02 #12] members に seat が無く (NH49 のよう)、ws に部屋の snapshot も無い試合に
+    # サイコロがあると、席 → 人 が引けず落ちていた。その試合のサイコロは飛ばす
+    ws = tmp_path / "ws.sqlite3"
+    make_ws_db(ws, [
+        ("N1", 1, 0, {"type": "selectSaiKoroCombo", "small": 2, "large": 5}),
+        ("N1", 2, 0, {"type": "rollSaiKoroDice", "override": [5, 2], "_roomChipDelta": {"0": 10, "1": -5, "2": -5}}),
+        ("N1", 3, 0, {"type": "advanceSaiKoro"}),
+    ])
+    _profile_env(monkeypatch, tmp_path, ws)
+    add_match("N1", [("a", 0), ("b", 1), ("c", 2)], {"a": 30, "b": -10, "c": -20},
+              {"a": (8, 2, 0, 1), "b": (8, 1, 1, 2), "c": (8, 0, 2, 3)})
+    with appmod.db_conn() as c:
+        c.execute("UPDATE matches SET members_json=? WHERE room_id='N1'", (json.dumps([{"user_id": u} for u in "abc"]),))
+        c.commit()
+    login(env.client, "a")
+    r = env.client.get("/api/stats/profile")
+    assert r.status_code == 200, r.text
+    players = {p["name"]: p for p in r.json()["players"]}
+    assert players["a"]["chip"] == 30
+    assert all(p.get("dice_chip", 0) == 0 and p.get("dice_n", 0) == 0 for p in players.values())
+
+
 # ---- 対人戦の戦績 [2026-11-02] ----
 
 def test_stats_pvp_needs_login(env):
