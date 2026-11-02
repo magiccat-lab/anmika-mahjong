@@ -7,6 +7,7 @@ import Majiang from '@kobalab/majiang-core';
 
 import type { GameEvent, GameState, Lunban, Pai, PlayerId } from './types';
 import { Shan3, defaultSanmaRule, type ShanRule } from './shan3';
+import { discardTieScore, legacyKindBase, TIE_RESID } from './game3/cpuDiscardTie';
 
 // 共通 helper は helpers.ts に分離 [code clean-up 2026-05-10]
 import { DEBUG_LOG, dlog, normalizePai, toCorePai, isGoldPai, isNijiPai, buildShoupai, normalizeBaopaiForMajiang, pochiColorFromPai, addAnmikaPai, patchAnmikaShoupai, countGoldInHand, countPochiInHand, countNijiInHand, isPositiveZ5, isNegativeZ5, fanshuLevel, LEVEL_TO_FANSHU, isValidAnmikaTile } from './helpers';
@@ -2011,6 +2012,26 @@ export class Game3 {
       }
       const dropsNiji = releasesNiji(baseTile(basePai));
       if (dropsNiji) prio -= 6;
+      // [cpu-lab 2026-11-02] 牌の種類だけの土台を、人の同点崩しの表 [cpuDiscardTie.ts] に置き換える。
+      // 残りの加減点 [金 ・ 赤 ・ 虹 ・ 7 の芽 ・ ぽっち倍率 ・ 安全度] は TIE_RESID で同じ物差しに載せる
+      {
+        const kind = baseTile(basePai);
+        const ks = kind[0];
+        const kn = Number(kind[1]);
+        const count = Number(sp._bingpai?.[ks]?.[kn] ?? 0);
+        const held = (d: number) => (ks === 'p' || ks === 's') && kn + d >= 1 && kn + d <= 9
+          ? Number(sp._bingpai?.[ks]?.[kn + d] ?? 0) : 0;
+        const tie = discardTieScore({
+          kind,
+          count,
+          seen: ks === 'm' || ks === 'p' || ks === 's' || ks === 'z' ? visibleElsewhere(ks, kn) : 0,
+          adjacent: held(-1) + held(1) > 0,
+          gapped: held(-2) + held(2) > 0,
+          yakuWind: ks === 'z' && (kn === this.changfengZ || kn === this.zifengZ(player)),
+          turn: ((this.he.get(player)?._pai ?? []) as string[]).length,
+        });
+        prio = (prio - legacyKindBase(kind, count)) * TIE_RESID + tie;
+      }
       rows.push({
         pai: c,
         base: baseTile(basePai),

@@ -17,6 +17,7 @@ describe('cpuVersion', () => {
     const files = cpuSourceFiles();
     expect(files[0]).toBe('game3.ts');
     expect(files).toContain('game3/cpuValue.ts');
+    expect(files).toContain('game3/cpuDiscardTie.ts');
     expect(files).toContain('store/cpuCall.ts');
     expect(files).toContain('store/cpuFever.ts');
     // [クラウドレビュー 11-02 #10] 下家 CPU の冬判定 [store.ts] とオンライン CPU の鳴き設定 [server/authority.ts]

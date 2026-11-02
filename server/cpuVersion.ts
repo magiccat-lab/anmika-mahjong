@@ -5,7 +5,7 @@
 // ws server の起動時に sha256 を取る [server は src/ を直接 import して動くため、
 // 起動中のコードとこのハッシュは必ず同じソースを指す]。ブラウザ側には出さない。
 //
-// 対象: src/lib/game3.ts と src/lib/game3/cpuValue.ts [テンパイの手の価値、10-28] と src/lib/store/cpu*.ts [cpuCall.ts を含む]、
+// 対象: src/lib/game3.ts と src/lib/game3/cpu*.ts [cpuValue.ts 10-28 ・ cpuDiscardTie.ts 11-02] と src/lib/store/cpu*.ts [cpuCall.ts を含む]、
 // src/lib/store.ts [下家 CPU の冬の使う / 保留: shimochaFuyuDecision ほか] と server/authority.ts
 // [オンライン CPU の鳴き設定 feverSkip] [クラウドレビュー 11-02 #10]。server/ は 'server/' 付きの名前で、src/ の隣の server/ から読む。
 // 並びはパス昇順、パス名も一緒にハッシュに入れる [ファイル名の入れ替えも版が変わる]。
@@ -29,9 +29,13 @@ export function cpuSourceFiles(libDir: string = LIB_DIR): string[] {
   const store = readdirSync(join(libDir, 'store'))
     .filter((name) => /^cpu.*\.ts$/.test(name))
     .map((name) => `store/${name}`);
-  const optional = ['game3/cpuValue.ts', 'store.ts', ...SERVER_CPU_FILES.map((name) => `server/${name}`)]
+  // game3/cpu*.ts [cpuValue.ts ・ cpuDiscardTie.ts ほか] も CPU の判断を決める
+  const value = existsSync(join(libDir, 'game3'))
+    ? readdirSync(join(libDir, 'game3')).filter((name) => /^cpu.*\.ts$/.test(name)).map((name) => `game3/${name}`)
+    : [];
+  const optional = ['store.ts', ...SERVER_CPU_FILES.map((name) => `server/${name}`)]
     .filter((rel) => existsSync(resolveCpuSource(libDir, rel)));
-  return ['game3.ts', ...optional, ...store].sort();
+  return ['game3.ts', ...value, ...optional, ...store].sort();
 }
 
 /** sha256 の先頭 12 桁 [hex]。読めない時は null [記録を落とさないため呼び出し側は null を許す] */
