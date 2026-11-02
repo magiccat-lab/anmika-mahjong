@@ -2,15 +2,29 @@
 // 冬の段 [下家 CPU の自動判定 → resolveFuyuSelection] の後の金北が人間の和了者に出ていた。
 // 冬を選ぶと fuyuConsumed が立ち、下家 CPU の「保留」が覆っていた。
 // 期待: 金北の選び手 [同卓者] が全員 CPU なので自動で決める。保留した冬は強化先にしない
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { game, fuyuOwnerChipDelta, fuyuWaitRemainCount, shimochaFuyuDecision } from '../store';
 import { buildShoupai } from '../game3';
+
+// 配牌 [山の待ちの残り ・ ドラ] で下家 CPU の冬の判定が変わり、全件の中で時々落ちたので乱数を固定する (review1102_02 と同じ)
+beforeEach(() => {
+  let x = 12345;
+  vi.restoreAllMocks();
+  vi.spyOn(Math, 'random').mockImplementation(() => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648; });
+});
+afterEach(() => { vi.restoreAllMocks(); });
 
 function arm(hua: string[] = ['f4']): any {
   const s: any = get(game);
   const g = s.game;
   const cur = g.lunbanToPlayerId(g.state.lunban);
+  // 他の席の配牌 [手牌 ・ 華 ・ 金 ・ ぽっち] で冬の祝儀の見込み [useNow] が 24〜34 に揺れ、保留の境目 [約 32.7] をまたいでいたので決め打ちにする
+  for (const p of [0, 1, 2]) {
+    if (p !== cur) g.shoupai.set(p, buildShoupai(['m1', 'm9', 'p1', 'p9', 's1', 's9', 'z2', 'z3', 'z6', 'z7', 'p9', 's9', 'z2']));
+    g.huapai[p] = []; g.goldHand[p] = { p: 0, s: 0, z: 0 }; g.pochiHand[p] = { blue: 0, red: 0, green: 0, yellow: 0 };
+    g.nukidoraGold[p] = 0; g.nukidora[p] = 0;
+  }
   g.huapai[cur] = hua;
   g.lizhi.add(cur);
   g.feverActive[cur] = true;
@@ -24,6 +38,9 @@ function arm(hua: string[] = ['f4']): any {
   const wall = g.shan as any;
   // 乱数のドラ表示の華を消して決定的にする
   wall._baopai = ['m1']; wall._fubaopai = ['m2']; wall._committedBaopaiLen = 1; wall._committedFubaopaiLen = 1;
+  // 冬のめくりは山の奥から読むので、配った山の残りを和了者の手に当たらない牌で埋めて決め打ちにする
+  wall._pai = wall._pai.map(() => 'm2');
+  wall._rinshan = wall._rinshan.map(() => 'm2');
   wall._pai.push('m5', 'm3', 's5', 'p8', 'z2');
   for (let i = 0; i < 4; i++) wall._pai.push('m5');
   wall._pai.unshift('z1', 'z2');

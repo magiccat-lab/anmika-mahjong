@@ -2,11 +2,19 @@
 // ・CPU だけの槍槓 [processKakanQianggangWindow] は fuyuQuestionNeeded を見ておらず、人間の下家に聞かなかった
 // ・CPU 2 人のダブロン [innerDiscard] は先頭の CPU にしか聞かず、席順で人間の下家に聞くかが変わっていた
 // 期待: どちらも人間の下家に pendingFuyu [decisionOwners = 下家] を出す
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { game, processKakanQianggangWindow, fuyuQuestionNeeded } from '../store';
 import { buildShoupai } from '../game3';
 import { fuyuDecisionOwner } from '../store/winPipeline';
+
+// 配牌 [山の待ちの残り ・ ドラ] で下家 CPU の冬の判定が変わり、全件の中で時々落ちたので乱数を固定する (review1102_02 と同じ)
+beforeEach(() => {
+  let x = 12345;
+  vi.restoreAllMocks();
+  vi.spyOn(Math, 'random').mockImplementation(() => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648; });
+});
+afterEach(() => { vi.restoreAllMocks(); });
 
 function armReverseFever(g: any, F: number, tile: string) {
   g.huapai[F] = ['f4'];
