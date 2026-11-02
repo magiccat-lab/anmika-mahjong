@@ -2272,8 +2272,17 @@ async def stats_pvp(request: Request):
     }
 
 
-# ws の部屋の記録 [サイコロの収支]。ws_server は repo の頭で起動して data/anmika.sqlite3 を使う
-WS_DB_PATH = Path(os.environ.get("ANMIKA_WS_DB_PATH", str(Path(__file__).resolve().parent.parent / "data" / "anmika.sqlite3")))
+# ws の部屋の記録 [サイコロの収支]。ws_server は repo の頭で起動して ANMIKA_DB_PATH か data/anmika.sqlite3 を使う
+# (server/persistence.ts の RoomPersistence と同じ順)。ANMIKA_WS_DB_PATH があればそれが先
+def _ws_db_path() -> Path:
+    return Path(
+        os.environ.get("ANMIKA_WS_DB_PATH")
+        or os.environ.get("ANMIKA_DB_PATH")
+        or str(Path(__file__).resolve().parent.parent / "data" / "anmika.sqlite3")
+    )
+
+
+WS_DB_PATH = _ws_db_path()
 _profile_cache: dict[str, Any] = {"t": 0.0, "body": None}
 
 

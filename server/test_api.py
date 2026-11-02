@@ -875,6 +875,37 @@ def test_stats_profile_pvp_only_and_dice_sum_zero(env, tmp_path, monkeypatch):
     assert sum(p.get("dice_chip", 0) for p in players.values()) == 0
 
 
+def _profile_env(monkeypatch, tmp_path, ws):
+    monkeypatch.setattr(appmod, "WS_DB_PATH", ws)
+    monkeypatch.setattr(appmod, "SUMMARY_DIR", tmp_path / "summaries")
+    monkeypatch.setattr(appmod, "_profile_cache", {"t": 0.0, "body": None})
+
+
+def test_stats_profile_without_ws_db_is_200_and_dice_zero(env, tmp_path, monkeypatch):
+    # [クラウドレビュー 11-02 #11] ws の DB がまだ無い (ws_server が 1 度も起動していない) と 500 になっていた
+    _profile_env(monkeypatch, tmp_path, tmp_path / "missing_ws.sqlite3")
+    add_match("P1", [("a", 0), ("b", 1), ("c", 2)], {"a": 30, "b": -10, "c": -20},
+              {"a": (8, 2, 0, 1), "b": (8, 1, 1, 2), "c": (8, 0, 2, 3)})
+    login(env.client, "a")
+    r = env.client.get("/api/stats/profile")
+    assert r.status_code == 200, r.text
+    players = {p["name"]: p for p in r.json()["players"]}
+    assert players["a"]["chip"] == 30 and players["a"].get("dice_chip", 0) == 0
+    assert not (tmp_path / "missing_ws.sqlite3").exists()
+
+
+def test_ws_db_path_default_follows_anmika_db_path(monkeypatch, tmp_path):
+    # ws_server (server/persistence.ts) は ANMIKA_DB_PATH を使う。ANMIKA_WS_DB_PATH が無ければそれに合わせる
+    monkeypatch.delenv("ANMIKA_WS_DB_PATH", raising=False)
+    monkeypatch.setenv("ANMIKA_DB_PATH", str(tmp_path / "x.sqlite3"))
+    assert appmod._ws_db_path() == tmp_path / "x.sqlite3"
+    monkeypatch.setenv("ANMIKA_WS_DB_PATH", str(tmp_path / "w.sqlite3"))
+    assert appmod._ws_db_path() == tmp_path / "w.sqlite3"
+    monkeypatch.delenv("ANMIKA_WS_DB_PATH")
+    monkeypatch.delenv("ANMIKA_DB_PATH")
+    assert appmod._ws_db_path() == Path(appmod.__file__).resolve().parent.parent / "data" / "anmika.sqlite3"
+
+
 # ---- 対人戦の戦績 [2026-11-02] ----
 
 def test_stats_pvp_needs_login(env):

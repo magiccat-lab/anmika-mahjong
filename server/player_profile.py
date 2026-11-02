@@ -25,6 +25,15 @@ def ro(path):
     return c
 
 
+def empty_ws():
+    """中身の無い ws の DB (読む 2 表だけ)"""
+    c = sqlite3.connect(':memory:')
+    c.row_factory = sqlite3.Row
+    c.execute('create table room_state_snapshots(room_id text, snapshot_json text)')
+    c.execute('create table room_accepted_commands(room_id text, revision integer, actor_seat integer, action_json text)')
+    return c
+
+
 def blank():
     return collections.Counter()
 
@@ -73,7 +82,8 @@ def compute(stats_db, ws_db, summaries):
     # サイコロ: 席ごとの収支と、振った人の回数 ・ 当たり ・ ゾロ目。試合は nextMatch で区切った通し番号 (= match_no)
     # _roomChipDelta の鍵は部屋の席 (4 人部屋は 0-3)、actor_seat は試合の席 (0-2)。試合の席 → 部屋の席は
     # 最初が start.initialMapping、nextMatch ごとに _nextMapping の gameToRoom。抜け番の人もサイコロで払う ・ 貰う
-    w = ro(ws_db)
+    # ws の DB がまだ無い (ws_server が 1 度も動いていない) 時はサイコロを 0 として扱う
+    w = ro(ws_db) if Path(ws_db).is_file() else empty_ws()
     init_map = {}
     for r in w.execute('select room_id, snapshot_json from room_state_snapshots'):
         start = json.loads(r['snapshot_json']).get('start') or {}
