@@ -40,6 +40,11 @@
   const num = (v: number): string => `${v >= 0 ? '+' : ''}${v.toLocaleString()}`;
   const rate = (a: string, b: string) => (p: Counts) => (g(p, b) ? g(p, a) / g(p, b) : 0);
   const games = (p: Counts) => g(p, 'matches') + g(p, 'sitout');
+  // [11-03 先輩「サイコロの収支、期待値で置き換えたEVだして」] サイコロの実額を期待値に入れ替えた収支。期待値は読み直し
+  // (tools/profile_replay.mts) で倍率の分かった回だけ、分からない回は実額のまま
+  const ev = (p: Counts) => g(p, 'chip') - g(p, 'dice_chip') + g(p, 'dice_ev');
+  const numr = (v: number): string => num(Math.round(v));
+  const pochi = (a: string, e: string) => (p: Counts) => (g(p, 'lz_draws') ? `${g(p, a)} (期待値 ${g(p, e).toFixed(1)})` : '―');
 
   const money: Row[] = [
     ['対人戦の試合', (p) => g(p, 'matches'), 0, (p) => `${g(p, 'matches')}` + (g(p, 'sitout') ? ` (+抜け番${g(p, 'sitout')})` : '')],
@@ -47,15 +52,21 @@
     ['1試合あたり', (p) => g(p, 'chip') / games(p), 1, (p) => { const v = g(p, 'chip') / games(p); return `${v >= 0 ? '+' : ''}${v.toFixed(1)}`; }],
     ['うちサイコロ', (p) => g(p, 'dice_chip'), 0, (p) => num(g(p, 'dice_chip'))],
     ['サイコロ以外', (p) => g(p, 'chip') - g(p, 'dice_chip'), 1, (p) => num(g(p, 'chip') - g(p, 'dice_chip'))],
+    ['サイコロを期待値にした収支 (EV)', ev, 1, (p) => numr(ev(p))],
+    ['EV / 1試合', (p) => ev(p) / games(p), 1, (p) => { const v = ev(p) / games(p); return `${v >= 0 ? '+' : ''}${v.toFixed(1)}`; }],
   ];
   const luck: Row[] = [
     ['自分が振ったサイコロ', (p) => g(p, 'dice_own'), 0, (p) => num(g(p, 'dice_own'))],
     ['人が振ったサイコロ', (p) => g(p, 'dice_others'), 0, (p) => num(g(p, 'dice_others'))],
+    ['サイコロの運 (実額 − 期待値)', (p) => g(p, 'dice_chip') - g(p, 'dice_ev'), 0, (p) => numr(g(p, 'dice_chip') - g(p, 'dice_ev'))],
     ['振った回数', (p) => g(p, 'dice_n'), 0, (p) => `${g(p, 'dice_n')}`],
     ['投げた数', (p) => g(p, 'dice_rolls'), 0, (p) => `${g(p, 'dice_rolls')}`],
     ['当たり率 (平均5.6%)', () => 0, 0, (p) => `${pct(g(p, 'dice_hits'), g(p, 'dice_rolls'))} (${g(p, 'dice_hits')})`],
     ['ゾロ目率 (平均16.7%)', () => 0, 0, (p) => `${pct(g(p, 'dice_zoros'), g(p, 'dice_rolls'))} (${g(p, 'dice_zoros')})`],
     ['フィーバーリーチ / リーチ', () => 0, 0, (p) => `${pct(g(p, 'fever_riichi'), g(p, 'riichi'))} (${g(p, 'fever_riichi')})`],
+    ['配牌の平均シャンテン', (p) => (g(p, 'deal_n') ? g(p, 'deal_xt') / g(p, 'deal_n') : 0), 0, (p) => (g(p, 'deal_n') ? (g(p, 'deal_xt') / g(p, 'deal_n')).toFixed(2) : '―')],
+    ['リーチ中の正ぽっちツモ', () => 0, 0, pochi('pos', 'e_pos')],
+    ['リーチ中の逆ぽっちツモ', () => 0, 0, pochi('neg', 'e_neg')],
     ['北を抜いた数 / 局', () => 0, 0, (p) => (g(p, 'rounds') ? (g(p, 'nuki') / g(p, 'rounds')).toFixed(2) : '―')],
   ];
   const skill: Row[] = [
@@ -63,6 +74,8 @@
     ['放銃率', rate('deal_ins', 'rounds'), -1, (p) => pct(g(p, 'deal_ins'), g(p, 'rounds'))],
     ['平均打点', rate('points_won', 'wins'), 1, (p) => Math.floor(g(p, 'points_won') / Math.max(g(p, 'wins'), 1)).toLocaleString()],
     ['平均放銃点', rate('points_dealt_in', 'deal_ins'), -1, (p) => Math.floor(g(p, 'points_dealt_in') / Math.max(g(p, 'deal_ins'), 1)).toLocaleString()],
+    ['シュバ成就率', rate('shuba_won', 'shuba_decl'), 1, (p) => (g(p, 'shuba_decl') ? `${pct(g(p, 'shuba_won'), g(p, 'shuba_decl'))} (${g(p, 'shuba_won')}/${g(p, 'shuba_decl')})` : '―')],
+    ['シュバで増えた枚数', (p) => g(p, 'shuba_extra'), 1, (p) => numr(g(p, 'shuba_extra'))],
     ['リーチ率', rate('riichi', 'rounds'), 0, (p) => pct(g(p, 'riichi'), g(p, 'rounds'))],
     ['副露率', rate('furo_rounds', 'rounds'), 0, (p) => pct(g(p, 'furo_rounds'), g(p, 'rounds'))],
     ['平均順位', rate('place_sum', 'placed'), -1, (p) => (g(p, 'placed') ? (g(p, 'place_sum') / g(p, 'placed')).toFixed(2) : '―')],

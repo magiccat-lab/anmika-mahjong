@@ -859,6 +859,8 @@ def test_stats_profile_pvp_only_and_dice_sum_zero(env, tmp_path, monkeypatch):
     monkeypatch.setattr(appmod, "WS_DB_PATH", ws)
     monkeypatch.setattr(appmod, "SUMMARY_DIR", tmp_path / "summaries")
     monkeypatch.setattr(appmod, "_profile_cache", {"t": 0.0, "body": None})
+    monkeypatch.setattr(appmod, "PROFILE_REPLAY_JSON", tmp_path / "profile_replay.json")
+    monkeypatch.setattr(appmod, "_maybe_refresh_profile_replay", lambda: None)
     add_match("P1", [("a", 0), ("b", 1), ("c", 2)], {"a": 30, "b": -10, "c": -20},
               {"a": (8, 2, 0, 1), "b": (8, 1, 1, 2), "c": (8, 0, 2, 3)})
     add_match("C1", [("a", 0), ("CPU_1", 1), ("CPU_2", 2)], {"a": 40, "CPU_1": -20, "CPU_2": -20},
@@ -879,6 +881,51 @@ def _profile_env(monkeypatch, tmp_path, ws):
     monkeypatch.setattr(appmod, "WS_DB_PATH", ws)
     monkeypatch.setattr(appmod, "SUMMARY_DIR", tmp_path / "summaries")
     monkeypatch.setattr(appmod, "_profile_cache", {"t": 0.0, "body": None})
+    monkeypatch.setattr(appmod, "PROFILE_REPLAY_JSON", tmp_path / "profile_replay.json")
+    monkeypatch.setattr(appmod, "_maybe_refresh_profile_replay", lambda: None)
+
+
+def test_stats_profile_replay_dice_ev_deal_pochi_shuba(env, tmp_path, monkeypatch):
+    # [11-03 先輩「サイコロの収支、期待値で置き換えたEVだして」「配牌の平均シャンテン数」「逆/正ツモも枚数の期待値」
+    #  「シュバ成就率とシュバで増えた枚数」] 読み直しの JSON から足す。読み直しの無いサイコロは実額のまま
+    ws = tmp_path / "ws.sqlite3"
+    make_ws_db(ws, [
+        ("P1", 1, 0, {"type": "selectSaiKoroCombo", "small": 2, "large": 5}),
+        ("P1", 2, 0, {"type": "rollSaiKoroDice", "override": [5, 2], "_roomChipDelta": {"0": 10, "1": -5, "2": -5}}),
+        ("P1", 3, 0, {"type": "advanceSaiKoro"}),
+        ("P1", 4, 1, {"type": "selectSaiKoroCombo", "small": 1, "large": 3}),
+        ("P1", 5, 1, {"type": "rollSaiKoroDice", "override": [3, 1], "_roomChipDelta": {"0": -7, "1": 14, "2": -7}}),
+        ("P1", 6, 1, {"type": "advanceSaiKoro"}),
+    ])
+    _profile_env(monkeypatch, tmp_path, ws)
+    (tmp_path / "profile_replay.json").write_text(json.dumps({
+        "dice": [{"room": "P1", "match": 1, "rev": 1, "seat": 0, "base": 5, "mult": 1, "rolls": 4, "shuba": False}],
+        "hands": [{"room": "P1", "match": 1, "seat": 0, "xt": 3}, {"room": "P1", "match": 1, "seat": 0, "xt": 2},
+                  {"room": "P1", "match": 1, "seat": 1, "xt": 4}],
+        "counts": [{"room": "P1", "match": 1, "seat": 0, "lz_draws": 10, "pos": 1, "neg": 0, "e_pos": 0.4, "e_neg": 0.35,
+                    "shuba_decl": 2, "shuba_won": 1, "shuba_extra": 40}],
+    }))
+    add_match("P1", [("a", 0), ("b", 1), ("c", 2)], {"a": 30, "b": -10, "c": -20},
+              {"a": (8, 2, 0, 1), "b": (8, 1, 1, 2), "c": (8, 0, 2, 3)})
+    login(env.client, "a")
+    r = env.client.get("/api/stats/profile")
+    assert r.status_code == 200, r.text
+    players = {p["name"]: p for p in r.json()["players"]}
+    a, b = players["a"], players["b"]
+    # 1 回目: 5 × 4 / 15 = 1.33 を b と c から。2 回目は読み直しが無いので実額 (-7)
+    assert a["dice_chip"] == 3 and a["dice_ev"] == round(2 * 5 * 4 / 15 - 7, 2)
+    assert b["dice_ev"] == round(-5 * 4 / 15 + 14, 2) and a["dice_ev_n"] == 1 and a["dice_ev_real"] == 10
+    assert abs(sum(p["dice_ev"] for p in players.values())) < 0.02
+    assert a["deal_n"] == 2 and a["deal_xt"] == 5 and b["deal_xt"] == 4
+    assert a["pos"] == 1 and a["e_pos"] == 0.4 and a["lz_draws"] == 10
+    assert a["shuba_decl"] == 2 and a["shuba_won"] == 1 and a["shuba_extra"] == 40
+
+
+def test_profile_dice_ev_per_payer_shuba_bonus():
+    pp = appmod.player_profile
+    assert pp.dice_ev_per_payer({"base": 70, "mult": 1, "rolls": 4, "shuba": False}) == 70 * 4 / 15
+    v = pp.dice_ev_per_payer({"base": 70, "mult": -2, "rolls": 4, "shuba": True})
+    assert abs(v - (-2) * (70 * 4 / 15 + 4 * 331 / 180)) < 1e-9
 
 
 def test_stats_profile_without_ws_db_is_200_and_dice_zero(env, tmp_path, monkeypatch):

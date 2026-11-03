@@ -2285,6 +2285,46 @@ def _ws_db_path() -> Path:
 
 WS_DB_PATH = _ws_db_path()
 _profile_cache: dict[str, Any] = {"t": 0.0, "body": None}
+# 盤面の読み直し (配牌のシャンテン ・ ぽっちのツモ ・ シュバ ・ サイコロの倍率) は tools/profile_replay.mts が約 2 分かけて書く。
+# 戦績を開いた時に 30 分より古く ws の DB が新しくなっていれば裏で書き直し、その間は前の版で答える
+PROFILE_REPLAY_JSON = Path(
+    os.environ.get("ANMIKA_PROFILE_REPLAY_JSON")
+    or str(Path(__file__).resolve().parent / "data" / "profile_replay.json")
+)
+_ROOT = Path(__file__).resolve().parent.parent
+_profile_replay_task: dict[str, Any] = {"task": None}
+
+
+async def _run_profile_replay() -> None:
+    tsx = _ROOT / "node_modules" / ".bin" / "tsx"
+    tmp = PROFILE_REPLAY_JSON.with_suffix(".tmp")
+    try:
+        with open(tmp, "wb") as f:
+            proc = await asyncio.create_subprocess_exec(
+                str(tsx), str(_ROOT / "tools" / "profile_replay.mts"), str(WS_DB_PATH),
+                cwd=str(_ROOT), stdout=f, stderr=asyncio.subprocess.DEVNULL,
+            )
+            rc = await proc.wait()
+        if rc == 0 and tmp.stat().st_size > 0:
+            tmp.replace(PROFILE_REPLAY_JSON)
+            _profile_cache["t"] = 0.0
+    except OSError:
+        log.exception("profile replay failed")
+
+
+def _maybe_refresh_profile_replay() -> None:
+    t = _profile_replay_task["task"]
+    if t is not None and not t.done():
+        return
+    if not WS_DB_PATH.is_file() or not (_ROOT / "node_modules" / ".bin" / "tsx").exists():
+        return
+    try:
+        have = PROFILE_REPLAY_JSON.stat().st_mtime
+    except OSError:
+        have = 0.0
+    if _time.time() - have < 1800 or WS_DB_PATH.stat().st_mtime <= have:
+        return
+    _profile_replay_task["task"] = asyncio.get_running_loop().create_task(_run_profile_replay())
 
 
 @app.get("/api/stats/profile")
@@ -2294,8 +2334,9 @@ async def stats_profile(request: Request):
     if not current_user(request):
         raise HTTPException(status_code=401, detail="login required")
     now = _time.time()
+    _maybe_refresh_profile_replay()
     if _profile_cache["body"] is None or now - _profile_cache["t"] > 60:
-        out = await asyncio.to_thread(player_profile.compute, DB_PATH, WS_DB_PATH, SUMMARY_DIR)
+        out = await asyncio.to_thread(player_profile.compute, DB_PATH, WS_DB_PATH, SUMMARY_DIR, PROFILE_REPLAY_JSON)
         players = [{"id": uid, "name": p["name"], **p["pvp"]} for uid, p in out["players"].items() if p["pvp"].get("matches")]
         players.sort(key=lambda p: -p["matches"])
         at = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).isoformat(timespec="seconds")

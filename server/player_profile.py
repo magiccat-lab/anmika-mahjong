@@ -8,6 +8,10 @@ review ページで OK → 「これをオンミカのサイト上で見れる�
     _roomChipDelta を席ごとに足す。振った人の分だけでなく、他人のサイコロで払った ・ 貰った分も入る (3 人の和は 0)
   ・打牌: 部屋のまとめ (summaries/*/data.json) の discard_review.by_player (CPU と同じ打牌の率 ・ 降りの率)。
     部屋の通しの数なので、CPU 戦と対人戦が混ざる部屋の分は 全部 にだけ入れる
+  ・読み直しの数 [11-03 先輩「サイコロの収支、期待値で置き換えたEVだして」「配牌の平均シャンテン数」「逆/正ツモも枚数の期待値」
+    「シュバ成就率とシュバで増えた枚数」]: tools/profile_replay.mts が全部屋を読み直して書く JSON (replay_json)。
+    無い時は 0 のまま。サイコロの期待値は 1 回ごとに 倍率 × (基本の枚数 × 投げる数 / 15 + シュバサイなら 投げる数 × 331/180)
+    を 1 人あたりにし、振った人は払う人数分を貰う。読み直しが途中で止まった試合のサイコロは実際の収支のまま (dice_ev に実額)
 """
 from __future__ import annotations
 
@@ -18,6 +22,27 @@ import sqlite3
 from pathlib import Path
 
 KINDS = ('all', 'pvp', 'cpu')
+# 1 投の当たり = ゾロ目でない 30 通りのうち 2 通り。シュバサイの連続ゾロ目特典は 1 投あたり (1/30) × 平均 331/6 枚
+HIT_PER_ROLL = 1 / 15
+ZORO_BONUS_PER_ROLL = 331 / 180
+
+
+def dice_ev_per_payer(d) -> float:
+    """サイコロ 1 回の 1 人あたりの期待値 (倍率込み、逆ぽっちは負)"""
+    rolls = d.get('rolls') or 0
+    v = (d.get('base') or 0) * rolls * HIT_PER_ROLL
+    if d.get('shuba'):
+        v += rolls * ZORO_BONUS_PER_ROLL
+    return (d.get('mult') or 0) * v
+
+
+def load_replay(path):
+    if not path or not Path(path).is_file():
+        return {}
+    try:
+        return json.loads(Path(path).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
 
 
 def ro(path):
@@ -39,7 +64,7 @@ def blank():
     return collections.Counter()
 
 
-def compute(stats_db, ws_db, summaries):
+def compute(stats_db, ws_db, summaries, replay_json=None):
     """人ごとの {all, pvp, cpu} の生カウント。率は client で出す"""
     s = ro(stats_db)
     names = {r['user_id']: r['n'] for r in s.execute("select user_id, coalesce(nullif(display_name, ''), username) as n from users")}
@@ -115,7 +140,7 @@ def compute(stats_db, ws_db, summaries):
             mapping[(room, match_no)] = g2r
         if t == 'selectSaiKoroCombo':
             if cur is None:
-                cur = {'room': room, 'match_no': match_no, 'seat': r['actor_seat'], 'delta': collections.Counter(), 'rolls': 0, 'hits': 0, 'zoros': 0}
+                cur = {'room': room, 'match_no': match_no, 'seat': r['actor_seat'], 'rev': r['revision'], 'delta': collections.Counter(), 'rolls': 0, 'hits': 0, 'zoros': 0}
             cur['combo'] = (min(a['small'], a['large']), max(a['small'], a['large']))
         if cur is not None:
             for seat, v in (a.get('_roomChipDelta') or {}).items():
@@ -138,6 +163,8 @@ def compute(stats_db, ws_db, summaries):
         if users and g:
             for gs, u in users.items():
                 room_seat_user[room][g[gs]] = u
+    replay = load_replay(replay_json)
+    replay_dice = {(d['room'], d['rev']): d for d in replay.get('dice') or []}
     for ses in sessions:
         key = (ses['room'], ses['match_no'])
         if key not in match_seats:
@@ -156,6 +183,24 @@ def compute(stats_db, ws_db, summaries):
             for k in ('all', kind):
                 P[u][k]['dice_chip'] += v
                 P[u][k]['dice_own' if u == roller else 'dice_others'] += v
+        # 期待値: 読み直しで倍率の分かったサイコロは期待値に、分からないサイコロは実際の収支のまま
+        rd = replay_dice.get((ses['room'], ses['rev']))
+        if rd is not None:
+            per = dice_ev_per_payer(rd)
+            payers = max(len(seat_user), 3) - 1
+            for seat, u in seat_user.items():
+                if not u or u.startswith('CPU'):
+                    continue
+                for k in ('all', kind):
+                    P[u][k]['dice_ev'] += per * payers if u == roller else -per
+                    P[u][k]['dice_ev_n'] += 1
+                    P[u][k]['dice_ev_real'] += ses['delta'].get(seat, 0)
+        else:
+            for seat, v in ses['delta'].items():
+                u = seat_user.get(seat, '')
+                if u and not u.startswith('CPU'):
+                    for k in ('all', kind):
+                        P[u][k]['dice_ev'] += v
         if roller and not roller.startswith('CPU'):
             for k in ('all', kind):
                 c = P[roller][k]
@@ -190,8 +235,28 @@ def compute(stats_db, ws_db, summaries):
                 for f in ('evaluated', 'cpu_match', 'fold_spots', 'folded'):
                     c['dr_' + f] += v.get(f) or 0
 
+    # 配牌のシャンテン ・ リーチ中のぽっちのツモ ・ シュバ (試合の席 → 人 は試合ごとの members)
+    for h in replay.get('hands') or []:
+        seats, kind = match_seats.get((h['room'], h['match']), (None, None))
+        u = (seats or {}).get(int(h['seat']), '')
+        if not u or u.startswith('CPU'):
+            continue
+        for k in ('all', kind):
+            P[u][k]['deal_n'] += 1
+            P[u][k]['deal_xt'] += h['xt']
+    for c in replay.get('counts') or []:
+        seats, kind = match_seats.get((c['room'], c['match']), (None, None))
+        u = (seats or {}).get(int(c['seat']), '')
+        if not u or u.startswith('CPU'):
+            continue
+        for k in ('all', kind):
+            for f in ('lz_draws', 'pos', 'neg', 'e_pos', 'e_neg', 'shuba_decl', 'shuba_won', 'shuba_extra'):
+                if f in c:
+                    P[u][k][f] += c[f]
+
     out = {'no_ws_rooms': sorted(set(room_kind) - seen_rooms), 'dice_outside_matches': dict(unmatched), 'players': {}}
     # 鍵は user_id (表示名は重なる事がある)。表示名は name に持つ
     for u, kinds in P.items():
-        out['players'][u] = {'name': names.get(u, u), **{k: dict(v) for k, v in kinds.items()}}
+        # 期待値は小数で足したので、出す時に丸める (率の元は client で割る)
+        out['players'][u] = {'name': names.get(u, u), **{k: {f: (round(x, 2) if isinstance(x, float) else x) for f, x in v.items()} for k, v in kinds.items()}}
     return out
