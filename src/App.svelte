@@ -69,7 +69,7 @@
   import { createAutoTsumokiriScheduler, type AutoTsumokiriToken } from './lib/autoTsumokiriScheduler';
   import { buildCanonicalPaifuSnapshot, isSafePaifuSavePoint, buildDiagnosticDump } from './lib/store/paifuIo';
   import { serializeCanonical } from './lib/canonicalJson';
-  import { isPositiveZ5, toCorePai } from './lib/helpers';
+  import { agariZimoPai, isPositiveZ5, toCorePai } from './lib/helpers';
   import { evaluateDrawNextBridge } from './lib/drawNextBridge';
   import { buildChipTransferRows } from './lib/chipTransfer';
   import { getTingpaiList as tingpaiForShoupai } from './lib/game3/tingpai';
@@ -4051,7 +4051,7 @@
       agariType={$game.lastDapai && _olWinner !== null && $game.lastDapai.player !== _olWinner ? 'ron' : (_olWinner !== null ? 'tsumo' : null)}
       agariPai={$game.lastDapai && _olWinner !== null && $game.lastDapai.player !== _olWinner
         ? $game.lastDapai.pai
-        : (_olWinner !== null ? ($game.game.shoupai.get(_olWinner as PlayerId)?._zimo ?? null) : null)}
+        : (_olWinner !== null ? agariZimoPai($game.game.shoupai.get(_olWinner as PlayerId)) : null)}
       agariFrom={$game.lastDapai && _olWinner !== null && $game.lastDapai.player !== _olWinner ? $game.lastDapai.player : null}
     >
       <div slot="chip">
@@ -4145,7 +4145,7 @@
               agariType={$game.lastDapai && $game.lastDapai.player !== hw.player ? 'ron' : 'tsumo'}
               agariPai={$game.lastDapai && $game.lastDapai.player !== hw.player
                 ? $game.lastDapai.pai
-                : ($game.game.shoupai.get(hwPid)?._zimo ?? null)}
+                : agariZimoPai($game.game.shoupai.get(hwPid))}
               agariFrom={$game.lastDapai && $game.lastDapai.player !== hw.player ? $game.lastDapai.player : null}
             >
               <div slot="chip">
@@ -4173,7 +4173,7 @@
             winnerNukiGold={$game.game.nukidoraGold[kw] ?? 0}
             hideFuyuResult={true}
             agariType={$game.pendingKinpei.isRon ? 'ron' : 'tsumo'}
-            agariPai={$game.pendingKinpei.isRon ? ($game.lastDapai?.pai ?? null) : ($game.game.shoupai.get(kw)?._zimo ?? null)}
+            agariPai={$game.pendingKinpei.isRon ? ($game.lastDapai?.pai ?? null) : agariZimoPai($game.game.shoupai.get(kw))}
             agariFrom={$game.pendingKinpei.isRon ? $game.pendingKinpei.ronfrom : null}
           />
         {/if}

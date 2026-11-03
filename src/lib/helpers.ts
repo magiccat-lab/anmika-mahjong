@@ -76,6 +76,14 @@ export function isAnmikaExpandedPai(p: string): p is AnmikaExpandedPai {
   return (ANMIKA_EXPANDED_PAI as readonly string[]).includes(p);
 }
 
+/** 和了画面の「ツモ牌」に出す牌名。[2026-11-03 通報 20261103_0「つもきんうーそーなのに表示があかうーそーつも」]
+ *  sp._zimo は core 名 [金5索 gs → s0] なので、そのまま出すと金が赤に化ける。手牌の並び [App.svelte handTiles] と同じく
+ *  物理牌名 _anmikaZimo [金 ・ 虹 ・ 色付きの白] を先に見る */
+export function agariZimoPai(sp: any): string | null {
+  const z = sp?._anmikaZimo ?? sp?._zimo ?? null;
+  return typeof z === 'string' && z.length > 0 ? z : null;
+}
+
 export type AnmikaCounts = Record<AnmikaExpandedPai, number>;
 
 export function emptyAnmikaCounts(): AnmikaCounts {
