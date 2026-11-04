@@ -8,7 +8,8 @@
   export let onClose: () => void = () => {};
   // 2026-11-04 限定スタンプ: ログイン中の user_id が使える物だけ、共有 36 種の後ろ [最終段] に出す
   export let userId: string | null | undefined = null;
-  $: stampIds = [...STAMP_IDS, ...limitedStampsFor(userId)] as StampId[];
+  // 11-04 リョー「固有スタンプ、ボタンか線で分けよう」: 共有の 36 種の下に線と見出しを引いて、その下に並べる
+  $: ownIds = limitedStampsFor(userId) as StampId[];
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -19,12 +20,21 @@
       <button class="stamp-close" on:click={onClose}>×</button>
     </div>
     <div class="stamp-grid">
-      {#each stampIds as sid}
+      {#each STAMP_IDS as sid}
         <button class="stamp-btn" on:click={() => { onSelect(sid); onClose(); }} title={STAMP_LABELS[sid]}>
           <img class="stamp-thumb" src={`/stamps/stamp_${sid}.png`} alt={STAMP_LABELS[sid]} />
           <span class="stamp-label">{STAMP_LABELS[sid]}</span>
         </button>
       {/each}
+      {#if ownIds.length > 0}
+        <div class="stamp-own-divider" role="separator"><span>固有スタンプ</span></div>
+        {#each ownIds as sid}
+          <button class="stamp-btn stamp-btn-own" on:click={() => { onSelect(sid); onClose(); }} title={STAMP_LABELS[sid]}>
+            <img class="stamp-thumb" src={`/stamps/stamp_${sid}.png`} alt={STAMP_LABELS[sid]} />
+            <span class="stamp-label">{STAMP_LABELS[sid]}</span>
+          </button>
+        {/each}
+      {/if}
     </div>
   </div>
 </div>
@@ -97,6 +107,26 @@
     color: #555;
     text-align: center;
     word-break: break-word;
+  }
+  .stamp-own-divider {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 2px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #b8860b;
+  }
+  .stamp-own-divider::before,
+  .stamp-own-divider::after {
+    content: '';
+    flex: 1;
+    border-top: 2px solid #e0b84a;
+  }
+  .stamp-btn-own {
+    background: #fff8e1;
+    border-color: #e0b84a;
   }
   .stamp-btn:hover {
     background: #ffe082;
