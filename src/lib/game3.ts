@@ -4474,6 +4474,14 @@ export class Game3 {
         // Reverse-pochi tsumo can make the winner self-bust.  The match ends,
         // but no opponent is awarded a tobi prize for that self-inflicted loss.
         if (p === winner && isPochiReverse && loser === null) continue;
+        // [2026-11-04 通報 isg.「フィーバー逆後の放銃トビ賞に倍率が乗ってない」D3NH rev 5080]
+        // フィーバー中の逆ぽっちの後のロンで和了者が自分で飛んだら、受け取るのは放銃者。他の祝儀と同じく
+        // 和了者の倍率 [シュバ ・ フィーバー ・ ぽっち、逆なので負] で和了者が払う。旧実装は受取側 [×1] の倍率だった
+        if (p === winner && isPochiReverse && loser !== null
+          && this.computeChipMultiplier(winner, { mode: 'ron' }) < 0) {
+          this.applyChipFromLoser(winner, loser, 5, { label: `トビ賞 [p${p} 飛び]`, mode: 'ron' });
+          continue;
+        }
         for (const recipient of [0, 1, 2] as PlayerId[]) {
           if (recipient === p) continue;
           if (delta[recipient] > 0) {
