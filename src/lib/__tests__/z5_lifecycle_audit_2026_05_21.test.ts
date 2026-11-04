@@ -18,7 +18,8 @@ function rigPochiTsumo(pai: string, color: 'blue' | 'red' | 'green' | 'yellow' |
   g.shoupai.set(winner, sp);
   g.lastZimoInfo = { player: winner, pai, pochi: color, gold: false };
   g.yifaActive[winner] = opts.yifa !== false;
-  if (opts.lizhi) g.lizhi.add(winner);
+  // [2026-11-04] ぽっちのサイコロはリーチ後のツモだけ。既定はリーチ済み、lizhi: false で鳴き ・ リーチ前の形
+  if (opts.lizhi !== false) g.lizhi.add(winner);
   g.chipLedger = { 0: 0, 1: 0, 2: 0 };
   g.chipBreakdown = [];
   g.huapai = { 0: [], 1: [], 2: [] };
@@ -28,6 +29,15 @@ function rigPochiTsumo(pai: string, color: 'blue' | 'red' | 'green' | 'yellow' |
 }
 
 describe('z5 lifecycle audit 2026-05-21 (2026-07-17 裁定反映)', () => {
+  it('[2026-11-04 通報] リーチしていない (鳴き) 黄ぽっちツモの祝儀 0 枚はサイコロを出さない', () => {
+    const { g, winner } = rigPochiTsumo('z5y', 'yellow', { lizhi: false, yifa: false });
+    const result: any = { fanshu: 1, fu: 30, hupai: [] };
+    g.applyHule(result, winner, null);
+    const awards = (result.saiKoroChances ?? []).map((c: any) => c.awardKey);
+    expect(awards).not.toContain('白ぽっちツモ祝儀0');
+    expect(awards).not.toContain('白ぽっち即ツモ');
+  });
+
   it('z5b 即ツモ + 祝儀 0 枚 → 祝儀0サイコロと即ツモサイコロの両方が base70 で出る', () => {
     const { g, winner } = rigPochiTsumo('z5b', 'blue');
     const result: any = { fanshu: 1, fu: 30, hupai: [] };
@@ -49,6 +59,8 @@ describe('z5 lifecycle audit 2026-05-21 (2026-07-17 裁定反映)', () => {
 
   it('z5r [赤] 即ツモ → award は base70 のまま [140 や - を焼き込まない]', () => {
     const { g, winner } = rigPochiTsumo('z5r', 'red');
+    // リーチ後の白待ちの赤は逆を避けた扱いでサイコロ無し [10-13]。ここは別の待ちで赤ぽっちを万能に使った形
+    (g as any).getTingpaiListBeforeZimo = () => ['m4'];
     const result: any = { fanshu: 1, fu: 30, hupai: [] };
     g.applyHule(result, winner, null);
 

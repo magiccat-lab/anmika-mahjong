@@ -4531,13 +4531,16 @@ export class Game3 {
     //  回避するなら振らなくていいよ」] 本待ちで逆ぽっち [赤 / 黄] を避けたツモはサイコロも振らない。
     // リーチ後の白待ちの赤 / 黄の白ぽっちと、本待ちの 2p 一発ツモ。青 / 緑と本待ちの 1p は逆ではないので今まで通り振る
     const tingBeforeWin = loser === null ? this.getTingpaiListBeforeZimo(winner) : [];
+    // [2026-11-04 通報 arupu_「泣いてる時の黄色で正の上がりしたらポチゼロが出た」、リョー「サイコロはなかったことに」]
+    // ぽっちが効くのはリーチ後のツモだけ [05-21 裁定]。鳴き ・ 門前でもリーチ前に引いたぽっちは普通の白なので、サイコロも出さない
     const isPochiTsumo =
       loser === null
+      && this.lizhi.has(winner)
       && zimoIsZ5
       && this.lastZimoInfo.player === winner
       && lastZimoIsZ5
       && !!this.lastZimoInfo.pochi
-      && !(this.lizhi.has(winner) && tingBeforeWin.includes('z5')
+      && !(tingBeforeWin.includes('z5')
         && (this.lastZimoInfo.pochi === 'red' || this.lastZimoInfo.pochi === 'yellow'));
     if (isPochiTsumo && chipDelta === 0) {
       result.saiKoroChances = result.saiKoroChances ?? [];
