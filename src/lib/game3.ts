@@ -4410,6 +4410,10 @@ export class Game3 {
     // 逆ぽっち payment mode: 通常通り計算した後、 winner / 他家 の defen delta を × -1 で反転
     // [リョー指示 2026-05-11、 リーチ供託のみ常に winner 受取で反転対象外、 親子 / 本場 等の swap-side-effect を排除]
     const isPochiReverse = this.pochiPaymentMode[winner];
+    // [2026-11-04 リョー 隠し演出] 和了の時点でフィーバー中だったか。後で冬を使い切ってフィーバーが終わっても残る [lib/jikoSp.ts]
+    result._feverAtHule = !!this.feverActive[winner];
+    // 逆の元のぽっちの色 (赤 = チップ -2 倍、黄 = -1 倍)。暗転の後に浮かべるぽっちの色に使う
+    if (isPochiReverse) result._pochiReverseColor = (this.pochiMultiplier[winner]?.chip ?? -1) <= -2 ? 'red' : 'yellow';
     // 2026-05-14 codex review fix: 現親判定で 子アガリ後の親計算 / 親払い 正しく
     const isOya = winner === this.currentOya;
     const oyaSeat = this.currentOya;

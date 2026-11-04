@@ -13,6 +13,8 @@ export const SOUND_FILES: readonly string[] = [
   '/sounds/se_a.mp3', '/sounds/se_b.mp3', '/sounds/cutin.mp3',
   // 声とプレミアのサビは git に入れない (無ければ読めないだけ)
   '/sounds/voice/anmika_aori.wav', '/sounds/voice/anmika_yakuman.wav', '/sounds/bgm/premium_sabi.mp3',
+  // [2026-11-04] 隠し演出の曲 [lib/jikoSp.ts]
+  '/sounds/bgm/jiko_sp.mp3',
 ];
 
 const local = new Map<string, string>();

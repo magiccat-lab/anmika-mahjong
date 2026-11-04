@@ -21,6 +21,8 @@
   import SaiKoroModal from './lib/SaiKoroModal.svelte';
   import PochiSqueeze from './lib/PochiSqueeze.svelte';
   import FuyuFlip from './lib/FuyuFlip.svelte';
+  import JikoSp from './lib/JikoSp.svelte';
+  import { jikoSpFor, JIKO_SP_BLACK_MS, JIKO_SP_BOLT_MS, JIKO_SP_SONG_MS, JIKO_SP_SONG } from './lib/jikoSp';
   import Confetti from './lib/Confetti.svelte';
   import { EMPTY_FEVER_RUNS, feverRunTotal, signed, trackFeverRuns, type FeverRuns } from './lib/feverRun';
   import { publicPochiCandidates, kakuteiOf, POCHI_GOOD, pochiLeftForViewer, rollPlan, pochiGood, planFromRelay, DEFAULT_PLAN, type PochiColor, type PochiPlan } from './lib/pochiFx';
@@ -150,7 +152,8 @@
   $: if (typeof window !== 'undefined' && !$game.cutin && ($game.cutinQueue?.length ?? 0) > 0 && cutinTimer === null) {
     game.playNextCutin();
   }
-  $: if (typeof window !== 'undefined' && $game.cutin && cutinTimer === null) {
+  // [11-04 隠し演出] 暗転の間は和了の帯を始めない (明けてから流す)
+  $: if (typeof window !== 'undefined' && $game.cutin && cutinTimer === null && !jikoNow) {
     const ts = $game.cutin.ts;
     // [2026-09-20 E+F] 尺は演出の重さで決める。軽 0.7 / 中 1.2 / 重 1.8 秒
     const durationMs = cutinDurationMs($game.cutin.id);
@@ -225,7 +228,7 @@
   let fuyuFlipSeen = new Set<string>();
   type FuyuFlipEntry = { key: string; player: PlayerId; log: Array<{ pai: string; tier: 'upper' | 'lower'; hit: number }> };
   $: fuyuFlipEntry = ((): FuyuFlipEntry | null => {
-    if (viewMode !== 'single' || !$game.lastHuleResult || $game.game.state?.finished || $game.pendingKinpei || fxCutinBusy) return null;
+    if (viewMode !== 'single' || !$game.lastHuleResult || $game.game.state?.finished || $game.pendingKinpei || fxCutinBusy || jikoNow) return null;
     const entries = ($game.ronResults?.length ?? 0) > 0 ? $game.ronResults
       : ($game.lastWinner !== null ? [{ player: $game.lastWinner, result: $game.lastHuleResult }] : []);
     const st: any = $game.game.state ?? {};
@@ -243,6 +246,54 @@
   // オンライン: 和了った人の画面がめくった枚数を流し、他の席 ・ 観戦は同じ所まで返す
   let fuyuRemote: { key: string; seat: number; opened: number } | null = null;
   $: fuyuFlipMine = !!fuyuFlipEntry && (!onlineGameStarted || fuyuFlipEntry.player === actorSeat);
+  // [2026-11-04 リョー 隠し演出] フィーバー中の逆で 50 枚以上消えたら、和了が来た瞬間 (和了の帯 ・ 板 ・ 冬めくりより先) に全員の画面を暗転して曲を流す [lib/jikoSp.ts]。
+  // オンラインも各画面が同じ和了の結果から同じ判定をする (流し合いはしない)。出し直さない印は局 ・ 席 ・ 枚数
+  let jikoSeen = new Set<string>();
+  let jikoNow: { pochi: 'red' | 'yellow' } | null = null;
+  let jikoSongOn = false;
+  let jikoAudio: HTMLAudioElement | null = null;
+  let jikoTimers: ReturnType<typeof setTimeout>[] = [];
+  let jikoFade: ReturnType<typeof setInterval> | null = null;
+  $: jikoHit = ((): ReturnType<typeof jikoSpFor> => {
+    if (viewMode !== 'single' || !$game.lastHuleResult) return null;
+    const entries = ($game.ronResults?.length ?? 0) > 0 ? $game.ronResults
+      : ($game.lastWinner !== null ? [{ player: $game.lastWinner, result: $game.lastHuleResult }] : []);
+    const st: any = $game.game.state ?? {};
+    return jikoSpFor(entries as any, `${st.changbang ?? ''}-${st.jushu ?? ''}-${st.benbang ?? ''}`);
+  })();
+  $: if (typeof window !== 'undefined' && jikoHit && !jikoSeen.has(jikoHit.key)) startJiko(jikoHit);
+  function stopJikoSong(): void {
+    if (jikoFade !== null) { clearInterval(jikoFade); jikoFade = null; }
+    jikoAudio?.pause();
+    jikoAudio = null;
+    jikoSongOn = false;
+  }
+  function startJiko(hit: NonNullable<typeof jikoHit>): void {
+    jikoSeen.add(hit.key);
+    for (const t of jikoTimers) clearTimeout(t);
+    stopJikoSong();
+    // 帯の予約が先に始まっていたら畳み、明けてから最初から流す
+    if (cutinTimer !== null) { clearTimeout(cutinTimer); cutinTimer = null; }
+    jikoNow = { pochi: hit.pochi };
+    jikoSongOn = true;
+    jikoTimers = [
+      // 雷と同時にサビから鳴らす
+      setTimeout(() => {
+        jikoAudio = playSound(JIKO_SP_SONG, 0.5);
+        jikoSongOn = !!jikoAudio;
+        jikoAudio?.addEventListener('ended', () => stopJikoSong(), { once: true });
+      }, JIKO_SP_BOLT_MS),
+      setTimeout(() => { jikoNow = null; }, JIKO_SP_BLACK_MS),
+      // 曲は暗転が明けた後も流し、最後の 2.5 秒で下げて BGM に戻す
+      setTimeout(() => {
+        const a = jikoAudio;
+        if (!a) return;
+        const step = a.volume / 25;
+        jikoFade = setInterval(() => { if (a.volume - step > 0.001) a.volume -= step; else stopJikoSong(); }, 100);
+      }, JIKO_SP_BOLT_MS + Math.max(0, JIKO_SP_SONG_MS - 2500)),
+    ];
+  }
+  onDestroy(() => { for (const t of jikoTimers) clearTimeout(t); stopJikoSong(); });
   $: fuyuFlipRemote = !!fuyuFlipEntry && onlineGameStarted && fuyuFlipEntry.player !== actorSeat && !$game.cpu[fuyuFlipEntry.player];
   $: fuyuRemoteOpened = fuyuFlipEntry && fuyuRemote && fuyuRemote.seat === fuyuFlipEntry.player ? fuyuRemote.opened : 0;
   $: if (!$game.roundEnded && fuyuRemote) fuyuRemote = null;
@@ -268,7 +319,7 @@
     fuyuFlipSeen = fuyuFlipSeen;
     if (fuyuRemote?.key === key) fuyuRemote = null;
   }
-  $: fxPresentationBusy = fxCutinBusy || fxPochiRevealShowing || !!fuyuFlipEntry;
+  $: fxPresentationBusy = fxCutinBusy || fxPochiRevealShowing || !!fuyuFlipEntry || !!jikoNow;
   // [2026-10-14 リョー「アンミカの演出、裏に上がりが出てばれてることあるよ」] 自分の白ぽっちの絞りの幕 (78%) の裏で
   // ツモのボタン ・ 上の帯の「ツモ和了」・ シャンテンが透けて、めくる前に和了が分かっていた。外れの時はリーチの自動ツモ切りが
   // 絞りの途中で牌を河へ捨てていた。絞りの間はどれも出さず、自動ツモ切り ・ 自動和了も絞りが閉じるまで待つ
@@ -375,7 +426,7 @@
     for (const kind of Object.keys(BGM_TRACKS) as BgmKind[]) { stopBgmFade(kind); bgmAudio[kind]?.pause(); }
   });
   // 消すのは白ぽっちの演出の間だけ (同じ日「演出の時にって言うのはポッチ演出だけね、他は別に音量弄らなくていいよ」)
-  $: { void bgmTick; for (const audio of Object.values(bgmAudio)) if (audio) audio.muted = fxPochiRevealShowing; }
+  $: { void bgmTick; for (const audio of Object.values(bgmAudio)) if (audio) audio.muted = fxPochiRevealShowing || jikoSongOn; }
 
   const PLAYERS = [0, 1, 2] as const satisfies readonly PlayerId[];
 
@@ -3837,6 +3888,7 @@
   {#if viewMode === 'single' && confettiTs}
     {#key confettiTs}<Confetti />{/key}
   {/if}
+  {#if jikoNow}<JikoSp pochi={jikoNow.pochi} durationMs={JIKO_SP_BLACK_MS} boltMs={JIKO_SP_BOLT_MS} />{/if}
   {#if viewMode === 'single' && fxNow && (fxNow.id === 'aori' || fxNow.id === 'yakumanHoju')}
     {#key fxNow.ts}
       <!-- [2026-10-15 リョー「ロンするときの煽り演出も入れたいな」] 煽りは決め台詞と同じピンクの斜めの帯、役満放銃は黒と赤の帯にヒビ -->
@@ -4099,7 +4151,7 @@
     <!-- [2026-10-15 リョー「ロンのカットインが次局になってない？」] 和了の帯 (煽り ・ 役の名前 ・ ロン) が全部終わってから出す。
          決まった遅れ 1.35 秒だと、帯が 3 枚続く時に板と「次局へ」が先に出て、押すと残りの帯が次の局で流れていた -->
     <div class="agari-unified-panel" class:appear-after-cutin={!!$game.lastHuleResult && !state.finished}
-      class:wait-cutin={!!$game.lastHuleResult && !state.finished && (fxCutinBusy || !!fuyuFlipEntry)}
+      class:wait-cutin={!!$game.lastHuleResult && !state.finished && (fxCutinBusy || !!fuyuFlipEntry || !!jikoNow)}
       class:pingju-small={$game.pendingPingju && !$game.lastHuleResult && !state.finished && !$game.pendingKinpei}
       class:kinpei-peek-hidden={kinpeiPeek && !!$game.pendingKinpei}
       class:kinpei-only={!!$game.pendingKinpei && !$game.pendingKinpei.preview && !$game.lastHuleResult && !state.finished && !$game.pendingPingju}>
