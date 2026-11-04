@@ -55,14 +55,18 @@ import {
 // リョー指示 2026-05-15: 段階的に復活。2026-11-02 リョー「このへんからスタンプ足して」で 17 種
 // [隠していた 8 種は絵を元のシートから切り直し、一発ポッチを新しく、マイ転とサイコロは新しい絵]
 // 2026-11-03 リョー「これスタンプ足してあげて」で 8 種足して 25 種 [2p の牌の絵は「一発2p」]
+// 2026-11-04 オタサーの麻雀 ch で isg さんがまとめた最終盤で 36 種 [並びも 4 列でその通り。New 11 ・ 赤黄ときいてないは絵の差し替え]
 // STAMP_IDS から外すだけで pallet / popup から消える。server/ws_server.ts の STAMP_IDS も同じ並びにする
 export const STAMP_IDS = [
-  'shunkashutou', 'kita4', 'konmika', 'shubapotsumo',
-  'doko', 'gyakushubatsumo', 'plus', 'minus',
-  'saikoro', 'ippatsu', 'fever', 'koi',
-  'shuva', 'utare', 'akakino', 'magege', 'udeba',
-  'kiitenai', 'unge', 'ippatsu2p', 'shubarenkane',
-  'mudasaikoro', 'ojouzu', 'pon', 'kagayaku',
+  'yatta', 'zannen', 'arigatou', 'gomenne',
+  'shubapotsumo', 'gyakushubatsumo', 'plus', 'minus',
+  'doko', 'ippatsu', 'fever', 'koi',
+  'magege', 'akakino', 'udeba', 'unge',
+  'shuva', 'shubarenkane', 'ojouzu', 'heta',
+  'utare', 'mudasaikoro', 'pon', 'block',
+  'kiitenai', 'mada', 'okotteru', 'kuyashii',
+  'konmika', 'shunkashutou', 'kita4', 'saikoro',
+  'seiten', 'kagayaku', 'nakayubi', 'ippatsu2p',
 ] as const;
 export type StampId = typeof STAMP_IDS[number];
 export const STAMP_LABELS: Record<StampId, string> = {
@@ -83,7 +87,7 @@ export const STAMP_LABELS: Record<StampId, string> = {
   akakino: '赤黄のこ',
   magege: '曲げ得',
   udeba: '腕場',
-  kiitenai: '聞いてないよ～',
+  kiitenai: 'きいてないよ～',
   unge: '運ゲー',
   ippatsu2p: '一発2p',
   shubarenkane: 'シュバれんかね',
@@ -91,6 +95,17 @@ export const STAMP_LABELS: Record<StampId, string> = {
   ojouzu: 'お上手',
   pon: 'ポン！？',
   kagayaku: '輝く配牌',
+  yatta: 'やったー！',
+  zannen: '残念…',
+  arigatou: 'ありがとう',
+  gomenne: 'ごめんね',
+  heta: '下手くそ',
+  block: 'ブロックサイン',
+  mada: 'まだ〜？',
+  okotteru: '怒ってる…？',
+  kuyashii: '悔しい？',
+  seiten: '正転',
+  nakayubi: '中指',
 };
 const _STAMP_ID_SET: Set<string> = new Set(STAMP_IDS);
 /** スタンプ表示の自動 fade-out [ms] */

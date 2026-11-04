@@ -1,6 +1,6 @@
 ﻿
 <script lang="ts">
-  // スタンプ pallet [25 種 grid、背が足りない時は縦に送る、 thumb image + label]
+  // スタンプ pallet [36 種 grid、背が足りない時は縦に送る、 thumb image + label]
   // 自家 panel の「💬」 button から open、 click で sendStamp
   import { STAMP_IDS, STAMP_LABELS, type StampId } from './store';
   export let onSelect: (id: StampId) => void;

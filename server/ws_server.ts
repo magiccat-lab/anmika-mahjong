@@ -56,14 +56,17 @@ const DEFAULT_MATCH_RECORD_RETRY_DELAYS_MS = [0, 2_000, 5_000];
 const DEFAULT_NEXT_ROUND_TIMEOUT_MS = 180_000;
 const SERVER_NEXT_ROUND_UID = '__server_next_round__';
 
-// src/lib/store.ts の STAMP_IDS と同じ (2026-11-03 25 種)
+// src/lib/store.ts の STAMP_IDS と同じ (2026-11-04 36 種)
 const STAMP_IDS = new Set([
-  'shunkashutou', 'kita4', 'konmika', 'shubapotsumo',
-  'doko', 'gyakushubatsumo', 'plus', 'minus',
-  'saikoro', 'ippatsu', 'fever', 'koi',
-  'shuva', 'utare', 'akakino', 'magege', 'udeba',
-  'kiitenai', 'unge', 'ippatsu2p', 'shubarenkane',
-  'mudasaikoro', 'ojouzu', 'pon', 'kagayaku',
+  'yatta', 'zannen', 'arigatou', 'gomenne',
+  'shubapotsumo', 'gyakushubatsumo', 'plus', 'minus',
+  'doko', 'ippatsu', 'fever', 'koi',
+  'magege', 'akakino', 'udeba', 'unge',
+  'shuva', 'shubarenkane', 'ojouzu', 'heta',
+  'utare', 'mudasaikoro', 'pon', 'block',
+  'kiitenai', 'mada', 'okotteru', 'kuyashii',
+  'konmika', 'shunkashutou', 'kita4', 'saikoro',
+  'seiten', 'kagayaku', 'nakayubi', 'ippatsu2p',
 ]);
 // [2026-10-09 R3] 1 frame の上限。client が送るのは action / resync / stamp 等の小さな JSON だけ
 // [数百 B。バグ通報の状態ダンプは ws ではなく HTTP POST /api/bugreport]。ws 既定の 100MB のままだと
