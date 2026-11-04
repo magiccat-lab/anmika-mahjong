@@ -22,7 +22,7 @@
   import PochiSqueeze from './lib/PochiSqueeze.svelte';
   import FuyuFlip from './lib/FuyuFlip.svelte';
   import JikoSp from './lib/JikoSp.svelte';
-  import { jikoSpFor, JIKO_SP_BLACK_MS, JIKO_SP_BOLT_MS, JIKO_SP_SONG_MS, JIKO_SP_SONG } from './lib/jikoSp';
+  import { jikoSpFor, JIKO_SP_BLACK_MS, JIKO_SP_BOLT_MS, JIKO_SP_SONG } from './lib/jikoSp';
   import Confetti from './lib/Confetti.svelte';
   import { EMPTY_FEVER_RUNS, feverRunTotal, signed, trackFeverRuns, type FeverRuns } from './lib/feverRun';
   import { publicPochiCandidates, kakuteiOf, POCHI_GOOD, pochiLeftForViewer, rollPlan, pochiGood, planFromRelay, DEFAULT_PLAN, type PochiColor, type PochiPlan } from './lib/pochiFx';
@@ -61,7 +61,7 @@
   import LizhiControls from './lib/LizhiControls.svelte';
   import RiichiWaitPanel from './lib/RiichiWaitPanel.svelte';
   import { riichiWaitSuggestions } from './lib/riichiWaitSuggest';
-  import { CUTIN_DURATION_MS, CUTIN_TIER, cutinDurationMs, game, isFeverForcedTsumogiri, shouldAutoNukiBei, type StampId, type StoreState } from './lib/store';
+  import { CUTIN_DURATION_MS, CUTIN_TIER, cutinDurationMs, game, isFeverForcedTsumogiri, jikoPreCheck, jikoRoundKey, shouldAutoNukiBei, type JikoPreHit, type StampId, type StoreState } from './lib/store';
   import type { PlayerId } from './lib/types';
   // フィーバー中の 1 巡の刻み [人の強制ツモ切り ・ CPU]。オンラインは ws_server の FEVER_STEP_MS と合わせる
   const FEVER_TSUMOGIRI_MS = 1000;
@@ -253,23 +253,49 @@
   let jikoSongOn = false;
   let jikoAudio: HTMLAudioElement | null = null;
   let jikoTimers: ReturnType<typeof setTimeout>[] = [];
-  let jikoFade: ReturnType<typeof setInterval> | null = null;
+  // [2026-11-05 リョー「アガリ牌が見えない状態からにして」] 暗転は和了の結果を待たず、ツモった瞬間 (牌も絞りも見える前) から始める。
+  // 単体: 手番の人が引いた直後に jikoPreCheck で試し打ちする (1 ツモにつき 1 回)。オンライン: server が全席 ・ 観戦の投影に載せた印 (jikoPre) を読む。
+  // 当たったら絞りは出さず、暗転の裏でそのまま自動でツモ和了する。和了の結果が届いた時は同じ印 (局 ・ 席) で見ているので二重に暗転しない
+  const jikoPreMemo: { key: string; hit: JikoPreHit | null } = { key: '', hit: null };
+  $: jikoPre = ((): JikoPreHit | null => {
+    if (viewMode !== 'single' || $game.lastHuleResult || $game.roundEnded) return null;
+    if (onlineGameStarted) return $game.jikoPre ?? null;
+    const g = $game.game;
+    const cur = g.lunbanToPlayerId(g.state.lunban) as PlayerId;
+    const sp: any = g.shoupai.get(cur);
+    if ($game.cpu[cur] || !g.feverActive[cur] || !g.lizhi.has(cur) || !g.pochiPaymentMode[cur] || typeof sp?._zimo !== 'string') return null;
+    const k = `${jikoRoundKey(g.state)}|${g.events.length}|${g.state.lunban}|${sp._zimo}`;
+    if (k !== jikoPreMemo.key) { jikoPreMemo.key = k; jikoPreMemo.hit = jikoPreCheck($game); }
+    return jikoPreMemo.hit;
+  })();
+  $: jikoPreHit = jikoPre ? { key: `${jikoRoundKey($game.game.state)}-${jikoPre.player}-${jikoPre.loss}`, player: jikoPre.player, loss: jikoPre.loss, pochi: jikoPre.pochi } : null;
+  $: if (typeof window !== 'undefined' && jikoPreHit && !jikoSeen.has(jikoPreHit.key)) startJiko(jikoPreHit, true);
+  // 新しい試合の最初の局では前の試合の印を捨てる (局 ・ 席 ・ 枚数が同じ印で次の試合の暗転を止めない)
+  $: if (($game.game.events?.length ?? 0) < 2 && jikoSeen.size > 0) jikoSeen = new Set();
   $: jikoHit = ((): ReturnType<typeof jikoSpFor> => {
     if (viewMode !== 'single' || !$game.lastHuleResult) return null;
     const entries = ($game.ronResults?.length ?? 0) > 0 ? $game.ronResults
       : ($game.lastWinner !== null ? [{ player: $game.lastWinner, result: $game.lastHuleResult }] : []);
     const st: any = $game.game.state ?? {};
-    return jikoSpFor(entries as any, `${st.changbang ?? ''}-${st.jushu ?? ''}-${st.benbang ?? ''}`);
+    return jikoSpFor(entries as any, jikoRoundKey(st));
   })();
-  $: if (typeof window !== 'undefined' && jikoHit && !jikoSeen.has(jikoHit.key)) startJiko(jikoHit);
+  const jikoRoundSeat = (key: string): string => `rp:${key.slice(0, key.lastIndexOf('-'))}`;
+  $: if (typeof window !== 'undefined' && jikoHit && !jikoSeen.has(jikoHit.key) && !jikoSeen.has(jikoRoundSeat(jikoHit.key))) startJiko(jikoHit);
   function stopJikoSong(): void {
-    if (jikoFade !== null) { clearInterval(jikoFade); jikoFade = null; }
     jikoAudio?.pause();
     jikoAudio = null;
     jikoSongOn = false;
   }
-  function startJiko(hit: NonNullable<typeof jikoHit>): void {
+  // 暗転の裏で自動のツモ和了。自分の手番の人間だけが送る (他の席 ・ 観戦は見るだけ)。送れなくても暗転が明ければ普通のツモボタンが出る
+  function jikoAutoTsumo(player: number): void {
+    if (!jikoNow || onlineSpectator || $game.roundEnded || $game.lastWinner !== null) return;
+    if (onlineGameStarted ? player !== actorSeat : !!$game.cpu[player as PlayerId]) return;
+    if ($game.game.lunbanToPlayerId($game.game.state.lunban) !== player) return;
+    game.tsumo();
+  }
+  function startJiko(hit: { key: string; player: number; pochi: 'red' | 'yellow' }, pre = false): void {
     jikoSeen.add(hit.key);
+    jikoSeen.add(jikoRoundSeat(hit.key));
     for (const t of jikoTimers) clearTimeout(t);
     stopJikoSong();
     // 帯の予約が先に始まっていたら畳み、明けてから最初から流す
@@ -283,14 +309,9 @@
         jikoSongOn = !!jikoAudio;
         jikoAudio?.addEventListener('ended', () => stopJikoSong(), { once: true });
       }, JIKO_SP_BOLT_MS),
+      // 曲は暗転が明けた後も原曲の終わりまで流す (切らない ・ 下げない)。終わったら ended で BGM に戻る
       setTimeout(() => { jikoNow = null; }, JIKO_SP_BLACK_MS),
-      // 曲は暗転が明けた後も流し、最後の 2.5 秒で下げて BGM に戻す
-      setTimeout(() => {
-        const a = jikoAudio;
-        if (!a) return;
-        const step = a.volume / 25;
-        jikoFade = setInterval(() => { if (a.volume - step > 0.001) a.volume -= step; else stopJikoSong(); }, 100);
-      }, JIKO_SP_BOLT_MS + Math.max(0, JIKO_SP_SONG_MS - 2500)),
+      ...(pre ? [setTimeout(() => jikoAutoTsumo(hit.player), 400)] : []),
     ];
   }
   onDestroy(() => { for (const t of jikoTimers) clearTimeout(t); stopJikoSong(); });
@@ -568,7 +589,10 @@
         // [2026-07-22 リョー報告: 自分リーチ中に CPU の白ツモで演出が出る]
         // CPU の引き牌開示は全画面モーダルを出さない [05-13 の「CPUも同じ演出」仕様を上書き。
         // 結果は河・和了時カットインで分かる]。人間の引き牌だけ開示する
+        // [2026-11-05 隠し演出] 事故は起きるものさになるツモは、色が見える絞りを出さない (暗転が先)
+        const jikoBlackout = !!jikoPre && jikoPre.player === ev.player;
         if (color && $game.game.lizhi.has(ev.player)
+            && !jikoBlackout
             && $game.cpu[ev.player] !== true
             && !(someoneFeverNow && !$game.game.feverActive[ev.player])) {
           const kakutei = kakuteiOf(publicPochiCandidates($game.game));
@@ -578,7 +602,7 @@
         const zi = $game.game.lastZimoInfo as { player?: number; pai?: string; pochi?: string | null } | null;
         const corePai = String(ev?.pai ?? '').replace(/[^a-z0-9]/g, '').slice(0, 2);
         // [2026-10-15] フィーバー中のフィーバーでない人は強制ツモ切りなので、白ぽっちと同じく絞りを出さない
-        if (!color && (corePai === 'p1' || corePai === 'p2') && i === zimoEvents.length - 1
+        if (!color && !jikoBlackout && (corePai === 'p1' || corePai === 'p2') && i === zimoEvents.length - 1
             && zi && zi.player === ev.player && (zi.pochi === 'green' || zi.pochi === 'yellow')
             && $game.cpu[ev.player] !== true
             && !(someoneFeverNow && !$game.game.feverActive[ev.player])) {
@@ -616,6 +640,8 @@
   function onRemotePochiFx(gameSeat: number, msg: any): void {
     // [2026-10-15 リョー「フィーバー中で他の人が一発でぽっちとかつもると関係ないのに演出は言ってるよ」]
     // 他の人のフィーバー中は、フィーバーでない人の絞り (でかぽっち ・ 白ぽっち) を出さない。引いた側が古い画面でも受け側で止める
+    // [2026-11-05 隠し演出] 暗転するツモの絞りは出さない (引いた側が古い画面で流してきても受け側で止める)
+    if (jikoNow || (jikoPre && jikoPre.player === gameSeat)) { if (remotePochi?.seat === gameSeat) remotePochi = null; return; }
     const feverNow = ([0, 1, 2] as const).some((p) => $game.game.feverActive[p]);
     if (feverNow && !$game.game.feverActive[gameSeat as PlayerId]) {
       if (remotePochi?.seat === gameSeat) remotePochi = null;

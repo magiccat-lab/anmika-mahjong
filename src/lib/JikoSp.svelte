@@ -2,8 +2,8 @@
   // [2026-11-04 隠し演出] フィーバー中の逆で 50 枚以上消えた時の暗転 [条件は lib/jikoSp.ts]。
   // [11-04 リョー B1] ツモった牌を見せずに真っ暗 → 雷が落ちる (曲のサビもここから) → 字は出さず、逆のぽっちが下から浮かび上がる → 明ける
   export let pochi: 'red' | 'yellow' = 'yellow';
-  export let durationMs = 4500;
-  export let boltMs = 600;
+  export let durationMs = 7000;
+  export let boltMs = 1200;
 </script>
 
 <div class="jk" style="--jk-dur: {durationMs}ms; --jk-bolt: {boltMs}ms" aria-hidden="true">
@@ -32,7 +32,7 @@
     inset: 0;
     background: #eef3ff;
     opacity: 0;
-    animation: jkFlash 0.7s linear var(--jk-bolt) both;
+    animation: jkFlash 1s linear var(--jk-bolt) both;
   }
   .jk-bolt {
     position: absolute;
@@ -42,7 +42,7 @@
     height: 78vh;
     transform: translateX(-46%);
     opacity: 0;
-    animation: jkBolt 0.9s linear var(--jk-bolt) both;
+    animation: jkBolt 1.4s linear var(--jk-bolt) both;
   }
   .jk-bolt path { fill: #fdfdff; filter: drop-shadow(0 0 10px #9fc2ff) drop-shadow(0 0 28px #5f8dff); }
   /* ぽっち: 白の牌の真ん中の点が、下の闇から浮かび上がる */
@@ -54,7 +54,7 @@
     --pg: rgba(242, 194, 58, 0.85);
     transform: translate(-50%, -50%);
     opacity: 0;
-    animation: jkRise 1.7s cubic-bezier(0.2, 0.7, 0.2, 1) calc(var(--jk-bolt) + 0.9s) both;
+    animation: jkRise 2.6s cubic-bezier(0.2, 0.7, 0.2, 1) calc(var(--jk-bolt) + 1.4s) both;
   }
   .jk-pochi.red { --pc: #ff3b3b; --pg: rgba(255, 59, 59, 0.85); }
   .jk-tile {
@@ -73,7 +73,7 @@
     border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, #fff 0, var(--pc) 45%);
     box-shadow: 0 0 18px 4px var(--pg);
-    animation: jkBeat 1.1s ease-in-out calc(var(--jk-bolt) + 2.4s) infinite;
+    animation: jkBeat 1.4s ease-in-out calc(var(--jk-bolt) + 4s) infinite;
   }
   @keyframes jkFlash {
     0% { opacity: 0; }
@@ -99,9 +99,9 @@
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.12); }
   }
-  /* 最後の 0.5 秒で明ける */
+  /* 最後の 0.8 秒で明ける (7 秒の 88%) */
   @keyframes jkOut {
-    0%, 89% { opacity: 1; }
+    0%, 88% { opacity: 1; }
     100% { opacity: 0; }
   }
   @media (prefers-reduced-motion: reduce) {

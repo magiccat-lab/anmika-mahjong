@@ -6,12 +6,13 @@
 export const JIKO_SP_MIN_LOSS = 50;
 // [11-04 リョー B1「ツモった瞬間つもったものみせず真っ暗にして、雷が落ちて、テキストとかなしで、事故は起きるものさ原曲のサビから
 //  再生される感じで、その後にポッチが浮かび上がってきて」] 和了の帯 ・ 和了の板より先に出し、明けてから帯と板を出す
-/** 暗転の長さ。真っ暗 → 雷 (0.6 秒) → ぽっちが浮かぶ → 明ける */
-export const JIKO_SP_BLACK_MS = 4500;
+// [11-04 リョー 2 版 V1「もうちょいゆっくりでもいいけどね」] 4.5 秒 → 7 秒。真っ暗の間 ・ 雷 ・ ぽっちの浮き上がりをそれぞれ延ばした
+/** 暗転の長さ。真っ暗 → 雷 (1.2 秒) → ぽっちが浮かぶ → 明ける */
+export const JIKO_SP_BLACK_MS = 7000;
 /** 雷が落ちる時刻。曲もここでサビから鳴らす */
-export const JIKO_SP_BOLT_MS = 600;
-/** 曲を流す長さ (原曲カラオケのサビ 27 秒)。暗転が明けた後も卓の上で流し、最後の 2.5 秒で下げる。この間は BGM を消す */
-export const JIKO_SP_SONG_MS = 27000;
+export const JIKO_SP_BOLT_MS = 1200;
+// [11-04 リョー 2 版 S1「いや、原曲そのままにしてくれ」] 27 秒で切って下げるのをやめ、原曲カラオケのサビ (34.6 秒) から曲の終わりまで流す。
+// 流れている間は BGM を消し、曲が終わったら BGM に戻す
 export const JIKO_SP_SONG = '/sounds/bgm/jiko_sp.mp3';
 
 export type JikoSpHit = { key: string; player: 0 | 1 | 2; loss: number; pochi: 'red' | 'yellow' };

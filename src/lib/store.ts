@@ -13,6 +13,7 @@ import { decideCpuDaiminkan, decideCpuPon } from './store/cpuCall';
 import { Shan3, generateTilePool, defaultSanmaRule } from './shan3';
 import { declareKanImpl, ponImpl, damingangImpl } from './store/fulouActions';
 import { hasGoldKita } from './game3/gold';
+import { jikoSpFor } from './jikoSp';
 import { feverWaitInfoFromLiveWall } from './game3/feverLizhi';
 import { evaluateWinPoints } from './game3/settlement';
 import type { LizhiPendingFlags } from './lizhiUi';
@@ -229,8 +230,15 @@ export interface StoreState {
   aoriKey?: string | null;
   /** [2026-10-22 観戦] 局が終わった後の「続けたら各席が引いたはずの牌」 [引く順]。server が観戦 [seat -1] の投影にだけ載せる。それ以外は null */
   spectatorNextDraws?: Record<number, string[]> | null;
+  /** [2026-11-04 隠し演出] server が全席の投影に載せる「今のツモが事故は起きるものさになる」印。ツモ牌は含まない */
+  jikoPre?: JikoPreHit | null;
   /** WSA: online replay mode — canonical store uses this instead of window.__anmikaOnline */
   _onlineMode?: boolean;
+}
+
+function parseJikoPre(v: any): JikoPreHit | null {
+  if (!v || ![0, 1, 2].includes(v.player) || !Number.isFinite(v.loss)) return null;
+  return { player: v.player, loss: Number(v.loss), pochi: v.pochi === 'red' ? 'red' : 'yellow' };
 }
 
 function parseNextDraws(value: unknown): Record<number, string[]> | null {
@@ -488,6 +496,48 @@ export function fuyuOwnerChipDelta(
   } finally {
     g.applySnapshot(snap);
     g.fuyuConsumed[winner] = prevConsumed;
+  }
+}
+
+/** [2026-11-04 リョー 隠し演出「アガリ牌が見えない状態からにして」] 事故は起きるものさ [lib/jikoSp.ts] を、ツモった瞬間 (和了の結果が来る前) に
+ *  知るための試し打ち。手番の人間がフィーバー中 ・ リーチ中 ・ 逆払いで、今引いた牌がツモ和了になり、その和了で本人のチップが
+ *  JIKO_SP_MIN_LOSS 枚以上減るなら { player, loss, pochi } を返す。それ以外は null [今まで通り、和了の結果が来てから暗転]。
+ *  fuyuOwnerChipDelta と同じ型: captureSnapshot → hule → applyHule → 読む → applySnapshot で必ず戻す。
+ *  人に聞く段が挟まる和了 [冬 ・ 金北の選択 ・ 神ぽっち ・ 高目の同率] は、本物の和了で枚数が変わり得るので null に倒す [偽の暗転を出さない] */
+export type JikoPreHit = { player: 0 | 1 | 2; loss: number; pochi: 'red' | 'yellow' };
+export function jikoRoundKey(st: any): string {
+  return `${st?.changbang ?? ''}-${st?.jushu ?? ''}-${st?.benbang ?? ''}`;
+}
+export function jikoPreCheck(s: StoreState): JikoPreHit | null {
+  const g = s.game;
+  if (!g || s.roundEnded || s.lastWinner !== null || isLiveTurnActionBlocked(s)) return null;
+  const player = g.lunbanToPlayerId(g.state.lunban) as PlayerId;
+  if (s.cpu[player] || !g.feverActive[player] || !g.lizhi.has(player) || !g.pochiPaymentMode[player]) return null;
+  const sp: any = g.shoupai.get(player);
+  if (typeof sp?._zimo !== 'string' || sp._zimo.length > 3) return null;
+  if (!g.canTsumo(player)) return null;
+  const snap = g.captureSnapshot();
+  const prevFuyu = g.fuyuConsumed[player];
+  // hule() が書く作業用の印 [次の hule が必ず書き直すが、前後で同じ形に戻す]
+  const hadHuaLen = Object.prototype.hasOwnProperty.call(g, '_huapaiOwnLengthAtHule');
+  const prevHuaLen = hadHuaLen ? structuredClone((g as any)._huapaiOwnLengthAtHule) : undefined;
+  try {
+    const result = g.hule(player);
+    if (!result) return null;
+    if (g.getKamiPochiDoraOccurrences(player).length > 0 || (result as any)._pochiSwapPending) return null;
+    const huapai = g.effectiveHuapaiAtHule(player);
+    if (huapai.includes('f4')) return null;
+    if (hasGoldKita(g, player) && g.kinpeiTarget[player] === null && huapai.length > 0) return null;
+    g.applyHule(result, player, null);
+    const hit = jikoSpFor([{ player, result }], jikoRoundKey(g.state));
+    return hit ? { player: hit.player, loss: hit.loss, pochi: hit.pochi } : null;
+  } catch {
+    return null;
+  } finally {
+    g.applySnapshot(snap);
+    g.fuyuConsumed[player] = prevFuyu;
+    if (hadHuaLen) (g as any)._huapaiOwnLengthAtHule = prevHuaLen;
+    else delete (g as any)._huapaiOwnLengthAtHule;
   }
 }
 
@@ -1313,6 +1363,7 @@ export function createGameStore() {
         cpuWinAck: wireStore.cpuWinAck !== false,
         // [2026-10-22] 観戦の投影だけが持つ。打ち手の画面には届かないので、席ありなら常に null
         spectatorNextDraws: myOnlineSeat === -1 ? parseNextDraws((projection as any).nextDraws) : null,
+        jikoPre: parseJikoPre(wireStore.jikoPre),
         _onlineMode: true,
       };
       // Candidate identity remains private, but tests/debug views may consume

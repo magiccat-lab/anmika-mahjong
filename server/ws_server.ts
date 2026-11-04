@@ -8,6 +8,7 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import jwt from 'jsonwebtoken';
 import { defaultSanmaRule, generateTilePool } from '../src/lib/shan3';
 import { toCorePai } from '../src/lib/helpers';
+import { jikoPreCheck, jikoRoundKey, type JikoPreHit } from '../src/lib/store';
 // [2026-07-21 監査 L-05 fix] online CPU の判断を single mode [cpuStepImpl] と同じ
 // 隠し情報ベースのヘルパーに揃える。旧実装は先頭候補と簡易 fever 判定で分岐していた
 import { decideFever, pickLizhiDapai } from '../src/lib/store/cpuLizhi';
@@ -921,6 +922,24 @@ function spectatorNextDrawsField(state: ReturnType<RoomAuthority['canonicalState
  * reducer for animation, but this projection is the source of truth after
  * every accepted command and on every reconnect.
  */
+// 試し打ち [jikoPreCheck] は 1 つのツモにつき 1 回だけ。全席 ・ 観戦 ・ 再接続の投影が同じ答えを共有する
+const jikoPreCache = new WeakMap<object, { key: string; hit: JikoPreHit | null }>();
+function jikoPreFor(authority: RoomAuthority): JikoPreHit | null {
+  const state = authority.canonicalState();
+  const g = state.game;
+  const player = g.lunbanToPlayerId(g.state.lunban);
+  // 安い条件で先に落とす [人間の手番 ・ フィーバー中 ・ リーチ中 ・ 逆払い ・ ツモ牌あり]。ここを通る時だけ試し打ちする
+  const sp: any = g.shoupai.get(player);
+  if (state.roundEnded || state.lastWinner !== null || state.cpu[player] || !g.feverActive[player]
+    || !g.lizhi.has(player) || !g.pochiPaymentMode[player] || typeof sp?._zimo !== 'string') return null;
+  const key = `${jikoRoundKey(g.state)}|${g.events.length}|${g.state.lunban}|${sp._zimo}|${state.awaitingRonDecision ? 1 : 0}${state.awaitingFulou ? 1 : 0}${state.pendingHold ? 1 : 0}`;
+  const cached = jikoPreCache.get(authority);
+  if (cached && cached.key === key) return cached.hit;
+  const hit = jikoPreCheck(state);
+  jikoPreCache.set(authority, { key, hit });
+  return hit;
+}
+
 export function captureSeatProjection(authority: RoomAuthority, recipientSeat: number): OnlineSeatProjection {
   const state = authority.canonicalState();
   const game = state.game;
@@ -1162,6 +1181,9 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       // canonical から drain されるので、この projection には「この action 分」だけ載る
       cutin: structuredClone((state as any).cutin ?? null),
       cutinQueue: structuredClone((state as any).cutinQueue ?? []),
+      // [2026-11-05 リョー隠し演出「アガリ牌が見えない状態から」] 今のツモが事故は起きるものさ [lib/jikoSp.ts] になるなら全席 ・ 観戦に同じ印を配る。
+      // 載るのは誰が・何枚・どの色の逆かだけで、ツモ牌は含まない [暗転そのものが明かす以上は伝えない]。client はこれを見たらツモ牌が見える前に暗転し、絞りを出さない
+      jikoPre: jikoPreFor(authority),
     },
   } as unknown as OnlineSeatProjection;
 }
