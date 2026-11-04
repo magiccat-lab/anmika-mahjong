@@ -14,6 +14,13 @@ export const LIMITED_STAMP_OWNERS: Readonly<Record<string, string>> = {
 };
 export const LIMITED_STAMP_IDS = ['kyuni', 'kaihatsu', 'toutotsu', 'nipmachi', 'jibungatari', 'shuichi'] as const;
 export type LimitedStampId = typeof LIMITED_STAMP_IDS[number];
+
+/** [2026-11-04 先輩「全員cpuにも出してあげよう」] 人が 1 人だけの卓 (CPU 戦 ・ 他が全員 CPU の部屋) は
+ *  見るのが本人だけなので、固有スタンプを誰にでも全種出す。人が 2 人以上の卓は持ち主だけ */
+export function stampsOpenToAll(members: ReadonlyArray<{ is_cpu?: boolean }> | null | undefined): boolean {
+  if (!members) return true;
+  return members.filter((m) => !m.is_cpu).length <= 1;
+}
 export const LIMITED_STAMP_LABELS: Record<LimitedStampId, string> = {
   kyuni: '急に静か',
   kaihatsu: '開発者特権',

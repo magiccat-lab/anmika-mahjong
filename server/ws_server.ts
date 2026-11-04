@@ -29,7 +29,7 @@ import {
   type RoomStartSnapshot,
 } from './protocol';
 import { activeTrioForStart, computeRoomChipDelta, finalizeRoomChipDelta, foldRoomState, gameLedgerFromRoom, gameToRoomSeat, initialRoomChipLedger, mappingFor, mergeRoomChipDelta, nextMappingForPresent, presentRoomSeats, roomToGameSeat } from './rotation';
-import { canUseLimitedStamp } from '../src/lib/stampAccess';
+import { canUseLimitedStamp, isLimitedStamp, stampsOpenToAll } from '../src/lib/stampAccess';
 import { ANMIKA_RULE_VERSION } from '../src/lib/ruleVersion';
 import { filterCpuAutoKan } from '../src/lib/store/cpuCall';
 import { getCpuVersion } from './cpuVersion';
@@ -69,10 +69,16 @@ const STAMP_IDS = new Set([
   'konmika', 'shunkashutou', 'kita4', 'saikoro',
   'seiten', 'kagayaku', 'nakayubi', 'ippatsu2p',
 ]);
-/** 共有スタンプは誰でも、限定スタンプ [stampAccess.ts] は持ち主と magicren だけ [2026-11-04] */
-export function canSendStamp(stampId: unknown, userId: string | null | undefined): boolean {
+/** 共有スタンプは誰でも、限定スタンプ [stampAccess.ts] は持ち主と magicren だけ [2026-11-04]。
+ *  人が 1 人だけの卓 (他が全員 CPU) は限定スタンプも誰でも [2026-11-04 先輩「全員cpuにも出してあげよう」] */
+export function canSendStamp(stampId: unknown, userId: string | null | undefined, openToAll = false): boolean {
   if (typeof stampId !== 'string') return false;
-  return STAMP_IDS.has(stampId) || canUseLimitedStamp(stampId, userId);
+  if (STAMP_IDS.has(stampId)) return true;
+  if (openToAll && isLimitedStamp(stampId)) return true;
+  return canUseLimitedStamp(stampId, userId);
+}
+function roomStampsOpenToAll(room: { members?: Map<string, { is_cpu?: boolean }> }): boolean {
+  return room.members ? stampsOpenToAll([...room.members.values()]) : false;
 }
 // [2026-10-09 R3] 1 frame の上限。client が送るのは action / resync / stamp 等の小さな JSON だけ
 // [数百 B。バグ通報の状態ダンプは ws ではなく HTTP POST /api/bugreport]。ws 既定の 100MB のままだと
@@ -2106,7 +2112,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     delete action.cpuSeat;
     if (action.type === 'stamp') {
       if (!room.snapshot.started) return { reason: 'room is not started' };
-      if (!canSendStamp(action.stampId, fromUserId)) {
+      if (!canSendStamp(action.stampId, fromUserId, roomStampsOpenToAll(room))) {
         return { reason: 'invalid stampId' };
       }
       // WSA: stamp は revision を進めない。broadcast だけして早期 return
@@ -3147,7 +3153,7 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           if (!room.snapshot.started) return;
           // 観戦 [seat < 0] は送れない。限定スタンプは接続の user_id が持ち主か magicren の時だけ
           if (typeof payload.seat !== 'number' || payload.seat < 0) return;
-          if (!canSendStamp(value.stampId, payload.uid)) return;
+          if (!canSendStamp(value.stampId, payload.uid, roomStampsOpenToAll(room))) return;
           if (!allowStamp(room, payload.seat)) return;
           broadcast(room, { type: 'stamp', seat: payload.seat, stampId: value.stampId });
           return;

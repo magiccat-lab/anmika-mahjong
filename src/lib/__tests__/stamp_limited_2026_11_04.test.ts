@@ -1,6 +1,6 @@
 // 限定スタンプ [2026-11-04 リョー「急に静か、俺にだけ搭載して」「ちなみに俺は全種使えるようにして」「asumeに「週1オンミカ！」ってスタンプもつけて」]
 import { describe, it, expect } from 'vitest';
-import { LIMITED_STAMP_IDS, canUseLimitedStamp, limitedStampsFor } from '../stampAccess';
+import { LIMITED_STAMP_IDS, canUseLimitedStamp, limitedStampsFor, stampsOpenToAll } from '../stampAccess';
 import { STAMP_IDS, STAMP_LABELS } from '../store';
 import { canSendStamp } from '../../../server/ws_server';
 
@@ -44,5 +44,20 @@ describe('server の許可 [canSendStamp]', () => {
     expect(canSendStamp('nothing', MAGICREN)).toBe(false);
     expect(canSendStamp(5, MAGICREN)).toBe(false);
     expect(canSendStamp('kyuni', undefined)).toBe(false);
+  });
+});
+
+// [2026-11-04 先輩「全員cpuにも出してあげよう」] 人が 1 人だけの卓は誰でも限定を全種
+describe('相手が全員 CPU の卓 [stampsOpenToAll]', () => {
+  const human = (id: string) => ({ user_id: id, is_cpu: false });
+  const cpu = (id: string) => ({ user_id: id, is_cpu: true });
+  it('人 1 + CPU は開く、人 2 以上は開かない', () => {
+    expect(stampsOpenToAll([human(NOBODY), cpu('CPU_X_1'), cpu('CPU_X_2')])).toBe(true);
+    expect(stampsOpenToAll([human(NOBODY), human(NOIMI), cpu('CPU_X_1')])).toBe(false);
+  });
+  it('開いた卓では誰でも限定を送れる、閉じた卓では持ち主だけ', () => {
+    for (const id of LIMITED_STAMP_IDS) expect(canSendStamp(id, NOBODY, true)).toBe(true);
+    expect(canSendStamp('toutotsu', NOBODY, false)).toBe(false);
+    expect(canSendStamp('nai_stamp', NOBODY, true)).toBe(false);
   });
 });
