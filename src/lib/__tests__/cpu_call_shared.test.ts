@@ -86,6 +86,14 @@ describe('decideCpuPon: 代表手', () => {
     expect(decideCpuPon(open, 0, 'z5', FEVER_ON)).toEqual({ call: true, reason: 'sanyuan' });
   });
 
+  it('[11-04 通報 20261104_0] 暗刻からはポンしない [字牌も数牌も。字牌は大明槓へ回る]', () => {
+    const g = buildG(['z5', 'z5', 'z5', ...PLAIN.slice(0, 8), 's9', 's9']);
+    expect(decideCpuPon(g, 0, 'z5', FEVER_ON)).toEqual({ call: false, reason: 'has-triplet' });
+    expect(decideCpuDaiminkan(g, 0, 'z5', FEVER_ON)).toEqual({ call: true, reason: 'sanyuan' });
+    const num = buildG(['p5', 'p5', 'p5', 'm1', 'm2', 'm3', 's4', 's5', 's8', 'z1'], ['z666+']);
+    expect(decideCpuPon(num, 0, 'p5', FEVER_ON)).toEqual({ call: false, reason: 'has-triplet' });
+  });
+
   it('七対子 / 全虹の芽がある手は feverSkip の時だけ見送る [三元牌でも]', () => {
     const g = buildG(['m7', 'm7', 'z5', 'z5', ...PLAIN]);
     expect(decideCpuPon(g, 0, 'z5', FEVER_ON)).toEqual({ call: false, reason: 'fever-skip' });
@@ -153,7 +161,9 @@ const SCENARIOS: Scenario[] = [
   { name: '数牌は門前で鳴かない', hand: ['p5', 'p5', 'm1', 'm2', 'm3', 's4', 's5', 's6', 's8', 'z1', 'z2', 'm9', 'm8'], tile: 'p5', expect: 'none' },
   { name: '副露後の進む数牌ポン', hand: ADVANCE_HAND, fulou: ['z666+'], tile: 'p5', expect: 'pon' },
   { name: '7 は鳴かない', hand: ['m1', 'm2', 'm3', 's4', 's5', 's6', 'p7', 'p7', 's9', 'z1'], fulou: ['z666+'], tile: 'p7', expect: 'none' },
-  { name: '發を 3 枚持ちでもポンが先 [CPU の大明槓は実質ここでは出ない]', hand: ['z6', 'z6', 'z6', ...PLAIN.slice(0, 8), 's9', 's9'], tile: 'z6', expect: 'pon' },
+  // 11-04 通報 20261104_0: 前は暗刻からポンして残りの 1 枚を切っていた。今は大明槓
+  { name: '發を 3 枚持ちならポンせず大明槓', hand: ['z6', 'z6', 'z6', ...PLAIN.slice(0, 8), 's9', 's9'], tile: 'z6', expect: 'kan' },
+  { name: '数牌の暗刻は副露後でもポンしない', hand: ['p5', 'p5', 'p5', 'm1', 'm2', 'm3', 's4', 's5', 's8', 'z1'], fulou: ['z666+'], tile: 'p5', expect: 'none' },
   // 7 対子の芽がある手の發ポンは両方見送る [10-28 に online を single に揃えた。前は online だけ鳴いていた]
   { name: '7 対子の芽 + 發', hand: ['m7', 'm7', 'z6', 'z6', ...PLAIN], tile: 'z6', expect: 'none' },
 ];

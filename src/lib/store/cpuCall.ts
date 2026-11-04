@@ -11,6 +11,8 @@
 //   - 数牌 / オタ風はポンのみ。副露 1 つ以上 かつ 現シャンテン <= 2 かつ ポンで
 //     シャンテンが下がる時だけ。7 は絶対に鳴かない [フィーバー権が飛ぶため]
 //   - 大明槓は三元牌 + 役牌風だけ
+//   - 手に同じ牌が 3 枚 [暗刻] ある時はポンしない [11-04 通報 20261104_0。ポンして残りの 1 枚を
+//     切っていた。字牌は大明槓の判断へ回し、数牌は暗刻のまま残す]
 //   - 暗槓 / 加槓は字牌 [北を除く] の 4 枚揃いだけ [11-02 から風牌も]
 //   - 七対子 / 全虹の芽がある手は見送る [shouldSkipPonForFever]。
 //     single も online も feverSkip: true [10-28 に online を揃えた]
@@ -36,7 +38,8 @@ export type CpuCallReason =
   | 'non-yakuhai-wind'
   | 'number-no-advance'
   | 'kan-not-honor'
-  | 'no-pair-left';
+  | 'no-pair-left'
+  | 'has-triplet';
 
 export interface CpuCallDecision {
   call: boolean;
@@ -81,6 +84,12 @@ function pairKinds(sp: any): number {
   return n;
 }
 
+/** 手にその牌が何枚あるか。majiang-core の [s][5] は赤 ・ 金を含む */
+function countInHand(game: CallGame, seat: PlayerId, core: string): number {
+  const arr = (game.shoupai.get(seat) as any)?._bingpai?.[core[0]];
+  return Number(arr?.[parseInt(core[1], 10)] ?? 0);
+}
+
 /** 門前で、その対子をポンすると雀頭の候補が残らないか
  *  [cpu-lab 2026-11-02 型 6] 人の対局 [古い 80%] では門前の役牌ポンでも、対子がその 1 組だけの時は 2 割しかポンしない */
 function ponLeavesNoPair(game: CallGame, seat: PlayerId): boolean {
@@ -97,6 +106,8 @@ export function decideCpuPon(game: CallGame, seat: PlayerId, discarded: string, 
   if (opts.feverSkip && shouldSkipPonForFever(game as Game3, seat)) {
     return { call: false, reason: 'fever-skip' };
   }
+  // 暗刻からのポンは 4 枚目を河に捨てるだけになる [11-04 通報 20261104_0 白の暗刻からポンして白を切った]
+  if (countInHand(game, seat, core) >= 3) return { call: false, reason: 'has-triplet' };
   if ((c.sanyuan || c.fengpai) && ponLeavesNoPair(game, seat)) {
     return { call: false, reason: 'no-pair-left' };
   }
