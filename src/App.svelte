@@ -53,7 +53,6 @@
   import PaifuLoadPanel from './lib/PaifuLoadPanel.svelte';
   import FeverWaitsPanel from './lib/FeverWaitsPanel.svelte';
   import StampPallet from './lib/StampPallet.svelte';
-  import { stampsOpenToAll } from './lib/stampAccess';
   import StampPopup from './lib/StampPopup.svelte';
   import { FX_LABELS } from './lib/fxArtwork';
   import { NO_SET, kinpeiPairLabels, setCutinFor, setFlags, type SetFlags } from './lib/setCutin';
@@ -82,7 +81,17 @@
 
   // スタンプ pallet 開閉 [自家「💬」 button 押下時 true]
   let stampPalletOpen = false;
-  function openStampPallet() { stampPalletOpen = true; }
+  // [2026-11-04 先輩「スマホで開いたけど俺の入ってなくね」] CPU 戦 (オフライン) は onlineMe が空で固有スタンプが出なかった。
+  // ログイン済みなら /api/me の user_id で固有スタンプを出す [CPU 戦のスタンプは手元だけ。オンラインの許可はサーバが見る]
+  let stampLoginUserId: string | null = null;
+  async function refreshStampLogin() {
+    if (onlineMe?.user_id) return;
+    try {
+      const r = await fetch(`/api/me`, { credentials: 'include' });
+      if (r.ok) stampLoginUserId = ((await r.json())?.user_id as string) || null;
+    } catch { /* 未ログイン ・ 圏外は共通の 36 種だけ */ }
+  }
+  function openStampPallet() { stampPalletOpen = true; void refreshStampLogin(); }
   function closeStampPallet() { stampPalletOpen = false; }
   function onStampSelect(id: StampId) {
     // 自家 seat に local set + online なら ws send [server で from_seat 上書き]
@@ -4417,7 +4426,7 @@
 
 <!-- スタンプ pallet [global modal、 viewMode 問わず 開いてれば表示] -->
 {#if stampPalletOpen}
-  <StampPallet onSelect={onStampSelect} onClose={closeStampPallet} userId={onlineMe?.user_id ?? null} openToAll={!onlineMe || stampsOpenToAll(onlineMembers)} />
+  <StampPallet onSelect={onStampSelect} onClose={closeStampPallet} userId={onlineMe?.user_id || stampLoginUserId} />
 {/if}
 
 
