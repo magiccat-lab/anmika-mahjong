@@ -3,8 +3,12 @@
   // スタンプ pallet [36 種 grid、背が足りない時は縦に送る、 thumb image + label]
   // 自家 panel の「💬」 button から open、 click で sendStamp
   import { STAMP_IDS, STAMP_LABELS, type StampId } from './store';
+  import { limitedStampsFor } from './stampAccess';
   export let onSelect: (id: StampId) => void;
   export let onClose: () => void = () => {};
+  // 2026-11-04 限定スタンプ: ログイン中の user_id が使える物だけ、共有 36 種の後ろ [最終段] に出す
+  export let userId: string | null | undefined = null;
+  $: stampIds = [...STAMP_IDS, ...limitedStampsFor(userId)] as StampId[];
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -15,7 +19,7 @@
       <button class="stamp-close" on:click={onClose}>×</button>
     </div>
     <div class="stamp-grid">
-      {#each STAMP_IDS as sid}
+      {#each stampIds as sid}
         <button class="stamp-btn" on:click={() => { onSelect(sid); onClose(); }} title={STAMP_LABELS[sid]}>
           <img class="stamp-thumb" src={`/stamps/stamp_${sid}.png`} alt={STAMP_LABELS[sid]} />
           <span class="stamp-label">{STAMP_LABELS[sid]}</span>

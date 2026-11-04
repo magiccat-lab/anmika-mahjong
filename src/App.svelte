@@ -4416,7 +4416,7 @@
 
 <!-- スタンプ pallet [global modal、 viewMode 問わず 開いてれば表示] -->
 {#if stampPalletOpen}
-  <StampPallet onSelect={onStampSelect} onClose={closeStampPallet} />
+  <StampPallet onSelect={onStampSelect} onClose={closeStampPallet} userId={onlineMe?.user_id ?? null} />
 {/if}
 
 

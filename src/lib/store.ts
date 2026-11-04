@@ -16,6 +16,7 @@ import { hasGoldKita } from './game3/gold';
 import { feverWaitInfoFromLiveWall } from './game3/feverLizhi';
 import { evaluateWinPoints } from './game3/settlement';
 import type { LizhiPendingFlags } from './lizhiUi';
+import { LIMITED_STAMP_IDS, LIMITED_STAMP_LABELS, type LimitedStampId } from './stampAccess';
 import {
   advanceSaiKoroStage,
   appendSaiKoroChances,
@@ -68,8 +69,9 @@ export const STAMP_IDS = [
   'konmika', 'shunkashutou', 'kita4', 'saikoro',
   'seiten', 'kagayaku', 'nakayubi', 'ippatsu2p',
 ] as const;
-export type StampId = typeof STAMP_IDS[number];
+export type StampId = typeof STAMP_IDS[number] | LimitedStampId;
 export const STAMP_LABELS: Record<StampId, string> = {
+  ...LIMITED_STAMP_LABELS,
   shunkashutou: '春夏秋冬揃いました',
   kita4: '4北揃いました',
   konmika: '期待値の皆さ〜ん こんミカ〜！',
@@ -107,7 +109,8 @@ export const STAMP_LABELS: Record<StampId, string> = {
   seiten: '正転',
   nakayubi: '中指',
 };
-const _STAMP_ID_SET: Set<string> = new Set(STAMP_IDS);
+// 限定スタンプも受け取り側は表示できる [送れる人の絞りは stampAccess.ts と server]
+const _STAMP_ID_SET: Set<string> = new Set([...STAMP_IDS, ...LIMITED_STAMP_IDS]);
 /** スタンプ表示の自動 fade-out [ms] */
 export const STAMP_DURATION_MS = 1500;
 export const CUTIN_DURATION_MS = 1800;
