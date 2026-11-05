@@ -108,6 +108,20 @@
     }
     return best && pick ? pick.id : null;
   }
+
+  // [11-06 先輩「こういうのも戦績に入れといて」] シャンテン巡目の数え方と、対人戦 FEW 試合以上の人の 2 / 1 / テンパイを 1 行ずつ、
+  // 届いた率の幅。表と同じ数 (xtAvg ・ xt_rounds) から毎回出す
+  $: xtPlayers = players
+    .filter((p) => !few(p) && g(p, 'xt0_n'))
+    .sort((a, b) => xtAvg(0)(a) - xtAvg(0)(b));
+  const xtCell = (k: number) => (p: Counts) => (g(p, `xt${k}_n`) ? xtAvg(k)(p).toFixed(2) : '―');
+  function reachRange(k: number, ps: Counts[]): string {
+    const r = ps.filter((p) => g(p, 'xt_rounds')).map((p) => (100 * g(p, `xt${k}_n`)) / g(p, 'xt_rounds'));
+    if (!r.length) return '―';
+    const lo = Math.min(...r).toFixed(0);
+    const hi = Math.max(...r).toFixed(0);
+    return lo === hi ? `${lo}%` : `${lo}〜${hi}%`;
+  }
 </script>
 
 {#if loading}
@@ -144,6 +158,20 @@
       </table>
     </div>
   {/each}
+  {#if xtPlayers.length}
+    <h3>シャンテン巡目のまとめ</h3>
+    <div class="xt">
+      <p>シャンテンは 7萬を 1萬に見て、嵌八萬 ・ 七対子 ・ アメリカン ・ 国士も込み</p>
+      <p>巡目は局ごとに自分が切った回数 (配牌で届いていたら 0)。届く前に局が終わった局は平均に入らない</p>
+      <p class="sub">今の数字 (対人戦{FEW}試合以上、2 / 1 / テンパイ、テンパイの早い順)</p>
+      <ol>
+        {#each xtPlayers as p (p.id)}
+          <li><b>{p.name}</b> | {xtCell(2)(p)} / {xtCell(1)(p)} / {xtCell(0)(p)}</li>
+        {/each}
+      </ol>
+      <p>届いた局の率: 2シャンテン {reachRange(2, xtPlayers)} ・ 1シャンテン {reachRange(1, xtPlayers)} ・ テンパイ {reachRange(0, xtPlayers)}</p>
+    </div>
+  {/if}
   <p class="note">緑の数は、対人戦{FEW}試合以上の人の中で一番良い所。比べる意味の薄い行 (リーチ率など) には付けていない</p>
 {/if}
 
@@ -174,5 +202,16 @@
   }
   td { text-align: right; font-variant-numeric: tabular-nums; }
   td.few { opacity: 0.6; }
+  .xt {
+    font-size: 0.84rem;
+    line-height: 1.55;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .xt p { margin: 2px 0; }
+  .xt .sub { margin-top: 6px; color: #ffe9ad; }
+  .xt ol { margin: 2px 0 6px; padding-left: 1.6em; font-variant-numeric: tabular-nums; }
   td.best { color: #8fe3a1; font-weight: 700; background: rgba(143, 227, 161, 0.12); }
 </style>
