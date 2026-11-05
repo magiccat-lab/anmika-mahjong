@@ -46,6 +46,11 @@
   const numr = (v: number): string => num(Math.round(v));
   const pochi = (a: string, e: string) => (p: Counts) => (g(p, 'lz_draws') ? `${g(p, a)} (期待値 ${g(p, e).toFixed(1)})` : '―');
 
+  // [11-06 先輩「平均シャンテン巡目とかも出せるようにして欲しい(2/1/テンパイ)」] 届いた局だけの平均巡目と、届いた局の率。
+  // 巡目は自分が切った回数 (配牌で届いていれば 0)。届く前に局が終わった局は平均に入らないので率を並べて読む
+  const xtAvg = (k: number) => (p: Counts) => (g(p, `xt${k}_n`) ? g(p, `xt${k}_sum`) / g(p, `xt${k}_n`) : Infinity);
+  const xtShow = (k: number) => (p: Counts) =>
+    g(p, `xt${k}_n`) ? `${xtAvg(k)(p).toFixed(2)} (${pct(g(p, `xt${k}_n`), g(p, 'xt_rounds'))})` : '―';
   const money: Row[] = [
     ['対人戦の試合', (p) => g(p, 'matches'), 0, (p) => `${g(p, 'matches')}` + (g(p, 'sitout') ? ` (+抜け番${g(p, 'sitout')})` : '')],
     ['チップ収支', (p) => g(p, 'chip'), 1, (p) => num(g(p, 'chip'))],
@@ -76,6 +81,9 @@
     ['平均放銃点', rate('points_dealt_in', 'deal_ins'), -1, (p) => Math.floor(g(p, 'points_dealt_in') / Math.max(g(p, 'deal_ins'), 1)).toLocaleString()],
     ['シュバ成就率', rate('shuba_won', 'shuba_decl'), 1, (p) => (g(p, 'shuba_decl') ? `${pct(g(p, 'shuba_won'), g(p, 'shuba_decl'))} (${g(p, 'shuba_won')}/${g(p, 'shuba_decl')})` : '―')],
     ['シュバで増えた枚数', (p) => g(p, 'shuba_extra'), 1, (p) => numr(g(p, 'shuba_extra'))],
+    ['2シャンテンの平均巡目 (届いた率)', xtAvg(2), -1, xtShow(2)],
+    ['1シャンテンの平均巡目 (届いた率)', xtAvg(1), -1, xtShow(1)],
+    ['テンパイの平均巡目 (届いた率)', xtAvg(0), -1, xtShow(0)],
     ['リーチ率', rate('riichi', 'rounds'), 0, (p) => pct(g(p, 'riichi'), g(p, 'rounds'))],
     ['副露率', rate('furo_rounds', 'rounds'), 0, (p) => pct(g(p, 'furo_rounds'), g(p, 'rounds'))],
     ['平均順位', rate('place_sum', 'placed'), -1, (p) => (g(p, 'placed') ? (g(p, 'place_sum') / g(p, 'placed')).toFixed(2) : '―')],

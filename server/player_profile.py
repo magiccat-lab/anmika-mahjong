@@ -9,7 +9,7 @@ review ページで OK → 「これをオンミカのサイト上で見れる�
   ・打牌: 部屋のまとめ (summaries/*/data.json) の discard_review.by_player (CPU と同じ打牌の率 ・ 降りの率)。
     部屋の通しの数なので、CPU 戦と対人戦が混ざる部屋の分は 全部 にだけ入れる
   ・読み直しの数 [11-03 先輩「サイコロの収支、期待値で置き換えたEVだして」「配牌の平均シャンテン数」「逆/正ツモも枚数の期待値」
-    「シュバ成就率とシュバで増えた枚数」]: tools/profile_replay.mts が全部屋を読み直して書く JSON (replay_json)。
+    「シュバ成就率とシュバで増えた枚数」、11-06「平均シャンテン巡目とかも (2/1/テンパイ)」]: tools/profile_replay.mts が全部屋を読み直して書く JSON (replay_json)。
     無い時は 0 のまま。サイコロの期待値は 1 回ごとに 倍率 × (基本の枚数 × 投げる数 / 15 + シュバサイなら 投げる数 × 331/180)
     を 1 人あたりにし、振った人は払う人数分を貰う。読み直しが途中で止まった試合のサイコロは実際の収支のまま (dice_ev に実額)
 """
@@ -250,7 +250,8 @@ def compute(stats_db, ws_db, summaries, replay_json=None):
         if not u or u.startswith('CPU'):
             continue
         for k in ('all', kind):
-            for f in ('lz_draws', 'pos', 'neg', 'e_pos', 'e_neg', 'shuba_decl', 'shuba_won', 'shuba_extra'):
+            for f in ('lz_draws', 'pos', 'neg', 'e_pos', 'e_neg', 'shuba_decl', 'shuba_won', 'shuba_extra',
+                      'xt_rounds', 'xt2_n', 'xt2_sum', 'xt1_n', 'xt1_sum', 'xt0_n', 'xt0_sum'):
                 if f in c:
                     P[u][k][f] += c[f]
 

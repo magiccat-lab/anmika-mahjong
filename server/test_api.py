@@ -903,7 +903,8 @@ def test_stats_profile_replay_dice_ev_deal_pochi_shuba(env, tmp_path, monkeypatc
         "hands": [{"room": "P1", "match": 1, "seat": 0, "xt": 3}, {"room": "P1", "match": 1, "seat": 0, "xt": 2},
                   {"room": "P1", "match": 1, "seat": 1, "xt": 4}],
         "counts": [{"room": "P1", "match": 1, "seat": 0, "lz_draws": 10, "pos": 1, "neg": 0, "e_pos": 0.4, "e_neg": 0.35,
-                    "shuba_decl": 2, "shuba_won": 1, "shuba_extra": 40}],
+                    "shuba_decl": 2, "shuba_won": 1, "shuba_extra": 40,
+                    "xt_rounds": 8, "xt2_n": 7, "xt2_sum": 21, "xt1_n": 5, "xt1_sum": 30, "xt0_n": 3, "xt0_sum": 27}],
     }))
     add_match("P1", [("a", 0), ("b", 1), ("c", 2)], {"a": 30, "b": -10, "c": -20},
               {"a": (8, 2, 0, 1), "b": (8, 1, 1, 2), "c": (8, 0, 2, 3)})
@@ -919,6 +920,8 @@ def test_stats_profile_replay_dice_ev_deal_pochi_shuba(env, tmp_path, monkeypatc
     assert a["deal_n"] == 2 and a["deal_xt"] == 5 and b["deal_xt"] == 4
     assert a["pos"] == 1 and a["e_pos"] == 0.4 and a["lz_draws"] == 10
     assert a["shuba_decl"] == 2 and a["shuba_won"] == 1 and a["shuba_extra"] == 40
+    # [11-06 先輩「平均シャンテン巡目とかも出せるようにして欲しい(2/1/テンパイ)」] 生の数のまま渡す (率は client)
+    assert a["xt_rounds"] == 8 and a["xt2_n"] == 7 and a["xt1_sum"] == 30 and a["xt0_n"] == 3 and a["xt0_sum"] == 27
 
 
 def test_profile_dice_ev_per_payer_shuba_bonus():

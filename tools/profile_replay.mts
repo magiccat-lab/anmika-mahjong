@@ -5,6 +5,8 @@
 //  - hands: 局ごとの配牌のシャンテン数
 //  - pochi: リーチ中のツモの数と、正ぽっち (緑 ・ 青) ・ 逆ぽっち (赤 ・ 黄) を引いた数と、その期待値
 //    [期待値 = ツモごとに「その人から見えていない色付きぽっち / 見えていない牌」を足した物]
+//  - xt2 / xt1 / xt0: 局ごとに 2 シャンテン ・ 1 シャンテン ・ テンパイに初めて届いた巡目 [11-06 先輩「平均シャンテン巡目とかも出せるようにして欲しい(2/1/テンパイ)」]。
+//    巡目 = その局で自分が切った回数 (配牌で届いていれば 0)。_n は届いた局の数、_sum は巡目の和、xt_rounds は見た局の数
 //  - shuba: シュバの宣言 ・ 成就 (宣言した局で 1 回でも和了、宣言 1 回に 1 回まで) ・ ×2 で増えた枚数 [シュバ×2 の付いたチップの半分、払う人の数を掛けた和了者の増え]
 // 使い方: tsx tools/profile_replay.mts [ws の DB] > out.json
 import { DatabaseSync } from 'node:sqlite';
@@ -13,6 +15,8 @@ import { resolve } from 'node:path';
 import Majiang from '@kobalab/majiang-core';
 import { createRoomAuthority, type RoomAuthority } from '../server/authority';
 import { toCorePai } from '../src/lib/helpers';
+import { swapM7, unswapM1, kanpamanXt } from '../src/lib/game3/cpuValue';
+import { americanChitoiXiangting } from '../src/lib/game3/tingpai';
 import { parseCanonicalRoomSnapshot, type AcceptedRoomCommand } from '../server/protocol';
 
 const dbPath = process.argv[2] ?? resolve('data', 'anmika.sqlite3');
@@ -50,10 +54,27 @@ function xiangting(tiles: string[]): number | null {
   }
 }
 
+/** シャンテン巡目に使うアンミカのシャンテン (room_analysis の anmikaXt と同じ数え方 + 国士):
+ *  7萬を 1萬にした手の通常形 ・ 嵌八萬 ・ 七対子 ・ アメリカン七対子 ・ 国士の一番小さい物。鳴いた手もそのまま */
+function anmikaXt(sp: any): number | null {
+  try {
+    const a = swapM7(sp.clone());
+    let xt = Math.min(Majiang.Util.xiangting_yiban(a), kanpamanXt(a), Majiang.Util.xiangting_qidui(a));
+    try { xt = Math.min(xt, americanChitoiXiangting(unswapM1(a.clone()))); } catch { /* 七対子だけ */ }
+    const g = Majiang.Util.xiangting_guoshi(a);
+    if (Number.isFinite(g)) xt = Math.min(xt, g);
+    return Number.isFinite(xt) ? xt : null;
+  } catch {
+    return null;
+  }
+}
+const XT_STEPS = [2, 1, 0] as const;
+
 // 局の中の見え方。seen[p] = p の手に来た牌 (配牌 ・ 自分のツモ) と表ドラの表示牌の数、pos/neg = そのうちの色付きぽっち。
 // 人の捨て牌は数えない: 人は字牌やぽっちを選んで捨てるので、捨て牌を「山に無い」に入れると残りの山の中身を読み違える
 // (11-03 実測: 捨て牌まで入れると期待値 2351 枚に対し実際 2654、自分の手だけなら 2611)。山の残りは自分の手以外から一様に来る
-type Round = { poolLen: number; dealt: Set<number>; seen: number[]; pos: number[]; neg: number[]; lizhi: Set<number>; shubaDecl: Set<number> };
+type Round = { poolLen: number; dealt: Set<number>; seen: number[]; pos: number[]; neg: number[]; lizhi: Set<number>; shubaDecl: Set<number>;
+  junme: number[]; reached: Array<Set<number>> };
 
 for (const snap of snaps) {
   const room = snap.room_id;
@@ -97,14 +118,28 @@ for (const snap of snaps) {
     let inDice = false;
 
     // 局の出来事を見て数える。hule は before の shuvariActive で成就を決める
+    const markXt = (p: number, xt: number | null) => {
+      if (xt === null || !round) return;
+      for (const k of XT_STEPS) {
+        if (xt > k || round.reached[p].has(k)) continue;
+        round.reached[p].add(k);
+        bump(room, match, p, `xt${k}_n`);
+        bump(room, match, p, `xt${k}_sum`, round.junme[p]);
+      }
+    };
+    let cut = new Set<number>();
     const onEvents = (events: any[], before: any, newBreakdown: any[], after: any = before) => {
+      cut = new Set();
       for (const ev of events) {
         const t = ev?.type;
         if (t === 'qipai') {
           // 新しい局。qipai は席ごとに 1 つずつ来る
           if (!round || round.dealt.has(ev.player)) {
+            // 前の局の切りは新しい局の手では測れないので捨てる
+            cut = new Set();
             const len = Number(before?.game?.shan?._pai?.length ?? 0);
-            round = { poolLen: poolLen || len, dealt: new Set(), seen: [0, 0, 0], pos: [0, 0, 0], neg: [0, 0, 0], lizhi: new Set(), shubaDecl: new Set() };
+            round = { poolLen: poolLen || len, dealt: new Set(), seen: [0, 0, 0], pos: [0, 0, 0], neg: [0, 0, 0], lizhi: new Set(), shubaDecl: new Set(),
+              junme: [0, 0, 0], reached: [new Set(), new Set(), new Set()] };
             const dora: string[] = (after?.game?.shan?._baopai ?? []).filter((x: any) => typeof x === 'string' && !x.startsWith('f'));
             for (const q of [0, 1, 2]) {
               round.seen[q] += dora.length;
@@ -117,6 +152,8 @@ for (const snap of snaps) {
           round.seen[ev.player] += tiles.length;
           round.pos[ev.player] += tiles.filter((x) => POS.has(x)).length;
           round.neg[ev.player] += tiles.filter((x) => NEG.has(x)).length;
+          bump(room, match, ev.player, 'xt_rounds');
+          markXt(ev.player, (() => { try { return anmikaXt(new Majiang.Shoupai(tiles.map((x) => toCorePai(x)))); } catch { return null; } })());
           // 配牌のシャンテンは読み直しが止まった試合も拾えるよう、記録の _blindState から別に数える (下)。最初の局だけここで
           if (firstDeal) {
             const xt = xiangting(tiles);
@@ -125,6 +162,12 @@ for (const snap of snaps) {
           continue;
         }
         if (!round) continue;
+        if (t === 'dapai') {
+          // 切った後の手で見る。1 つの command の中で同じ人が 2 回切った時は最後の手しか見えないので、最後の巡目で数える
+          round.junme[ev.player] += 1;
+          cut.add(ev.player);
+          continue;
+        }
         const draw = (p: number, pai: string) => {
           if (round!.lizhi.has(p)) {
             const unseen = round!.poolLen - round!.seen[p];
@@ -162,6 +205,10 @@ for (const snap of snaps) {
             }
           }
         }
+      }
+      for (const p of cut) {
+        const sp = after?.game?.shoupai?.get?.(p);
+        if (sp) markXt(p, anmikaXt(sp));
       }
     };
 
