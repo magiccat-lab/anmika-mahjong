@@ -304,10 +304,16 @@
     jikoSongOn = true;
     jikoTimers = [
       // 雷と同時にサビから鳴らす
+      // [11-06 リョー「トーマスのBGM、止まらなくなるバグがあるらしい」] 曲は 2 分 48 秒あり、BGM の切 ・ 消音 ・ メニューに戻っても鳴り続けていた。
+      // 鳴らせない卓 (bgmAllowed が偽) では鳴らさず、鳴っている途中で偽になったら止める (下の $:)。
+      // 自動再生を断られた時も止めた扱いにする (前は鳴っていないのに BGM だけ消えたままだった)
       setTimeout(() => {
-        jikoAudio = playSound(JIKO_SP_SONG, 0.5);
-        jikoSongOn = !!jikoAudio;
-        jikoAudio?.addEventListener('ended', () => stopJikoSong(), { once: true });
+        if (!bgmAllowed) { jikoSongOn = false; return; }
+        const a = playSound(JIKO_SP_SONG, 0.5);
+        jikoAudio = a;
+        jikoSongOn = !!a;
+        a?.addEventListener('ended', () => { if (jikoAudio === a) stopJikoSong(); }, { once: true });
+        a?.play().catch(() => { if (jikoAudio === a) stopJikoSong(); });
       }, JIKO_SP_BOLT_MS),
       // 曲は暗転が明けた後も原曲の終わりまで流す (切らない ・ 下げない)。終わったら ended で BGM に戻る
       setTimeout(() => { jikoNow = null; }, JIKO_SP_BLACK_MS),
@@ -315,6 +321,7 @@
     ];
   }
   onDestroy(() => { for (const t of jikoTimers) clearTimeout(t); stopJikoSong(); });
+  $: if (!bgmAllowed && (jikoAudio || jikoSongOn)) stopJikoSong();
   $: fuyuFlipRemote = !!fuyuFlipEntry && onlineGameStarted && fuyuFlipEntry.player !== actorSeat && !$game.cpu[fuyuFlipEntry.player];
   $: fuyuRemoteOpened = fuyuFlipEntry && fuyuRemote && fuyuRemote.seat === fuyuFlipEntry.player ? fuyuRemote.opened : 0;
   $: if (!$game.roundEnded && fuyuRemote) fuyuRemote = null;
