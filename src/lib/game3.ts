@@ -2743,10 +2743,14 @@ export class Game3 {
       }
     }
     dlog('[hule debug]', { player, ronpai, ronpaiWithDir, fromPlayer, isLizhi, paramBaopai: param.baopai, paramFubaopai: param.fubaopai, hupaiInResult: result?.hupai, fanshu: result?.fanshu, defen: result?.defen, hasResult: !!result, err: huleErr?.message });
-    if (!result && americanChitoiComplete(sp, ronpaiWithDir)) {
-      const quadCount = countAmericanChitoiQuads(sp, ronpaiWithDir);
-      const fallbackYaku = americanChitoiFallbackYaku(sp, ronpai);
-      result = {
+    // アメリカ七対子は majiang-core が和了と見ないので、役とドラを自前で積む。
+    // 普通の和了と、白ぽっちオールマイティの置き換え先で同じ組み立てを使う
+    // [2026-11-11 通報 F8DQ: 置き換え先がアメリカ七対子の時は七対子 ・ アメリカ七対子の 2 役だけで、
+    //  立直 ・ 門前清自摸和 ・ 裏ドラ ・ 赤ドラが抜けていた]
+    const buildAmericanChitoiResult = (hand: any, ronpaiCore: string | null, ronpaiDir: string | null): any => {
+      const quadCount = countAmericanChitoiQuads(hand, ronpaiDir);
+      const fallbackYaku = americanChitoiFallbackYaku(hand, ronpaiCore);
+      const result: any = {
         hupai: [{ name: '七対子', fanshu: 2 }],
         fu: 25,
         fanshu: 2,
@@ -2769,7 +2773,7 @@ export class Game3 {
         result.hupai.push(reach);
         result.fanshu += reach.fanshu;
       }
-      if (!ronpai) {
+      if (!ronpaiCore) {
         result.hupai.push({ name: '門前清自摸和', fanshu: 1 });
         result.fanshu += 1;
       }
@@ -2782,7 +2786,7 @@ export class Game3 {
         result.fanshu += 1;
       }
       if (isHaidi) {
-        result.hupai.push({ name: ronpai ? '河底撈魚' : '海底摸月', fanshu: 1 });
+        result.hupai.push({ name: ronpaiCore ? '河底撈魚' : '海底摸月', fanshu: 1 });
         result.fanshu += 1;
       }
       if (isTianhu === 1) {
@@ -2793,7 +2797,7 @@ export class Game3 {
         result.damanguan = (result.damanguan ?? 0) + 1;
       }
       // WSA: 槍槓
-      if (this.qianggangPending && ronpai) {
+      if (this.qianggangPending && ronpaiCore) {
         result.hupai.push({ name: '槍槓', fanshu: 1 });
         result.fanshu += 1;
       }
@@ -2801,7 +2805,7 @@ export class Game3 {
         result.hupai.push(yaku);
         result.fanshu += yaku.fanshu;
       }
-      const redDora = countPhysicalRedDora(sp, ronpai);
+      const redDora = countPhysicalRedDora(hand, ronpaiCore);
       if (redDora > 0) {
         result.hupai.push({ name: '赤ドラ', fanshu: redDora });
         result.fanshu += redDora;
@@ -2814,14 +2818,14 @@ export class Game3 {
       const acBaopai = this.kamiPochiEffectiveIndicators_(player, 'baopai', [...(this.shan.baopai ?? [])])
         .filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
       for (const indicator of acBaopai) {
-        const cnt = this.countDoraFromIndicator(sp, indicator, ronpai);
+        const cnt = this.countDoraFromIndicator(hand, indicator, ronpaiCore);
         if (cnt > 0) { result.hupai.push({ name: 'ドラ', fanshu: cnt }); result.fanshu += cnt; }
       }
       if (isLizhi) {
         const acFubaopai = this.kamiPochiEffectiveIndicators_(player, 'fubaopai', [...(this.shan.fubaopai ?? [])])
           .filter((p: any) => typeof p === 'string' && !p.startsWith('f')).map(normalizeBaopaiForMajiang);
         for (const indicator of acFubaopai) {
-          const cnt = this.countDoraFromIndicator(sp, indicator, ronpai);
+          const cnt = this.countDoraFromIndicator(hand, indicator, ronpaiCore);
           if (cnt > 0) { result.hupai.push({ name: '裏ドラ', fanshu: cnt }); result.fanshu += cnt; }
         }
       }
@@ -2845,6 +2849,10 @@ export class Game3 {
         result.damanguan += 1;
       }
       if (result.damanguan > 0) result.fanshu = undefined;
+      return result;
+    };
+    if (!result && americanChitoiComplete(sp, ronpaiWithDir)) {
+      result = buildAmericanChitoiResult(sp, ronpai, ronpaiWithDir);
     }
     // majiang-core が通常面子の解を高く採った場合でも、同じ牌姿にアメリカ七対子の
     // 解があれば独立候補として比較する。大/小車輪は後段 post-process で確定する。
@@ -3113,19 +3121,7 @@ export class Game3 {
           if (r) { (r as any)._spUsed = spClone; (r as any)._ronpaiUsed = ronpaiSwapped; }
           if ((!r || !((r.fanshu !== undefined) || ((r.damanguan ?? 0) > 0) || (r.hupai ?? []).some((h: any) => h.fanshu === '*' || h.fanshu === '**')))
             && americanChitoiComplete(spClone, ronpai ? ronpaiWithDir : null)) {
-            const quadCount = countAmericanChitoiQuads(spClone, ronpai ? ronpaiWithDir : null);
-            r = {
-              hupai: [{ name: '七対子', fanshu: 2 }],
-              fu: 25,
-              fanshu: 2,
-              damanguan: 0,
-              defen: 0,
-              fenpei: [0, 0, 0, 0],
-            };
-            if (quadCount > 0) {
-              r.hupai.push({ name: `アメリカ七対子 [${quadCount}種 4 枚使い]`, fanshu: 4 * quadCount });
-              r.fanshu += 4 * quadCount;
-            }
+            r = buildAmericanChitoiResult(spClone, ronpai, ronpai ? ronpaiWithDir : null);
           }
           if (r && (r.fanshu !== undefined || (r.damanguan ?? 0) > 0 || (r.hupai ?? []).some((h: any) => h.fanshu === '*' || h.fanshu === '**'))) {
             r._allmightyPochi = swap;
@@ -3187,7 +3183,7 @@ export class Game3 {
           if (r) { (r as any)._spUsed = spClone; (r as any)._ronpaiUsed = null; }
           if ((!r || !((r.fanshu !== undefined) || ((r.damanguan ?? 0) > 0)))
             && americanChitoiComplete(spClone)) {
-            r = { hupai: [{ name: '七対子', fanshu: 2 }], fu: 25, fanshu: 2, damanguan: 0, defen: 0, fenpei: [0, 0, 0, 0] };
+            r = buildAmericanChitoiResult(spClone, null, null);
           }
           if (r && (r.fanshu !== undefined || (r.damanguan ?? 0) > 0)) {
             r._dekapochiSwap = swap;
