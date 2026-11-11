@@ -1119,6 +1119,8 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
         1: game.feverDeclareDapaiPlayer === 1 && own !== 1 ? [] : [...game.feverDeclareTing[1]],
         2: game.feverDeclareDapaiPlayer === 2 && own !== 2 ? [] : [...game.feverDeclareTing[2]],
       },
+      // 河は公開なので、フリテンで宣言したフィーバー [ツモのみ] かは全員に見えてよい
+      feverFuritenAtDeclare: structuredClone(game.feverFuritenAtDeclare),
       feverTier: structuredClone(game.feverTier),
       feverDeclareDapaiPlayer: game.feverDeclareDapaiPlayer,
       feverPendingShuvari: structuredClone(game.feverPendingShuvari),

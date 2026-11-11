@@ -423,6 +423,7 @@ export function buildCanonicalPaifuSnapshot(state: StoreState, timestamp = new D
         openLizhi: Array.from(g.openLizhi),
         feverActive: g.feverActive,
         feverDeclareTing: g.feverDeclareTing,
+        feverFuritenAtDeclare: g.feverFuritenAtDeclare,
         feverTier: g.feverTier,
         feverDeclareDapaiPlayer: g.feverDeclareDapaiPlayer,
         feverPendingShuvari: g.feverPendingShuvari,
@@ -522,7 +523,7 @@ function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreSt
     'chipLedger', 'haruActive', 'fuyuSkip', 'fuyuConsumed', 'akiUsedCount',
     'akiUsedIndicators',
     'kinpeiTarget', 'chipBreakdown', 'discardLog', 'justNukidBei', 'feverActive',
-    'feverDeclareTing', 'feverTier', 'feverPendingShuvari', 'feverSaiAwarded',
+    'feverDeclareTing', 'feverFuritenAtDeclare', 'feverTier', 'feverPendingShuvari', 'feverSaiAwarded',
     'shuvariActive', 'shuvariUsed',
     'lateShuvariWindow',
     'missedRonTemp', 'missedRonPermanent',
@@ -758,6 +759,7 @@ export function buildStateFromPaifu(paifu: any, preservedCpu: Record<PlayerId, b
   ng.fuyuSkip = paifu.fuyuSkip ?? { 0: false, 1: false, 2: false };
   ng.lastZimoInfo = paifu.lastZimoInfo ?? { player: null, pai: null, pochi: null, gold: false };
   ng.feverDeclareTing = paifu.feverDeclareTing ?? { 0: [], 1: [], 2: [] };
+  ng.feverFuritenAtDeclare = paifu.feverFuritenAtDeclare ?? { 0: false, 1: false, 2: false };
   ng.feverWinCount = paifu.feverWinCount ?? { 0: 0, 1: 0, 2: 0 };
   ng.justNukidBei = paifu.justNukidBei ?? { 0: false, 1: false, 2: false };
   ng.discardLog = paifu.discardLog ?? { 0: [], 1: [], 2: [] };

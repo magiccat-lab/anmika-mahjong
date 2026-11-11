@@ -2088,8 +2088,9 @@ export class Game3 {
     if (waits.length === 0) return 0;
     // フリテン: 待ち牌のどれかが自分の河 [打つ牌を含む] にある、または見逃し [リーチ後は永久]。フィーバー中は無し
     const river = new Set<string>([discarded, ...((this.he.get(player)?._pai ?? []) as string[]).map(baseTile)].map(swapKind));
-    const furiten = !this.feverActive[player]
-      && (waitCores.some((w) => river.has(swapKind(w))) || this.missedRonTemp[player] || this.missedRonPermanent[player]);
+    const furiten = this.feverActive[player]
+      ? this.feverFuritenAtDeclare[player]
+      : (waitCores.some((w) => river.has(swapKind(w))) || this.missedRonTemp[player] || this.missedRonPermanent[player]);
     const sw = swapM7(after.clone());
     const param = Majiang.Util.hule_param({
       rule: anmikaHuleRule(),
@@ -2534,7 +2535,9 @@ export class Game3 {
       const myHe = this.he.get(player);
       // 見逃しフリテン [同巡内 / リーチ後の永久]。フィーバー中は skip [ルール 5-3]
       if (!this.feverActive[player] && (this.missedRonTemp[player] || this.missedRonPermanent[player])) return false;
-      // フィーバー中はフリテン判定 skip [ルール 5-3 何度でもアガリ可能]
+      // フリテンで宣言したフィーバーはツモのみ [11-12 リョー裁定]
+      if (this.feverActive[player] && this.feverFuritenAtDeclare[player]) return false;
+      // フィーバー中は宣言後の河のフリテン判定 skip [ルール 5-3 何度でもアガリ可能]
       if (myHe?._pai && !this.feverActive[player]) {
         for (const discarded of myHe._pai as string[]) {
           // 嵌八萬時は z5 / m8 のフリテン化を回避
@@ -4986,6 +4989,7 @@ export class Game3 {
     this.feverActive = { 0: false, 1: false, 2: false };
     this.feverTier = { 0: 1, 1: 1, 2: 1 };
     this.feverDeclareTing = { 0: [], 1: [], 2: [] };
+    this.feverFuritenAtDeclare = { 0: false, 1: false, 2: false };
     this.feverDeclareDapaiPlayer = null;
     this.feverPendingShuvari = { 0: false, 1: false, 2: false };
     this.feverSaiAwarded = { 0: [], 1: [], 2: [] };
@@ -5381,6 +5385,7 @@ export class Game3 {
             this.feverActive[player] = true;
             this.feverTier[player] = upgradedTier;
             this.feverDeclareTing[player] = this.getTingpaiListBeforeZimo(player);
+            this.markFeverFuritenAtDeclare(player);
           }
         }
       }
@@ -5464,6 +5469,18 @@ export class Game3 {
   feverActive: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false };
   /** フィーバー declare 時の wait snapshot [リョー指示 2026-05-12: tsumo で動かないように] */
   feverDeclareTing: Record<PlayerId, string[]> = { 0: [], 1: [], 2: [] };
+  /** 宣言の時点で自分の河 [宣言牌を含む] に待ち牌があった = フリテンで宣言したフィーバー。
+   *  このフィーバーはツモのみ [11-12 リョー裁定「2」、isg. 通報 FQC9 rev 347]。
+   *  見逃しフリテン [同巡 / リーチ後の永久] の無視はそのまま */
+  feverFuritenAtDeclare: Record<PlayerId, boolean> = { 0: false, 1: false, 2: false };
+
+  /** feverDeclareTing と自分の河 [+ これから切る宣言牌] から feverFuritenAtDeclare を決める */
+  markFeverFuritenAtDeclare(player: PlayerId, declareDiscard: string | null = null): void {
+    const waits = new Set((this.feverDeclareTing[player] ?? []).map(anmikaTileKind));
+    const river = [...((this.he.get(player)?._pai ?? []) as string[])];
+    if (declareDiscard) river.push(declareDiscard);
+    this.feverFuritenAtDeclare[player] = waits.size > 0 && river.some((d) => waits.has(anmikaTileKind(d)));
+  }
 
   /** フィーバー tier [1/2/3/4]、 打点・祝儀倍率は 1/2/4/8。 */
   feverTier: Record<PlayerId, 1 | 2 | 3 | 4> = { 0: 1, 1: 1, 2: 1 };
@@ -5538,6 +5555,7 @@ export class Game3 {
     this.feverActive[player] = false;
     this.feverTier[player] = 1;
     this.feverDeclareTing[player] = [];
+    this.feverFuritenAtDeclare[player] = false;
     this.feverPendingShuvari[player] = false;
     // [2026-07-22 リョー報告: フィーバー中の四華サイコロが2回出た]
     // feverSaiAwarded はここで消さない。冬使用等でフィーバーが終わった後、
@@ -5655,6 +5673,7 @@ export class Game3 {
         } catch { /* fallback to current ting */ }
       }
       this.feverDeclareTing[player] = [...declareTing];
+      this.markFeverFuritenAtDeclare(player, opts.feverDapai ?? null);
     }
     if (opts.shuvari && !this.shuvariUsed[player]) {
       if (opts.fever) {
