@@ -22,7 +22,7 @@
   import PochiSqueeze from './lib/PochiSqueeze.svelte';
   import FuyuFlip from './lib/FuyuFlip.svelte';
   import JikoSp from './lib/JikoSp.svelte';
-  import { jikoSpFor, JIKO_SP_BLACK_MS, JIKO_SP_BOLT_MS, JIKO_SP_SONG } from './lib/jikoSp';
+  import { jikoPreAllowed, jikoRoundSeat, jikoSongOutOfRound, jikoSpFor, JIKO_SP_BLACK_MS, JIKO_SP_BOLT_MS, JIKO_SP_SONG } from './lib/jikoSp';
   import Confetti from './lib/Confetti.svelte';
   import { EMPTY_FEVER_RUNS, feverRunTotal, signed, trackFeverRuns, type FeverRuns } from './lib/feverRun';
   import { publicPochiCandidates, kakuteiOf, POCHI_GOOD, pochiLeftForViewer, rollPlan, pochiGood, planFromRelay, DEFAULT_PLAN, type PochiColor, type PochiPlan } from './lib/pochiFx';
@@ -253,11 +253,12 @@
   let jikoSongOn = false;
   let jikoAudio: HTMLAudioElement | null = null;
   let jikoTimers: ReturnType<typeof setTimeout>[] = [];
+  let jikoSongRound: string | null = null; // 曲を鳴らし始めた局 [次の局に入ったら止める]
   // [2026-11-05 リョー「アガリ牌が見えない状態からにして」] 暗転は和了の結果を待たず、ツモった瞬間 (牌も絞りも見える前) から始める。
   // 単体: 手番の人が引いた直後に jikoPreCheck で試し打ちする (1 ツモにつき 1 回)。オンライン: server が全席 ・ 観戦の投影に載せた印 (jikoPre) を読む。
   // 当たったら絞りは出さず、暗転の裏でそのまま自動でツモ和了する。和了の結果が届いた時は同じ印 (局 ・ 席) で見ているので二重に暗転しない
   const jikoPreMemo: { key: string; hit: JikoPreHit | null } = { key: '', hit: null };
-  $: jikoPre = ((): JikoPreHit | null => {
+  $: jikoPreRaw = ((): JikoPreHit | null => {
     if (viewMode !== 'single' || $game.lastHuleResult || $game.roundEnded) return null;
     if (onlineGameStarted) return $game.jikoPre ?? null;
     const g = $game.game;
@@ -268,8 +269,10 @@
     if (k !== jikoPreMemo.key) { jikoPreMemo.key = k; jikoPreMemo.hit = jikoPreCheck($game); }
     return jikoPreMemo.hit;
   })();
+  // 同じ局 ・ 席で 2 回目の暗転は出さない [lib/jikoSp.ts jikoPreAllowed]。絞りを隠す判定 (jikoBlackout) もこの jikoPre を見る
+  $: jikoPre = jikoPreRaw && jikoPreAllowed(jikoRoundKey($game.game.state), jikoPreRaw.player, jikoSeen, !!jikoNow) ? jikoPreRaw : null;
   $: jikoPreHit = jikoPre ? { key: `${jikoRoundKey($game.game.state)}-${jikoPre.player}-${jikoPre.loss}`, player: jikoPre.player, loss: jikoPre.loss, pochi: jikoPre.pochi } : null;
-  $: if (typeof window !== 'undefined' && jikoPreHit && !jikoSeen.has(jikoPreHit.key)) startJiko(jikoPreHit, true);
+  $: if (typeof window !== 'undefined' && jikoPreHit && !jikoSeen.has(jikoPreHit.key) && !jikoSeen.has(jikoRoundSeat(jikoPreHit.key))) startJiko(jikoPreHit, true);
   // 新しい試合の最初の局では前の試合の印を捨てる (局 ・ 席 ・ 枚数が同じ印で次の試合の暗転を止めない)
   $: if (($game.game.events?.length ?? 0) < 2 && jikoSeen.size > 0) jikoSeen = new Set();
   $: jikoHit = ((): ReturnType<typeof jikoSpFor> => {
@@ -279,13 +282,16 @@
     const st: any = $game.game.state ?? {};
     return jikoSpFor(entries as any, jikoRoundKey(st));
   })();
-  const jikoRoundSeat = (key: string): string => `rp:${key.slice(0, key.lastIndexOf('-'))}`;
   $: if (typeof window !== 'undefined' && jikoHit && !jikoSeen.has(jikoHit.key) && !jikoSeen.has(jikoRoundSeat(jikoHit.key))) startJiko(jikoHit);
   function stopJikoSong(): void {
-    jikoAudio?.pause();
+    const a = jikoAudio;
     jikoAudio = null;
     jikoSongOn = false;
+    jikoSongRound = null;
+    a?.pause();
   }
+  // [11-12 リョー「BGMが次の局でも治らない」] 曲は 2 分 48 秒あり、次の局 ・ 次の試合まで鳴り続けて BGM が消えたままだった。局が変わったら止める
+  $: if (jikoSongOutOfRound(jikoSongRound, jikoRoundKey($game.game.state), $game.game.events?.length ?? 0)) stopJikoSong();
   // 暗転の裏で自動のツモ和了。自分の手番の人間だけが送る (他の席 ・ 観戦は見るだけ)。送れなくても暗転が明ければ普通のツモボタンが出る
   function jikoAutoTsumo(player: number): void {
     if (!jikoNow || onlineSpectator || $game.roundEnded || $game.lastWinner !== null) return;
@@ -302,6 +308,7 @@
     if (cutinTimer !== null) { clearTimeout(cutinTimer); cutinTimer = null; }
     jikoNow = { pochi: hit.pochi };
     jikoSongOn = true;
+    const songRound = jikoRoundKey($game.game.state);
     jikoTimers = [
       // 雷と同時にサビから鳴らす
       // [11-06 リョー「トーマスのBGM、止まらなくなるバグがあるらしい」] 曲は 2 分 48 秒あり、BGM の切 ・ 消音 ・ メニューに戻っても鳴り続けていた。
@@ -312,7 +319,9 @@
         const a = playSound(JIKO_SP_SONG, 0.5);
         jikoAudio = a;
         jikoSongOn = !!a;
-        a?.addEventListener('ended', () => { if (jikoAudio === a) stopJikoSong(); }, { once: true });
+        jikoSongRound = a ? songRound : null;
+        // 終わった ・ 読めなかった ・ 端末に止められた時も BGM に戻す
+        for (const ev of ['ended', 'error', 'pause'] as const) a?.addEventListener(ev, () => { if (jikoAudio === a) stopJikoSong(); }, { once: true });
         a?.play().catch(() => { if (jikoAudio === a) stopJikoSong(); });
       }, JIKO_SP_BOLT_MS),
       // 曲は暗転が明けた後も原曲の終わりまで流す (切らない ・ 下げない)。終わったら ended で BGM に戻る

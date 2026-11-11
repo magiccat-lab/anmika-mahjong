@@ -30,3 +30,19 @@ export function jikoSpFor(entries: Array<{ player: number; result: any }>, round
   }
   return null;
 }
+
+// [2026-11-12 リョー「事故演出起きた後逆ツモで演出もっかいきてるしBGMが次の局でも治らない」]
+// フィーバー続行で同じ局のうちに同じ人が逆ツモを重ねると (6HJK 東2局1本場は 72 ・ 100 ・ 100 ・ 128 枚の 4 回)、
+// 試し打ちの印 (局 ・ 席 ・ 枚数) は枚数が変わるたびに新しく、暗転と曲が 3 回出ていた。暗転は 1 つの局 ・ 席で 1 回だけにする
+/** 局 ・ 席の印。key は `${局}-${席}-${枚数}` */
+export function jikoRoundSeat(key: string): string {
+  return `rp:${key.slice(0, key.lastIndexOf('-'))}`;
+}
+/** 試し打ちの当たりを使ってよいか。その局 ・ 席で暗転を出した後は、暗転中 (今のツモの分) だけ通し、明けた後の逆ツモは普通の絞りに戻す */
+export function jikoPreAllowed(roundKey: string, player: number, seen: ReadonlySet<string>, blackoutNow: boolean): boolean {
+  return blackoutNow || !seen.has(`rp:${roundKey}-${player}`);
+}
+/** 曲を止める時か。曲は鳴らし始めた局が終わって次の局 (次の試合を含む) に入ったら止め、BGM に戻す */
+export function jikoSongOutOfRound(songRound: string | null, roundKeyNow: string, eventsLen: number): boolean {
+  return songRound !== null && (roundKeyNow !== songRound || eventsLen < 2);
+}
