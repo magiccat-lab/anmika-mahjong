@@ -1472,6 +1472,22 @@ function broadcast(room: Room, payload: unknown): void {
   for (const spectator of room.spectators.values()) sendJson(spectator.ws, payload);
 }
 
+/** 絞りの中継の記録 1 行 [ws.log に時刻が無いので ISO の時刻を頭に付ける] */
+export function pochiFxLogLine(
+  room: Pick<Room, 'roomId' | 'members' | 'spectators'>,
+  seat: number,
+  relay: PochiFxRelay | null,
+  allowed: boolean,
+  now = new Date(),
+): string {
+  const to = [...room.members.values()]
+    .filter((m) => m.seat !== seat)
+    .map((m) => `${m.seat}:${!m.ws ? 'none' : m.ws.readyState === 1 ? 'open' : `ws${m.ws.readyState}`}`)
+    .join(',');
+  const what = relay ? `${relay.phase}${relay.color ? `/${relay.color}` : ''}` : 'invalid';
+  return `[anmika-ws] pochiFx ${now.toISOString()} room=${room.roomId} seat=${seat} ${what} ${allowed ? 'relay' : 'drop'} to=${to || '-'} spect=${room.spectators.size}`;
+}
+
 /** スタンプ連打の間引き。通すなら true [その席の時刻を更新]、1 秒以内の 2 発目以降は false */
 export function allowStamp(room: Pick<Room, 'stampLastAt'>, roomSeat: number, now = performance.now()): boolean {
   const last = room.stampLastAt.get(roomSeat);
@@ -3160,7 +3176,11 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           // [2026-10-14] 白ぽっちの絞りの進みを他の席 ・ 観戦へ流す [revision は進めない、送った席の画面は自前]
           if (!room.snapshot.started || typeof payload.seat !== 'number' || payload.seat < 0) return;
           const relay = sanitizePochiFx(msg as Record<string, unknown>);
-          if (!relay || !allowPochiFx(room, payload.seat, relay.phase)) return;
+          const allowed = !!relay && allowPochiFx(room, payload.seat, relay.phase);
+          // [2026-11-12 リョー「0032の」] 絞りが他の席に届いたかを後から見られるように 1 行残す
+          // [open ・ reveal ・ close だけ、1 回の絞りで 3 行。送り先の席と接続の開き具合も]
+          console.log(pochiFxLogLine(room, payload.seat, relay, allowed));
+          if (!relay || !allowed) return;
           broadcast(room, { type: 'pochiFx', seat: payload.seat, ...relay });
           return;
         }
