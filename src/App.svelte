@@ -37,6 +37,7 @@
   import FxOddsPanel from './lib/FxOddsPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
   import { prefs, bgmMode, nextBgmPrefs, playSound } from './lib/prefs';
+  import { HULE_HOLD_MS, playDiscardSe, playHuleSe, playRiichiSe } from './lib/fxSe';
   import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
@@ -182,6 +183,39 @@
     aoriVoiceTs = fxNow.ts;
     playSound(AORI_VOICE[fxNow.id], 0.9);
   }
+  // [2026-11-13 リョー ○× anmika_sakurai1 H2] 効果音。どれも受理済みの状態から鳴らす [solo ・ online の全 client が同じ経路。client の推測では鳴らさない]
+  // ロン ・ ツモ: 帯が出る瞬間 [H1 のビート 120ms の後] に鳴らす / リーチ: 帯の出始め
+  let seTs = 0;
+  let huleSeTimer: ReturnType<typeof setTimeout> | null = null;
+  $: if (typeof window !== 'undefined' && fxNow && fxNow.ts !== seTs) {
+    seTs = fxNow.ts;
+    if (fxNow.id === 'ron' || fxNow.id === 'tsumo') {
+      if (huleSeTimer !== null) clearTimeout(huleSeTimer);
+      huleSeTimer = setTimeout(() => { huleSeTimer = null; playHuleSe(); }, HULE_HOLD_MS);
+    } else if (fxNow.id === 'reach' || fxNow.id === 'fever') {
+      playRiichiSe();
+    }
+  }
+  onDestroy(() => { if (huleSeTimer !== null) clearTimeout(huleSeTimer); });
+  // 打牌音: 3 人の河の合計が 1〜2 枚増えた時だけ [局の頭 ・ 途中参加の一括読み込みは鳴らさない]。連打は playDiscardSe が 90ms で間引く
+  let seRiverCount: number | null = null;
+  function trackDiscardSe(n: number): void {
+    const prev = seRiverCount;
+    seRiverCount = n;
+    if (prev === null || n <= prev || n - prev > 2) return;
+    playDiscardSe();
+  }
+  $: if (typeof window !== 'undefined') trackDiscardSe(he0.length + he1.length + he2.length);
+  // [2026-11-13 リョー ○× anmika_sakurai1 H1] 和了の重さ。満貫以上で金のフラッシュ、跳満以上で卓の揺れ。
+  // 揺れは main の class で出す [帯と同じ 120ms のビートの後]。同じ class のまま次の和了が来ても出し直せるよう a / b を交互に使う
+  let huleShakeSeen = 0;
+  let huleShakeFlip = false;
+  let huleShakeCls = '';
+  $: if (typeof window !== 'undefined' && fxNow && (fxNow.id === 'ron' || fxNow.id === 'tsumo') && fxNow.ts !== huleShakeSeen) {
+    huleShakeSeen = fxNow.ts;
+    if ((fxNow.hl ?? 0) >= 2) { huleShakeFlip = !huleShakeFlip; huleShakeCls = huleShakeFlip ? 'hule-shake-a' : 'hule-shake-b'; }
+  }
+  $: if (!fxNow && huleShakeCls) huleShakeCls = '';
   // [2026-10-15 fx7 の答え C2 a] 重い演出 (フィーバー ・ 八華四北) と天和の帯の時に、色紙の紙吹雪を左右から噴き上げる (3.2 秒)
   let confettiTs = 0;
   let confettiTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3277,7 +3311,7 @@
     <button class="mode-toggle" on:click={() => { viewMode = 'single'; disconnectOnline(); currentRoomId = null; onlineMe = null; }}>← オフラインに戻る</button>
   </div>
 {:else}
-<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class:ws-down={onlineWsDown} class="ui-board-v2" class:spectating={watchOnly} on:contextmenu={onContextMenuTsumokiri}>
+<main class:mode-single={viewMode === 'single' || (viewMode === 'online' && onlineGameStarted)} class:online-game={onlineGameStarted} class:ws-down={onlineWsDown} class="ui-board-v2 {huleShakeCls}" class:spectating={watchOnly} on:contextmenu={onContextMenuTsumokiri}>
   <!-- [2026-10-09 遊真 C2/A2] 対局中の帯: socket が切れている間の「つなぎ直し中」と、
        自分の席を CPU が代打ちしている間の「自分で打つ」。切れている間は盤面を暗くして触れなくする -->
   {#if onlineGameStarted && ((onlineWsDown && !onlineTerminalClose) || myCpuProxy)}
@@ -3942,7 +3976,7 @@
   {:else if viewMode === 'single' && fxNow && fxTier}
     {#key fxNow.ts}
       <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-      <div class="fx fx-{fxNow.id} fx-{fxTier} dr {fxNow.style ? 'yk-' + fxNow.style : ''} {fxNow.combo && fxNow.combo >= 2 ? 'combo-' + Math.min(fxNow.combo, 4) : ''}" class:fx-skippable={fxTier === 'heavy'}
+      <div class="fx fx-{fxNow.id} fx-{fxTier} dr {fxNow.style ? 'yk-' + fxNow.style : ''} {fxNow.combo && fxNow.combo >= 2 ? 'combo-' + Math.min(fxNow.combo, 4) : ''}" class:hs={fxNow.id === 'ron' || fxNow.id === 'tsumo'} class:hs-flash={(fxNow.id === 'ron' || fxNow.id === 'tsumo') && (fxNow.hl ?? 0) >= 1} class:fx-skippable={fxTier === 'heavy'}
         style="--fx-dur: {fxDur}ms; --fit: {Math.min(1, 3.2 / (fxNow.label ?? FX_LABELS[fxNow.id]).length)}" aria-hidden="true"
         on:click={() => { if (fxTier === 'heavy' && fxNow) skipCutin(fxNow.ts); }}>
         <div class="dr-band"><span class="fx-word dr-word">{fxNow.label ?? FX_LABELS[fxNow.id]}</span><span class="fx-who dr-who">{fxWho}</span>{#if fxNow.combo && fxNow.combo >= 2}<span class="dr-combo">{fxNow.combo} 連続</span>{#if fxNow.seat !== undefined && feverTotals[fxNow.seat]}<span class="dr-total">通算 {signed(feverTotals[fxNow.seat]?.defen ?? 0)} 点 ・ {signed(feverTotals[fxNow.seat]?.chip ?? 0)} 枚</span>{/if}{/if}</div>
@@ -7089,6 +7123,22 @@
   .dr.combo-3 .dr-band, .dr.combo-4 .dr-band { box-shadow: 0 0 0 4px #fff inset, 0 0 40px rgba(255, 200, 80, 0.9), 0 10px 30px rgba(0, 0, 0, 0.5); }
   .dr.combo-4 .dr-band { animation: drBand var(--fx-dur) cubic-bezier(0.2, 0.9, 0.2, 1) both, drShake 0.12s linear 0.3s 6; }
   @keyframes drShake { 0%, 100% { translate: 0 0; } 25% { translate: 6px -4px; } 75% { translate: -6px 4px; } }
+  /* [2026-11-13 リョー ○× anmika_sakurai1 H1] ロン ・ ツモのヒットストップ: 帯 ・ 字 ・ 暗幕を 120ms 遅らせる [尺の総量は fx-dur のまま。pump / watchdog は動かさない]。
+     満貫以上 [hs-flash] は金の薄いフラッシュを 1 回 [opacity だけ、0.3 まで ・ 180ms]、跳満以上は卓 [main] を translate で揺らす [最大 6px、300ms、減衰]。
+     reduced-motion では揺れ ・ フラッシュとも出さない [ビートだけ残す] */
+  .dr.hs { --fx-hold: 120ms; }
+  .dr.hs::before { animation: drFlash calc(var(--fx-dur) - var(--fx-hold)) linear var(--fx-hold) both; }
+  .dr.hs .dr-band { animation: drBand calc(var(--fx-dur) - var(--fx-hold)) cubic-bezier(0.2, 0.9, 0.2, 1) var(--fx-hold) both; }
+  .dr.hs .dr-word { animation: drWord calc(var(--fx-dur) - var(--fx-hold)) cubic-bezier(0.2, 1.4, 0.3, 1) var(--fx-hold) both; }
+  .dr.hs .dr-combo, .dr.hs .dr-total { animation: drCombo calc(var(--fx-dur) - var(--fx-hold)) cubic-bezier(0.2, 1.6, 0.3, 1) var(--fx-hold) both; }
+  .dr.hs.combo-4 .dr-band { animation: drBand calc(var(--fx-dur) - var(--fx-hold)) cubic-bezier(0.2, 0.9, 0.2, 1) var(--fx-hold) both, drShake 0.12s linear calc(var(--fx-hold) + 0.3s) 6; }
+  .dr.hs-flash::after { content: ''; position: absolute; inset: 0; background: #d9b453; opacity: 0; pointer-events: none;
+    animation: drHuleFlash 180ms ease-out var(--fx-hold) both; }
+  @keyframes drHuleFlash { 0% { opacity: 0; } 20% { opacity: 0.3; } 100% { opacity: 0; } }
+  main:global(.hule-shake-a) { animation: drHuleShakeA 300ms linear 120ms both; }
+  main:global(.hule-shake-b) { animation: drHuleShakeB 300ms linear 120ms both; }
+  @keyframes drHuleShakeA { 0% { translate: 0 0; } 12% { translate: 6px -3px; } 28% { translate: -5px 3px; } 46% { translate: 3px -2px; } 64% { translate: -2px 1px; } 82% { translate: 1px 0; } 100% { translate: 0 0; } }
+  @keyframes drHuleShakeB { 0% { translate: 0 0; } 12% { translate: 6px -3px; } 28% { translate: -5px 3px; } 46% { translate: 3px -2px; } 64% { translate: -2px 1px; } 82% { translate: 1px 0; } 100% { translate: 0 0; } }
   /* 役の名前: 一発 = 黄と黒の電撃 (速い) ・ 嶺上開花 = 若葉と桜 ・ 海底 ・ 河底 = 夜の青 (ゆっくり) ・ 天和 ・ 地和 = 虹 */
   .dr.yk-ippatsu { --dr-pink: #ffe14d; --dr-pink2: #f2b705; --dr-shadow: #3b2a00; }
   .dr.yk-ippatsu .dr-band { background: repeating-linear-gradient(135deg, #111 0 26px, #ffd400 26px 52px); }
@@ -7141,6 +7191,11 @@
     .dr::before, .dr.fx-heavy::after { animation: none; opacity: 0; }
     .dr-band { animation: none; transform: rotate(-7deg); }
     .dr-word { animation: none; opacity: 1; transform: skewX(-12deg); }
+    .dr.hs-flash::after { animation: none; opacity: 0; }
+    main:global(.hule-shake-a), main:global(.hule-shake-b) { animation: none; }
+    .dr.hs::before { animation: none; opacity: 0; }
+    .dr.hs .dr-band { animation: none; transform: rotate(-7deg); }
+    .dr.hs .dr-word { animation: none; opacity: 1; transform: skewX(-12deg); }
   }
   main.mode-single.ui-board-v2 .cb-panel .score-top {
     grid-area: auto;

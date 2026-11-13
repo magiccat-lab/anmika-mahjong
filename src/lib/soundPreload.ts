@@ -11,6 +11,8 @@ const FX = ['don', 'gashan', 'gyuiin', 'hazure', 'heart', 'kira', 'kyuin', 'piki
 export const SOUND_FILES: readonly string[] = [
   ...FX.map((n) => `/sounds/fx/${n}.mp3`),
   '/sounds/se_a.mp3', '/sounds/se_b.mp3', '/sounds/cutin.mp3',
+  // [2026-11-13 H2] 打牌 ・ リーチ ・ 和了
+  '/sounds/se_discard.mp3', '/sounds/se_riichi.mp3', '/sounds/se_hule.mp3',
   // 声とプレミアのサビは git に入れない (無ければ読めないだけ)
   '/sounds/voice/anmika_aori.wav', '/sounds/voice/anmika_yakuman.wav', '/sounds/bgm/premium_sabi.mp3',
   // [2026-11-04] 隠し演出の曲 [lib/jikoSp.ts]

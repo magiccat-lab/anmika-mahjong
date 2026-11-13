@@ -4,7 +4,7 @@ import { writable, get } from 'svelte/store';
 import Majiang from '@kobalab/majiang-core';
 import { Game3, buildShoupai, isGoldPai, pochiColorFromPai } from './game3';
 import type { PlayerId } from './types';
-import { dlog, toCorePai } from './helpers';
+import { dlog, toCorePai, effectiveLevel } from './helpers';
 import { resolveNukiBeiMeta } from './game3/bei';
 import { buildStateFromPaifu } from './store/paifuIo';
 import { buildDebugState } from './store/debug';
@@ -161,7 +161,17 @@ export function cutinDurationMs(id: CutinId | null | undefined): number {
 }
 
 // label: 帯の字を差し替える (役の名前)。style: 見た目の種類。combo: フィーバー中の連続和了の数 [fx5 V5]
-export type CutinPayload = { id: CutinId; ts: number; seat?: PlayerId; label?: string; style?: string; combo?: number };
+// hl: ロン ・ ツモの和了の重さ。0 = 満貫未満 / 1 = 満貫以上 [金のフラッシュ] / 2 = 跳満以上 [さらに卓を揺らす]。
+// [2026-11-13 リョー ○× anmika_sakurai1 H1] payload に焼いて渡すので、online でも server が積んだ値をそのまま全員が見る (client の推測ではない)
+export type CutinPayload = { id: CutinId; ts: number; seat?: PlayerId; label?: string; style?: string; combo?: number; hl?: 0 | 1 | 2 };
+
+/** 和了の結果から演出の重さ hl を決める。段は和了パネルと同じ effectiveLevel [Lv4 満貫 / Lv5 跳満、夏の段上げ込み] */
+export function huleFxLevel(result: any): 0 | 1 | 2 {
+  if (!result) return 0;
+  if ((result.damanguan ?? 0) > 0) return 2;
+  const lv = effectiveLevel(result);
+  return lv >= 5 ? 2 : lv >= 4 ? 1 : 0;
+}
 
 export interface StoreState {
   game: Game3;
@@ -1031,7 +1041,7 @@ export function specialYakuOf(result: any): { label: string; style: string } | n
   for (const [name, label, style] of SPECIAL_YAKU) if (names.has(name)) return { label, style };
   return null;
 }
-export function enqueueCutinState(s: StoreState, id: CutinId, seat?: PlayerId, extra?: Pick<CutinPayload, 'label' | 'style' | 'combo'>): StoreState {
+export function enqueueCutinState(s: StoreState, id: CutinId, seat?: PlayerId, extra?: Pick<CutinPayload, 'label' | 'style' | 'combo' | 'hl'>): StoreState {
   if ((id === 'tsumo' || id === 'ron') && seat !== undefined && !extra) {
     const st: any = s.game?.state ?? {};
     const rk = `${st.changbang}-${st.jushu}-${st.benbang}`;
@@ -1054,6 +1064,9 @@ export function enqueueCutinState(s: StoreState, id: CutinId, seat?: PlayerId, e
     const sp = specialYakuOf(result);
     if (sp) s = enqueueCutinState(s, 'yaku', seat, sp);
     if (count >= 2) extra = { combo: count };
+    // [2026-11-13 リョー ○× anmika_sakurai1 H1] 満貫以上は金のフラッシュ、跳満以上は卓の揺れ。結果が無い時は 0 [ビートだけ]
+    const hl = huleFxLevel(result);
+    if (hl > 0) extra = { ...(extra ?? {}), hl };
   }
   const payload: CutinPayload = { id, ts: Date.now() + Math.random(), seat, ...(extra ?? {}) };
   s.cutinQueue = [...(s.cutinQueue ?? []), payload];
@@ -1803,7 +1816,7 @@ export function createGameStore() {
     },
     /** オンライン flag 確認 */
     isOnline(): boolean { return onlineMode; },
-    enqueueCutin(id: CutinId, seat?: PlayerId, extra?: Pick<CutinPayload, 'label' | 'style' | 'combo'>) {
+    enqueueCutin(id: CutinId, seat?: PlayerId, extra?: Pick<CutinPayload, 'label' | 'style' | 'combo' | 'hl'>) {
       update((st) => enqueueCutinState(st, id, seat, extra));
     },
     playNextCutin() {
