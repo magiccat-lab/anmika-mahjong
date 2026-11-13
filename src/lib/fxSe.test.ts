@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { huleFxLevel } from './store';
-import { playDiscardSe, _resetDiscardSeForTest, DISCARD_SE_MIN_GAP_MS } from './fxSe';
+import { playDiscardSe, _resetDiscardSeForTest, DISCARD_SE_MIN_GAP_MS, CALL_VOICE, playCallVoice } from './fxSe';
+import { SOUND_FILES } from './soundPreload';
 
 describe('[2026-11-13 H1] 和了の重さ', () => {
   it('満貫未満 0 / 満貫 1 / 跳満以上 2 / 役満 2 / 結果なし 0', () => {
@@ -19,5 +20,16 @@ describe('[2026-11-13 H2] 打牌音の間引き', () => {
     expect(playDiscardSe(1000)).toBe(true);
     expect(playDiscardSe(1000 + DISCARD_SE_MIN_GAP_MS - 1)).toBe(false);
     expect(playDiscardSe(1000 + DISCARD_SE_MIN_GAP_MS)).toBe(true);
+  });
+});
+describe('[2026-11-13 anmika_voice1] 発声の声', () => {
+  it('リーチ ・ ロン ・ ツモ ・ ポン ・ カン ・ フィーバーに声があり、先読みの一覧に載っている', () => {
+    for (const id of ['reach', 'ron', 'tsumo', 'pon', 'kan', 'fever']) {
+      expect(CALL_VOICE[id]).toBeTruthy();
+      expect(SOUND_FILES).toContain(CALL_VOICE[id]);
+    }
+  });
+  it('華 ・ 役 ・ 煽りの帯では鳴らさない', () => {
+    for (const id of ['shika', 'kinpei', 'yaku', 'aori', 'yakumanHoju']) expect(playCallVoice(id)).toBe(false);
   });
 });

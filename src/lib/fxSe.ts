@@ -23,4 +23,18 @@ export function playDiscardSe(now: number = Date.now()): boolean {
 }
 export function playRiichiSe(): void { playSound(SE_RIICHI, SE_VOL.riichi); }
 export function playHuleSe(): void { playSound(SE_HULE, SE_VOL.hule); }
+// [2026-11-13 リョー ○× anmika_voice1 2 版目 B1 a ・ A5 a] 発声の声。全員のリーチ ・ ロン ・ ツモ ・ ポン ・ カン ・ フィーバーリーチに付ける
+// 声は Irodori-TTS の説明文だけで作った声 c [実在の声優の録音は使っていない]。public/sounds/voice/ は git に入れない [無ければ鳴らないだけ]
+export const CALL_VOICE: Readonly<Record<string, string>> = {
+  reach: '/sounds/voice/call_riichi.mp3', ron: '/sounds/voice/call_ron.mp3', tsumo: '/sounds/voice/call_tsumo.mp3',
+  pon: '/sounds/voice/call_pon.mp3', kan: '/sounds/voice/call_kan.mp3', fever: '/sounds/voice/call_fever.mp3',
+};
+export const CALL_VOICE_VOL = 0.9;
+/** 帯の id に声があれば鳴らす。鳴らしたら true */
+export function playCallVoice(id: string): boolean {
+  const src = CALL_VOICE[id];
+  if (!src) return false;
+  playSound(src, CALL_VOICE_VOL);
+  return true;
+}
 export function _resetDiscardSeForTest(): void { lastDiscardAt = -Infinity; }

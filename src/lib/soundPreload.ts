@@ -15,6 +15,9 @@ export const SOUND_FILES: readonly string[] = [
   '/sounds/se_discard.mp3', '/sounds/se_riichi.mp3', '/sounds/se_hule.mp3',
   // 声とプレミアのサビは git に入れない (無ければ読めないだけ)
   '/sounds/voice/anmika_aori.wav', '/sounds/voice/anmika_yakuman.wav', '/sounds/bgm/premium_sabi.mp3',
+  // [2026-11-13 anmika_voice1] 発声の声 [lib/fxSe.ts CALL_VOICE]
+  '/sounds/voice/call_riichi.mp3', '/sounds/voice/call_ron.mp3', '/sounds/voice/call_tsumo.mp3',
+  '/sounds/voice/call_pon.mp3', '/sounds/voice/call_kan.mp3', '/sounds/voice/call_fever.mp3',
   // [2026-11-04] 隠し演出の曲 [lib/jikoSp.ts]
   '/sounds/bgm/jiko_sp.mp3',
 ];

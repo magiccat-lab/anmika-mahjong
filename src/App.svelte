@@ -37,7 +37,7 @@
   import FxOddsPanel from './lib/FxOddsPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
   import { prefs, bgmMode, nextBgmPrefs, playSound } from './lib/prefs';
-  import { HULE_HOLD_MS, playDiscardSe, playHuleSe, playRiichiSe } from './lib/fxSe';
+  import { HULE_HOLD_MS, playCallVoice, playDiscardSe, playHuleSe, playRiichiSe } from './lib/fxSe';
   import { fxMs } from './lib/fxSpeed';
   import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
@@ -193,9 +193,12 @@
     seTs = fxNow.ts;
     if (fxNow.id === 'ron' || fxNow.id === 'tsumo') {
       if (huleSeTimer !== null) clearTimeout(huleSeTimer);
-      huleSeTimer = setTimeout(() => { huleSeTimer = null; playHuleSe(); }, HULE_HOLD_MS);
-    } else if (fxNow.id === 'reach' || fxNow.id === 'fever') {
-      playRiichiSe();
+      const id = fxNow.id;
+      huleSeTimer = setTimeout(() => { huleSeTimer = null; playHuleSe(); playCallVoice(id); }, HULE_HOLD_MS);
+    } else {
+      if (fxNow.id === 'reach' || fxNow.id === 'fever') playRiichiSe();
+      // [2026-11-13 anmika_voice1 A5 a] 発声の声 [リーチ ・ フィーバーリーチ ・ ポン ・ カン]。ロン ・ ツモは上の帯の瞬間に鳴らす
+      playCallVoice(fxNow.id);
     }
   }
   onDestroy(() => { if (huleSeTimer !== null) clearTimeout(huleSeTimer); });
