@@ -22,6 +22,11 @@ export interface Prefs {
    *  [2026-10-14 リョー「通常BGM切ってフィーバーだけONにする設定も用意したい」→「bgm、デフォはフィーバーだけにしておいて～」。
    *  最初は normalBgmOff (既定 false) で出したが、既定を変える時に保存済みの false が残るので名前ごと替えた]。 */
   normalBgmOn: boolean;
+  /** 演出を短くする。カットイン ・ ぽっち ・ サイコロ ・ 冬めくりの待ちを約半分にする。この端末の画面だけで、ルールと点数と他の人の画面には効かない
+   *  [2026-11-13 リョー ○× anmika_sakurai1 T3。10-15 に「演出を楽しめるように遅く」と頼まれたので既定は今まで通り false]。 */
+  shortFx: boolean;
+  /** 一人用: 局が終わって「次局へ」が押せる様になってから 5 秒数えて自動で押す [2026-11-13 リョー ○× anmika_sakurai1 T2]。半荘の終わりと online は対象外 */
+  autoNextRound: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -31,6 +36,8 @@ export const DEFAULT_PREFS: Prefs = {
   autoNuki: false,
   bgmOff: false,
   normalBgmOn: false,
+  shortFx: false,
+  autoNextRound: false,
 };
 
 const KEY = 'anmika.prefs.v1';

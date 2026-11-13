@@ -31,6 +31,7 @@
   import { onDestroy } from 'svelte';
   import DiceCube from './DiceCube.svelte';
   import { playSound } from './prefs';
+  import { fxMs } from './fxSpeed';
   import { planRoll, zoroBonusBase, zoroStreakAt, ZORO_WORD, type BallColor, type RollPlan } from './diceFx';
 
   $: chance = chances[currentIdx];
@@ -118,7 +119,8 @@
   }
 
   function later(fn: () => void, ms: number) {
-    const t = setTimeout(() => { timers.delete(t); fn(); }, ms);
+    // [2026-11-13 リョー ○× anmika_sakurai1 T3] 「演出を短く」の時は 1 振りの中の待ちを半分に [既定はそのまま。サーバーの振りの間隔には触れない]
+    const t = setTimeout(() => { timers.delete(t); fn(); }, fxMs(ms));
     timers.add(t);
   }
   function sleep(ms: number): Promise<void> {

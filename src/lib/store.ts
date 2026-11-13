@@ -5,6 +5,7 @@ import Majiang from '@kobalab/majiang-core';
 import { Game3, buildShoupai, isGoldPai, pochiColorFromPai } from './game3';
 import type { PlayerId } from './types';
 import { dlog, toCorePai, effectiveLevel } from './helpers';
+import { fxMs } from './fxSpeed';
 import { resolveNukiBeiMeta } from './game3/bei';
 import { buildStateFromPaifu } from './store/paifuIo';
 import { buildDebugState } from './store/debug';
@@ -156,8 +157,9 @@ export const CUTIN_TIER_DURATION_MS: Record<'light' | 'mid' | 'heavy', number> =
 
 /** この演出を何ミリ秒出すか。App の pump / watchdog と表示側で同じ値を使う。 */
 export function cutinDurationMs(id: CutinId | null | undefined): number {
-  if (!id) return CUTIN_DURATION_MS;
-  return CUTIN_TIER_DURATION_MS[CUTIN_TIER[id] ?? 'heavy'] ?? CUTIN_DURATION_MS;
+  // [2026-11-13 リョー ○× anmika_sakurai1 T3] 「演出を短く」の時だけ半分。App の pump / watchdog と overlay が同じ関数を読むので尺が食い違わない
+  if (!id) return fxMs(CUTIN_DURATION_MS);
+  return fxMs(CUTIN_TIER_DURATION_MS[CUTIN_TIER[id] ?? 'heavy'] ?? CUTIN_DURATION_MS);
 }
 
 // label: 帯の字を差し替える (役の名前)。style: 見た目の種類。combo: フィーバー中の連続和了の数 [fx5 V5]

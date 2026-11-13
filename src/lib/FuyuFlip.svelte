@@ -9,6 +9,7 @@
   import { createEventDispatcher, onDestroy } from 'svelte';
   import Tile from './Tile.svelte';
   import { playSound } from './prefs';
+  import { fxMs } from './fxSpeed';
   import { tulipNeighbors } from './game3/tulip';
 
   export let log: Array<{ pai: string; tier: 'upper' | 'lower'; hit: number }> = [];
@@ -22,13 +23,14 @@
   export let remote = false;
   export let remoteOpened = 0;
 
-  const AUTO_MS = 650;
+  // [2026-11-13 リョー ○× anmika_sakurai1 T3] 「演出を短く」の時は自動めくりと閉じを半分に [既定はそのまま]
+  const AUTO_MS = fxMs(650);
   /** 自分の和了で押さないまま、この間が過ぎたら自動に切り替える */
   const IDLE_MS = 10_000;
   /** 他の人の和了で中継がこの間届かなければ自動で続ける (和了った人が抜けた時など) */
   const REMOTE_STALL_MS = 6_000;
   /** CPU ・ 他の人の和了は、めくり終わってこの間で閉じる */
-  const CLOSE_MS = 3_000;
+  const CLOSE_MS = fxMs(3_000);
 
   const dispatch = createEventDispatcher<{ flip: { opened: number }; done: { hits: number } }>();
 

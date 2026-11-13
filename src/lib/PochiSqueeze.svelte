@@ -14,6 +14,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { playSound } from './prefs';
   import FreezeFx from './FreezeFx.svelte';
+  import { fxMs } from './fxSpeed';
   import { DEFAULT_PLAN, DELAY_MS, FREEZE_MS, GLOW_ORDER, GLOW_STAGE_MS, KAKUTEI_MS, POCHI_DOT, POCHI_GOOD, PREMIUM_MS, PUSH_IDLE_MS, REMOTE_IDLE_MS,
     RESULT_MS, REVIVE_MISS_MS, REVIVE_WORD_MS, TEASER_MS, DEVELOP_MS, TAME_MS, develops, glowSteps, movieTimeline, pochiRevealText, shownGlow,
     type PochiColor, type PochiPlan } from './pochiFx';
@@ -45,7 +46,11 @@
   // 光りの色 (番号は GLOW_ORDER の順。class 名には色の言葉を使わない)
   const GLOW_CSS = ['#ffffff', '#3a78ff', '#2ecc71', '#ff3b3b', '#f2c23a', 'conic-gradient(#ff3b3b, #ffd23b, #3bff8a, #3bb8ff, #c63bff, #ff3b3b)'];
   const PUSH_LOOK: Record<PochiPlan['push'], number> = { normal: 0, red: 1, gold: 2, rainbow: 3 };
-  const tl = movieTimeline(plan, kakutei);
+  // [2026-11-13 リョー ○× anmika_sakurai1 T3] 「演出を短く」の時は各段の尺を半分に [既定はそのまま]。この画面の待ちだけで、押した色の中継 ・ 結果は変えない
+  const tl0 = movieTimeline(plan, kakutei);
+  const tl = { ...tl0, openingMs: fxMs(tl0.openingMs), kakuteiMs: fxMs(tl0.kakuteiMs), glowMs: fxMs(tl0.glowMs), developMs: fxMs(tl0.developMs), tameMs: fxMs(tl0.tameMs) };
+  const freezeMs = fxMs(FREEZE_MS);
+  const resultMs = fxMs(RESULT_MS);
   const target = GLOW_ORDER.indexOf(shownGlow(plan, kakutei));
   const dev = develops(plan, kakutei);
   const isFreeze = plan.opening === 'freeze_black' || plan.opening === 'freeze_still';
@@ -106,15 +111,15 @@
     pulsing = false;
     const steps = glowSteps(GLOW_ORDER[target]);
     for (const st of steps) {
-      later(() => { gl = GLOW_ORDER.indexOf(st.color); if (gl >= 4) se('kira', 0.5); }, st.at);
+      later(() => { gl = GLOW_ORDER.indexOf(st.color); if (gl >= 4) se('kira', 0.5); }, fxMs(st.at));
     }
     const stepsEnd = steps.length ? steps[steps.length - 1].at : 0;
-    later(() => { pulsing = true; }, stepsEnd + 120);
+    later(() => { pulsing = true; }, fxMs(stepsEnd + 120));
     if (plan.pulse === 'blink') {
       // 脈打ちの代わりに、一瞬消えて虹で点け直す
-      const darkAt = Math.min(stepsEnd + 500, GLOW_STAGE_MS - 700);
+      const darkAt = fxMs(Math.min(stepsEnd + 500, GLOW_STAGE_MS - 700));
       later(() => { dark = true; }, darkAt);
-      later(() => { dark = false; gl = 5; se('kira', 0.6); }, darkAt + 250);
+      later(() => { dark = false; gl = 5; se('kira', 0.6); }, darkAt + fxMs(250));
     }
   }
   function startMovie(): void {
@@ -128,7 +133,7 @@
     else if (plan.opening === 'mono') { se('gashan', 0.4); se('kira', 0.7); }
     else if (plan.opening === 'bolt') { se('gashan', 0.6); se('gyuiin', 0.5); }
     // 先告知のランプは引いた直後 (フリーズの時は明けてから)
-    if (plan.lamp === 'pre') lampTimer = setTimeout(lightLamp, isFreeze ? FREEZE_MS + 100 : 250);
+    if (plan.lamp === 'pre') lampTimer = setTimeout(lightLamp, isFreeze ? freezeMs + 100 : 250);
     // 段の並び。尺 0 の段は飛ばす
     const seq: { s: Stage; ms: number }[] = [
       { s: 'opening', ms: tl.openingMs }, { s: 'kakutei', ms: tl.kakuteiMs }, { s: 'glow', ms: tl.glowMs },
@@ -214,8 +219,8 @@
       // 復活: まず外れに見せて、「まだや！」で本当の当たり
       rphase = 'miss'; flipped = true; fakeMiss = true;
       se('hazure', 0.6);
-      laterResult(() => { rphase = 'word'; fakeMiss = false; se('gyuiin', 0.6); }, REVIVE_MISS_MS);
-      laterResult(() => revealFinal(good), REVIVE_MISS_MS + REVIVE_WORD_MS);
+      laterResult(() => { rphase = 'word'; fakeMiss = false; se('gyuiin', 0.6); }, fxMs(REVIVE_MISS_MS));
+      laterResult(() => revealFinal(good), fxMs(REVIVE_MISS_MS + REVIVE_WORD_MS));
     } else {
       revealFinal(good);
     }
@@ -224,7 +229,7 @@
     rphase = 'reveal'; flipped = true; fakeMiss = false;
     if (good) { se('kyuin', 0.6); snd('/sounds/se_a.mp3', 0.6); } else { se('hazure', 0.6); snd('/sounds/se_b.mp3', 0.6); }
     if (plan.lamp === 'post' && good) lampTimer = setTimeout(lightLamp, 350);
-    closeTimer = setTimeout(close, RESULT_MS);
+    closeTimer = setTimeout(close, resultMs);
   }
   function close(): void {
     if (closing) return;
@@ -290,7 +295,7 @@
 <div class="sq" class:dev={devSeen && stage !== 'result'} class:mono={stage === 'opening' && plan.opening === 'mono'} class:bad={stage === 'result' && rphase === 'reveal' && !good}
   data-testid="pochi-skip" data-stage={stage} role="dialog" aria-label={label} tabindex="-1" on:pointerdown={onDown} on:keydown={onKey}>
   {#if who}<div class="sq-who">{who}{readOnly ? ' が引いた' : ''}</div>{/if}
-  {#if stage === 'opening' && isFreeze}<FreezeFx kind={plan.opening === 'freeze_still' ? 'still' : 'black'} durationMs={FREEZE_MS} />{/if}
+  {#if stage === 'opening' && isFreeze}<FreezeFx kind={plan.opening === 'freeze_still' ? 'still' : 'black'} durationMs={freezeMs} />{/if}
   {#if lampOn}<div class="sq-edge" aria-hidden="true"><div class="sq-edge-run"></div></div>{/if}
   {#if stage === 'opening' && plan.opening === 'premium'}
     <div class="sq-rays" aria-hidden="true"></div>
