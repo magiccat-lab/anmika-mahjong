@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { CUTIN_TIER, cutinDurationMs, type CutinPayload } from './store';
+  import { prefs } from './prefs';
 
   export let cutin: CutinPayload | null;
 
@@ -16,7 +17,8 @@
   }
 
   $: tier = cutin ? CUTIN_TIER[cutin.id] : 'light';
-  $: durationMs = cutinDurationMs(cutin?.id);
+  // [2026-11-13 リョー ○× anmika_sakurai1 T3] 「演出を短く」の切り替えでも尺を取り直す
+  $: durationMs = ($prefs.shortFx, cutinDurationMs(cutin?.id));
   // スキップできるのは 重 だけ (原則 6)。軽と中は 0.7〜1.2 秒で消えるので
   // 触れるようにすると打牌のタップを食う
   $: skippable = tier === 'heavy';

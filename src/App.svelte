@@ -37,6 +37,7 @@
   import FxOddsPanel from './lib/FxOddsPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
   import { prefs, bgmMode, nextBgmPrefs, playSound } from './lib/prefs';
+  import { fxMs } from './lib/fxSpeed';
   import OnlineGameView from './lib/OnlineGameView.svelte';
   import PlayerStatus from './lib/PlayerStatus.svelte';
   import PlayerHandPanel from './lib/PlayerHandPanel.svelte';
@@ -145,7 +146,8 @@
     // 札の側も必ずこの seatDisplayNames を読む
     seatDisplayNames = onlineGameStarted
       ? [seatName(0), seatName(1), seatName(2)]
-      : ['P0', 'P1', 'P2'];
+      // [2026-11-13 リョー ○× anmika_sakurai1 V2] 一人用は席の札と同じく自分の席を「あなた」にする [他は P{n}]
+      : ([0, 1, 2].map((p) => (p === selfPlayer ? 'あなた' : `P${p}`)) as [string, string, string]);
   }
 
   let cutinTimer: ReturnType<typeof setTimeout> | null = null;
@@ -192,7 +194,7 @@
   }
   onDestroy(() => { if (confettiTimer !== null) clearTimeout(confettiTimer); });
   $: fxTier = fxNow ? CUTIN_TIER[fxNow.id] : null;
-  $: fxDur = cutinDurationMs(fxNow?.id);
+  $: fxDur = ($prefs.shortFx, cutinDurationMs(fxNow?.id));
   $: fxWho = !fxNow || fxNow.seat === undefined ? '' : (onlineGameStarted ? seatDisplayNames[fxNow.seat as 0 | 1 | 2] : (fxNow.seat === selfPlayer ? 'あなた' : `P${fxNow.seat}`));
   // [2026-10-14 リョー「四華とか四北がそろったらカットイン出るようにして」] 華と北が揃った瞬間に 1 回だけ出す [lib/setCutin.ts]。
   // 最初に見た局面 [読み直し ・ 途中から入った] は覚えるだけ。局が変わったら空から数え直す [配牌で揃っても出る]。
@@ -2980,9 +2982,10 @@
         // [2026-05-15 bug 10 fix] CPU saikoro 体感 skip 抑制で 各 step 延長:
         // combo 800→1500ms / roll 1500→2500ms / advance 1500→2000ms
         // [dicebox 物理アニメ + 結果視認 + 次 chance 移行 を 確実に見せる]
+        // [2026-11-13 リョー ○× anmika_sakurai1 T3] 「演出を短く」の時は CPU のサイコロの刻みも半分 [solo だけ。この driver は online では動かない]
         const stepDelay = cpuSaiFast
           ? (!ps0.finalized ? 0 : CPU_SAI_FAST_ADVANCE_MS)
-          : (!ps0.selectedCombo ? 1500 : (!ps0.finalized ? 2500 : 3000));
+          : fxMs(!ps0.selectedCombo ? 1500 : (!ps0.finalized ? 2500 : 3000));
         // [2026-10-14] リーチの演出 (最長 2 秒) の後も結果の欄を読めるよう、次のチャンスへは 3 秒待つ
         __cpuSaiKoroTimer = setTimeout(() => {
           __cpuSaiKoroTimer = null;
@@ -3049,11 +3052,18 @@
   // R13 P0 #1 fix: online 中の auto nextRound は host CPU driver の責務、 各 client が
   // 独立 fire すると 同 action 重複 send で desync する
   let cpuAutoAdvanceFired = false;
+  // [2026-11-13 リョー ○× anmika_sakurai1 T1] 和了者が全員 CPU か。ロン [lastDapai が残る] は ronResults の全員、ツモは lastWinner
+  function cpuOnlyWinners(g: typeof $game): boolean {
+    const winners = g.lastDapai && (g.ronResults?.length ?? 0) > 0
+      ? g.ronResults.map((e) => e.player)
+      : (g.lastWinner !== null ? [g.lastWinner] : []);
+    return winners.length > 0 && winners.every((w) => !!g.cpu[w as PlayerId]);
+  }
   $: if (viewMode === 'single' && !onlineGameStarted && $game.roundEnded && $game.lastWinner !== null
         && $game.cpu[$game.lastWinner as PlayerId] && !state.finished
         && !$game.pendingKinpei && !$game.pendingFuyu && !$game.pendingKamiPochi && !$game.pendingPochiSwap && !$game.pendingSaiKoro
         && $game.cpuWinAck  // [2026-07-17] CPU和了は人間の確認まで自動進行しない
-        && !$game.lastDapai  // ron 時は lastDapai が残ってる、 tsumo のみ
+        && cpuOnlyWinners($game)  // [2026-11-13 リョー ○× anmika_sakurai1 T1] ロンも CPU だけの和了なら tsumo と同じに自動で進める [人間が絡むダブロンは従来通り押すまで待つ]
         && !fxCutinBusy  // [2026-10-15] 役の名前 + ツモの帯 (3.4 秒) を見せ終わってから 3 秒数える
         && !fuyuFlipEntry  // [2026-10-15] 冬冬金北のめくりを見終わってから
         && !cpuAutoAdvanceFired) {
@@ -3066,6 +3076,51 @@
     }, 3000);
   }
   $: if (!$game.roundEnded) cpuAutoAdvanceFired = false;
+
+  // [2026-11-13 リョー ○× anmika_sakurai1 T2] 「次局へを自動で押す」設定 [一人用だけ]。
+  // 和了の後の鎖 [帯 → 冬めくり → ぽっち → 冬 ・ 金北の選択 → サイコロ → フィーバー継続] が全部終わって
+  // 「次局へ」が実際に押せる様になってから 5 秒数える。押せば数えを待たずにすぐ進む [ボタンの処理は従来のまま]。半荘の終わりは対象外
+  // [2026-11-13 リョー ○× anmika_sakurai1 V2] 流局の板の 1 行。見出しが「流局」なので「🌀 流局: 流局 [全員テンパイ、 点数移動なし]」の重なりを畳み、
+  // 中身だけ「全員テンパイ ・ 点数移動なし」にする。末尾が「流局 [...]」でない物 [フィーバーの 1 人テンパイ流局など] と、
+  // 前置きに理由がある物 [カン後 王牌枯渇] は理由を残す。表示だけで、game.message [ログ ・ online の中継] は変えない
+  function pingjuNoteText(raw: string): string {
+    const m = raw.match(/流局 \[([^\]]+)\]\s*$/);
+    if (!m || m.index === undefined) return raw;
+    const reason = m[1].replace(/、\s*/g, ' ・ ');
+    let head = raw.slice(0, m.index).replace(/^[^\p{L}\p{N}\[]+/u, '').replace(/[:：]\s*$/, '').trim();
+    const hm = head.match(/^流局 \[(.+)\]$/);
+    if (head === '流局' || head === '') head = '';
+    else if (hm) head = hm[1];
+    return head ? `${head} ・ ${reason}` : reason;
+  }
+  const AUTO_NEXT_SEC = 5;
+  let autoNextSec: number | null = null;
+  let autoNextTimer: ReturnType<typeof setInterval> | null = null;
+  $: autoNextReady = $prefs.autoNextRound && viewMode === 'single' && !onlineGameStarted
+    && ($game.roundEnded || !!$game.pendingPingju) && !state.finished
+    && !$game.pendingKinpei && !$game.pendingFuyu && !$game.pendingKamiPochi && !$game.pendingPochiSwap && !$game.pendingSaiKoro && !$game.pendingFeverContinue
+    && !fxPresentationBusy && !pochiReveal && !$game.awaitingRonDecision;
+  $: syncAutoNext(autoNextReady);
+  function stopAutoNext(): void {
+    if (autoNextTimer !== null) { clearInterval(autoNextTimer); autoNextTimer = null; }
+    autoNextSec = null;
+  }
+  function syncAutoNext(ready: boolean): void {
+    if (typeof window === 'undefined') return;
+    if (!ready) { stopAutoNext(); return; }
+    if (autoNextTimer !== null) return;
+    autoNextSec = AUTO_NEXT_SEC;
+    autoNextTimer = setInterval(() => {
+      if (autoNextSec === null) { stopAutoNext(); return; }
+      autoNextSec -= 1;
+      if (autoNextSec <= 0) {
+        stopAutoNext();
+        const snap = get(game) as any;
+        if ((snap.roundEnded || snap.pendingPingju) && !snap.game.state?.finished) game.nextRound();
+      }
+    }, 1000);
+  }
+  onDestroy(stopAutoNext);
 
   // WSA-A8: checkbox 自動とリーチ強制を同じキャンセル可能 scheduler に統合。
   // 発火時にも player・phase・局面 revision を readAutoTsumokiriToken で再検証する。
@@ -3699,7 +3754,7 @@
             <span class="muted-hint">観戦中 [対局者が「次の試合へ」を押すと次が始まる]</span>
           {/if}
         {:else if !onlineGameStarted}
-          <button class="next-btn" on:click={() => game.nextRound()}>次局へ</button>
+          <button class="next-btn" on:click={() => game.nextRound()}>次局へ{#if autoNextSec !== null} [{autoNextSec}]{/if}</button>
           {#if $game.lastWinner !== null && $game.game.canAgariyame($game.lastWinner as PlayerId) && !$game.cpu[$game.lastWinner as 0|1|2]}
             <button class="next-btn agariyame" on:click={() => game.agariyame()}>アガリ止め</button>
           {/if}
@@ -4204,7 +4259,7 @@
         {#if $game.pendingPingju && !$game.lastHuleResult}
           <div class="pingju-head">
             <h2 class="pingju-title">流局</h2>
-            <span class="pingju-note">{#each ($game.message ?? '🌀 山切れ').split(/(p[\d,]+ [+-]\d+\]?)/) as part, pi}{#if pi % 2 === 1}<span class="keep">{part}</span>{:else}{part}{/if}{/each}</span>
+            <span class="pingju-note">{#each pingjuNoteText($game.message ?? '🌀 山切れ').split(/(p[\d,]+ [+-]\d+\]?)/) as part, pi}{#if pi % 2 === 1}<span class="keep">{part}</span>{:else}{part}{/if}{/each}</span>
           </div>
           {#if $game.game.preHuleSnapshot}
             {@const pdelta = [0,1,2].map(p => state.defen[p as PlayerId] - (($game.game.preHuleSnapshot as any).defen[p] ?? 0))}
@@ -4370,7 +4425,7 @@
             <!-- R21 P0 fix: nextRound は host or winner or 親 許容 [server gate]、
                  ゲスト人間和了で 詰みを 解消 -->
             {#if !onlineGameStarted && !$game.pendingSaiKoro}
-              <button on:click={() => game.nextRound()}>▶ 次局へ</button>
+              <button on:click={() => game.nextRound()}>▶ 次局へ{#if autoNextSec !== null} [{autoNextSec}]{/if}</button>
               {#if $game.lastWinner !== null && $game.game.canAgariyame($game.lastWinner as PlayerId) && !$game.cpu[$game.lastWinner as 0|1|2]}
                 <button on:click={() => game.agariyame()}>アガリ止め</button>
               {/if}
