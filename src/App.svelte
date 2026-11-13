@@ -229,6 +229,15 @@
   onDestroy(() => { if (confettiTimer !== null) clearTimeout(confettiTimer); });
   $: fxTier = fxNow ? CUTIN_TIER[fxNow.id] : null;
   $: fxDur = ($prefs.shortFx, cutinDurationMs(fxNow?.id));
+  // [2026-11-13 リョー ○× anmika_sakurai1 V1] 軽 (リーチ ・ ポン ・ カン) は帯を出さず、宣言した席の札の上に小札を出す。
+  // 和了でない知らせの中 (金北 ・ 四華 ・ 四北 ・ 八華 ・ 四華四北 ・ 役) は、当事者の画面だけ今まで通り真ん中の帯、
+  // 他の席の画面 (と観戦) では当事者の席の札に寄せた帯にする [他の卓で起きた事を知る意味もある、リョー]。
+  // 席の札の子要素にするので、PC と スマホで札の位置が違っても CSS が席に付いてくる [測らない]
+  const FX_INFO_MID = new Set(['kinpei', 'shika', 'shipei', 'hachika', 'shikashipei', 'yaku']);
+  $: fxSeatForm = !fxNow || fxNow.seat === undefined ? null
+    : fxTier === 'light' ? 'light'
+    : (fxTier === 'mid' && FX_INFO_MID.has(fxNow.id) && (watchOnly || fxNow.seat !== selfPlayer)) ? 'info'
+    : null;
   $: fxWho = !fxNow || fxNow.seat === undefined ? '' : (onlineGameStarted ? seatDisplayNames[fxNow.seat as 0 | 1 | 2] : (fxNow.seat === selfPlayer ? 'あなた' : `P${fxNow.seat}`));
   // [2026-10-14 リョー「四華とか四北がそろったらカットイン出るようにして」] 華と北が揃った瞬間に 1 回だけ出す [lib/setCutin.ts]。
   // 最初に見た局面 [読み直し ・ 途中から入った] は覚えるだけ。局が変わったら空から数え直す [配牌で揃っても出る]。
@@ -3186,6 +3195,11 @@
   {@const seatMember = onlineGameStarted ? memberAtGameSeat(onlineMembers, onlineActiveMapping, p) : undefined}
   {@const wind = ['東', '南', '西'][$game.game.zifengZ(p) - 1] ?? ''}
   <div class="seat-card sc-{pos}" class:turn={currentPlayer === p && !$game.roundEnded} class:oya={wind === '東'} class:fx-hit={!!fxNow && fxNow.seat === p}>
+    {#if fxSeatForm && fxNow && fxNow.seat === p}
+      {#key fxNow.ts}
+        <span class="sc-fx sc-fx-{fxSeatForm}" style="--fx-dur: {fxDur}ms; --fit: {Math.min(1, 4.2 / (fxNow.label ?? FX_LABELS[fxNow.id]).length)}" aria-hidden="true">{fxNow.label ?? FX_LABELS[fxNow.id]}</span>
+      {/key}
+    {/if}
     <div class="sc-head">
       <span class="sc-wind" title={wind === '東' ? '親' : ''}>{wind}</span>
       <span class="sc-name">{onlineGameStarted ? seatDisplayNames[p] : (pos === 'me' ? 'あなた' : `P${p}`)}</span>
@@ -4028,7 +4042,7 @@
         <div class="ao-band"><div class="ao-speed"></div><div class="ao-line">{fxNow.label ?? FX_LABELS[fxNow.id]}</div><div class="ao-sig">アン ミカ</div>{#if fxWho}<div class="ao-who">{fxWho} の放銃</div>{/if}</div>
       </div>
     {/key}
-  {:else if viewMode === 'single' && fxNow && fxTier}
+  {:else if viewMode === 'single' && fxNow && fxTier && !fxSeatForm}
     {#key fxNow.ts}
       <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
       <div class="fx fx-{fxNow.id} fx-{fxTier} dr {fxNow.style ? 'yk-' + fxNow.style : ''} {fxNow.combo && fxNow.combo >= 2 ? 'combo-' + Math.min(fxNow.combo, 4) : ''}" class:hs={fxNow.id === 'ron' || fxNow.id === 'tsumo'} class:hs-flash={(fxNow.id === 'ron' || fxNow.id === 'tsumo') && (fxNow.hl ?? 0) >= 1} class:fx-skippable={fxTier === 'heavy'}
@@ -7241,6 +7255,33 @@
   @keyframes aoOut { to { transform: rotate(-6deg) translateX(-110%); } }
   @keyframes aoWord { 0% { opacity: 0; transform: skewX(-8deg) scale(2.2); } 100% { opacity: 1; transform: skewX(-8deg) scale(1); } }
   @keyframes aoCrack { to { stroke-dashoffset: 0; } }
+  /* [2026-11-13 リョー ○× anmika_sakurai1 V1] 席の札に付く演出。軽は金の枠の小札、中の知らせは札の上半分の細い帯。
+     河 ・ 真ん中の札 ・ 手牌は覆わない [席の札の中だけ]。transform と opacity だけ、尺は軽 / 中のまま */
+  .sc-fx {
+    position: absolute; z-index: 5; pointer-events: none; white-space: nowrap; opacity: 0;
+    font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.06em;
+    animation: scFx calc(var(--fx-dur) - 100ms) cubic-bezier(0.22, 1, 0.36, 1) 100ms both;
+  }
+  .sc-fx-light {
+    left: 50%; top: 4px; margin-left: -0.5px; padding: 2px 10px 3px; font-size: clamp(15px, 4vw, 20px);
+    color: #d9b453 !important; background: #102b25f2; border: 2px solid #d9b453; border-radius: 4px;
+    --sc-x: -50%;
+  }
+  .seat-card.sc-me .sc-fx-light { top: 50%; left: auto; right: 10px; margin: 0; --sc-x: 0%; --sc-y: -50%; }
+  .sc-fx-info {
+    left: -4px; right: -4px; top: 6px; padding: 3px 4px 4px; text-align: center; --sc-x: 0%;
+    font-size: calc(clamp(18px, 5.2vw, 30px) * var(--fit, 1)); line-height: 1.15;
+    color: #fff !important; -webkit-text-stroke: 3px #111; paint-order: stroke fill;
+    background: linear-gradient(180deg, #111 0 7%, #f2d27a 7% 50%, #b8862b 50% 93%, #111 93%);
+    box-shadow: 0 0 0 2px #fff inset, 0 4px 12px rgba(0, 0, 0, 0.5); transform-origin: 50% 50%;
+  }
+  @keyframes scFx {
+    0% { opacity: 0; transform: translate(var(--sc-x, 0), var(--sc-y, 0)) scale(0.9); }
+    22%, 78% { opacity: 1; transform: translate(var(--sc-x, 0), var(--sc-y, 0)) scale(1); }
+    100% { opacity: 0; transform: translate(var(--sc-x, 0), var(--sc-y, 0)) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) { .sc-fx { animation-name: scFxQuiet; } }
+  @keyframes scFxQuiet { 0%, 100% { opacity: 0; } 22%, 78% { opacity: 1; } }
   .seat-card.fx-hit { box-shadow: inset 0 0 0 2px var(--jz-gold), 0 0 0 2px var(--jz-gold), var(--jz-shadow); }
   @media (prefers-reduced-motion: reduce) {
     .dr::before, .dr.fx-heavy::after { animation: none; opacity: 0; }
