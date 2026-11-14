@@ -1536,6 +1536,25 @@ export function sanitizePochiFx(value: Record<string, unknown>): PochiFxRelay | 
   }
   return out;
 }
+/** [2026-11-14 isg. 通報 SB9Z rev 1771]「冬冬金北を上がるとサイコロを振らない」。
+ *  CPU の和了の冬めくり (FuyuFlip auto) は和了の帯の後に出て、画面はめくり終わるまでサイコロを出さない。
+ *  サーバーは 1.5 秒でサイコロを進めていたので、22 枚めくる間に出目宣言から次局まで済み、人の画面にサイコロが出なかった。
+ *  CPU の最初のサイコロの手の前に、めくりの尺 [和了の帯 + 0.9 秒 + 1 枚 0.65 秒 + 閉じる 3 秒] を足す。0 なら待たない */
+export const FUYU_FLIP_BAND_MS = 3_400;
+export function fuyuFlipHoldMs(state: any): number {
+  if (!state?.lastHuleResult || state.game?.state?.finished) return 0;
+  const entries: Array<{ player: number; result: any }> = (state.ronResults?.length ?? 0) > 0 ? state.ronResults
+    : (state.lastWinner !== null && state.lastWinner !== undefined ? [{ player: state.lastWinner, result: state.lastHuleResult }] : []);
+  let hold = 0;
+  for (const hw of entries) {
+    const log = hw?.result?.fuyuLog;
+    if (!Array.isArray(log) || log.length === 0 || !log.some((e: any) => e?.tier === 'lower')) continue;
+    const hua: string[] = state.game?.effectiveHuapaiAtHule?.(hw.player) ?? [];
+    if (hua.filter((x) => x === 'f4').length < 2) continue;
+    hold += 900 + log.length * 650 + 3_250;
+  }
+  return hold > 0 ? FUYU_FLIP_BAND_MS + hold : 0;
+}
 /** [2026-10-15 リョー ○ anmika-fuyu1] 冬冬金北の冬めくりで、和了った人の画面がめくった枚数を他の席へ流す。
  *  めくる牌と当たりは全員の和了の結果に入っているので、流すのは枚数だけ [牌も点も通さない] */
 export function sanitizeFuyuFx(value: Record<string, unknown>): { opened: number } | null {
@@ -2579,7 +2598,11 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
       const humanPostWinTimeoutMs = Number(process.env.ANMIKA_POST_WIN_TIMEOUT_MS || 180_000);
       // [2026-10-09 遊真 A2] CPU 代行中の人間 owner も CPU の刻みで進める [180 秒待たない]
       const armedCpu = cpuDrivenAt(room, postWinOwner);
-      const delay = armedCpu ? cpuStepDelay : humanPostWinTimeoutMs;
+      // [2026-11-14 isg. 通報] CPU の冬冬金北は、めくりを見終わってから最初のサイコロを進める [スキップ時は待たない]
+      const firstSaiStep = postWinAction.type === 'selectSaiKoroCombo'
+        && (canonical.pendingSaiKoro as any)?.currentIdx === 0 && !room.cpuSaiFast;
+      const flipHold = armedCpu && firstSaiStep ? fuyuFlipHoldMs(canonical) : 0;
+      const delay = armedCpu ? cpuStepDelay + flipHold : humanPostWinTimeoutMs;
       announceDeadline(armedCpu ? 'none' : 'postWin', [postWinOwner], delay);
       room.deadlineTimer = setTimeout(() => {
         room.queue = room.queue.then(async () => {
