@@ -4247,7 +4247,9 @@ export class Game3 {
       // [D-03 fix] 直接祝儀は result 積み → applyHule で一度だけ適用
       (result._directChipAwards ??= []).push({ n: 300, opts: { bypassShuvari: true, label: '八華四北 300枚オール' } });
       result.hupai.push({ name: '八華四北 [+300オール]', fanshu: 0 });
-      for (let i = 1; i <= 3; i++) addSai(`八華四北:${i}`, `八華四北 ${i}/3`, 70, false, 1);
+      // 2026-11-14 isg. 通報: 出目当てのシュバ適用 (= シュバ宣言中ならゾロ目連続特典が付く) は
+      // 八華と揃える。§6-2 の「100/300 枚はシュバ非適用」は直接祝儀の話でサイコロの事ではない
+      for (let i = 1; i <= 3; i++) addSai(`八華四北:${i}`, `八華四北 ${i}/3`, 70, true, 1);
     } else if (huaCount >= 8) {
       (result._directChipAwards ??= []).push({ n: 100, opts: { bypassShuvari: true, label: '八華 100枚オール' } });
       result.hupai.push({ name: '八華 [+100オール]', fanshu: 0 });
@@ -4258,8 +4260,8 @@ export class Game3 {
       (result._directChipAwards ??= []).push({ n: 100, opts: { bypassShuvari: true, label: '四華四北 100枚オール' } });
       result.hupai.push({ name: '四華四北 [+100オール]', fanshu: 0 });
       // 鳴き四華四北は 70 枚 2 回振りと 70 枚 [4 回振り] を各 1 回。面前なら70枚を独立2回。
-      addSai('四華四北:1', '四華四北 1/2', 70, false, 1, '+', false, hasFulou ? HALF_SAI_ROLLS : undefined);
-      addSai('四華四北:2', '四華四北 2/2', 70, false, 1);
+      addSai('四華四北:1', '四華四北 1/2', 70, true, 1, '+', false, hasFulou ? HALF_SAI_ROLLS : undefined);
+      addSai('四華四北:2', '四華四北 2/2', 70, true, 1);
     } else if (hasAll4Hua) {
       addSai('四華', '四華', 70, true, 1, '+', false, hasFulou ? HALF_SAI_ROLLS : undefined);
     } else if (nukiTotal >= 4) {
@@ -4301,7 +4303,9 @@ export class Game3 {
       const totalYakumanUnits = Math.max(hasYakumanMarker ? 1 : 0, result.damanguan ?? 0);
       const genericYakumanCount = Math.max(0, totalYakumanUnits - dedicatedYakumanUnits);
       if (genericYakumanCount > 0) {
-        addSai('yakuman:その他本役満', '本役満アガリ', YAKUMAN_SAI_BASE.その他本役満, false, genericYakumanCount);
+        // 2026-11-14 isg. 通報「サイコロ 2 回でシュバサイだと片方の表示が非シュバサイ」: 本役満のサイコロも
+        // シュバ宣言中ならシュバサイ (ルール §4-3/4-4、別枠は天地人和 ・ 流し役満の常時シュバサイだけ)
+        addSai('yakuman:その他本役満', '本役満アガリ', YAKUMAN_SAI_BASE.その他本役満, true, genericYakumanCount);
       }
     }
   }
