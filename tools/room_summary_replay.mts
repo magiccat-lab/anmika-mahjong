@@ -58,6 +58,8 @@ for (const command of commands) {
 type Dice = {
   match: number; seat: number; user: string; name: string; rolls: number; hits: number; chip: number; revision: number;
   zoros: number; hitChip: number; zoroChip: number; base: number; mult: number; sign: '' | '+' | '-'; shuba: boolean | null;
+  // 席ごとの動き (振った人の分も入る)。11-16 通報「他家のサイコロで動いた枚数 "サイコロのチップ(他)" を追加」
+  seats: Record<string, number>;
 };
 type Hule = { match: number; seat: number | null; ron: boolean; defen: number; hand: string; revision: number };
 // 1 局で動いた祝儀 (アガリ ・ サイコロ ・ 華 ・ 流局のテンパイ料も全部)。局の切れ目は nextRound。
@@ -333,13 +335,16 @@ segments.forEach((segment, index) => {
       if (!current) {
         current = {
           match, seat: command.actorSeat, user: roomSeatUser[command.actorSeat] ?? '', name: '', rolls: 0, hits: 0, chip: 0, revision: command.revision,
-          zoros: 0, hitChip: 0, zoroChip: 0, base: 0, mult: 0, sign: '', shuba: null,
+          zoros: 0, hitChip: 0, zoroChip: 0, base: 0, mult: 0, sign: '', shuba: null, seats: {},
         };
       }
       combo = [Math.min(action.small, action.large), Math.max(action.small, action.large)];
     }
     const mineDelta = current ? Number(delta[String(current.seat)] ?? 0) : 0;
     if (current) current.chip += mineDelta;
+    if (current) {
+      for (const [seat, v] of Object.entries(delta)) current.seats[seat] = (current.seats[seat] ?? 0) + Number(v || 0);
+    }
     const rolled = action.type === 'rollSaiKoroDice' && Array.isArray(action.override) ? action.override as [number, number] : null;
     if (current && rolled && rolled[0] === rolled[1]) {
       current.zoros += 1;
