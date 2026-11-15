@@ -2380,8 +2380,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     type: 'nextRoundReady',
     revision: room.nextRoundReadyRevision,
     seats: [...room.nextRoundReadySeats].sort((a, b) => a - b),
-    // [2026-10-09 遊真 A2] CPU 代行席は押せないので分母から外す
-    total: Math.max(1, activeHumanMembers(room).filter((m) => !m.cpuProxy).length),
+    // [2026-11-15] 全員押すまで進まないので分母も active の人間全員 [CPU 代行席も含む]
+    total: Math.max(1, activeHumanMembers(room).length),
   });
 
   const sendNextRoundReadyStateTo = (ws: WebSocket, room: Room) => {
@@ -2422,17 +2422,47 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     }).catch((error) => warn('[anmika-ws] next-round advance failed', error));
   };
 
+  // [2026-11-15 リョー「3人が押さないと次にいけないようにして、オンラインで」]
+  // 次局は active の人間が全員押すまで進まない。旧仕様は (1) 最初の 1 押しから 180s で
+  // 自動で進む (2) 切断中 ・ CPU 代行の席は gate から外す、の 2 つで、押していない人を置いて進んでいた。
+  // 押していない席が全員「いない」(切断中 / CPU 代行) の時だけ、本当に抜けた人で卓が永久に
+  // 止まらないよう nextRoundTimeoutMs の fallback を張る。発火時にもう一度確かめ、
+  // 戻ってきて押していない人がいれば進めない
+  const nextRoundPending = (room: Room) => {
+    const missing = activeHumanMembers(room).filter((m) => !room.nextRoundReadySeats.has(m.seat));
+    const present = missing.filter((m) => m.connected && !m.cpuProxy);
+    return { missing, present };
+  };
+
+  const clearNextRoundTimer = (room: Room) => {
+    if (room.nextRoundTimer) clearTimeout(room.nextRoundTimer);
+    room.nextRoundTimer = null;
+  };
+
   const maybeAdvanceAllReady = (room: Room, revision: number) => {
     if (room.nextRoundReadyRevision !== revision || room.snapshot.revision !== revision) return;
-    // 切断中の人間は押せないので gate から除外 [復帰しないケースは timeout fallback が拾う]
-    // [Phase3] 抜け番も gate から除外 [active human の全押しで進む]
-    // [2026-10-09 遊真 A2] CPU 代行席も除外 [押せない]
-    const required = activeHumanMembers(room)
-      .filter((m) => m.connected && !m.cpuProxy)
-      .map((m) => m.seat);
-    if (required.length === 0) return;
-    if (!required.every((seat) => room.nextRoundReadySeats.has(seat))) return;
-    issueServerNextRound(room, revision, required[0], 'all-ready');
+    if (room.nextRoundReadySeats.size === 0) return;
+    const { missing, present } = nextRoundPending(room);
+    if (missing.length === 0) {
+      clearNextRoundTimer(room);
+      const first = [...room.nextRoundReadySeats].sort((a, b) => a - b)[0];
+      issueServerNextRound(room, revision, first, 'all-ready');
+      return;
+    }
+    if (present.length > 0) {
+      // まだ卓にいて押していない人がいる: 待つ [時間切れでは進めない]
+      clearNextRoundTimer(room);
+      return;
+    }
+    if (!room.nextRoundTimer) {
+      room.nextRoundTimer = setTimeout(() => {
+        room.nextRoundTimer = null;
+        if (room.nextRoundReadyRevision !== revision || room.snapshot.revision !== revision) return;
+        if (nextRoundPending(room).present.length > 0) return;
+        const first = [...room.nextRoundReadySeats].sort((a, b) => a - b)[0] ?? 0;
+        issueServerNextRound(room, revision, first, 'timeout');
+      }, nextRoundTimeoutMs);
+    }
   };
 
   // [2026-07-22 リョー要望] 次局へは「全員が押したら進む」。
@@ -2463,11 +2493,6 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
     }
     room.nextRoundReadySeats.add(actorSeat);
     broadcast(room, nextRoundReadyPayload(room));
-    if (!room.nextRoundTimer) {
-      room.nextRoundTimer = setTimeout(() => {
-        issueServerNextRound(room, revision, actorSeat, 'timeout');
-      }, nextRoundTimeoutMs);
-    }
     maybeAdvanceAllReady(room, revision);
     return null;
   };
