@@ -401,11 +401,15 @@ export function applyChipsOnHule(
   const cappedGoldP = Math.min(ctx.goldHand[winner].p, ownGoldCapacityP) + calledGoldP + ronGoldP;
   const cappedGoldS = Math.min(ctx.goldHand[winner].s, ownGoldCapacityS) + calledGoldS + ronGoldS;
   const winnerGoldCount = cappedGoldP + cappedGoldS;
+  // [11-16 通報 20261116_0 部屋 I2ZK rev 14] 嵌八萬ロンは正ぽっちを m8 として受けるが、
+  // 置き換え先の印が _kanpamanPochi だけで現物に白 z5 として残り、冬冬で 中 ・ 逆ぽっちに当たっていた
   ctx.pochiSwapView = result?._allmightyPochi
     ? { from: 'z5', target: result._allmightyPochi }
     : result?._dekapochiSwap && result?._dekapochiFrom
       ? { from: result._dekapochiFrom, target: result._dekapochiSwap }
-      : null;
+      : result?._kanpamanPochi && claim.core === 'z5'
+        ? { from: 'z5', target: 'm8' }
+        : null;
   // 赤 count = 全 '0' marker - 金 count
   let redCount = 0;
   if (sp) {
