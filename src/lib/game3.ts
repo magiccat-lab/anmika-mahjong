@@ -2734,6 +2734,16 @@ export class Game3 {
       // 既存の手牌ぶん akiUsedCount と同じく全額消費扱い]
       this.akiUsedIndicators[player] = [...usedIndicators, ...consumedIndicatorKeys];
     }
+    // [2026-11-15 リョー「秋秋金北は捲りなおさないよ」 DD6G rev 692]
+    // 秋 2 枚 [手 + 表示] を前の和了で使い切った後に金北を秋に選んだ時は、めくり足さずに
+    // この和了の翻数で秋秋金北の祝儀だけ出す。同じ局で 1 回だけ [kinpei:aki を消費済みに記録]
+    const akiKinpeiCarry = this.kinpeiTarget[player] === 'aki'
+      && baseAkiCount === 0
+      && !usedIndicators.includes('kinpei:aki')
+      && this.effectiveHuapaiAtHule(player).filter((p) => p === 'f3').length >= 2;
+    if (akiKinpeiCarry) {
+      this.akiUsedIndicators[player] = [...(this.akiUsedIndicators[player] ?? []), 'kinpei:aki'];
+    }
 
     let result: any;
     let huleErr: any = null;
@@ -3483,6 +3493,7 @@ export class Game3 {
     }
     // アンミカ独自役 post-process [リーのみ / 三風 / アメリカ七対子 / 小車輪 / 大車輪 / 八連荘]
     (result as any)._akiRevealCount = akiRevealCount;
+    (result as any)._akiKinpeiCarry = akiKinpeiCarry;
     // R9 P1 #2: 役満 reject 前に既に走らせてる場合 skip [重複呼出防止]
     if (!(result as any)._anmikaPostProcessApplied) {
       this.applyAnmikaYakuPostProcess(result, player, ronpai !== null, ronpai ?? sp._zimo ?? null, fromPlayer, ronpai, param);

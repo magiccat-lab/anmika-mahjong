@@ -637,7 +637,7 @@ export function applyChipsOnHule(
     } else if (target === 'natsu' && natsus === 1) {
       // [2026-10-09 リョー] 夏金北 = 夏夏と同じ 2 段 [段は game3 の夏の処理で上げ済み]
       label = '夏金北 [夏夏と同じ 2 段アップ適用済]';
-    } else if (target === 'aki' && akis >= 2 && Number(result._akiRevealCount ?? 0) >= 2) {
+    } else if (target === 'aki' && akis >= 2 && (Number(result._akiRevealCount ?? 0) >= 2 || result._akiKinpeiCarry === true)) {
       const natsuW = hua.filter((p: string) => p === 'f2').length;
       const reportedFanshu = typeof result.fanshu === 'number'
         ? result.fanshu

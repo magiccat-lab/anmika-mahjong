@@ -40,4 +40,39 @@ describe('秋金北で開いた秋は同じフィーバーの次の和了で再�
     expect(g.shan.baopai).toEqual(['m9', 'z7', 'f3', 'ns3']);
     expect(g.shan.fubaopai).toEqual(['p6', 'p1', 'z1', 's8']);
   });
+
+  it('秋 2 枚を使い切った後に金北を秋に選ぶと、めくらずに次の和了の翻数で秋秋金北の祝儀が 1 回だけ出る', () => {
+    const g = new Game3({ qijia: 0 });
+    g.qipai();
+    const player = 0 as PlayerId;
+    g.lizhi.add(player);
+    g.huapai[player] = ['f3'];
+    (g as any).nukidoraGold[player] = 1;
+    (g as any).diyizimo = false;
+    (g.shan as any)._baopai = ['m9', 'z7'];
+    (g.shan as any)._fubaopai = ['p6', 'p1'];
+    const pai: string[] = (g.shan as any)._pai;
+    pai.splice(0, 6, 'f3', 'z1', 'ns3', 's8', 's9', 'z3');
+
+    // 1 回目: 金北は保留 [target なし]。手の秋で 2 枚目の秋がめくれ、秋秋で 2 組
+    setHand(g, player);
+    expect(g.hule(player)).not.toBeNull();
+    expect(g.shan.baopai).toEqual(['m9', 'z7', 'f3', 'ns3']);
+
+    // 和了の後に金北を秋に選ぶ [DD6G rev 686]
+    g.kinpeiTarget[player] = 'aki';
+    setHand(g, player);
+    const r2 = g.hule(player);
+    expect(r2).not.toBeNull();
+    // めくり直さない
+    expect(g.shan.baopai).toEqual(['m9', 'z7', 'f3', 'ns3']);
+    g.applyHule(r2, player, null);
+    expect(r2.hupai.map((h: any) => h.name)).toContain('秋秋金北 [ハン数分祝儀]');
+
+    // 3 回目: 同じ局ではもう出ない
+    setHand(g, player);
+    const r3 = g.hule(player);
+    g.applyHule(r3, player, null);
+    expect(r3.hupai.map((h: any) => h.name)).not.toContain('秋秋金北 [ハン数分祝儀]');
+  });
 });
