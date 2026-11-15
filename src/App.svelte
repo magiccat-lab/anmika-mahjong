@@ -77,6 +77,7 @@
   import { evaluateDrawNextBridge } from './lib/drawNextBridge';
   import { buildChipTransferRows } from './lib/chipTransfer';
   import { getTingpaiList as tingpaiForShoupai } from './lib/game3/tingpai';
+  import { openLizhiWaitRows } from './lib/openLizhiWaits';
   import { feverWaitInfoFromLiveWall } from './lib/game3/feverLizhi';
   import { computeTileInventory, expectedInventory } from './lib/game3/inventory';
   import { countDisplayDora } from './lib/doraDisplay';
@@ -1500,6 +1501,9 @@
     if (!$game.game.isFeverConfirmed(p)) return null;
     return { player: p, waits: feverWaitInfo(p) };
   }).filter((x): x is NonNullable<typeof x> => x !== null);
+
+  // オープンリーチの待ち [2026-11-15 先輩]。手牌は全員に公開済みなので全員に出す。フィーバー確定の席はフィーバーの枠が勝つ
+  $: openWaits = openLizhiWaitRows($game.game, srv0, (p) => $game.game.isFeverConfirmed(p as 0|1|2));
 
   // フィーバー時: 他家手牌にあるアガリ牌 [フィーバー待ち] を強制表示 [2026-07-16 リョー指示]
   // ぽっちは白 [z5] 待ちの時だけ見せる [z5 待ちならぽっち含め表示、それ以外の待ちでぽっちは伏せたまま]
@@ -3894,6 +3898,18 @@
             <span class="fever-inline-remain">なし</span>
           {/if}
         {/if}
+        {#if openWaits.length > 0}
+          <span class="fever-inline-label">オープン 待ち</span>
+          {#each openWaits as ow}
+            <span class="fever-inline-player">{seatDisplayNames[ow.player as 0|1|2] ?? `p${ow.player}`}:</span>
+            {#each ow.waits as w}
+              <span class="fever-inline-wait">
+                <Tile pai={w.tile} size="md" />
+                <span class="fever-inline-remain">残{w.remain ?? '-'}</span>
+              </span>
+            {/each}
+          {/each}
+        {/if}
       </div>
       <div class="table-menu-wrap">
         <!-- [2026-10-14 リョー「BGM音量操作トグルは付けて良いな、見える位置に」] 卓の BGM (通常の 8bit 版 ・ フィーバーの原曲) を流すか。⋯ の隣に常に出す
@@ -4223,7 +4239,7 @@
   </div>
 
   {#if viewMode !== 'single'}
-    <FeverWaitsPanel feverWaits={feverWaits} />
+    <FeverWaitsPanel feverWaits={feverWaits} openWaits={openWaits} seatNames={seatDisplayNames} />
   {/if}
 
   {#if state.finished && viewMode !== 'single'}

@@ -3,9 +3,25 @@
   import Tile from './Tile.svelte';
   export let feverWaits: Array<{
     player: number;
-    waits: Array<{ tile: string; remain: number; hasRed?: boolean; hasGold?: boolean; hasNiji?: boolean }>;
+    waits: Array<{ tile: string; remain: number | null; hasRed?: boolean; hasGold?: boolean; hasNiji?: boolean }>;
   }>;
+  export let openWaits: Array<{ player: number; waits: Array<{ tile: string; remain: number | null }> }> = [];
+  export let seatNames: Record<number, string> = {};
 </script>
+
+{#if openWaits.length > 0}
+  <section class="fever-info open-info">
+    <h2>オープン 待ち</h2>
+    {#each openWaits as ow}
+      <div class="fever-row">
+        <strong>{seatNames[ow.player] ?? `p${ow.player}`}:</strong>
+        {#each ow.waits as w}
+          <span class="wait-chip"><Tile pai={w.tile} /> 残{w.remain ?? '-'}</span>
+        {/each}
+      </div>
+    {/each}
+  </section>
+{/if}
 
 {#if feverWaits.length > 0}
   <section class="fever-info">
@@ -34,6 +50,8 @@
     border-radius: 6px;
     margin: 10px 0;
   }
+  section.open-info { border-color: #2a8a6a; background: #effaf5; }
+  section.open-info h2 { color: #1f6e54; }
   h2 { font-size: 13px; margin: 0 0 6px; color: #a02080; }
   .fever-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
   .wait-chip { display: inline-flex; align-items: center; gap: 2px; background: #fff; border: 1px solid #d0a0c0; padding: 2px 6px; border-radius: 12px; }
