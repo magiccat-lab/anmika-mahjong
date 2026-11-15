@@ -764,6 +764,15 @@ export class Game3 {
     this.kinpeiTarget[player] = null;
   }
 
+  /** 金北の保留 [フィーバー中の和了だけ] を出すかの判定に使う、和了前のフィーバー。
+   *  待ち残山 0 で冬を自動で使う最後のフィーバー和了は hule の中で endFever するので、
+   *  金北の modal の時点の feverActive は false になり、保留が消えて強化先を選ぶしかなかった
+   *  [2026-11-15 通報 20261115_0 2L8R rev 1002「金北で選択しないがフィーバーの最後の上がりで出来なかった」]。
+   *  selectKinpei は restoreSnapshot 後の [和了前の] feverActive で保留を受けるので、画面も同じ値で見る */
+  feverActiveBeforeHule(player: PlayerId): boolean {
+    return this.preHuleSnapshot?.feverActive[player] ?? this.feverActive[player];
+  }
+
   /** 金北の選択を lock 中の preHuleSnapshot にも書く [2026-10-26 通報 20261026_0]
    *  ダブロンで 2 人目の判断待ちの間は snapshotLocked で saveSnapshot が no-op になり、
    *  selectKinpei の選択が snapshot に残らない。2 人目のロンが restoreSnapshot すると

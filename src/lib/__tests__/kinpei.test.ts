@@ -107,3 +107,26 @@ describe('Game3 autoResolveKinpei', () => {
     expect(g.kinpeiTarget[0]).toBe('natsu');
   });
 });
+
+// [2026-11-15 通報 20261115_0 2L8R rev 1002] 待ち残山 0 で冬を自動で使う最後のフィーバー和了は
+// hule の中で endFever するので、金北の modal の時点の feverActive は false。保留の判定は和了前の値で見る
+describe('Game3 feverActiveBeforeHule', () => {
+  it('和了前 snapshot がフィーバー中なら、和了の中でフィーバーが終わっても true', () => {
+    const g = newGamePinnedBaopai();
+    g.feverActive[2] = true;
+    g.saveSnapshot();
+    g.endFever(2 as PlayerId);
+    expect(g.feverActive[2]).toBe(false);
+    expect(g.feverActiveBeforeHule(2 as PlayerId)).toBe(true);
+  });
+
+  it('和了前もフィーバーでなければ false、snapshot が無ければ今の値', () => {
+    const g = newGamePinnedBaopai();
+    g.feverActive[1] = false;
+    g.saveSnapshot();
+    expect(g.feverActiveBeforeHule(1 as PlayerId)).toBe(false);
+    g.preHuleSnapshot = null;
+    g.feverActive[1] = true;
+    expect(g.feverActiveBeforeHule(1 as PlayerId)).toBe(true);
+  });
+});

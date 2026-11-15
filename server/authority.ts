@@ -1138,7 +1138,9 @@ export class RoomAuthority {
         if (!available.includes(expected)) return `${type}: target ${target} is not available`;
       } else {
         const hasAnyHua = available.some((pai) => /^f[1-4]$/.test(pai));
-        if (!state.game.feverActive[pending.winner as PlayerId] && hasAnyHua) {
+        // 和了前のフィーバーで見る。冬を自動で使う最後のフィーバー和了は hule の中で endFever する
+        // [2026-11-15 通報 20261115_0 2L8R rev 1002。selectKinpei は restoreSnapshot 後の値で保留を受ける]
+        if (!state.game.feverActiveBeforeHule(pending.winner as PlayerId) && hasAnyHua) {
           return `${type}: null target is allowed only during fever or with no hua target`;
         }
       }
