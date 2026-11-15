@@ -160,7 +160,7 @@ function countPhysicalRedDora(sp: any, ronpai: string | null): number {
   return count;
 }
 import { canFeverLizhi as canFeverLizhiHelper, isFeverWaitExhausted as isFeverWaitExhaustedHelper, feverCandidatesByDapai as feverCandidatesByDapaiHelper, rainbowKanUpgradeTier, type FeverCheck } from './game3/feverLizhi';
-import { isKanpaman as isKanpamanHelper, doraIndicatorOf as doraIndicatorOfHelper } from './game3/yaku';
+import { isKanpaman as isKanpamanHelper, doraIndicatorOf as doraIndicatorOfHelper, hasKanpaman789, kanpaman789Rule } from './game3/yaku';
 import { correctedFuForM7 } from './game3/fu7m';
 import { tulipNeighbors } from './game3/tulip';
 import { anmikaHuleRule, chipEnvOf, normalizeBaopaiForSwappedM7, swapM7, swapKind, unswapKind, unswapM1, tenpaiWinValue, type TenpaiWait } from './game3/cpuValue';
@@ -3698,9 +3698,13 @@ export class Game3 {
         result.hupai.push({ name: '嵌八萬', fanshu: 8 });
         if (result.fanshu !== undefined) result.fanshu += 8;
       }
-      // 789 三色完成 [m789 + p789 + s789] → +4 翻
-      if (sp._bingpai.p[7] >= 1 && sp._bingpai.p[8] >= 1 && sp._bingpai.p[9] >= 1 &&
-          sp._bingpai.s[7] >= 1 && sp._bingpai.s[8] >= 1 && sp._bingpai.s[9] >= 1) {
+      // 789 三色完成 [m789 + p789 + s789 が 3 つとも順子に取れるアガリ形] → +4 翻
+      // [11-15 2L8R] 枚数だけ見ていたので p67899 (p678 + p99) でも付いていた
+      const has789 = kanpaman789Rule.legacyCountOnly
+        ? (sp._bingpai.p[7] >= 1 && sp._bingpai.p[8] >= 1 && sp._bingpai.p[9] >= 1
+          && sp._bingpai.s[7] >= 1 && sp._bingpai.s[8] >= 1 && sp._bingpai.s[9] >= 1)
+        : hasKanpaman789(_bp);
+      if (has789) {
         result.hupai.push({ name: '789 三色 [嵌八萬複合]', fanshu: 4 });
         if (result.fanshu !== undefined) result.fanshu += 4;
         (result as any)._kanpaman789 = true;

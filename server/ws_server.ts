@@ -32,6 +32,7 @@ import {
 import { activeTrioForStart, computeRoomChipDelta, finalizeRoomChipDelta, foldRoomState, gameLedgerFromRoom, gameToRoomSeat, initialRoomChipLedger, mappingFor, mergeRoomChipDelta, nextMappingForPresent, presentRoomSeats, roomToGameSeat } from './rotation';
 import { canUseLimitedStamp } from '../src/lib/stampAccess';
 import { ANMIKA_RULE_VERSION } from '../src/lib/ruleVersion';
+import { withLegacyKanpaman789 } from '../src/lib/game3/yaku';
 import { filterCpuAutoKan } from '../src/lib/store/cpuCall';
 import { getCpuVersion } from './cpuVersion';
 
@@ -525,7 +526,16 @@ export function lastReplayableMatchBoundary(commands: readonly AcceptedRoomComma
   return null;
 }
 
+// [2026-11-15] 嵌八萬の 789 三色を厳しくした。直す前に記録した手 (付いたサイコロを振った記録) は新しい判定だと
+// 弾かれるので、弾かれた時だけ前の判定で読み直す [withLegacyKanpaman789]。新しい局の判定は新しいまま
 export function restoreAuthority(
+  snapshot: CanonicalRoomSnapshot,
+  commands?: AcceptedRoomCommand[],
+): RoomAuthority | null {
+  return withLegacyKanpaman789(() => restoreAuthorityOnce(snapshot, commands));
+}
+
+function restoreAuthorityOnce(
   snapshot: CanonicalRoomSnapshot,
   commands?: AcceptedRoomCommand[],
 ): RoomAuthority | null {
@@ -1365,6 +1375,15 @@ export function revealReplayPochi<T>(msg: T, authority: RoomAuthority): T {
  *  sync と action [actionRelay と同じ形 ・ 同じ伏せ方] を順に返す。client は対局中と同じ受け口で再生する。
  *  stamp は対局中と同じ { type: 'stamp' } にする。at は受理した時刻 [間合い用] */
 export function buildMatchReplay(
+  snapshot: CanonicalRoomSnapshot,
+  commands: AcceptedRoomCommand[],
+  matchNo: number,
+  recipientRoomSeat: number,
+): { matchNo: number; firstRevision: number; lastRevision: number; lastAcceptedAt: string; frames: MatchReplayFrame[] } {
+  return withLegacyKanpaman789(() => buildMatchReplayOnce(snapshot, commands, matchNo, recipientRoomSeat));
+}
+
+function buildMatchReplayOnce(
   snapshot: CanonicalRoomSnapshot,
   commands: AcceptedRoomCommand[],
   matchNo: number,

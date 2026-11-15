@@ -44,6 +44,82 @@ export function isKanpaman(shoupai: any, agariPai: string | null, substituteFrom
   return false;
 }
 
+/** 11-15 の直しより前に記録した対局を読み直す時だけ true にする (server の restore ・ 牌譜再生が、新しい判定で
+ *  記録の手が弾かれた時に 1 回だけ使う)。前の判定は p7 ・ p8 ・ p9 ・ s7 ・ s8 ・ s9 の枚数だけを見ていた */
+export const kanpaman789Rule = { legacyCountOnly: false };
+
+/** 新しい判定で読み直して記録の手が弾かれたら、前の判定 (枚数だけ) でもう 1 回読む */
+export function withLegacyKanpaman789<T>(run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    if (kanpaman789Rule.legacyCountOnly) throw error;
+    kanpaman789Rule.legacyCountOnly = true;
+    try {
+      return run();
+    } catch {
+      throw error;
+    } finally {
+      kanpaman789Rule.legacyCountOnly = false;
+    }
+  }
+}
+
+/** 嵌八萬に付く 789 三色: m789 ・ p789 ・ s789 が 3 つとも順子として取れるアガリ形か。
+ *  bp は和了牌込み 14 枚 (副露は除く) の枚数表。ぽっちが m8 に置換されていなければ z5 を 1 枚 m8 として読む。
+ *  [11-15 リョー「この牌譜だと789三色おかしくね？9p9pだし」2L8R 13 戦目: m79+ぽっち p67899 s666789 は
+ *  p678 + p99 の頭にしか割れず p789 が無いのに、p7 ・ p8 ・ p9 が 1 枚ずつあるだけで付いていた] */
+export function hasKanpaman789(bp: { m?: number[]; p?: number[]; s?: number[]; z?: number[] }): boolean {
+  const c: Record<'m' | 'p' | 's' | 'z', number[]> = {
+    m: Array.from({ length: 10 }, (_, i) => (i === 0 ? 0 : bp.m?.[i] ?? 0)),
+    p: Array.from({ length: 10 }, (_, i) => (i === 0 ? 0 : bp.p?.[i] ?? 0)),
+    s: Array.from({ length: 10 }, (_, i) => (i === 0 ? 0 : bp.s?.[i] ?? 0)),
+    z: Array.from({ length: 8 }, (_, i) => (i === 0 ? 0 : bp.z?.[i] ?? 0)),
+  };
+  if (c.m[8] < 1 && c.z[5] > 0) { c.z[5] -= 1; c.m[8] += 1; }
+  for (const s of ['m', 'p', 's'] as const) {
+    for (const n of [7, 8, 9]) {
+      if (c[s][n] < 1) return false;
+      c[s][n] -= 1;
+    }
+  }
+  const total = (['m', 'p', 's', 'z'] as const).reduce((sum, s) => sum + c[s].reduce((a, b) => a + b, 0), 0);
+  if (total % 3 !== 2) return false;
+  // 残りが 面子 N 個 + 頭 1 つに割れるか
+  const mentsuOnly = (): boolean => {
+    for (const s of ['m', 'p', 's', 'z'] as const) {
+      const arr = c[s];
+      for (let n = 1; n < arr.length; n += 1) {
+        if (arr[n] === 0) continue;
+        if (arr[n] >= 3) {
+          arr[n] -= 3;
+          const ok = mentsuOnly();
+          arr[n] += 3;
+          if (ok) return true;
+        }
+        if (s !== 'z' && n <= 7 && arr[n + 1] > 0 && arr[n + 2] > 0) {
+          arr[n] -= 1; arr[n + 1] -= 1; arr[n + 2] -= 1;
+          const ok = mentsuOnly();
+          arr[n] += 1; arr[n + 1] += 1; arr[n + 2] += 1;
+          if (ok) return true;
+        }
+        return false;
+      }
+    }
+    return true;
+  };
+  for (const s of ['m', 'p', 's', 'z'] as const) {
+    for (let n = 1; n < c[s].length; n += 1) {
+      if (c[s][n] < 2) continue;
+      c[s][n] -= 2;
+      const ok = mentsuOnly();
+      c[s][n] += 2;
+      if (ok) return true;
+    }
+  }
+  return false;
+}
+
 /** 「あるドラ target が成立する indicator」 を逆引きする helper
  *  神ぽっち [game3.ts:933] で baopai 内 z5 をこの indicator で 仮想 swap するため
  *  [入力] target = 「ドラ にしたい牌」
