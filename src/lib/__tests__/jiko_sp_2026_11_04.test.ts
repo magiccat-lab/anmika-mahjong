@@ -1,5 +1,5 @@
 // [2026-11-04 リョー 隠し演出] フィーバー中の逆で 50 枚以上消えた時だけ暗転して曲を流す [lib/jikoSp.ts]
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { game } from '../store';
 import { buildShoupai } from '../game3';
@@ -24,6 +24,8 @@ function armFeverTsumo(reverse: boolean, fever = true): any {
   return { s, g, cur };
 }
 
+// 種 1 ・ 7 ・ 12345 は配牌の都合で game.tsumo() が和了にならない [lastWinner null]。通る種で固定する
+const SEED = 42;
 const hit = (player: number, result: any) => jikoSpFor([{ player, result }], '0-0-0');
 
 describe('隠し演出 jikoSp: 出る条件', () => {
@@ -57,7 +59,14 @@ describe('隠し演出 jikoSp: 出る条件', () => {
 });
 
 describe('隠し演出 jikoSp: 和了の結果にフィーバーの印が付く', () => {
-  beforeEach(() => { game.reset(); });
+  // 配牌の乱数で赤の逆が効かない和了 [ぽっちの色が黄のまま] になり時々落ちたので乱数を固定する (review1102_02 と同じ)
+  beforeEach(() => {
+    let x = SEED;
+    vi.restoreAllMocks();
+    vi.spyOn(Math, 'random').mockImplementation(() => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648; });
+    game.reset();
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
   it('フィーバー中の逆のツモは _feverAtHule と _pochiPaymentApplied が立ち、和了者のチップが減る', () => {
     const { cur } = armFeverTsumo(true);
     game.tsumo();
