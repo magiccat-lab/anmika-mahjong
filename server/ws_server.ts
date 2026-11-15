@@ -1075,9 +1075,11 @@ export function captureSeatProjection(authority: RoomAuthority, recipientSeat: n
       fuyuRevealed: [...(shan._fuyuRevealed ?? [])],
     },
     privateHand: own === null ? null : (serializePrivateHand(game.shoupai.get(own)) ?? emptyPrivateHand()),
-    // [2026-10-22 リョー「観戦モードに限りそのあとのそれぞれのツモ見れるように」] 観戦 [seat -1] にだけ、
-    // 局が終わった後の「続けたら引いたはずの牌」を載せる。打ち手 [0-2] と局の途中の観戦には key ごと出さない
-    ...(recipientSeat === SPECTATOR_SEAT ? spectatorNextDrawsField(state) : {}),
+    // [2026-10-22 リョー「観戦モードに限りそのあとのそれぞれのツモ見れるように」] 局が終わった後の
+    // 「続けたら引いたはずの牌」。[2026-11-15 リョー「オンライン対戦でこの後のツモとかちゃんと見えるように
+    // してあげてね。観戦は見えるけど他の人見えてなさそう」] で打ち手 [0-2] にも載せる。
+    // 局の途中は観戦にも打ち手にも key ごと出さない [computeSpectatorNextDraws が null]
+    ...spectatorNextDrawsField(state),
     publicHands,
     rivers: {
       0: [...(game.he.get(0)?._pai ?? [])],

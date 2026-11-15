@@ -4404,8 +4404,9 @@
           />
         {/if}
       <!-- [2026-10-22 リョー「観戦モードに限りそのあとのそれぞれのツモ見れるように」] 局が終わった後の「続けたら引く牌」。
-           server が観戦 [抜け番を含む] の投影にだけ送る。和了 ・ 流局の板の本文 [agari-left] の末尾に置く [盤面の手牌に重ねない] -->
-      {#if ($game.roundEnded || $game.pendingPingju) && !$game.pendingKinpei && (onlineSpectator || onlineInactive) && $game.spectatorNextDraws}
+           [2026-11-15 リョー] 観戦だけでなくオンラインの打ち手にも出す [server が局の後だけ全員の投影に送る]。
+           和了 ・ 流局の板の本文 [agari-left] の末尾に置く [盤面の手牌に重ねない] -->
+      {#if ($game.roundEnded || $game.pendingPingju) && !$game.pendingKinpei && onlineGameStarted && $game.spectatorNextDraws}
         <NextDrawsPanel
           rows={[srv1, srv0, srv2].map((p) => ({ seat: p, name: seatDisplayNames[p] }))}
           draws={$game.spectatorNextDraws}

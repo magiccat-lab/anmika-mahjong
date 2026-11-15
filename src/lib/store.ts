@@ -1376,8 +1376,8 @@ export function createGameStore() {
         pendingNukiBei: cloneWire(wireStore.pendingNukiBei ?? null),
         pendingSaiKoro: cloneWire(wireStore.pendingSaiKoro ?? null),
         cpuWinAck: wireStore.cpuWinAck !== false,
-        // [2026-10-22] 観戦の投影だけが持つ。打ち手の画面には届かないので、席ありなら常に null
-        spectatorNextDraws: myOnlineSeat === -1 ? parseNextDraws((projection as any).nextDraws) : null,
+        // [2026-10-22] 局が終わった後の「この後のツモ」。[2026-11-15 リョー] 打ち手の投影にも届く様にした
+        spectatorNextDraws: parseNextDraws((projection as any).nextDraws),
         jikoPre: parseJikoPre(wireStore.jikoPre),
         _onlineMode: true,
       };

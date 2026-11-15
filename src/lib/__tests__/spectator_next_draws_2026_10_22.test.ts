@@ -106,23 +106,32 @@ describe('観戦の「この後のツモ」', () => {
     expect((captureSeatProjection(authority, -1) as any).nextDraws).toEqual({ 0: [], 1: [], 2: [] });
   });
 
-  it('打ち手 [席 0-2] には局が終わった後も key ごと送らない', () => {
-    const { authority, state } = fresh();
-    endWithTsumo(state, 0);
+  // [2026-11-15 リョー「観戦は見えるけど他の人見えてなさそう」] 打ち手にも局の後だけ送る
+  it('打ち手 [席 0-2] にも局が終わった後は観戦と同じ牌を送り、局の途中は送らない', () => {
+    const { authority, state, live } = fresh();
     for (const seat of [0, 1, 2]) {
       const projection: any = captureSeatProjection(authority, seat);
       expect(projection).not.toHaveProperty('nextDraws');
       expect(JSON.stringify(projection)).not.toContain('nextDraws');
     }
-    endWithRon(state, 1, 0);
+    endWithTsumo(state, 0);
+    for (const seat of [0, 1, 2]) {
+      expect((captureSeatProjection(authority, seat) as any).nextDraws).toEqual(expectedDraws(live, 2));
+    }
+    state.pendingFeverContinue = { winner: 0 };
     for (const seat of [0, 1, 2]) {
       expect(captureSeatProjection(authority, seat)).not.toHaveProperty('nextDraws');
+    }
+    state.pendingFeverContinue = null;
+    endWithRon(state, 1, 0);
+    for (const seat of [0, 1, 2]) {
+      expect((captureSeatProjection(authority, seat) as any).nextDraws).toEqual((captureSeatProjection(authority, -1) as any).nextDraws);
     }
     state.roundEnded = false;
     state.pendingPingju = true;
     state.lastWinner = null;
     for (const seat of [0, 1, 2]) {
-      expect(captureSeatProjection(authority, seat)).not.toHaveProperty('nextDraws');
+      expect(captureSeatProjection(authority, seat)).toHaveProperty('nextDraws');
     }
   });
 
@@ -185,6 +194,23 @@ describe('観戦の画面 [store]', () => {
     expect(game.hydrateOnlineProjection(captureSeatProjection(authority, -1))).toBe(true);
     game.subscribe((s: any) => { current = s; })();
     expect(current.spectatorNextDraws).toBeNull();
+  });
+
+  it('打ち手の store も局の後の nextDraws を受け取る [2026-11-15]', () => {
+    const { authority, state, live } = fresh();
+    const game = createGameStore();
+    const start = captureSeatProjection(authority, 0);
+    game.initOnlineGame({
+      ws: { readyState: 0, send() {} } as unknown as WebSocket,
+      qijia: 0,
+      mySeat: 0,
+      blindStart: { hands: { 0: [], 1: [], 2: [] }, firstZimo: '', paishu: start.shan.paishu, baopai: start.shan.baopai, fubaopai: null },
+    } as any);
+    let current: any;
+    endWithTsumo(state, 1);
+    expect(game.hydrateOnlineProjection(captureSeatProjection(authority, 0))).toBe(true);
+    game.subscribe((s: any) => { current = s; })();
+    expect(current.spectatorNextDraws).toEqual(expectedDraws(live, 0));
   });
 
   it('旧 server の投影 [nextDraws なし] でも観戦の store は壊れない', () => {
