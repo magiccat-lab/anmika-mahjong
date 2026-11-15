@@ -2717,10 +2717,13 @@ export class Game3 {
         // その秋による「3枚目」の追加ドラは発生させない。
         if (!akiKinpeiSingleBoost) {
           akiRemaining += newlyRevealedAki;
-          // [D-01 fix] 連鎖で開いてこの和了内で発動した秋も消費済みに記録する
-          if (visible === 'f3') consumedIndicatorKeys.push(`baopai:${this.shan.baopai.length - 1}`);
-          if (isLizhi && hidden === 'f3') consumedIndicatorKeys.push(`fubaopai:${(this.shan.fubaopai ?? []).length - 1}`);
         }
+        // [D-01 fix] 連鎖で開いてこの和了内で発動した秋も消費済みに記録する。
+        // 秋金北で開いた 2 枚目の秋も、この和了の秋秋金北として使い切った扱い
+        // [2026-11-15 通報 DD6G rev 692: 記録が漏れ、フィーバーの次の和了で同じ秋に
+        //  金北の強化がまた乗って表裏 2 組を余計にめくっていた]
+        if (visible === 'f3') consumedIndicatorKeys.push(`baopai:${this.shan.baopai.length - 1}`);
+        if (isLizhi && hidden === 'f3') consumedIndicatorKeys.push(`fubaopai:${(this.shan.fubaopai ?? []).length - 1}`);
         if (this.shan.paishu === 0) break;
       }
       param.baopai = (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f') && !isPositiveZ5(p)).map(normalizeBaopaiForMajiang);
