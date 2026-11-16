@@ -2659,6 +2659,7 @@ export function createGameStore() {
               // [2026-07-21 監査 D-06 fix] ロン由来サイコロは FEVER 中でもぽっち除外 [2026-07-15 裁定]
               bypassPochi: chanceMode === 'ron',
               bypassFever: false,
+              feverTierOverride: (curChance as any)?.feverTierAtHule,
               label: `🎲 ゾロ目連続特典 [${n},${n}] ×${consec}`,
               mode: chanceMode,
               // [2026-07-23 4人回し Phase1] サイコロ精算 [抜け番も頭数に入る対象]
@@ -2693,6 +2694,7 @@ export function createGameStore() {
               // [2026-07-21 監査 D-06 fix] ロン由来サイコロは FEVER 中でもぽっち除外 [2026-07-15 裁定]
               bypassPochi: (chance as any).mode === 'ron',
               bypassFever: false,
+              feverTierOverride: (chance as any).feverTierAtHule,
               label: `🎲 サイコロ ${chance.name} [${hits} hit × ${baseChip}]`,
               mode: (chance as any).mode ?? 'tsumo',
               // [2026-07-23 4人回し Phase1] サイコロ精算 [抜け番も頭数に入る対象]
@@ -2716,6 +2718,7 @@ export function createGameStore() {
             bypassShuvari: true,
             bypassPochi: chanceMode === 'ron',
             mode: chanceMode,
+            feverTierOverride: (chanceFin as any).feverTierAtHule,
           });
           ps.summary = { hits, chipN: chipN * mulFin, zoroBonusTotal: zoroAcc };
         }
@@ -3967,6 +3970,8 @@ export function triggerSaiKoroIfAny(s: StoreState, result: any, winner: number):
       plusMinus: c.plusMinus ?? '+',
       mode: c.mode ?? (result?._isRon ? 'ron' : 'tsumo'),
       winner,
+      // 和了の時点のフィーバー段。冬の自動使用で hule の中でフィーバーが終わっても倍率を残す [通報 20261116_2]
+      ...(typeof result?._feverTierAtHule === 'number' ? { feverTierAtHule: result._feverTierAtHule } : {}),
     }));
   });
   appendSaiKoroChances(s, winner, mappedChances);

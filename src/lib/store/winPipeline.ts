@@ -137,6 +137,8 @@ export type PendingSaiKoroChance = {
   plusMinus: '+' | '-';
   winner?: number;
   mode?: 'tsumo' | 'ron';
+  /** 和了の時点のフィーバー段 [0 = フィーバー外]。hule の中でフィーバーが終わっても、このサイコロはこの段で払う */
+  feverTierAtHule?: number;
 };
 
 export type PendingSaiKoro = {

@@ -49,6 +49,10 @@ export type ChipMulOpts = {
   bypassPochi?: boolean;
   /** 和了モード: 'tsumo' / 'ron' / undefined。ぽっち chip 倍率は mode に関係なく kyoku 中は適用。 */
   mode?: 'tsumo' | 'ron';
+  /** 今の feverActive / feverTier の代わりに使うフィーバー段 [0 = フィーバー外]。
+   *  和了の中で冬を使い切ってフィーバーが終わっても、そのアガリのサイコロは和了の時点の段で払う
+   *  [2026-11-16 通報 20261116_2 部屋 4OU4 rev 1940「ダブフィーサイコロは140」] */
+  feverTierOverride?: number;
 };
 
 export type ChipApplyOpts = ChipMulOpts & {
@@ -82,15 +86,17 @@ export function computeChipMultiplierDetail(
   let m = 1;
   const parts: string[] = [];
   if (st.shuvariActive[target] && !opts.bypassShuvari) { m *= 2; parts.push('シュバ×2'); }
-  if (st.feverActive[target] && !opts.bypassFever) {
-    const tier = st.feverTier[target] ?? 1;
+  const hasOverride = typeof opts.feverTierOverride === 'number';
+  const feverOn = hasOverride ? opts.feverTierOverride! > 0 : !!st.feverActive[target];
+  if (feverOn && !opts.bypassFever) {
+    const tier = hasOverride ? opts.feverTierOverride! : (st.feverTier[target] ?? 1);
     const fm = tier === 4 ? 8 : tier === 3 ? 4 : tier === 2 ? 2 : 1;
     m *= fm; parts.push(`フィーバー tier${tier}×${fm}`);
   }
   // [2026-05-21 リョー仕様] 通常 ron は ぽっち倍率 bypass、 ただし target が
   // フィーバー中なら 「フィーバーリーチ中ぽっちツモ → 局終了まで継続、 ロン毎 payment」
   // 特例で ron 時も pochi 倍率 ON。
-  const ronBypassPochi = opts.mode === 'ron' && !st.feverActive[target];
+  const ronBypassPochi = opts.mode === 'ron' && !feverOn;
   if (!opts.bypassPochi && !ronBypassPochi) {
     const pm = pochiChipMultiplier(st.pochiMultiplier[target]);
     if (pm !== 1) { m *= pm; parts.push(`ぽっち×${pm}`); }

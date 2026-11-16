@@ -4596,7 +4596,7 @@
       rolls={$game.pendingSaiKoro.rolls}
       finalized={$game.pendingSaiKoro.finalized}
       summary={$game.pendingSaiKoro.summary}
-      chipMultiplier={$game.game.computeChipMultiplier(_chanceOwner, { bypassShuvari: true, bypassFever: false, bypassPochi: (_curChance as any)?.mode === 'ron', mode: (_curChance as any)?.mode ?? 'tsumo' })}
+      chipMultiplier={$game.game.computeChipMultiplier(_chanceOwner, { bypassShuvari: true, bypassFever: false, bypassPochi: (_curChance as any)?.mode === 'ron', mode: (_curChance as any)?.mode ?? 'tsumo', feverTierOverride: (_curChance as any)?.feverTierAtHule })}
       ownerShuvariActive={$game.game.shuvariActive[_chanceOwner]}
       onSelectCombo={(a, b) => game.selectSaiKoroCombo(a, b)}
       onRoll={(override?: [number, number]) => game.rollSaiKoroDice(override)}

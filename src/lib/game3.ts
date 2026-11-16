@@ -899,7 +899,7 @@ export class Game3 {
    *  - bypassFever: フィーバー倍率 [1/2/4] を skip
    *  - bypassPochi: ぽっち pochiMultiplier を skip
    *  シュバはアガリ chip のみ ×2、 局中 chip は bypassShuvari=true で呼ぶこと */
-  computeChipMultiplier(target: PlayerId, opts: { bypassShuvari?: boolean; bypassFever?: boolean; bypassPochi?: boolean; mode?: 'tsumo' | 'ron' } = {}): number {
+  computeChipMultiplier(target: PlayerId, opts: { bypassShuvari?: boolean; bypassFever?: boolean; bypassPochi?: boolean; mode?: 'tsumo' | 'ron'; feverTierOverride?: number } = {}): number {
     return computeChipMultiplierHelper(this._chipState(), target, opts);
   }
 
@@ -4442,6 +4442,8 @@ export class Game3 {
     const isPochiReverse = this.pochiPaymentMode[winner];
     // [2026-11-04 リョー 隠し演出] 和了の時点でフィーバー中だったか。後で冬を使い切ってフィーバーが終わっても残る [lib/jikoSp.ts]
     result._feverAtHule = !!this.feverActive[winner];
+    // 和了の時点のフィーバー段 [フィーバー外は 0]。このアガリのサイコロの倍率に使う [store triggerSaiKoroIfAny]
+    result._feverTierAtHule = this.feverActive[winner] ? this.feverTier[winner] : 0;
     // 逆の元のぽっちの色 (赤 = チップ -2 倍、黄 = -1 倍)。暗転の後に浮かべるぽっちの色に使う
     if (isPochiReverse) result._pochiReverseColor = (this.pochiMultiplier[winner]?.chip ?? -1) <= -2 ? 'red' : 'yellow';
     // 2026-05-14 codex review fix: 現親判定で 子アガリ後の親計算 / 親払い 正しく
