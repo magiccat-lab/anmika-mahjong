@@ -75,6 +75,8 @@ export type OnlineSeatProjection = {
   privateHand: SerializedOnlineHand | null;
   /** [2026-10-22] 観戦 [seat -1] 専用。局が終わった後だけ、続けたら各席が引いたはずの牌 [引く順]。打ち手には送らない */
   nextDraws?: Record<number, string[]>;
+  /** [2026-11-17 isg. 通報 20261117_1] nextDraws と同じ時だけ、王牌の中身 [嶺上の残り ・ 表ドラ表示 ・ 裏ドラ表示の全部] */
+  deadWall?: { rinshan: string[]; baopai: string[]; fubaopai: string[] };
   publicHands: Record<number, {
     concealedCount: number;
     /** True only for a real 2/3-character draw tile. */

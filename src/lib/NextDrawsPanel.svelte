@@ -8,6 +8,15 @@
   export let rows: Array<{ seat: number; name: string }> = [];
   /** 席番号 → 引く順の牌 */
   export let draws: Record<number, string[]> = {};
+  /** [2026-11-17 isg. 通報 20261117_1「透明化のため王牌も出してほしい」] 王牌の中身。無ければ出さない */
+  export let deadWall: { rinshan: string[]; baopai: string[]; fubaopai: string[] } | null = null;
+  $: deadWallRows = deadWall
+    ? [
+        { key: 'rinshan', name: '嶺上', tiles: deadWall.rinshan },
+        { key: 'baopai', name: 'ドラ表示', tiles: deadWall.baopai },
+        { key: 'fubaopai', name: '裏ドラ表示', tiles: deadWall.fubaopai },
+      ]
+    : [];
 </script>
 
 <div class="next-draws" role="region" aria-label="この後のツモ">
@@ -22,6 +31,18 @@
       </span>
     </div>
   {/each}
+  {#if deadWall}
+    <h3 class="nd-title nd-dead">王牌 <span class="nd-note">[嶺上は引く順]</span></h3>
+    {#each deadWallRows as row (row.key)}
+      <div class="nd-row" data-dead={row.key}>
+        <span class="nd-name">{row.name}</span>
+        <span class="nd-tiles">
+          {#each row.tiles as t, i (i)}<Tile pai={t} size="sm" />{/each}
+          {#if row.tiles.length === 0}<span class="nd-none">なし</span>{/if}
+        </span>
+      </div>
+    {/each}
+  {/if}
 </div>
 
 <style>
@@ -39,6 +60,7 @@
   }
   .nd-title { margin: 0 0 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
   .nd-note { font-weight: 400; opacity: 0.7; }
+  .nd-dead { margin-top: 6px; }
   .nd-row { display: flex; align-items: flex-start; gap: 6px; margin-top: 2px; }
   .nd-name { flex: none; width: 5.2em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-top: 4px; }
   .nd-tiles { display: flex; flex-wrap: wrap; gap: 0; min-width: 0; }

@@ -242,6 +242,8 @@ export interface StoreState {
   aoriKey?: string | null;
   /** [2026-10-22 観戦] 局が終わった後の「続けたら各席が引いたはずの牌」 [引く順]。server が観戦 [seat -1] の投影にだけ載せる。それ以外は null */
   spectatorNextDraws?: Record<number, string[]> | null;
+  /** [2026-11-17 isg. 通報 20261117_1] 局が終わった後の王牌 [嶺上の残り ・ 表ドラ表示 ・ 裏ドラ表示]。nextDraws と同じ時だけ */
+  spectatorDeadWall?: { rinshan: string[]; baopai: string[]; fubaopai: string[] } | null;
   /** [2026-11-04 隠し演出] server が全席の投影に載せる「今のツモが事故は起きるものさになる」印。ツモ牌は含まない */
   jikoPre?: JikoPreHit | null;
   /** WSA: online replay mode — canonical store uses this instead of window.__anmikaOnline */
@@ -261,6 +263,13 @@ function parseNextDraws(value: unknown): Record<number, string[]> | null {
     out[seat] = Array.isArray(list) ? list.filter((t): t is string => typeof t === 'string') : [];
   }
   return out;
+}
+
+function parseDeadWall(value: unknown): { rinshan: string[]; baopai: string[]; fubaopai: string[] } | null {
+  if (!value || typeof value !== 'object') return null;
+  const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((t): t is string => typeof t === 'string') : []);
+  const v = value as Record<string, unknown>;
+  return { rinshan: list(v.rinshan), baopai: list(v.baopai), fubaopai: list(v.fubaopai) };
 }
 
 function formatFanshu(f: any): string {
@@ -1378,6 +1387,7 @@ export function createGameStore() {
         cpuWinAck: wireStore.cpuWinAck !== false,
         // [2026-10-22] 局が終わった後の「この後のツモ」。[2026-11-15 リョー] 打ち手の投影にも届く様にした
         spectatorNextDraws: parseNextDraws((projection as any).nextDraws),
+        spectatorDeadWall: parseDeadWall((projection as any).deadWall),
         jikoPre: parseJikoPre(wireStore.jikoPre),
         _onlineMode: true,
       };

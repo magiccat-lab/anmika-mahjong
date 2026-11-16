@@ -15,7 +15,7 @@ import { decideFever, pickLizhiDapai } from '../src/lib/store/cpuLizhi';
 import { decideCpuShuvari } from '../src/lib/store/cpuShuvari';
 import { createRoomAuthority, type AuthorityMember, type RoomAuthority } from './authority';
 import { RoomPersistence } from './persistence';
-import { computeSpectatorNextDraws } from './next_draws';
+import { computeDeadWallReveal, computeSpectatorNextDraws, type DeadWallReveal } from './next_draws';
 import {
   appendAcceptedCommand,
   applyRoomChipCommand,
@@ -922,9 +922,15 @@ export function reactionCandidateMessage(message: unknown, own: number | null, o
   return `${isNorthRon ? '北抜きロン可能' : 'ロン可能'}: player ${own}`;
 }
 
-function spectatorNextDrawsField(state: ReturnType<RoomAuthority['canonicalState']>): { nextDraws?: Record<number, string[]> } {
+function spectatorNextDrawsField(state: ReturnType<RoomAuthority['canonicalState']>): {
+  nextDraws?: Record<number, string[]>;
+  deadWall?: DeadWallReveal;
+} {
   const nextDraws = computeSpectatorNextDraws(state);
-  return nextDraws ? { nextDraws } : {};
+  if (!nextDraws) return {};
+  // [2026-11-17 isg. 通報 20261117_1] この後のツモと同じ時だけ王牌も載せる
+  const deadWall = computeDeadWallReveal(state);
+  return deadWall ? { nextDraws, deadWall } : { nextDraws };
 }
 
 /**

@@ -4410,6 +4410,7 @@
         <NextDrawsPanel
           rows={[srv1, srv0, srv2].map((p) => ({ seat: p, name: seatDisplayNames[p] }))}
           draws={$game.spectatorNextDraws}
+          deadWall={$game.spectatorDeadWall ?? null}
         />
       {/if}
       </div>

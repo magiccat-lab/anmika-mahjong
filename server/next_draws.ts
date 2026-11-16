@@ -21,18 +21,43 @@ export function nextSeatInTurnOrder(seat: number): 0 | 1 | 2 {
  *   [華が山にあればそのまま 1 枚の牌として出る。実際は嶺上から補充して次の牌を引く]
  * - 局が終わっていない [打牌中 ・ 反応窓 ・ 冬 / 金北などの選択待ち ・ フィーバー続行待ち ・ 試合終了後] は null
  */
-export function computeSpectatorNextDraws(state: CanonicalState): Record<number, string[]> | null {
+/** 局が終わって「この後」を見せてよい形か。途中 ・ 選択待ち ・ フィーバー続行待ち ・ 試合終了後は false */
+function roundOverForReveal(state: CanonicalState): boolean {
   const game: any = state.game;
-  if (!game || game.state?.finished) return null;
-  if (state.awaitingRonDecision || state.pendingQianggang) return null;
+  if (!game || game.state?.finished) return false;
+  if (state.awaitingRonDecision || state.pendingQianggang) return false;
   if (state.pendingFuyu || state.pendingKinpei || state.pendingKamiPochi || state.pendingPochiSwap
-    || state.pendingFeverContinue) return null;
-
+    || state.pendingFeverContinue) return false;
   const hasWinner = state.lastWinner === 0 || state.lastWinner === 1 || state.lastWinner === 2;
   const isRon = state.ronResults.length > 0 || state.ronDeclaredPlayers.length > 0;
   const winEnded = state.roundEnded && hasWinner && !!(state.lastHuleResult || isRon);
   const pingjuEnded = !!state.pendingPingju && !hasWinner;
-  if (!winEnded && !pingjuEnded) return null;
+  return winEnded || pingjuEnded;
+}
+
+export type DeadWallReveal = { rinshan: string[]; baopai: string[]; fubaopai: string[] };
+
+/**
+ * [2026-11-17 isg. 通報 20261117_1「この後の上がり時にツモが見えるなら、透明化のため王牌も出してほしい」]
+ * 局が終わった時だけ、王牌の中身を全部出す。「この後のツモ」と同じ時にだけ載せる [roundOverForReveal]。
+ * - rinshan: 嶺上の残り [カン ・ 北抜き ・ 華の補充で前から引く順。使った分は減っている]
+ * - baopai: 表ドラ表示 [カン ・ 秋でめくった分も含む全部]
+ * - fubaopai: 裏ドラ表示 [リーチで上がっていなくても全部。局はもう終わっている]
+ */
+export function computeDeadWallReveal(state: CanonicalState): DeadWallReveal | null {
+  if (!roundOverForReveal(state)) return null;
+  const shan: any = (state.game as any)?.shan;
+  if (!shan || shan.isBlind) return null;
+  const list = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
+  return { rinshan: list(shan._rinshan), baopai: list(shan._baopai), fubaopai: list(shan._fubaopai) };
+}
+
+export function computeSpectatorNextDraws(state: CanonicalState): Record<number, string[]> | null {
+  const game: any = state.game;
+  if (!roundOverForReveal(state)) return null;
+  const hasWinner = state.lastWinner === 0 || state.lastWinner === 1 || state.lastWinner === 2;
+  const isRon = state.ronResults.length > 0 || state.ronDeclaredPlayers.length > 0;
+  const winEnded = state.roundEnded && hasWinner && !!(state.lastHuleResult || isRon);
 
   let from: number | null;
   if (winEnded && !isRon) from = state.lastWinner;
