@@ -656,8 +656,11 @@
         // 結果は河・和了時カットインで分かる]。人間の引き牌だけ開示する
         // [2026-11-05 隠し演出] 事故は起きるものさになるツモは、色が見える絞りを出さない (暗転が先)
         const jikoBlackout = !!jikoPre && jikoPre.player === ev.player;
+        // [2026-11-17 リョー「カンできる時は捲り演出なしにしないか？」] 引いた直後にカンの候補がある時は絞りを出さない。
+        // 絞ってからカンを選ぶ流れだと、捲った勢いでツモ ・ 打牌に進んでカンのボタンを見落とす (部屋 0IDQ の 2筒)
+        const kanNow = i === zimoEvents.length - 1 && $game.game.getKanCandidates(ev.player as 0 | 1 | 2).length > 0;
         if (color && $game.game.lizhi.has(ev.player)
-            && !jikoBlackout
+            && !jikoBlackout && !kanNow
             && $game.cpu[ev.player] !== true
             && !(someoneFeverNow && !$game.game.feverActive[ev.player])) {
           const kakutei = kakuteiOf(publicPochiCandidates($game.game));
@@ -667,7 +670,7 @@
         const zi = $game.game.lastZimoInfo as { player?: number; pai?: string; pochi?: string | null } | null;
         const corePai = String(ev?.pai ?? '').replace(/[^a-z0-9]/g, '').slice(0, 2);
         // [2026-10-15] フィーバー中のフィーバーでない人は強制ツモ切りなので、白ぽっちと同じく絞りを出さない
-        if (!color && !jikoBlackout && (corePai === 'p1' || corePai === 'p2') && i === zimoEvents.length - 1
+        if (!color && !jikoBlackout && !kanNow && (corePai === 'p1' || corePai === 'p2') && i === zimoEvents.length - 1
             && zi && zi.player === ev.player && (zi.pochi === 'green' || zi.pochi === 'yellow')
             && $game.cpu[ev.player] !== true
             && !(someoneFeverNow && !$game.game.feverActive[ev.player])) {
