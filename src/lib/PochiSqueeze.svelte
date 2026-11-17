@@ -373,7 +373,7 @@
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div class="sq" class:dev={devSeen && stage !== 'result'} class:mono={stage === 'opening' && plan.opening === 'mono'} class:bad={stage === 'result' && rphase === 'reveal' && !good}
   data-testid="pochi-skip" data-stage={stage} role="dialog" aria-label={label} tabindex="-1" on:pointerdown={onDown} on:keydown={onKey}>
-  {#if who}<div class="sq-who">{who}{readOnly ? ' が引いた' : ''}</div>{/if}
+  {#if who && !(readOnly && !autoColor)}<div class="sq-who">{who}{readOnly ? ' が引いた' : ''}</div>{/if}
   {#if stage === 'opening' && isFreeze}<FreezeFx kind={plan.opening === 'freeze_still' ? 'still' : 'black'} durationMs={freezeMs} />{/if}
   {#if lampOn}<div class="sq-edge" aria-hidden="true"><div class="sq-edge-run"></div></div>{/if}
   {#if stage === 'opening' && plan.opening === 'premium'}
@@ -426,7 +426,8 @@
     {#if stage === 'result' && rphase === 'burst'}<div class="sq-burst" aria-hidden="true"></div>{/if}
   </div>
   {#if stage === 'push' && !readOnly && peel < 0.05 && !pressing}<div class="sq-hint" aria-hidden="true">牌を押すか、下から絞る</div>{/if}
-  {#if readOnly && !autoColor && stage !== 'result' && stage !== 'opening' && who}<div class="sq-hint" data-testid="pochi-wait">{who} がめくり中</div>{/if}
+  <!-- [11-17 リョー「誰がめくってるかはもうちょっとわかりやすく、演出を崩さないようにして」] 他の席は名前を大きく 1 枚の札にし、牌と光りに重ねない (縦持ちは牌の上、横持ちは牌の左)。始まりの演出と結果の間は出さない -->
+  {#if readOnly && !autoColor && stage !== 'result' && stage !== 'opening' && who}<div class="sq-drawer" data-testid="pochi-wait"><b>{who}</b><span>がめくり中</span></div>{/if}
   {#if stage === 'kakutei'}
     <div class="sq-band" class:grey={kakutei === 'bad'}><span class="sq-word">確定</span><span class="sq-tag">{kakutei === 'good' ? '正のぽっち' : '逆のぽっち'}</span></div>
   {/if}
@@ -480,7 +481,16 @@
   .sq-pin.grow { animation: sqPinGrow 0.45s cubic-bezier(0.2, 1.5, 0.4, 1) both; }
   @keyframes sqPinGrow { from { transform: scale(0.14); } to { transform: scale(0.68); } }
   .sq-tile.peelable { cursor: grab; touch-action: none; }
-  .sq-hint { position: absolute; z-index: 4; left: 50%; top: calc(42% + min(46vw, 210px) * 0.86); transform: translateX(-50%); padding: 4px 14px; border-radius: 999px;
+  .sq-drawer { position: absolute; z-index: 3; left: 50%; top: max(14px, calc(42% - min(46vw, 210px) * 0.8 - 76px)); transform: translateX(-50%); max-width: 88vw;
+    display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 22px 7px; background: rgba(0, 0, 0, 0.72); color: #fff; pointer-events: none;
+    font-family: 'Zen Kaku Gothic New', sans-serif; text-align: center; animation: sqDrawerIn 0.3s ease-out both; }
+  .sq-drawer b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: clamp(18px, 5vmin, 26px); font-weight: 900; letter-spacing: 0.04em; line-height: 1.25; }
+  .sq-drawer span { font-size: clamp(11px, 2.6vmin, 14px); font-weight: 700; letter-spacing: 0.12em; opacity: 0.8; }
+  @media (orientation: landscape) {
+    .sq-drawer { left: max(16px, 3vw); top: 42%; transform: translateY(-50%); max-width: calc(50% - min(46vw, 210px) * 0.62 - 28px); align-items: flex-start; text-align: left; }
+  }
+  @keyframes sqDrawerIn { from { opacity: 0; } to { opacity: 1; } }
+  .sq-hint { position: absolute; z-index: 4; left: 50%; top: calc(42% + min(46vw, 210px) * 0.95); transform: translateX(-50%); padding: 4px 14px; border-radius: 999px;
     background: rgba(0, 0, 0, 0.6); color: #fff; font: 700 clamp(12px, 2.6vmin, 16px) 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.08em; white-space: nowrap; pointer-events: none; }
   /* キリン柄: 牌の背に茶色の斑 (光りの段だけ) */
   .sq-kirin { position: absolute; inset: -2px; border-radius: 14px; pointer-events: none; mix-blend-mode: multiply; opacity: 0.85;
