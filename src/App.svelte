@@ -685,7 +685,9 @@
   }
   // [2026-10-25 リョー] オンラインでは引いた人の画面が open (deka ・ kakutei ・ plan) と reveal (PUSH で色) と close を server 経由で他の席へ流す。
   // 色は reveal でしか流れない。他の席: remotePochi に受けて、同じ PochiSqueeze を readOnly で出す
-  type RemotePochi = { seat: number; deka: 'p1' | 'p2' | null; kakutei: 'good' | 'bad' | null; plan: PochiPlan; color: PochiColor | null; revealed?: boolean; key: number };
+  // [2026-11-17 リョー ○× anmika_push1 R2 a] 段 (stage) と絞った量 (peel) も流す。他の席は触っても飛ばず、引いた人と同じ物を見る
+  type RemotePochi = { seat: number; deka: 'p1' | 'p2' | null; kakutei: 'good' | 'bad' | null; plan: PochiPlan; color: PochiColor | null; revealed?: boolean; key: number;
+    stage?: { stage: string; skipped: boolean; n: number } | null; peel?: number };
   let remotePochi: RemotePochi | null = null;
   let pochiPushed = false;
   function sendPochiFx(body: Record<string, unknown>): void {
@@ -699,6 +701,12 @@
     pochiPushed = false;
     if (!pochiFxMine() || !pochiReveal) return;
     sendPochiFx({ phase: 'open', deka: pochiReveal.deka ?? null, kakutei: pochiReveal.kakutei ?? null, plan: pochiReveal.plan });
+  }
+  function onPochiStage(stage: string, skipped: boolean): void {
+    if (pochiFxMine()) sendPochiFx({ phase: 'stage', stage, skipped });
+  }
+  function onPochiPeel(peel: number): void {
+    if (pochiFxMine()) sendPochiFx({ phase: 'peel', peel });
   }
   function onPochiPush(): void {
     if (!pochiReveal || pochiPushed) return;
@@ -726,6 +734,15 @@
     }
     if (msg.phase === 'close') {
       if (remotePochi?.seat === gameSeat && !remotePochi.revealed) remotePochi = null;
+      return;
+    }
+    if (msg.phase === 'stage' || msg.phase === 'peel') {
+      if (remotePochi?.seat !== gameSeat || remotePochi.revealed) return;
+      if (msg.phase === 'stage' && typeof msg.stage === 'string') {
+        remotePochi = { ...remotePochi, stage: { stage: msg.stage, skipped: msg.skipped === true, n: (remotePochi.stage?.n ?? 0) + 1 } };
+      } else if (msg.phase === 'peel' && typeof msg.peel === 'number' && Number.isFinite(msg.peel)) {
+        remotePochi = { ...remotePochi, peel: Math.max(0, Math.min(1, msg.peel)) };
+      }
       return;
     }
     if (msg.phase !== 'reveal' || !color) return;
@@ -3672,7 +3689,7 @@
         <PochiSqueeze color={pochiReveal.color} pushed={pochiPushed} deka={pochiReveal.deka ?? null} kakutei={pochiReveal.kakutei ?? null}
           plan={pochiReveal.plan} who={onlineGameStarted ? seatDisplayNames[pochiReveal.player as 0 | 1 | 2] : ''}
           pushIdleMs={screenReplay ? 1500 : null}
-          onOpen={onPochiOpen} onPush={onPochiPush} onClose={closePochiReveal} />
+          onOpen={onPochiOpen} onPush={onPochiPush} onStage={onPochiStage} onPeel={onPochiPeel} onClose={closePochiReveal} />
       {/key}
     {:else if screenReplay && pochiReveal && !fxCutinBusy}
       <!-- [2026-10-27 修] 牌譜再生で他の人が引いた分。対局中は引いた人の画面から流れて来た物を、記録の色で同じ様に出す -->
@@ -3684,7 +3701,7 @@
     {:else if onlineGameStarted && remotePochi && !fxCutinBusy}
       <!-- [2026-10-25] 他の人のムービー。引いた人の plan と PUSH の色を流す (観戦も同じ) -->
       {#key remotePochi.key}
-        <PochiSqueeze readOnly revealColor={remotePochi.color}
+        <PochiSqueeze readOnly revealColor={remotePochi.color} remoteStage={remotePochi.stage ?? null} remotePeel={remotePochi.peel ?? 0}
           deka={remotePochi.deka} kakutei={remotePochi.kakutei} plan={remotePochi.plan}
           who={seatDisplayNames[remotePochi.seat as 0 | 1 | 2]} onClose={() => { remotePochi = null; }} />
       {/key}

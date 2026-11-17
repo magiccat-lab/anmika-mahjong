@@ -2,7 +2,8 @@
 // 契約 [client 側が合わせる物]:
 // - client→server { type:'pochiFx', phase:'open'|'reveal'|'close', ... }。server は送った席を seat に付けて全員と観戦へ配る
 // - open は deka ・ kakutei ・ plan (opening/glow/pulse/particle/crack/push/lamp/premium は 16 字までの文字列か null、delay は true の時だけ) だけ通す。色は入れない
-// - 色は reveal の時だけ通す [PUSH の前に色を流さない]。reveal に正しい色が無ければ捨てる。peel は廃止
+// - 色は reveal の時だけ通す [PUSH の前に色を流さない]。reveal に正しい色が無ければ捨てる
+// - [2026-11-17 ○× anmika_push1 R2 a] stage (kakutei/glow/develop/tame/push と skipped) と peel (0〜1、色は落とす) を通す
 // - 1 席 1 秒 30 通まで、open は 2 秒に 1 回 [連打で他の画面を塞がない]
 import jwt from 'jsonwebtoken';
 import { createServer, type Server } from 'node:http';
@@ -114,7 +115,12 @@ describe('白ぽっちのムービーの中継 [2026-10-25]', () => {
     expect(sanitizePochiFx({ phase: 'reveal', color: 'blue' })).toEqual({ phase: 'reveal', color: 'blue' });
     expect(sanitizePochiFx({ phase: 'reveal' })).toBeNull();
     expect(sanitizePochiFx({ phase: 'reveal', color: 'purple' })).toBeNull();
-    expect(sanitizePochiFx({ phase: 'peel', peel: 0.5, color: 'red' })).toBeNull();
+    expect(sanitizePochiFx({ phase: 'peel', peel: 0.5, color: 'red' })).toEqual({ phase: 'peel', peel: 0.5 });
+    expect(sanitizePochiFx({ phase: 'peel', peel: 3 })).toEqual({ phase: 'peel', peel: 1 });
+    expect(sanitizePochiFx({ phase: 'peel', peel: 'x' })).toBeNull();
+    expect(sanitizePochiFx({ phase: 'stage', stage: 'tame', color: 'red' })).toEqual({ phase: 'stage', stage: 'tame' });
+    expect(sanitizePochiFx({ phase: 'stage', stage: 'push', skipped: true })).toEqual({ phase: 'stage', stage: 'push', skipped: true });
+    expect(sanitizePochiFx({ phase: 'stage', stage: 'result' })).toBeNull();
     expect(sanitizePochiFx({ phase: 'hack' })).toBeNull();
     expect(sanitizePochiFx({ phase: 'close', color: 'red' })).toEqual({ phase: 'close' });
     expect(sanitizePochiFx({ phase: 'open', deka: 'p1', kakutei: 'good', plan: PLAN }))
@@ -155,14 +161,15 @@ describe('白ぽっちのムービーの中継 [2026-10-25]', () => {
     for (const idx of [1, 2]) {
       const got = await waitUntil(() => {
         const list = clients[idx].messages.filter((m) => m.type === 'pochiFx');
-        return list.length >= 3 ? list : undefined;
+        return list.length >= 4 ? list : undefined;
       }, 3000, `relay to seat ${idx}`);
-      // peel は捨てられる
-      expect(got.map((m) => m.phase)).toEqual(['open', 'reveal', 'close']);
+      // peel は色を落として通す
+      expect(got.map((m) => m.phase)).toEqual(['open', 'peel', 'reveal', 'close']);
+      expect(got[1].color).toBeUndefined();
       expect(got.every((m) => m.seat === 0)).toBe(true);
       expect(got[0]).toMatchObject({ kakutei: 'good', plan: PLAN });
       expect(got[0].color).toBeUndefined();
-      expect(got[1].color).toBe('green');
+      expect(got[2].color).toBe('green');
     }
   });
 });

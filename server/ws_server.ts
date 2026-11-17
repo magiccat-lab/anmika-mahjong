@@ -1513,7 +1513,7 @@ export function pochiFxLogLine(
     .filter((m) => m.seat !== seat)
     .map((m) => `${m.seat}:${!m.ws ? 'none' : m.ws.readyState === 1 ? 'open' : `ws${m.ws.readyState}`}`)
     .join(',');
-  const what = relay ? `${relay.phase}${relay.color ? `/${relay.color}` : ''}` : 'invalid';
+  const what = relay ? `${relay.phase}${relay.color ? `/${relay.color}` : ''}${relay.stage ? `/${relay.stage}${relay.skipped ? '+skip' : ''}` : ''}` : 'invalid';
   return `[anmika-ws] pochiFx ${now.toISOString()} room=${room.roomId} seat=${seat} ${what} ${allowed ? 'relay' : 'drop'} to=${to || '-'} spect=${room.spectators.size}`;
 }
 
@@ -1533,18 +1533,37 @@ export type PochiFxPlan = {
   crack: string | null; push: string | null; lamp: string | null; premium: string | null; delay?: true;
 };
 export type PochiFxRelay = {
-  phase: 'open' | 'reveal' | 'close' | 'peel';
+  phase: 'open' | 'reveal' | 'close' | 'stage' | 'peel';
   color?: 'blue' | 'red' | 'green' | 'yellow';
+  /** [2026-11-17 リョー ○× anmika_push1 R2 a] 引いた人の今の段と、飛ばしたか */
+  stage?: 'kakutei' | 'glow' | 'develop' | 'tame' | 'push';
+  skipped?: boolean;
+  /** 引いた人が下から絞った割合 0〜1 (色は入れない) */
+  peel?: number;
   deka?: 'p1' | 'p2' | null;
   kakutei?: 'good' | 'bad' | null;
   plan?: PochiFxPlan;
 };
 const POCHI_FX_COLORS = new Set(['blue', 'red', 'green', 'yellow']);
+const POCHI_FX_STAGES = new Set(['kakutei', 'glow', 'develop', 'tame', 'push']);
 const POCHI_FX_PLAN_KEYS = ['opening', 'glow', 'pulse', 'particle', 'crack', 'push', 'lamp', 'premium'] as const;
 export function sanitizePochiFx(value: Record<string, unknown>): PochiFxRelay | null {
   const phase = value.phase;
-  if (phase !== 'open' && phase !== 'reveal' && phase !== 'close') return null;
+  if (phase !== 'open' && phase !== 'reveal' && phase !== 'close' && phase !== 'stage' && phase !== 'peel') return null;
   const out: PochiFxRelay = { phase };
+  // [2026-11-17 リョー「虹＋ひび割れ演出が他人から見えなくて早くしろよと言われた」 ○× anmika_push1 R2 a]
+  // 引いた人の段 (光り ・ 溜め ・ PUSH 待ち) と絞った量を他の席へ流す。色は今まで通り reveal だけ
+  if (phase === 'stage') {
+    if (typeof value.stage !== 'string' || !POCHI_FX_STAGES.has(value.stage)) return null;
+    out.stage = value.stage as PochiFxRelay['stage'];
+    if (value.skipped === true) out.skipped = true;
+    return out;
+  }
+  if (phase === 'peel') {
+    if (typeof value.peel !== 'number' || !Number.isFinite(value.peel)) return null;
+    out.peel = Math.round(Math.max(0, Math.min(1, value.peel)) * 100) / 100;
+    return out;
+  }
   if (phase === 'reveal') {
     if (typeof value.color !== 'string' || !POCHI_FX_COLORS.has(value.color)) return null;
     out.color = value.color as PochiFxRelay['color'];
@@ -3256,7 +3275,8 @@ export function createWsRuntime(options: WsRuntimeOptions = {}) {
           const allowed = !!relay && allowPochiFx(room, payload.seat, relay.phase);
           // [2026-11-12 リョー「0032の」] 絞りが他の席に届いたかを後から見られるように 1 行残す
           // [open ・ reveal ・ close だけ、1 回の絞りで 3 行。送り先の席と接続の開き具合も]
-          console.log(pochiFxLogLine(room, payload.seat, relay, allowed));
+          // [11-17] 絞りの量 (peel) は 1 回の絞りで何通も来るので残さない
+          if (relay?.phase !== 'peel') console.log(pochiFxLogLine(room, payload.seat, relay, allowed));
           if (!relay || !allowed) return;
           broadcast(room, { type: 'pochiFx', seat: payload.seat, ...relay });
           return;

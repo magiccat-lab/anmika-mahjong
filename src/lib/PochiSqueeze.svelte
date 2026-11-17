@@ -11,6 +11,10 @@
   // [2026-11-01 リョー「やっぱめくりたい。1p2p だと早くわかるからそこだけ解消」] ⑤ の間は牌を指で下から絞ってもめくれる (9 割で PUSH と同じ)。
   //  絞りの面は白ぽっちもでかぽっちも「白の面の真ん中に同じ大きさの点」。1p ・ 2p の大きい丸は下の方から見えてしまうので、めくれ切ってから大きくする。
   //  色が DOM に出るのは指で絞り始めてから (自分の画面だけ。他の席は今まで通り PUSH の reveal で結果へ)
+  // [2026-11-17 リョー「ボタン押す演出全般きもいから変えるか」 ○× anmika_push1 P1 a] PUSH の丸いボタンをやめ、牌そのものを押すとめくれる。
+  //  牌の下に「牌を押すか、下から絞る」の 1 行だけ。押すと牌が少し沈んでからめくれる。期待度は牌の周りの光りの色だけ
+  // [2026-11-17 リョー「虹＋ひび割れ演出が他人から見えなくて早くしろよと言われた」 ○× anmika_push1 R2 a] 他の席は画面を触っても飛ばない。
+  //  引いた人の段 (remoteStage) と絞った量 (remotePeel) に合わせる。引いた人が飛ばせば一緒に飛ぶ。「待ち」のボタンは無くし、牌の下に「〜がめくり中」
   import { onMount, onDestroy } from 'svelte';
   import { playSound } from './prefs';
   import FreezeFx from './FreezeFx.svelte';
@@ -39,13 +43,20 @@
   export let onOpen: () => void = () => {};
   /** 引いた人が PUSH を押した時 (他の席へ色を流す) */
   export let onPush: () => void = () => {};
+  /** 引いた人の画面で段が進んだ時 (他の席へ流す)。skipped は画面を触って飛ばした時 */
+  export let onStage: (stage: 'kakutei' | 'glow' | 'develop' | 'tame' | 'push', skipped: boolean) => void = () => {};
+  /** 引いた人が下から絞った割合 (他の席へ流す。色は入れない) */
+  export let onPeel: (peel: number) => void = () => {};
+  /** [他の席] 引いた人の今の段 (届いた順の番号 n 付き) */
+  export let remoteStage: { stage: string; skipped: boolean; n: number } | null = null;
+  /** [他の席] 引いた人が絞った割合 */
+  export let remotePeel = 0;
   export let onClose: () => void = () => {};
 
   type Stage = 'opening' | 'kakutei' | 'glow' | 'develop' | 'tame' | 'push' | 'result';
   type RPhase = 'burst' | 'miss' | 'word' | 'reveal';
   // 光りの色 (番号は GLOW_ORDER の順。class 名には色の言葉を使わない)
   const GLOW_CSS = ['#ffffff', '#3a78ff', '#2ecc71', '#ff3b3b', '#f2c23a', 'conic-gradient(#ff3b3b, #ffd23b, #3bff8a, #3bb8ff, #c63bff, #ff3b3b)'];
-  const PUSH_LOOK: Record<PochiPlan['push'], number> = { normal: 0, red: 1, gold: 2, rainbow: 3 };
   // [2026-11-13 リョー ○× anmika_sakurai1 T3] 「演出を短く」の時は各段の尺を半分に [既定はそのまま]。この画面の待ちだけで、押した色の中継 ・ 結果は変えない
   const tl0 = movieTimeline(plan, kakutei);
   const tl = { ...tl0, openingMs: fxMs(tl0.openingMs), kakuteiMs: fxMs(tl0.kakuteiMs), glowMs: fxMs(tl0.glowMs), developMs: fxMs(tl0.developMs), tameMs: fxMs(tl0.tameMs) };
@@ -72,6 +83,11 @@
   let fakeMiss = false;     // 復活の「外れに見せる」間
   let peel = 0;             // 0〜1。⑤ の間に指で下からめくった割合
   let peelY: number | null = null;
+  let peelStartY: number | null = null;
+  let peelMoved = false;    // 指を動かした (絞った) 押し方は「牌を押す」に数えない
+  let pressing = false;     // 牌を押して沈んでいる間
+  let peelSentAt = 0;
+  let peelSent = 0;
   let tileEl: HTMLDivElement | null = null;
   const PEEL_AT = 0.9;
   let timers: ReturnType<typeof setTimeout>[] = [];
@@ -101,6 +117,7 @@
   // ---- ① 〜 ④ ----
   function enterStage(s: Stage): void {
     stage = s;
+    if (!readOnly && s !== 'opening' && s !== 'push' && s !== 'result') onStage(s, false);
     if (s === 'kakutei') se('kyuin', 0.5);
     if (s === 'glow') startGlow();
     if (s === 'develop') devSeen = true;
@@ -150,10 +167,11 @@
   }
 
   // ---- ⑤ PUSH ----
-  function enterPush(): void {
+  function enterPush(skipped = false): void {
     if (stage === 'push' || stage === 'result') return;
     clearStageTimers();
     stage = 'push';
+    if (!readOnly) onStage('push', skipped);
     if (gl < 0) gl = target;
     pulsing = true;
     clearTimeout(idleTimer);
@@ -170,13 +188,44 @@
     devSeen = false;
     dark = false;
     gl = target;
+    enterPush(true);
+  }
+  // [他の席] 引いた人が PUSH 待ちに着いた。飛ばしていれば同じ様に飛ばし、自然に着いたなら寄りとひびを残したまま
+  function followPush(skipped: boolean): void {
+    if (stage === 'push' || stage === 'result' || closing) return;
+    if (skipped) { skip(); return; }
+    clearTimeout(delayTimer);
+    if (dev) devSeen = true;
+    dark = false;
+    gl = target;
     enterPush();
+  }
+  // [他の席] 自分の画面の方が遅れていたら、引いた人の段まで進める (先の段へだけ)
+  const STAGE_ORDER: Stage[] = ['opening', 'kakutei', 'glow', 'develop', 'tame', 'push', 'result'];
+  function followStage(s: string, skipped: boolean): void {
+    if (s === 'push') { followPush(skipped); return; }
+    const want = STAGE_ORDER.indexOf(s as Stage);
+    if (want < 0 || want <= STAGE_ORDER.indexOf(stage) || closing) return;
+    if (s === 'develop' && !dev) return;
+    clearStageTimers();
+    if (stage === 'opening' || gl < 0) gl = target;
+    pulsing = true;
+    enterStage(s as Stage);
+    // 残りの段は自分の尺で進める
+    let at = 0;
+    if (s === 'kakutei') { later(() => enterStage('glow'), tl.kakuteiMs); at = tl.kakuteiMs + tl.glowMs; if (tl.developMs > 0) { later(() => enterStage('develop'), at); at += tl.developMs; } if (tl.tameMs > 0) { later(() => enterStage('tame'), at); at += tl.tameMs; } }
+    else if (s === 'glow') { at = tl.glowMs; if (tl.developMs > 0) { later(() => enterStage('develop'), at); at += tl.developMs; } if (tl.tameMs > 0) { later(() => enterStage('tame'), at); at += tl.tameMs; } }
+    else if (s === 'develop') { at = tl.developMs; if (tl.tameMs > 0) { later(() => enterStage('tame'), at); at += tl.tameMs; } }
+    else if (s === 'tame') at = tl.tameMs;
+    later(enterPush, at);
   }
   // ---- ⑤ の絞り ----
   function onPeelDown(e: PointerEvent): void {
     if (readOnly || stage !== 'push' || localPushed || closing) return;
     e.stopPropagation();
     peelY = e.clientY;
+    peelStartY = e.clientY;
+    peelMoved = false;
     (e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId);
   }
   function onPeelMove(e: PointerEvent): void {
@@ -184,15 +233,34 @@
     const h = tileEl?.offsetHeight ?? 260;
     const d = (peelY - e.clientY) / (h * 1.1);
     peelY = e.clientY;
+    if (peelStartY !== null && Math.abs(peelStartY - e.clientY) > 8) peelMoved = true;
     const prev = peel;
     peel = Math.max(0, Math.min(1, peel + d));
+    sendPeel(false);
     // 絞っている間は自動 PUSH を待たせる
     if (peel !== prev) { clearTimeout(idleTimer); idleTimer = setTimeout(doPush, pushIdleMs ?? PUSH_IDLE_MS); }
     if (prev < 0.3 && peel >= 0.3) se('heart', 0.5);
     if (prev < 0.6 && peel >= 0.6) se('heart', 0.65);
     if (peel >= PEEL_AT) { peelY = null; doPush(); }
   }
-  function onPeelUp(): void { peelY = null; }
+  function onPeelUp(): void { peelY = null; sendPeel(true); }
+  // 絞りの量は 0.1 秒に 1 回まで流す (離した時は必ず)
+  function sendPeel(force: boolean): void {
+    if (readOnly || peel === peelSent) return;
+    const now = Date.now();
+    if (!force && now - peelSentAt < 100) return;
+    peelSentAt = now;
+    peelSent = peel;
+    onPeel(peel);
+  }
+  // 牌を押す: 少し沈んでからめくる
+  function onTileClick(e: MouseEvent): void {
+    if (readOnly || stage !== 'push' || localPushed || closing || pressing) return;
+    e.stopPropagation();
+    if (peelMoved) { peelMoved = false; return; }
+    pressing = true;
+    later(() => { pressing = false; doPush(); }, 120);
+  }
 
   function doPush(): void {
     if (readOnly || localPushed || stage === 'result' || closing) return;
@@ -239,6 +307,15 @@
 
   $: if (mounted && !readOnly && pushed) startResult(color);
   $: if (mounted && readOnly && revealColor) startResult(revealColor);
+  $: if (mounted && readOnly && remoteStage) followStage(remoteStage.stage, remoteStage.skipped);
+  $: if (mounted && readOnly) applyRemotePeel(remotePeel);
+  function applyRemotePeel(p: number): void {
+    if (stage !== 'push' || p === peel) return;
+    peel = Math.max(0, Math.min(1, p));
+    // 引いた人が絞っている間は閉じない
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { if (autoColor) startResult(autoColor); else close(); }, pushIdleMs ?? REMOTE_IDLE_MS);
+  }
   $: text = resultColor ? pochiRevealText(resultColor, !!deka) : null;
   $: fakeText = pochiRevealText('red', !!deka);
   $: good = resultColor ? POCHI_GOOD[resultColor] : false;
@@ -248,13 +325,15 @@
 
   function onDown(): void {
     if (stage === 'result') { if (rphase === 'reveal') close(); return; }
+    // 他の席は触っても飛ばさない (引いた人と同じ物を見る)。牌譜再生は今まで通り飛ばせる
+    if (readOnly && !autoColor) return;
     if (skippable) skip();
   }
   function onKey(e: KeyboardEvent): void {
     if (e.target !== e.currentTarget) return;
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
-    if (stage === 'result') { if (rphase === 'reveal') close(); } else if (stage === 'push') doPush(); else if (skippable) skip();
+    if (stage === 'result') { if (rphase === 'reveal') close(); } else if (stage === 'push') doPush(); else if (skippable && !(readOnly && !autoColor)) skip();
   }
 
   // 粒子 (発展の間だけ。位置は番号から決める)
@@ -318,9 +397,10 @@
     </div>
   {/if}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="sq-tile gl-{halo}" bind:this={tileEl} class:peelable={stage === 'push' && !readOnly} class:zoom={zoomed} class:float={stage === 'develop'} class:burst={stage === 'result' && rphase !== 'miss' && rphase !== 'word'} class:flipped
+  <div class="sq-tile gl-{halo}" bind:this={tileEl} class:peelable={stage === 'push' && !readOnly} class:press={pressing} class:zoom={zoomed} class:float={stage === 'develop'} class:burst={stage === 'result' && rphase !== 'miss' && rphase !== 'word'} class:flipped
     style="--gc:{halo >= 0 ? GLOW_CSS[halo] : 'transparent'};--ring:{halo >= 0 && halo < 5 ? GLOW_CSS[halo] : '#fff'}"
-    on:pointerdown={onPeelDown} on:pointermove={onPeelMove} on:pointerup={onPeelUp} on:pointercancel={onPeelUp}>
+    data-testid={stage === 'push' && !readOnly ? 'pochi-push' : undefined} role={stage === 'push' && !readOnly ? 'button' : undefined} aria-label={stage === 'push' && !readOnly ? 'めくる' : undefined}
+    on:pointerdown={onPeelDown} on:pointermove={onPeelMove} on:pointerup={onPeelUp} on:pointercancel={onPeelUp} on:click={onTileClick}>
     <div class="sq-halo" class:pu-slow={pulsing && stage !== 'result' && plan.pulse === 'slow'} class:pu-fast={pulsing && stage !== 'result' && plan.pulse === 'fast'}
       class:pu-hold={pulsing && stage !== 'result' && (plan.pulse === 'hold' || plan.pulse === 'blink')} class:dark class:frozen class:rainbow={halo === 5}></div>
     {#if !flipped}
@@ -345,16 +425,8 @@
     {/if}
     {#if stage === 'result' && rphase === 'burst'}<div class="sq-burst" aria-hidden="true"></div>{/if}
   </div>
-  {#if stage === 'push' && !readOnly && peel < 0.05}<div class="sq-hint" aria-hidden="true">下から上へ指で絞る</div>{/if}
-  {#if stage === 'push'}
-    <div class="sq-pushwrap">
-      {#if readOnly}
-        <button type="button" class="sq-push pk-{PUSH_LOOK[plan.push]}" data-testid="pochi-push" disabled aria-label={`${who} を待っています`}>待ち</button>
-      {:else}
-        <button type="button" class="sq-push pk-{PUSH_LOOK[plan.push]}" data-testid="pochi-push" on:pointerdown|stopPropagation on:click|stopPropagation={doPush}>PUSH</button>
-      {/if}
-    </div>
-  {/if}
+  {#if stage === 'push' && !readOnly && peel < 0.05 && !pressing}<div class="sq-hint" aria-hidden="true">牌を押すか、下から絞る</div>{/if}
+  {#if readOnly && !autoColor && stage !== 'result' && stage !== 'opening' && who}<div class="sq-hint" data-testid="pochi-wait">{who} がめくり中</div>{/if}
   {#if stage === 'kakutei'}
     <div class="sq-band" class:grey={kakutei === 'bad'}><span class="sq-word">確定</span><span class="sq-tag">{kakutei === 'good' ? '正のぽっち' : '逆のぽっち'}</span></div>
   {/if}
@@ -408,7 +480,7 @@
   .sq-pin.grow { animation: sqPinGrow 0.45s cubic-bezier(0.2, 1.5, 0.4, 1) both; }
   @keyframes sqPinGrow { from { transform: scale(0.14); } to { transform: scale(0.68); } }
   .sq-tile.peelable { cursor: grab; touch-action: none; }
-  .sq-hint { position: absolute; z-index: 4; left: 50%; top: calc(42% + min(46vw, 210px) * 0.72); transform: translateX(-50%); padding: 4px 14px; border-radius: 999px;
+  .sq-hint { position: absolute; z-index: 4; left: 50%; top: calc(42% + min(46vw, 210px) * 0.86); transform: translateX(-50%); padding: 4px 14px; border-radius: 999px;
     background: rgba(0, 0, 0, 0.6); color: #fff; font: 700 clamp(12px, 2.6vmin, 16px) 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.08em; white-space: nowrap; pointer-events: none; }
   /* キリン柄: 牌の背に茶色の斑 (光りの段だけ) */
   .sq-kirin { position: absolute; inset: -2px; border-radius: 14px; pointer-events: none; mix-blend-mode: multiply; opacity: 0.85;
@@ -430,18 +502,10 @@
   .pt-rainbow i { animation-name: sqFloatUp; background: hsl(var(--h) 100% 65%); box-shadow: 0 0 10px 3px hsl(var(--h) 100% 65%); }
   @keyframes sqFloatUp { 0% { opacity: 0; transform: translate(var(--x), calc(var(--y) + 50px)); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--x), calc(var(--y) - 130px)); } }
   @keyframes sqSuck { 0% { opacity: 0; transform: translate(calc(var(--x) * 1.5), calc(var(--y) * 1.5)) scale(1); } 20% { opacity: 1; } 100% { opacity: 0; transform: translate(0, 0) scale(0.2); } }
-  /* PUSH: 牌の右。名前は左 */
-  .sq-pushwrap { position: absolute; z-index: 8; left: calc(50% + min(23vw, 105px) * 1.2 + 22px); top: 42%; transform: translateY(-50%); }
-  .sq-push { width: clamp(84px, 19vmin, 132px); height: clamp(84px, 19vmin, 132px); border-radius: 50%; border: 4px solid #fff; cursor: pointer; font: 900 clamp(18px, 4.4vmin, 30px) 'Zen Kaku Gothic New', sans-serif; letter-spacing: 0.06em;
-    color: #333; background: radial-gradient(circle at 35% 30%, #fff, #c9ccd2 75%); box-shadow: 0 6px 0 #6d717a, 0 0 24px rgba(255, 255, 255, 0.5); animation: sqPushIn 0.35s cubic-bezier(0.2, 1.7, 0.4, 1) both, sqPushBeat 1.1s ease-in-out 0.4s infinite; }
-  .sq-push:active { transform: translateY(4px); box-shadow: 0 2px 0 #6d717a; }
-  .sq-push.pk-1 { color: #fff; background: radial-gradient(circle at 35% 30%, #ff8a8a, #e0262a 75%); box-shadow: 0 6px 0 #7d1114, 0 0 28px rgba(255, 60, 60, 0.8); -webkit-text-stroke: 2px #7d1114; paint-order: stroke fill; }
-  .sq-push.pk-2 { color: #fff; background: radial-gradient(circle at 35% 30%, #fff1a8, #e0a21c 75%); box-shadow: 0 6px 0 #7a5410, 0 0 30px rgba(255, 200, 70, 0.9); -webkit-text-stroke: 2px #7a5410; paint-order: stroke fill; }
-  .sq-push.pk-3 { color: #fff; background: conic-gradient(#ff3b3b, #ffd23b, #3bff8a, #3bb8ff, #c63bff, #ff3b3b); box-shadow: 0 6px 0 #3a2a5a, 0 0 32px rgba(180, 140, 255, 0.9); -webkit-text-stroke: 3px #3a2a5a; paint-order: stroke fill; }
-  .sq-push:disabled { cursor: default; opacity: 0.8; animation: sqPushIn 0.35s cubic-bezier(0.2, 1.7, 0.4, 1) both; font-size: clamp(16px, 3.6vmin, 24px); }
-  @keyframes sqPushIn { from { opacity: 0; scale: 0.3; } to { opacity: 1; scale: 1; } }
-  /* 鼓動は大きさでなく明るさで (大きさを動かすと押す瞬間に位置がずれる) */
-  @keyframes sqPushBeat { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.18) drop-shadow(0 0 10px rgba(255, 255, 255, 0.9)); } }
+  /* [11-17 P1 a] 牌を押した時: 少し沈む (zoom の transform と重ねるので translate で) */
+  .sq-tile { transition: transform 0.5s ease-out, box-shadow 0.3s, translate 0.08s; }
+  .sq-tile.press { translate: 0 6px; box-shadow: 0 4px 0 #c9bf9f, 0 0 0 6px var(--ring, #fff); }
+  .sq-tile.peelable { cursor: pointer; }
   .sq-matada { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); z-index: 6; white-space: nowrap; font-family: 'FX Kana', 'Zen Kaku Gothic New', sans-serif; font-size: clamp(40px, 12vw, 130px); color: #ffe27a;
     -webkit-text-stroke: 6px #111; paint-order: stroke fill; text-shadow: 0 0 24px rgba(255, 200, 70, 0.9); animation: sqPop 0.3s cubic-bezier(0.2, 1.7, 0.4, 1) both; }
   .sq-rays { position: absolute; left: 50%; top: 42%; width: 220vmax; height: 220vmax; margin: -110vmax 0 0 -110vmax; border-radius: 50%; pointer-events: none;
@@ -494,7 +558,7 @@
   @keyframes sqWord { 0% { opacity: 0; transform: skewX(-12deg) scale(2.4); } 60% { opacity: 1; transform: skewX(-12deg) scale(0.94); } 100% { opacity: 1; transform: skewX(-12deg) scale(1); } }
   @keyframes sqDraw { to { stroke-dashoffset: 0; } }
   @media (prefers-reduced-motion: reduce) {
-    .sq-band, .sq-word, .sq-crack path, .sq-cracks path, .sq-rays, .sq-ci-line, .sq-push, .sq-halo, .sq-tile.float, .sq-tile.burst, .sq-parts i, .sq-matada { animation: none; }
+    .sq-band, .sq-word, .sq-crack path, .sq-cracks path, .sq-rays, .sq-ci-line, .sq-halo, .sq-tile.float, .sq-tile.burst, .sq-parts i, .sq-matada { animation: none; }
     .sq-crack path, .sq-cracks path { stroke-dashoffset: 0; }
   }
   /* [2026-10-15 fx10 L1] 告知ランプ = 画面の外周。点いた瞬間に白く光り、金の縁が脈打つ。
