@@ -9,6 +9,8 @@
 set -euo pipefail
 src="${1:?usage: tools/swap_dist.sh <new dist dir>}"
 src="${src%/}"
+# 欠けの確かめは public に cd した中で回すので、相対パスだと public/<src> を見て全部欠けに見える
+src="$(cd "$src" && pwd)"
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 pub="$repo/public"
 dist="$repo/dist"
