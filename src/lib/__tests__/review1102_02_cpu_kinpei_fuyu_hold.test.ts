@@ -28,7 +28,8 @@ function arm(opts: { hua: string[]; fixDora?: boolean }): any {
   }
   wall._pai.push('m5', 'm3', 's5', 'p8', 'z2');
   for (let i = 0; i < 4; i++) wall._pai.push('m5');
-  wall._pai.unshift('z1', 'z2');
+  // 秋の追加ドラ [表 z1, 裏 z2] は嶺上の末尾から開く [2026-11-18]
+  wall._rinshan.splice(-2, 2, 'z2', 'z1');
   g.nukidoraGold[cur] = 1;
   for (const p of [0, 1, 2]) s.cpu[p] = true;
   return { s, g, cur };

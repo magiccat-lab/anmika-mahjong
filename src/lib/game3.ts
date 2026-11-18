@@ -2683,8 +2683,9 @@ export class Game3 {
     if (akiKinpeiSingleBoost) {
       aki += 1;
     }
-    if (aki > 0 && this.shan.paishu < 2) {
-      // 山残なし → 秋効果不発 [ルール: 下段しか山が残っていない場合は使用不可]
+    if (aki > 0 && this.shan.akiDoraAvailable < 2) {
+      // 嶺上もツモ山も残りなし → 秋効果不発 [ルール: 下段しか残っていない場合は使用不可]
+      // 秋は嶺上から開く [shan3 drawAkiDora、2026-11-18 リョー] ので残りは嶺上 + ツモ山で数える
       aki = 0;
     }
     dlog('[aki check]', { player, akiInHand: this.huapai[player].filter(p => p === 'f3').length, baopaiAki, fubaopaiAki, totalAki: aki, baopaiNow: [...this.shan.baopai], fubaopaiNow: [...(this.shan.fubaopai ?? [])] });
@@ -2701,16 +2702,16 @@ export class Game3 {
       let akiRemaining = aki;
       while (akiRemaining > 0) {
         // 上段が無く下段1枚だけなら秋は使えない。
-        if (this.shan.paishu < 2) break;
+        if (this.shan.akiDoraAvailable < 2) break;
         let newlyRevealedAki = 0;
-        const visible = this.shan.drawNewDora(false);
+        const visible = this.shan.drawAkiDora(false);
         if (visible === null) break;
         akiRevealCount += 1;
         if (visible === 'f3') newlyRevealedAki += 1;
         // 表示位置はリーチ有無に関係なく [上, 下] の固定ペア。
-        // 下段は常にlive wallから物理切出しして裏表示枠へ保持し、
+        // 下段も嶺上 [尽きたらlive wall] から物理切出しして裏表示枠へ保持し、
         // リーチ和了時だけ公開・得点・秋連鎖へ含める。
-        const hidden = this.shanRule.fudora ? this.shan.drawNewDora(true) : null;
+        const hidden = this.shanRule.fudora ? this.shan.drawAkiDora(true) : null;
         if (isLizhi && hidden === 'f3') newlyRevealedAki += 1;
         akiRemaining -= 1;
         // 秋金北でめくった牌が2枚目の秋なら、秋秋金北へ移行し、
@@ -2724,7 +2725,7 @@ export class Game3 {
         //  金北の強化がまた乗って表裏 2 組を余計にめくっていた]
         if (visible === 'f3') consumedIndicatorKeys.push(`baopai:${this.shan.baopai.length - 1}`);
         if (isLizhi && hidden === 'f3') consumedIndicatorKeys.push(`fubaopai:${(this.shan.fubaopai ?? []).length - 1}`);
-        if (this.shan.paishu === 0) break;
+        if (this.shan.akiDoraAvailable === 0) break;
       }
       param.baopai = (this.shan.baopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f') && !isPositiveZ5(p)).map(normalizeBaopaiForMajiang);
       if (isLizhi) param.fubaopai = (this.shan.fubaopai ?? []).filter((p: any) => typeof p === 'string' && !p.startsWith('f') && !isPositiveZ5(p)).map(normalizeBaopaiForMajiang);

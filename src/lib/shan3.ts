@@ -171,7 +171,7 @@ export class Shan3 {
   /** 山 index → 金フラグ参照 [配牌時に goldHand 集計用、 player 側に渡す] */
   isGoldAt(idx: number): boolean { return this._gold[idx] ?? false; }
 
-  /** リンシャン使用枚数 [カン / 北抜き / 華牌抜き / 秋でドラめくりで +1]
+  /** リンシャン使用枚数 [カン / 北抜き / 華牌抜き / 秋のドラめくり (drawAkiDora) で +1]
    *  16 まではリンシャンから取って残山に影響なし、 17 以上は残山から消費 */
   rinshanUsed: number = 0;
 
@@ -266,6 +266,26 @@ export class Shan3 {
     if (this._pai.length === 0) return null;
     const newPai = this._pai.shift()!;
     // _gold 撤去済
+    if (isFu) (this._fubaopai ??= []).push(newPai);
+    else this._baopai.push(newPai);
+    return newPai;
+  }
+
+  /** 秋で開ける追加ドラ表の残り [嶺上 + ツモ山]。嶺上から先に開くので両方を足す。 */
+  get akiDoraAvailable(): number {
+    return this.rinshanRemaining + this.paishu;
+  }
+
+  /** 秋の追加ドラ [和了時]: 王牌の嶺上側から開き、ツモ山の枚数を減らさない
+   *  [2026-11-18 リョー「秋のめくる向きを逆にしないと山の枚数減るから」。本家 norosh は
+   *  カンと同じツモ山の奥から開くが、フィーバーの続く山を秋で削らない方を採る]。
+   *  嶺上の番 [カン / 北抜き / 華の補充] は先頭から取るので、秋は反対の末尾から取り、
+   *  嶺上の補充順を変えない。嶺上が尽きていたら従来どおりツモ山の王牌側から開く。
+   *  カンドラは本家どおり drawNewDora [ツモ山の奥] のまま。 */
+  drawAkiDora(isFu: boolean): string | null {
+    if (this._blind || this._rinshan.length === 0) return this.drawNewDora(isFu);
+    const newPai = this._rinshan.pop()!;
+    this.consumeRinshan();
     if (isFu) (this._fubaopai ??= []).push(newPai);
     else this._baopai.push(newPai);
     return newPai;

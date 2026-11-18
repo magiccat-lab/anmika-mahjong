@@ -23,9 +23,9 @@ describe('秋金北で開いた秋は同じフィーバーの次の和了で再�
     g.kinpeiTarget[player] = 'aki';
     (g.shan as any)._baopai = ['m9', 'z7'];
     (g.shan as any)._fubaopai = ['p6', 'p1'];
-    // 秋めくりは _pai 先頭から [表, 裏] の順。1 組目の表に 2 枚目の秋を置く
-    const pai: string[] = (g.shan as any)._pai;
-    pai.splice(0, 6, 'f3', 'z1', 'ns3', 's8', 's9', 'z3');
+    // 秋めくりは嶺上の末尾から [表, 裏] の順 [2026-11-18]。1 組目の表に 2 枚目の秋を置く
+    const rinshan: string[] = (g.shan as any)._rinshan;
+    rinshan.splice(-6, 6, 'z3', 's9', 's8', 'ns3', 'z1', 'f3');
 
     setHand(g, player);
     const r1 = g.hule(player);
@@ -51,8 +51,8 @@ describe('秋金北で開いた秋は同じフィーバーの次の和了で再�
     (g as any).diyizimo = false;
     (g.shan as any)._baopai = ['m9', 'z7'];
     (g.shan as any)._fubaopai = ['p6', 'p1'];
-    const pai: string[] = (g.shan as any)._pai;
-    pai.splice(0, 6, 'f3', 'z1', 'ns3', 's8', 's9', 'z3');
+    const rinshan: string[] = (g.shan as any)._rinshan;
+    rinshan.splice(-6, 6, 'z3', 's9', 's8', 'ns3', 'z1', 'f3');
 
     // 1 回目: 金北は保留 [target なし]。手の秋で 2 枚目の秋がめくれ、秋秋で 2 組
     setHand(g, player);

@@ -750,6 +750,11 @@ export class NoroshShan extends Shan3 {
     this.flushPeeked();
     return super.drawNewDora(isFu);
   }
+  /** 本家の秋はツモ山の奥から開く。うちの秋は嶺上から [2026-11-18] だが、
+   *  本家の牌譜との答え合わせはこちらの並びのまま行う */
+  drawAkiDora(isFu: boolean): string | null {
+    return this.drawNewDora(isFu);
+  }
 }
 
 /** live wall を [深い側 = 上段/下段ペア順, 末尾 = 次ツモ] で構築する。orig は tiles[] の index */
