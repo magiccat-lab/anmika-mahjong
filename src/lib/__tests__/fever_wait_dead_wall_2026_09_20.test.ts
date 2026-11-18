@@ -64,3 +64,44 @@ describe('Shan3.concealedDeadWall', () => {
     expect(blind.concealedDeadWall).toEqual([]);
   });
 });
+
+// [通報 20261118_2 部屋 207N rev 66〜84「裏ドラがめくれたらフィーバーの待ち消してあげてね」]
+// フィーバーのツモ和了で裏ドラ (s4 ・ z1) を全員に見せた後も、続行中の待ちの残りに数えていた
+describe('和了で見せた裏ドラは待ちの残りから外す', () => {
+  it('revealFubaopai の後は裏ドラ表が concealedDeadWall に居ない', () => {
+    const shan = new Shan3(defaultSanmaRule());
+    const ura = [...(shan.fubaopai ?? [])];
+    expect(ura.length).toBeGreaterThan(0);
+    const before = shan.concealedDeadWall.length;
+
+    shan.revealFubaopai();
+
+    expect(shan.concealedDeadWall.length).toBe(before - ura.length);
+  });
+
+  it('snapshot / restore で見せた枚数が戻る。無い旧 snapshot は 0', () => {
+    const shan = new Shan3(defaultSanmaRule());
+    shan.revealFubaopai();
+    const snap = shan.snapshot();
+    const other = new Shan3(defaultSanmaRule());
+    other.restore(snap);
+    expect(other.revealedFubaopaiLen).toBe(shan.fubaopai?.length ?? 0);
+
+    const { revealedFubaopaiLen: _drop, ...legacy } = snap;
+    other.restore(legacy as any);
+    expect(other.revealedFubaopaiLen).toBe(0);
+  });
+
+  it('リーチ者の applyHule で表にし、リーチでない和了では表にしない', async () => {
+    const { Game3 } = await import('../game3');
+    const g = new Game3({ qijia: 0 });
+    g.qipai();
+    const fu = g.shan.fubaopai?.length ?? 0;
+    expect(fu).toBeGreaterThan(0);
+    g.applyHule({ fanshu: 2, fu: 30, hupai: [] }, 1, 0);
+    expect(g.shan.revealedFubaopaiLen).toBe(0);
+    g.lizhi.add(1);
+    g.applyHule({ fanshu: 2, fu: 30, hupai: [] }, 1, 0);
+    expect(g.shan.revealedFubaopaiLen).toBe(fu);
+  });
+});

@@ -191,6 +191,7 @@ export class Shan3 {
     fubaopai: Pai[] | null;
     committedBaopaiLen: number;
     committedFubaopaiLen: number;
+    revealedFubaopaiLen?: number;
     blindQueue: BlindDrawEntry[];
     blindDoraQueue: Pai[];
     blindPaishu: number;
@@ -209,6 +210,7 @@ export class Shan3 {
       fubaopai: this._fubaopai ? [...this._fubaopai] : null,
       committedBaopaiLen: this._committedBaopaiLen,
       committedFubaopaiLen: this._committedFubaopaiLen,
+      revealedFubaopaiLen: this._revealedFubaopaiLen,
       blindQueue: this._blindQueue.map((d) => ({ ...d, huapai: [...d.huapai] })),
       blindDoraQueue: [...this._blindDoraQueue],
       blindPaishu: this._blindPaishu,
@@ -229,6 +231,8 @@ export class Shan3 {
     // 確定表示枚数も戻す。無い旧 snapshot は現 baopai 全量を確定扱い [後方互換]
     this._committedBaopaiLen = snap.committedBaopaiLen ?? this._baopai.length;
     this._committedFubaopaiLen = snap.committedFubaopaiLen ?? (this._fubaopai?.length ?? 0);
+    // 無い旧 snapshot は 0 [裏ドラは全部見えていない、直す前と同じ]
+    this._revealedFubaopaiLen = snap.revealedFubaopaiLen ?? 0;
     this._blindQueue = (snap.blindQueue ?? []).map((d) => ({ ...d, huapai: [...d.huapai] }));
     this._blindDoraQueue = [...(snap.blindDoraQueue ?? [])];
     this._blindPaishu = snap.blindPaishu ?? this._blindPaishu;
@@ -311,11 +315,21 @@ export class Shan3 {
    *  使い続けるため点数計算には一切影響しない。 */
   private _committedBaopaiLen: number = 0;
   private _committedFubaopaiLen: number = 0;
+  /** 和了の結果で全員に見せた裏ドラ表の枚数 [局の始めは 0]。フィーバーは和了の後も局が続くので、
+   *  見せた裏ドラは待ちの残り (concealedDeadWall) から外す [通報 20261118_2 部屋 207N
+   *  「裏ドラがめくれたらフィーバーの待ち消してあげてね」]。表示用の _committedFubaopaiLen は
+   *  局の始めから全量なので別に持つ */
+  private _revealedFubaopaiLen: number = 0;
   /** 現在の _baopai / _fubaopai 全量を確定表示扱いにする [局開始 / カン / 和了確定で呼ぶ] */
   commitDoraReveal(): void {
     this._committedBaopaiLen = this._baopai.length;
     this._committedFubaopaiLen = this._fubaopai?.length ?? 0;
   }
+  /** リーチ者の和了で裏ドラを表にした。今ある裏ドラ表を見えている扱いにする [Game3.applyHule から] */
+  revealFubaopai(): void {
+    this._revealedFubaopaiLen = this._fubaopai?.length ?? 0;
+  }
+  get revealedFubaopaiLen(): number { return this._revealedFubaopaiLen; }
   /** 表示用ドラ表 [確定枚数まで]。評価中/modal中の未確定めくりは含めない */
   get displayBaopai(): Pai[] { return this._baopai.slice(0, this._committedBaopaiLen); }
   get displayFubaopai(): Pai[] | null {
@@ -330,13 +344,14 @@ export class Shan3 {
    *  公開済みのドラ表は盤面に出ているので含めない [含めると見えている牌を残りと数える]。
    *  裏ドラは局の途中では表にしない (和了の結果にだけ出る) ので全部含める
    *  [2026-10-24 リョー「裏ドラは上がるまで捲らない」。前は確定枚数で切っていて、局の始めから全部が見えている扱いだった]。
+   *  リーチ者の和了で表にした裏ドラ (フィーバーの続行中) は見えているので外す [revealFubaopai]。
    *  blind [online の projection] では現物を持たないので空を返す。 */
   get concealedDeadWall(): Pai[] {
     if (this._blind) return [];
     return [
       ...this._rinshan,
       ...this._baopai.slice(this._committedBaopaiLen),
-      ...(this._fubaopai ?? []),
+      ...(this._fubaopai ?? []).slice(this._revealedFubaopaiLen),
     ];
   }
 

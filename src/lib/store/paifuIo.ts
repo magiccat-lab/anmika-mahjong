@@ -476,6 +476,7 @@ function restoreV3(paifu: any, preservedCpu: Record<PlayerId, boolean>): StoreSt
     weikaigang: !!shanData.weikaigang,
     baopai: [...(shanData.baopai ?? [])],
     fubaopai: shanData.fubaopai === null ? null : [...(shanData.fubaopai ?? [])],
+    revealedFubaopaiLen: Number(shanData.revealedFubaopaiLen ?? 0),
   });
   shan._fuyuRevealed = [...(shanData.fuyuRevealed ?? [])];
   shan.extraSanReduction = Number(shanData.extraSanReduction ?? 0);
