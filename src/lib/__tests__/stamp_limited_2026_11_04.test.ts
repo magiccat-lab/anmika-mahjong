@@ -7,12 +7,16 @@ import { canSendStamp } from '../../../server/ws_server';
 const MAGICREN = '398738170314752012';
 const NOIMI = '410812617263808513';
 const ASUME = '514403167165743104';
+const ARUPU = '464811848420556801';
 const NOBODY = '1';
 
 describe('限定スタンプの pallet [limitedStampsFor]', () => {
   it('持ち主は自分の限定だけ見える', () => {
     expect(limitedStampsFor(NOIMI)).toEqual(['toutotsu']);
     expect(limitedStampsFor(ASUME)).toEqual(['shuichi']);
+  });
+  it('arupu は自分語りと唐突に-1000枚の 2 種 [2026-11-18 リョー]', () => {
+    expect(limitedStampsFor(ARUPU)).toEqual(['toutotsu', 'jibungatari']);
   });
   it('magicren は 6 種全部', () => {
     expect(limitedStampsFor(MAGICREN)).toEqual([...LIMITED_STAMP_IDS]);
@@ -37,6 +41,8 @@ describe('server の許可 [canSendStamp]', () => {
     expect(canSendStamp('toutotsu', NOIMI)).toBe(true);
     expect(canSendStamp('toutotsu', NOBODY)).toBe(false);
     expect(canSendStamp('toutotsu', ASUME)).toBe(false);
+    expect(canSendStamp('toutotsu', ARUPU)).toBe(true);
+    expect(canSendStamp('jibungatari', NOIMI)).toBe(false);
     for (const id of LIMITED_STAMP_IDS) expect(canSendStamp(id, MAGICREN)).toBe(true);
     expect(canUseLimitedStamp('kyuni', NOIMI)).toBe(false);
   });
