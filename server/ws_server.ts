@@ -8,7 +8,7 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import jwt from 'jsonwebtoken';
 import { defaultSanmaRule, generateTilePool } from '../src/lib/shan3';
 import { toCorePai } from '../src/lib/helpers';
-import { jikoPreCheck, jikoRoundKey, type JikoPreHit } from '../src/lib/store';
+import { jikoPreCheck, jikoRoundKey, type JikoPreHit } from '../src/lib/store/jiko';
 // [2026-07-21 監査 L-05 fix] online CPU の判断を single mode [cpuStepImpl] と同じ
 // 隠し情報ベースのヘルパーに揃える。旧実装は先頭候補と簡易 fever 判定で分岐していた
 import { decideFever, pickLizhiDapai } from '../src/lib/store/cpuLizhi';
